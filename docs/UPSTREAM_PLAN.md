@@ -26,6 +26,21 @@ repo — context budget is precious.
 - The known DD/FF `erfc` mid-z limitations (TEST_SUITE_PLAN /
   PORT_NOTES) are **out of scope** for the entire arc.
 
+## Ratified decisions (Reet, 2026-08-24)
+
+- A fourth backend, **TF** (`TripleFloat`, 3×FP32, 72 bits / ~21.7
+  digits), is added to this arc as **S10**, sequenced **after S5 and
+  before S6**. It fills the only gap in the precision ladder under a
+  quad-precision ceiling: 48b (FF) → 53b (`double`) → **72b (TF)** →
+  96b (QF) → 106b (DD).
+- S10 is the **only sub-plan in this arc that adds arithmetic**, so it
+  is explicitly outside the Rule 4 supersession described below. Its
+  byte-identical gate protects the five existing backends; it does not
+  apply to TF.
+- Precisions **beyond quad (>113 bits) are out of scope** for this
+  library. That bounds the backend set at the five existing plus TF, and
+  keeps `__float128` sufficient as the oracle — no MPFR, no ARB.
+
 ---
 
 ## Common context (read this + your own section, nothing else)
@@ -283,6 +298,10 @@ it accurately, do not paraphrase from memory).
    - Motivation (2 paragraphs): portable extended precision inside
      Kokkos kernels; what exists (three backends, op inventory, accuracy
      tables, 23-test suite, device run from S1).
+     Note the planned fourth backend (TF, 3×FP32, 72b — S10) so the RFC
+     describes the ladder Kokkos would actually consume: 48b / 53b /
+     72b / 96b / 106b. S4 runs before S10, so state TF as planned, not
+     as shipped.
    - Proposed consumption model: vendored TPL (like `tpls/mdspan`,
      desul) + thin `Kokkos::Experimental` wrapper preserving the
      existing-API spelling; link the S2 slice as the concrete exhibit.
@@ -338,9 +357,105 @@ arithmetic changes.
 
 ---
 
+## S10 — TF backend (TripleFloat, 3×FP32, 72 bits / ~21.7 digits)
+
+**Model: Sonnet** (the DD→FF and QD→QF ports are the worked pattern;
+escalate via STATUS on any site that resists mechanical translation).
+Depends on: S5. **Runs before S6** — see "Why here" below. Needs the
+x86_64 Linux host.
+
+**Rule 4 posture — read this first.** S10 is the one sub-plan in this arc
+that **adds arithmetic**. It therefore sits OUTSIDE the Rule 4
+supersession that governs S2/S3/S5, which permits mechanical
+restructuring only. The byte-identical gate still applies, but to the
+**five existing backends**, which S10 must not perturb; it does not and
+cannot apply to TF itself. This is a declared gate regime, not a silent
+loosening.
+
+**Context.** TF is a 72-bit rung between `double` (53b) and QF (96b).
+The demand is measured, not speculative. A downstream consumer walks a
+cost-ordered precision ladder and stops at the first rung that clears a
+digit tolerance; that ladder currently steps 48b (FF) → 53b (double) →
+96b (QF), and workloads whose conditioning destroys ~9–12 digits land in
+the gap and are forced onto QF. Expansion cost scales ~O(k²) — roughly
+90 flops/multiply at k=3 versus ~250 at k=4 — so those workloads overpay
+~2.8×. Both are FP32-word types on the same units, so that cost ordering
+follows from k alone and needs no per-arch benchmark.
+
+The consumer-side evidence and routing data live with the consumer, not
+here. This repo's interest is narrower and sufficient: 72 bits is a real
+precision, it is the only gap in the ladder under a quad-precision
+ceiling, and the library is the right place to supply it.
+
+**Provenance.** QD 2.3.24 is parameterized in word count, so TF is the
+k=3 FP32 instantiation of the same LBNL-BSD source QF descends from —
+not a new lineage, and no new license obligation beyond what QF already
+carries. Apply `docs/PORT_NOTES_QF.md`'s source-fidelity rule 6: port
+QD's real code, record every divergence between task text and source.
+Reuse FF's EFT primitives verbatim, per the same "reuse, do not
+re-derive" mandate QF followed — `two_sum`/`quick_two_sum`/`two_prod`
+are word-type properties, not word-count properties, and FF already has
+them for FP32.
+
+**Range is inherited, not improved.** TF is 3×FP32 and therefore a
+member of the FP32 family for every range-safety purpose: usable
+magnitudes ~[3.9e-31, 8.3e34], no better than FF at the top end and
+worse at the bottom. Any consumer-side range guard that rejects FF must
+reject TF identically. Do not describe TF as a range improvement
+anywhere in the docs it touches.
+
+**Oracle.** 72 bits < `__float128`'s 113, so the existing libquadmath
+oracle validates TF with full margin. No new dependency, and no MPFR —
+that constraint only binds above 113 bits, which this arc does not go.
+
+**Read:** `docs/PORT_NOTES_QF.md` (the port pattern and its traps); the
+S5 STATUS block (the post-restructure layout TF must be written into);
+`ff_math.hpp` for the EFT primitives to reuse; `qf_math.hpp` for the
+renormalization structure at k=4 that TF specializes to k=3.
+
+**Deliverables.**
+1. `tf_math.hpp` + `tf_complex.hpp`, written directly into the post-S5
+   standalone core layout under `include/<name>/`, with compat wrappers
+   at the `third_party/include/` paths matching the S5 convention.
+2. `docs/PORT_NOTES_TF.md` in the shape of `PORT_NOTES_QF.md`:
+   source-fidelity findings, divergences from QD, term-count and
+   threshold derivations for k=3, anything non-mechanical.
+3. Test suite extended to TF against the `__float128` oracle, including
+   a `tf_eft_test` and an FMA-guard test mirroring the FF/QF pair.
+4. A TF demo matching the existing per-backend demo shape.
+5. STATUS block: op inventory, measured accuracy per op, any op where TF
+   falls short of the ~21.7-digit ceiling and why.
+
+**Gates:** ctest green including the new TF tests; TF resolves ≥ 21
+digits on the ops the oracle can check, with any shortfall explained in
+STATUS rather than waived; **the five existing backends byte-identical**
+(TF is purely additive — if a demo's accuracy table moves, stop);
+no-Kokkos compile smoke covers TF; TF compiles for device under the S1
+CUDA recipe.
+
+**Why here (S5 → S10 → S6).** S10 runs immediately after S5 and before
+packaging for two reasons. First, post-S5 the headers are already
+de-Kokkos-ified, so TF is written once into the standalone core instead
+of becoming a seventh Kokkos-coupled header that a later sweep has to
+convert. Second, S6/S7/S8 each enumerate the backend set — license
+manifest and release tag (S6), compile-smoke lanes and device TUs (S7),
+the per-arch oracle-free test list and validation matrix (S8). S8 in
+particular is hybrid: adding a backend after it means re-running four
+GPUs by hand or shipping a matrix with a hole. Doing TF first lets those
+three stages enumerate the full set once, correctly, and lets `v0.1.0`
+ship complete.
+
+**Not renumbered deliberately.** S10 executes fifth-from-last despite its
+number. The dependency graph is the authority on order — S1 already runs
+out of numeric sequence — and renumbering S6–S9 would invalidate every
+existing cross-reference and STATUS entry.
+
+---
+
 ## S6 — Standalone packaging, example, oracle-conditional demos
 
-**Model: Sonnet.** Depends on: S5. Needs the x86_64 Linux host for the
+**Model: Sonnet.** Depends on: S5 + S10 (TF must exist before the
+backend set is packaged and tagged). Needs the x86_64 Linux host for the
 gates.
 
 **Context.** "Non-Kokkos users can use this" requires a consumable
@@ -376,7 +491,8 @@ Existing build + ctest still green.
 
 ## S7 — Public CI
 
-**Model: Sonnet.** Depends on: S6.
+**Model: Sonnet.** Depends on: S6 (and therefore S10 — the smoke lanes
+below enumerate eight headers, including TF).
 
 **Context.** Kokkos will ask how they know vendored snapshots are green;
 a visible CI answers it before they ask. It also protects the
@@ -387,7 +503,8 @@ byte-identical/23-test invariants for the rest of the arc.
 **Deliverables.** GitHub Actions workflows:
 1. x86_64 Linux: build Kokkos 5.1 Serial + LIBQUADMATH (cached), build
    repo `-O3 -DNDEBUG`, run full ctest (~630 s optimized — acceptable).
-2. No-Kokkos lane: compile smoke of all six standalone headers + build
+2. No-Kokkos lane: compile smoke of all eight standalone headers (six
+   pre-S10 + `tf_math.hpp`/`tf_complex.hpp`) + build
    and run the standalone example, on ubuntu AND macos runners (the
    macOS ARM runner proves the core really is x86_64-independent).
 3. Compile-only device lanes: nvcc container compiling a device TU of
@@ -401,7 +518,10 @@ byte-identical/23-test invariants for the rest of the arc.
 
 ## S8 — Cross-vendor device matrix
 
-**Model: Opus** (per-arch divergence analysis). Depends on: S5 + S6.
+**Model: Opus** (per-arch divergence analysis). Depends on: S5 + S6 +
+S10 (TF must be in the tree before the matrix is run — this stage is
+hybrid and re-running four GPUs to add a backend later is the cost S10's
+placement exists to avoid).
 **Hybrid execution** — reuse the S1 protocol verbatim.
 
 **Context.** Validate the RESTRUCTURED code on the four targets: NVIDIA
@@ -413,8 +533,8 @@ are clang-based, so the GCC-flavored quadmath oracle
 unavailable there — oracle-dependent tests skip (exit 77) by design and
 demos are oracle-conditional since S6. The meaningful per-arch signal is:
 library headers compile for device; oracle-free tests (`ff_eft_test`,
-`qf_eft_test`, both FF/QF FMA guards, the three invariant tests) run
-green; demos run where the oracle exists.
+`qf_eft_test`, `tf_eft_test`, the FF/QF/TF FMA guards, and the three
+invariant tests) run green; demos run where the oracle exists.
 
 **Read:** the S1 STATUS block (protocol + CUDA baseline); `validation/`
 layout; `tests/README.md` "graceful degradation" section.
@@ -466,8 +586,11 @@ everything the PR claims is reproducible from committed artifacts.
 
 1. After S2: ratify the library/repo name; rename the GitHub repo.
 2. After S4: review and post the RFC issue.
-3. At S6: pick the first release version number.
-4. On Kokkos's reply: choose the S9 shape.
+3. Before S10: confirm TF ships in `v0.1.0` rather than waiting for a
+   later release. Deferring it re-opens the S6/S7/S8 enumeration cost
+   that S10's placement is designed to avoid.
+4. At S6: pick the first release version number.
+5. On Kokkos's reply: choose the S9 shape.
 
 ## Sub-plan → model map
 
@@ -479,6 +602,7 @@ everything the PR claims is reproducible from committed artifacts.
 | S3 | Name ratification sweep + repo rename follow-up | Sonnet | Mechanical rename under hard gates |
 | S4 | Kokkos RFC draft | Opus | Persuasive technical writing; licensing precision |
 | S5 | Full restructure sweep (FF/QF/complex) | Sonnet | Repetition of the proven S2 pattern; gates catch drift |
+| S10 | TF backend (3×FP32, 72b) — runs after S5, before S6 | Sonnet | QD→QF port pattern reapplied at k=3; additive, gates catch drift |
 | S6 | Packaging + standalone example + oracle-conditional demos | Sonnet | Standard CMake/packaging work |
 | S7 | Public CI | Sonnet | Standard GitHub Actions work |
 | S8 | Cross-vendor device matrix | Opus | Per-arch toolchain + numerical judgment |
@@ -489,12 +613,14 @@ everything the PR claims is reproducible from committed artifacts.
 ```
 S0 ──> S1 ──────────────┐
   └──> S2 ─(Reet)─> S3 ─┼─> S4 ─(Reet posts; wait)─────> S9
-                    S3 ─┴─> S5 ─> S6 ─> S7                ^
-                                   └──> S8 ───────────────┘
+                    S3 ─┴─> S5 ─> S10 ─> S6 ─> S7         ^
+                                          └──> S8 ────────┘
 ```
 
-S1 and S2 run in parallel. S5–S8 run during the RFC wait and ship the
-non-Kokkos goal regardless of Kokkos's answer. Only S9 blocks on Kokkos.
+S1 and S2 run in parallel. S5, S10 and S6–S8 run during the RFC wait and
+ship the non-Kokkos goal regardless of Kokkos's answer. Only S9 blocks
+on Kokkos. S10 executes fifth-from-last despite its number: this graph,
+not the numbering, is the authority on order.
 
 ---
 
