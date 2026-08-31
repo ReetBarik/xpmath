@@ -1,5 +1,9 @@
 # Performance measurement plan — kokkos-extended-precision-demo
 
+**PARKED.** This arc is paused pending completion of `docs/UPSTREAM_PLAN.md`. The standalone library extraction will restructure the repository layout (namespace moves, header reorganization, build system changes), invalidating the assumptions in this plan. Phase 1 must not be started until the upstream arc completes and this plan is updated to reflect the new structure.
+
+---
+
 This document is the authoritative spec for the perf-measurement arc
 that produces the README performance tables. Each phase depends on
 the previous one landing on `main`. A fresh Claude session should be
