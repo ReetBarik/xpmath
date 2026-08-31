@@ -74,6 +74,13 @@ endif()
 
 set(THIRD_PARTY_INCLUDE "${CMAKE_SOURCE_DIR}/third_party/include")
 
+# S2: the standalone, Kokkos-free extended-precision core lives in include/EPLIB/.
+# The compat wrappers in third_party/include/ resolve `#include <EPLIB/...>`
+# through this directory, so every target that already gets THIRD_PARTY_INCLUDE
+# needs it as well. Appended to the same variable (which tests/CMakeLists.txt
+# also consumes) so no individual target's include list has to change.
+list(APPEND THIRD_PARTY_INCLUDE "${CMAKE_SOURCE_DIR}/include")
+
 add_executable(kokkos_ep_demo src/demo_real.cpp)
 target_include_directories(kokkos_ep_demo PRIVATE ${THIRD_PARTY_INCLUDE})
 target_link_libraries(kokkos_ep_demo PRIVATE Kokkos::kokkos)
