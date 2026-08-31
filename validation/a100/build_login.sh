@@ -111,10 +111,14 @@ export NVCC_WRAPPER_DEFAULT_COMPILER=$(command -v g++)
 NVCC_WRAPPER="$KOKKOS_SRC/bin/nvcc_wrapper"
 
 say "configure Kokkos (CUDA / AMPERE80 / sm_80 / LIBQUADMATH)"
+# Kokkos 5.1.0 REQUIRES C++20 (cmake/kokkos_test_cxx_std.cmake rejects 17).
+# The existing ~/kokkos-install* trees confirm it: Kokkos_CXX_STANDARD 20.
+# The consuming repo stays at C++17 -- that direction is fine, a C++17 TU can
+# link a C++20-built Kokkos, and this mirrors the working Serial installs.
 cmake -S "$KOKKOS_SRC" -B "$KOKKOS_BUILD" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_CXX_COMPILER="$NVCC_WRAPPER" \
-  -DCMAKE_CXX_STANDARD=17 \
+  -DCMAKE_CXX_STANDARD=20 \
   -DCMAKE_INSTALL_PREFIX="$KOKKOS_PREFIX" \
   -DKokkos_ENABLE_SERIAL=ON \
   -DKokkos_ENABLE_CUDA=ON \

@@ -1,0 +1,1196 @@
+Internal ctest changing into directory: /home/rbarik/kokkos-ep-build-a100
+UpdateCTestConfiguration  from :/home/rbarik/kokkos-ep-build-a100/DartConfiguration.tcl
+UpdateCTestConfiguration  from :/home/rbarik/kokkos-ep-build-a100/DartConfiguration.tcl
+Test project /home/rbarik/kokkos-ep-build-a100
+Constructing a list of tests
+Done constructing a list of tests
+Updating test list for fixtures
+Added 0 tests to meet fixture requirements
+Checking test dependency graph...
+Checking test dependency graph end
+test 1
+      Start  1: hello_test
+Could not find executable /home/rbarik/kokkos-ep-build-a100/tests/hello_test
+Looked in the following places:
+/home/rbarik/kokkos-ep-build-a100/tests/hello_test
+/home/rbarik/kokkos-ep-build-a100/tests/hello_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/hello_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/hello_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/hello_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/hello_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/hello_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/hello_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/hello_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/hello_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/hello_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/hello_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/hello_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/hello_test
+home/rbarik/kokkos-ep-build-a100/tests/hello_test
+home/rbarik/kokkos-ep-build-a100/tests/hello_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/hello_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/hello_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/hello_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/hello_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/hello_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/hello_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/hello_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/hello_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/hello_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/hello_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/hello_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/hello_test
+
+1: Test command: 
+1: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+Unable to find executable: /home/rbarik/kokkos-ep-build-a100/tests/hello_test
+ 1/23 Test  #1: hello_test .......................***Not Run   0.00 sec
+test 2
+      Start  2: corpus_test
+
+2: Test command: /home/rbarik/kokkos-ep-build-a100/tests/corpus_test
+2: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+2: Test timeout computed to be: 1800
+2: corpus_test: all corpus-scaffolding checks passed
+ 2/23 Test  #2: corpus_test ......................   Passed    0.03 sec
+test 3
+      Start  3: dd_invariant_test
+
+3: Test command: /home/rbarik/kokkos-ep-build-a100/tests/dd_invariant_test
+3: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+3: Test timeout computed to be: 1800
+3: === dd_invariant_test (T1.2): non-overlap invariant fl(hi+lo)==hi for every DD op ===
+3: Oracle-independent (raw FP64 check). Execution space: Cuda
+3: 
+3: [Test A] per-op invariant (10^6 random + full corpus)
+3:   abs            tested=1000149   skipped=16        failures=0
+3:   negate         tested=1000149   skipped=16        failures=0
+3:   sqrt           tested=1000102   skipped=63        failures=0
+3:   round_to_nearest_int tested=1000159   skipped=6         failures=0
+3:   ceil           tested=1000159   skipped=6         failures=0
+3:   floor          tested=1000159   skipped=6         failures=0
+3:   round          tested=1000159   skipped=6         failures=0
+3:   trunc          tested=1000159   skipped=6         failures=0
+3:   exp            tested=1000152   skipped=13        failures=0
+3:   exp2           tested=1000144   skipped=21        failures=0
+3:   exp10          tested=1000144   skipped=21        failures=0
+3:   expm1          tested=1000136   skipped=29        failures=0
+3:   log            tested=1000087   skipped=78        failures=0
+3:   log2           tested=1000087   skipped=78        failures=0
+3:   log10          tested=1000087   skipped=78        failures=0
+3:   log1p          tested=1000105   skipped=60        failures=0
+3:   sin            tested=1000154   skipped=11        failures=0
+3:   cos            tested=1000154   skipped=11        failures=0
+3:   tan            tested=1000154   skipped=11        failures=0
+3:   asin           tested=1000047   skipped=118       failures=0
+3:   acos           tested=1000063   skipped=102       failures=0
+3:   atan           tested=1000143   skipped=22        failures=0
+3:   sinh           tested=1000134   skipped=31        failures=0
+3:   cosh           tested=1000144   skipped=21        failures=0
+3:   tanh           tested=1000128   skipped=37        failures=0
+3:   asinh          tested=1000143   skipped=22        failures=0
+3:   acosh          tested=1000063   skipped=102       failures=0
+3:   atanh          tested=1000042   skipped=123       failures=0
+3:   erf            tested=1000149   skipped=16        failures=0
+3:   erfc           tested=1000165   skipped=0         failures=0
+3:   tgamma         tested=1000069   skipped=96        failures=0
+3:   sincos.cos     tested=1000154   skipped=11        failures=0
+3:   sincos.sin     tested=1000154   skipped=11        failures=0
+3:   sinhcosh.cosh  tested=1000144   skipped=21        failures=0
+3:   sinhcosh.sinh  tested=1000134   skipped=31        failures=0
+3:   add            tested=1000061   skipped=6         failures=0
+3:   subtract       tested=1000067   skipped=0         failures=0
+3:   multiply       tested=1000055   skipped=12        failures=0
+3:   divide         tested=1000051   skipped=16        failures=0
+3:   pow            tested=1000034   skipped=33        failures=0
+3:   atan2          tested=1000055   skipped=12        failures=0
+3:   hypot          tested=1000067   skipped=0         failures=0
+3:   fmod           tested=1000048   skipped=19        failures=0
+3:   remainder      tested=1000048   skipped=19        failures=0
+3:   copysign       tested=1000055   skipped=12        failures=0
+3:   fmax           tested=1000061   skipped=6         failures=0
+3:   fmin           tested=1000049   skipped=18        failures=0
+3:   fdim           tested=1000067   skipped=0         failures=0
+3:   fma            tested=1000000   skipped=0         failures=0
+3:   pow_int        tested=1000000   skipped=0         failures=0
+3: 
+3: [Test B] device tripwire (5 ops, 10^5 random on Cuda)
+3:   [device] add          tested=100000   skipped=0        failures=0
+3:   [device] multiply     tested=100000   skipped=0        failures=0
+3:   [device] sqrt         tested=100000   skipped=0        failures=0
+3:   [device] exp          tested=100000   skipped=0        failures=0
+3:   [device] sin          tested=100000   skipped=0        failures=0
+3: 
+3: [Test C] PORT_NOTES §4 named regressions (DD has no equivalent bug)
+3:     exp(79.5): hi=3.3605573500247798e+34 lo=-1.2721e+18  PASS
+3:     exp(80): hi=5.5406223843935098e+34 lo=2.1812e+18  PASS
+3:     exp(85): hi=8.2230127146229131e+36 lo=4.0831e+20  PASS
+3:     exp(88.7): hi=3.3259869802505791e+38 lo=-2.5581e+21  PASS
+3:     exp(88.72): hi=3.3931763741631701e+38 lo=1.1153e+22  PASS
+3:     nint(19.4999993): hi=19 lo=0  PASS
+3:     nint(19.5): hi=19 lo=0  PASS
+3:     nint(0.5): hi=0 lo=0  PASS
+3:     nint(0.5): hi=0 lo=0  PASS
+3:     nint(0.5): hi=1 lo=0  PASS
+3:     nint(-0.5): hi=0 lo=0  PASS
+3:     nint(-0.5): hi=-1 lo=0  PASS
+3:     nint(-0.5): hi=0 lo=0  PASS
+3:     nint(1.5): hi=2 lo=0  PASS
+3:     nint(1.5): hi=1 lo=0  PASS
+3:     nint(1.5): hi=2 lo=0  PASS
+3:     nint(-1.5): hi=-2 lo=0  PASS
+3:     nint(-1.5): hi=-2 lo=0  PASS
+3:     nint(-1.5): hi=-1 lo=0  PASS
+3:     nint(2.5): hi=2 lo=0  PASS
+3:     nint(2.5): hi=2 lo=0  PASS
+3:     nint(2.5): hi=3 lo=0  PASS
+3:     nint(-2.5): hi=-2 lo=0  PASS
+3:     nint(-2.5): hi=-3 lo=0  PASS
+3:     nint(-2.5): hi=-2 lo=0  PASS
+3:     nint(10.5): hi=10 lo=0  PASS
+3:     nint(10.5): hi=10 lo=0  PASS
+3:     nint(10.5): hi=11 lo=0  PASS
+3:     nint(-10.5): hi=-10 lo=0  PASS
+3:     nint(-10.5): hi=-11 lo=0  PASS
+3:     nint(-10.5): hi=-10 lo=0  PASS
+3:     nint(100.5): hi=100 lo=0  PASS
+3:     nint(100.5): hi=100 lo=0  PASS
+3:     nint(100.5): hi=101 lo=0  PASS
+3:     nint(-100.5): hi=-100 lo=0  PASS
+3:     nint(-100.5): hi=-101 lo=0  PASS
+3:     nint(-100.5): hi=-100 lo=0  PASS
+3:     nint(1000.5): hi=1000 lo=0  PASS
+3:     nint(1000.5): hi=1000 lo=0  PASS
+3:     nint(1000.5): hi=1001 lo=0  PASS
+3:     nint(-1000.5): hi=-1000 lo=0  PASS
+3:     nint(-1000.5): hi=-1001 lo=0  PASS
+3:     nint(-1000.5): hi=-1000 lo=0  PASS
+3:     nint(19.5): hi=20 lo=0  PASS
+3:     nint(19.5): hi=19 lo=0  PASS
+3:     nint(19.5): hi=20 lo=0  PASS
+3:     nint(-19.5): hi=-20 lo=0  PASS
+3:     nint(-19.5): hi=-20 lo=0  PASS
+3:     nint(-19.5): hi=-19 lo=0  PASS
+3:     remainder(68.379, 3.5066): hi=-1.7529999999999983 lo=0  sign=- IEEEref=-1.7529999999999983 inv=ok  PASS
+3:   Test C: 50/50 passed
+3: 
+3: === Summary (op : tested / skipped / failures : status) ===
+3:   abs                         1000149           16          0   OK
+3:   negate                      1000149           16          0   OK
+3:   sqrt                        1000102           63          0   OK
+3:   round_to_nearest_int        1000159            6          0   OK
+3:   ceil                        1000159            6          0   OK
+3:   floor                       1000159            6          0   OK
+3:   round                       1000159            6          0   OK
+3:   trunc                       1000159            6          0   OK
+3:   exp                         1000152           13          0   OK
+3:   exp2                        1000144           21          0   OK
+3:   exp10                       1000144           21          0   OK
+3:   expm1                       1000136           29          0   OK
+3:   log                         1000087           78          0   OK
+3:   log2                        1000087           78          0   OK
+3:   log10                       1000087           78          0   OK
+3:   log1p                       1000105           60          0   OK
+3:   sin                         1000154           11          0   OK
+3:   cos                         1000154           11          0   OK
+3:   tan                         1000154           11          0   OK
+3:   asin                        1000047          118          0   OK
+3:   acos                        1000063          102          0   OK
+3:   atan                        1000143           22          0   OK
+3:   sinh                        1000134           31          0   OK
+3:   cosh                        1000144           21          0   OK
+3:   tanh                        1000128           37          0   OK
+3:   asinh                       1000143           22          0   OK
+3:   acosh                       1000063          102          0   OK
+3:   atanh                       1000042          123          0   OK
+3:   erf                         1000149           16          0   OK
+3:   erfc                        1000165            0          0   OK
+3:   tgamma                      1000069           96          0   OK
+3:   sincos.cos                  1000154           11          0   OK
+3:   sincos.sin                  1000154           11          0   OK
+3:   sinhcosh.cosh               1000144           21          0   OK
+3:   sinhcosh.sinh               1000134           31          0   OK
+3:   add                         1000061            6          0   OK
+3:   subtract                    1000067            0          0   OK
+3:   multiply                    1000055           12          0   OK
+3:   divide                      1000051           16          0   OK
+3:   pow                         1000034           33          0   OK
+3:   atan2                       1000055           12          0   OK
+3:   hypot                       1000067            0          0   OK
+3:   fmod                        1000048           19          0   OK
+3:   remainder                   1000048           19          0   OK
+3:   copysign                    1000055           12          0   OK
+3:   fmax                        1000061            6          0   OK
+3:   fmin                        1000049           18          0   OK
+3:   fdim                        1000067            0          0   OK
+3:   fma                         1000000            0          0   OK
+3:   pow_int                     1000000            0          0   OK
+3:   device:add                   100000            0          0   OK
+3:   device:multiply              100000            0          0   OK
+3:   device:sqrt                  100000            0          0   OK
+3:   device:exp                   100000            0          0   OK
+3:   device:sin                   100000            0          0   OK
+3:   TOTAL                      50505193         1453          0
+3: 
+3: === dd_invariant_test: ALL PASSED ===
+ 3/23 Test  #3: dd_invariant_test ................   Passed   45.14 sec
+test 4
+      Start  4: ff_invariant_test
+
+4: Test command: /home/rbarik/kokkos-ep-build-a100/tests/ff_invariant_test
+4: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+4: Test timeout computed to be: 1800
+4: === ff_invariant_test (T2.2): non-overlap invariant fl(hi+lo)==hi for every FF op ===
+4: Oracle-independent (raw FP32 check). Execution space: Cuda
+4: 
+4: [Test A] per-op invariant (10^6 random + full corpus)
+4:   abs              tested=1000149   skipped=16        failures=0
+4:   negate           tested=1000149   skipped=16        failures=0
+4:   sqrt             tested=1000102   skipped=63        failures=0
+4:   round_to_nearest_int tested=1000159   skipped=6         failures=0
+4:   ceil             tested=1000159   skipped=6         failures=0
+4:   floor            tested=1000159   skipped=6         failures=0
+4:   round            tested=1000159   skipped=6         failures=0
+4:   trunc            tested=1000159   skipped=6         failures=0
+4:   exp              tested=893488    skipped=106677    failures=0
+4:   exp2             tested=916771    skipped=83394     failures=0
+4:   exp10            tested=906854    skipped=93311     failures=0
+4:   expm1            tested=1000131   skipped=34        failures=0
+4:   log              tested=1000087   skipped=78        failures=0
+4:   log2             tested=1000087   skipped=78        failures=0
+4:   log10            tested=1000087   skipped=78        failures=0
+4:   log1p            tested=1000105   skipped=60        failures=0
+4:   sin              tested=1000138   skipped=27        failures=0
+4:   cos              tested=1000138   skipped=27        failures=0
+4:   tan              tested=1000138   skipped=27        failures=0
+4:   asin             tested=1000047   skipped=118       failures=0
+4:   acos             tested=1000047   skipped=118       failures=0
+4:   atan             tested=1000143   skipped=22        failures=0
+4:   sinh             tested=1000117   skipped=48        failures=0
+4:   cosh             tested=1000133   skipped=32        failures=0
+4:   tanh             tested=1000117   skipped=48        failures=0
+4:   asinh            tested=1000143   skipped=22        failures=0
+4:   acosh            tested=1000063   skipped=102       failures=0
+4:   atanh            tested=1000042   skipped=123       failures=0
+4:   erf              tested=1000149   skipped=16        failures=0
+4:   erfc             tested=1000162   skipped=3         failures=0
+4:   tgamma           tested=1000060   skipped=105       failures=0
+4:   sincos.cos       tested=1000138   skipped=27        failures=0
+4:   sincos.sin       tested=1000138   skipped=27        failures=0
+4:   sinhcosh.cosh    tested=1000133   skipped=32        failures=0
+4:   sinhcosh.sinh    tested=1000117   skipped=48        failures=0
+4:   add              tested=1000061   skipped=6         failures=0
+4:   subtract         tested=1000067   skipped=0         failures=0
+4:   multiply         tested=1000055   skipped=12        failures=0
+4:   divide           tested=1000050   skipped=17        failures=0
+4:   pow              tested=1000034   skipped=33        failures=0
+4:   atan2            tested=1000043   skipped=24        failures=0
+4:   hypot            tested=1000063   skipped=4         failures=0
+4:   fmod             tested=1000047   skipped=20        failures=0
+4:   remainder        tested=1000047   skipped=20        failures=0
+4:   copysign         tested=1000055   skipped=12        failures=0
+4:   fmax             tested=1000061   skipped=6         failures=0
+4:   fmin             tested=1000049   skipped=18        failures=0
+4:   fdim             tested=1000067   skipped=0         failures=0
+4:   fma              tested=1000000   skipped=0         failures=0
+4:   pow_int          tested=999218    skipped=782       failures=0
+4: 
+4: [Test B] device tripwire (5 ops, 10^5 random on Cuda)
+4:   [device] add          tested=100000   skipped=0        failures=0
+4:   [device] multiply     tested=100000   skipped=0        failures=0
+4:   [device] sqrt         tested=100000   skipped=0        failures=0
+4:   [device] exp          tested=89436    skipped=10564    failures=0
+4:   [device] sin          tested=100000   skipped=0        failures=0
+4: 
+4: [Test C] PORT_NOTES §4 named regressions (historical FF bugs)
+4:     exp(79.5) [bug-regression (NaN pre-fix)]: hi=3.36055734e+34 lo=1.0775e+26  PASS
+4:     exp(80) [bug-regression (NaN pre-fix)]: hi=5.54062248e+34 lo=-1.0028e+27  PASS
+4:     exp(85) [bug-regression (NaN pre-fix)]: hi=8.22301303e+36 lo=-3.1222e+29  PASS
+4: FFEXP: argument too large
+4:     exp(88.7) [edge-of-saturation guard]: hi=0 lo=0  PASS (saturates to +0; 1 FFEXP diagnostic expected+normal)
+4: FFEXP: argument too large
+4:     exp(88.72) [edge-of-saturation guard]: hi=0 lo=0  PASS (saturates to +0; 1 FFEXP diagnostic expected+normal)
+4:     nint(19.5): hi=20 lo=0  PASS
+4:     nint(19.49999809): hi=19 lo=0  PASS
+4:     nint(0.5): hi=0 lo=0  PASS
+4:     nint(0.4999999702): hi=0 lo=0  PASS
+4:     nint(0.5000000596): hi=1 lo=0  PASS
+4:     nint(-0.5): hi=0 lo=0  PASS
+4:     nint(-0.5000000596): hi=-1 lo=0  PASS
+4:     nint(-0.4999999702): hi=0 lo=0  PASS
+4:     nint(1.5): hi=2 lo=0  PASS
+4:     nint(1.499999881): hi=1 lo=0  PASS
+4:     nint(1.500000119): hi=2 lo=0  PASS
+4:     nint(-1.5): hi=-2 lo=0  PASS
+4:     nint(-1.500000119): hi=-2 lo=0  PASS
+4:     nint(-1.499999881): hi=-1 lo=0  PASS
+4:     nint(2.5): hi=2 lo=0  PASS
+4:     nint(2.499999762): hi=2 lo=0  PASS
+4:     nint(2.500000238): hi=3 lo=0  PASS
+4:     nint(-2.5): hi=-2 lo=0  PASS
+4:     nint(-2.500000238): hi=-3 lo=0  PASS
+4:     nint(-2.499999762): hi=-2 lo=0  PASS
+4:     nint(10.5): hi=10 lo=0  PASS
+4:     nint(10.49999905): hi=10 lo=0  PASS
+4:     nint(10.50000095): hi=11 lo=0  PASS
+4:     nint(-10.5): hi=-10 lo=0  PASS
+4:     nint(-10.50000095): hi=-11 lo=0  PASS
+4:     nint(-10.49999905): hi=-10 lo=0  PASS
+4:     nint(100.5): hi=100 lo=0  PASS
+4:     nint(100.4999924): hi=100 lo=0  PASS
+4:     nint(100.5000076): hi=101 lo=0  PASS
+4:     nint(-100.5): hi=-100 lo=0  PASS
+4:     nint(-100.5000076): hi=-101 lo=0  PASS
+4:     nint(-100.4999924): hi=-100 lo=0  PASS
+4:     nint(1000.5): hi=1000 lo=0  PASS
+4:     nint(1000.499939): hi=1000 lo=0  PASS
+4:     nint(1000.500061): hi=1001 lo=0  PASS
+4:     nint(-1000.5): hi=-1000 lo=0  PASS
+4:     nint(-1000.500061): hi=-1001 lo=0  PASS
+4:     nint(-1000.499939): hi=-1000 lo=0  PASS
+4:     nint(19.5): hi=20 lo=0  PASS
+4:     nint(19.49999809): hi=19 lo=0  PASS
+4:     nint(19.50000191): hi=20 lo=0  PASS
+4:     nint(-19.5): hi=-20 lo=0  PASS
+4:     nint(-19.50000191): hi=-20 lo=0  PASS
+4:     nint(-19.49999809): hi=-19 lo=0  PASS
+4:     nint(19.4999993 via double-ctor): hi=19 lo=0  nint=19(fixed) inv=ok  PASS
+4:     remainder(68.379, 3.5066): hi=-1.75300026 lo=0  sign=- remainderf=-1.75300026 inv=ok  PASS
+4:       [finding] FP32 a/b = 19.5000858 (> 19.5) -> nint=20 -> sign NEGATIVE; PORT_NOTES §4b '+1.7533' premise (a/b<19.5) does NOT hold for these literals
+4:   Test C: 51/51 passed
+4: 
+4: === Summary (op : tested / skipped / failures : status) ===
+4:   abs                         1000149           16          0   OK
+4:   negate                      1000149           16          0   OK
+4:   sqrt                        1000102           63          0   OK
+4:   round_to_nearest_int        1000159            6          0   OK
+4:   ceil                        1000159            6          0   OK
+4:   floor                       1000159            6          0   OK
+4:   round                       1000159            6          0   OK
+4:   trunc                       1000159            6          0   OK
+4:   exp                          893488       106677          0   OK
+4:   exp2                         916771        83394          0   OK
+4:   exp10                        906854        93311          0   OK
+4:   expm1                       1000131           34          0   OK
+4:   log                         1000087           78          0   OK
+4:   log2                        1000087           78          0   OK
+4:   log10                       1000087           78          0   OK
+4:   log1p                       1000105           60          0   OK
+4:   sin                         1000138           27          0   OK
+4:   cos                         1000138           27          0   OK
+4:   tan                         1000138           27          0   OK
+4:   asin                        1000047          118          0   OK
+4:   acos                        1000047          118          0   OK
+4:   atan                        1000143           22          0   OK
+4:   sinh                        1000117           48          0   OK
+4:   cosh                        1000133           32          0   OK
+4:   tanh                        1000117           48          0   OK
+4:   asinh                       1000143           22          0   OK
+4:   acosh                       1000063          102          0   OK
+4:   atanh                       1000042          123          0   OK
+4:   erf                         1000149           16          0   OK
+4:   erfc                        1000162            3          0   OK
+4:   tgamma                      1000060          105          0   OK
+4:   sincos.cos                  1000138           27          0   OK
+4:   sincos.sin                  1000138           27          0   OK
+4:   sinhcosh.cosh               1000133           32          0   OK
+4:   sinhcosh.sinh               1000117           48          0   OK
+4:   add                         1000061            6          0   OK
+4:   subtract                    1000067            0          0   OK
+4:   multiply                    1000055           12          0   OK
+4:   divide                      1000050           17          0   OK
+4:   pow                         1000034           33          0   OK
+4:   atan2                       1000043           24          0   OK
+4:   hypot                       1000063            4          0   OK
+4:   fmod                        1000047           20          0   OK
+4:   remainder                   1000047           20          0   OK
+4:   copysign                    1000055           12          0   OK
+4:   fmax                        1000061            6          0   OK
+4:   fmin                        1000049           18          0   OK
+4:   fdim                        1000067            0          0   OK
+4:   fma                         1000000            0          0   OK
+4:   pow_int                      999218          782          0   OK
+4:   device:add                   100000            0          0   OK
+4:   device:multiply              100000            0          0   OK
+4:   device:sqrt                  100000            0          0   OK
+4:   device:exp                    89436        10564          0   OK
+4:   device:sin                   100000            0          0   OK
+4:   TOTAL                      50210321       296325          0
+4: 
+4: === ff_invariant_test: ALL PASSED ===
+ 4/23 Test  #4: ff_invariant_test ................   Passed   39.14 sec
+test 5
+      Start  5: dd_property_test
+
+5: Test command: /home/rbarik/kokkos-ep-build-a100/tests/dd_property_test
+5: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+5: Test timeout computed to be: 1800
+5: === dd_property_test (T1.3): algebraic identities for DD ===
+5: Execution space: Cuda
+5: Group A = bit-exact (no oracle); Group B / Test C = tolerance (needs __float128 oracle).
+5: 
+5: [Group A] bit-exact identities (10^6 random + full finite corpus)
+5:   A1_add_neg       n=1000165   skipped=0    min_digits= 31.00 mean_digits= 31.00 tolerance_digits= 31.00 status=PASS
+5:   A2_self_sub      n=1000165   skipped=0    min_digits= 31.00 mean_digits= 31.00 tolerance_digits= 31.00 status=PASS
+5:   A3_mul_one       n=1000159   skipped=6    min_digits= 31.00 mean_digits= 31.00 tolerance_digits= 31.00 status=PASS
+5:   A4_mul_negone    n=1000159   skipped=6    min_digits= 31.00 mean_digits= 31.00 tolerance_digits= 31.00 status=PASS
+5:   A5_abs_branch    n=1000165   skipped=0    min_digits= 31.00 mean_digits= 31.00 tolerance_digits= 31.00 status=PASS
+5:   A6_double_neg    n=1000165   skipped=0    min_digits= 31.00 mean_digits= 31.00 tolerance_digits= 31.00 status=PASS
+5:   A8_add_comm      n=1000067   skipped=0    min_digits= 31.00 mean_digits= 31.00 tolerance_digits= 31.00 status=PASS
+5: 
+5: [Group B] approximate identities (digits of accuracy vs __float128)
+5:   B0_mul_comm      n=1000000   min_digits= 31.00 mean_digits= 31.00 tolerance_digits= 25.91 status=PASS
+5:   B1_sqrt_sq       n=1000000   min_digits= 30.82 mean_digits= 31.00 tolerance_digits= 25.91 status=PASS
+5:   B2_exp_log       n=1000000   min_digits= 29.19 mean_digits= 30.42 tolerance_digits= 25.91 status=PASS
+5:   B3_log_exp       n=1000000   min_digits= 26.47 mean_digits= 31.00 tolerance_digits= 25.91 status=PASS
+5:   B4_pythag        n=1000000   min_digits= 30.82 mean_digits= 31.00 tolerance_digits= 25.91 status=PASS
+5:   B5_sin_odd       n=1000000   min_digits= 31.00 mean_digits= 31.00 tolerance_digits= 25.91 status=PASS
+5:   B6_cos_even      n=1000000   min_digits= 31.00 mean_digits= 31.00 tolerance_digits= 25.91 status=PASS
+5:   B7_tan_cos       n=1000000   min_digits= 31.00 mean_digits= 31.00 tolerance_digits= 25.91 status=PASS
+5:   B8_double_angle  n=100000    min_digits= 20.45 mean_digits= 30.12 tolerance_digits= 26.91 status=PASS
+5:   B9_exp_prod      n=1000000   min_digits= 29.29 mean_digits= 30.29 tolerance_digits= 25.91 status=PASS
+5:   B10_hypot_sq     n=1000000   min_digits= 30.73 mean_digits= 31.00 tolerance_digits= 25.91 status=PASS
+5:   B11_pow_two      n=1000000   min_digits= 28.99 mean_digits= 30.12 tolerance_digits= 25.91 status=PASS
+5:   B12_atanh_log    n=1000000   min_digits= 23.94 mean_digits= 29.77 tolerance_digits= 25.91 status=PASS
+5:     note[B4_pythag]: min_digits=30.82 — dips are argument-reduction conditioning near a=±pi*k (near +/-pi needs triple-float arg reduction (out of scope); PORT_NOTES §5)
+5: 
+5: [Device] 3 Group A (bit-exact) + 2 Group B on 100000 inputs (Cuda)
+5:   [device] A1_add_neg     n=100000 failures=0 status=PASS
+5:   [device] A3_mul_one     n=100000 failures=0 status=PASS
+5:   [device] A5_abs_branch  n=100000 failures=0 status=PASS
+5:   [device] B1_sqrt_sq     n=100000 min=30.92 mean=31.00 tol=26.91 status=PASS
+5:   [device] B4_pythag      n=100000 min=30.89 mean=31.00 tol=26.91 status=PASS
+5: 
+5: [Test C] named-constant regressions (target ≥30 digits)
+5:     C1_sin_pi      |sin(pi)|=1.080e-31 zero_digits= 30.97  PASS  (near +/-pi needs triple-float arg reduction (out of scope); PORT_NOTES §5)
+5:     C2_log_e       digits= 30.46  PASS
+5:     C3_exp_log2    digits= 31.00  PASS
+5:     C4_sqrt2_sq    digits= 31.00  PASS
+5:     C5_log_ten     digits= 30.18  PASS
+5:     C6_gamma       SKIPPED (no digamma op; constant has no independent DD oracle in dd_math.hpp)
+5:   Test C: 5/5 passed
+5: 
+5: [Anti-tests] associativity of add and distributivity across large
+5:   cancellations are NOT tested: both are false for any finite-precision
+5:   format (rounding is grouping-dependent). See the comment block in main().
+5: 
+5: === Summary ===
+5:   Group A: 7 identities, total failures=0
+5:   Group B: 13 identities, mean below tolerance=0
+5:   Device: total failures=0
+5: 
+5: === dd_property_test: ALL PASSED ===
+ 5/23 Test  #5: dd_property_test .................   Passed   29.53 sec
+test 6
+      Start  6: dd_accuracy_test
+Could not find executable /home/rbarik/kokkos-ep-build-a100/tests/dd_accuracy_test
+Looked in the following places:
+/home/rbarik/kokkos-ep-build-a100/tests/dd_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/dd_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/dd_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/dd_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/dd_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/dd_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/dd_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/dd_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/dd_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/dd_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/dd_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/dd_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/dd_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/dd_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/dd_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/dd_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/dd_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/dd_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/dd_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/dd_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/dd_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/dd_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/dd_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/dd_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/dd_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/dd_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/dd_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/dd_accuracy_test
+
+6: Test command: 
+6: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+Unable to find executable: /home/rbarik/kokkos-ep-build-a100/tests/dd_accuracy_test
+ 6/23 Test  #6: dd_accuracy_test .................***Not Run   0.00 sec
+test 7
+      Start  7: dd_e2e_test
+
+7: Test command: /home/rbarik/kokkos-ep-build-a100/tests/dd_e2e_test
+7: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+7: Test timeout computed to be: 1800
+7: === dd_e2e_test (T1.6): end-to-end cancellation kernels for DD ===
+7: Execution space: Cuda
+7: Host-side kernels (inherently serial); gate = mean_digits >= 28.00.
+7: 
+7: [K1] sqrt(x^2+1) - x  at x in {1e6, 1e10, 1e15}
+7:   K1_stable              n=3   min_digits= 31.00 mean_digits= 31.00 tolerance_digits= 28.00 status=PASS
+7:   K1_naive_report        n=3   min_digits=  1.54 mean_digits= 13.08 tolerance_digits=  0.00 status=PASS
+7:     (REPORT — not gated; naive form is precision-independent catastrophic cancellation, ~2*log10(x) digits lost)
+7:       DD   naive  x=1e6:  21.25  x=1e10:  16.44  x=1e15:   1.54
+7:       FP64 naive  x=1e6:   5.12  x=1e10:  -0.00  x=1e15:  -0.00
+7:       -> DD retains ~16 more digits than FP64 at each magnitude (DD's word-doubling of FP64's mantissa); the stable form above keeps ~31.
+7: 
+7: [K2] Sum 1/k^2, k=1..1e6  (Basel; oracle pi^2/6)
+7:   K2_basel_1_over_k2     n=1   min_digits= 29.48 mean_digits= 29.48 tolerance_digits= 28.00 status=PASS
+7:     sanity vs pi^2/6: digits=6.22 (truncation floor ~6; gate=5.00) status=PASS
+7:     (DD-vs-f128-partial-sum carries the precision claim; DD-vs-pi^2/6 is a truncation-limited sanity check)
+7: 
+7: [K3] Machin: pi = 16*atan(1/5) - 4*atan(1/239)  (oracle DoubleDouble_pi)
+7:   K3_machin_pi           n=1   min_digits= 28.09 mean_digits= 28.09 tolerance_digits= 28.00 status=PASS
+7: 
+7: [K4] Sum (-1)^(k+1)/k, k=1..1e6  (alternating harmonic; oracle ln2)
+7:   K4_alt_harmonic_ln2    n=1   min_digits= 29.56 mean_digits= 29.56 tolerance_digits= 28.00 status=PASS
+7:     sanity vs ln2: digits=6.14 (truncation floor ~6; gate=5.00) status=PASS
+7:     (DD-vs-f128-partial-sum carries the precision claim; DD-vs-ln2 is a truncation-limited sanity check)
+7: 
+7: === Summary ===
+7:   Kernels: K1_stable, K2_basel, K3_machin, K4_alt_harmonic (+ K1_naive reported, not gated)
+7:   Total gate failures: 0
+7: 
+7: === dd_e2e_test: ALL PASSED ===
+ 7/23 Test  #7: dd_e2e_test ......................   Passed    0.55 sec
+test 8
+      Start  8: dd_eft_test
+
+8: Test command: /home/rbarik/kokkos-ep-build-a100/tests/dd_eft_test
+8: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+8: Test timeout computed to be: 1800
+8: === dd_eft_test (T1.1): EFT bit-exactness for DD twoSum + Dekker twoProd ===
+8: Oracle: __float128 (exact — 54-bit sum / 106-bit product both fit in 113-bit mantissa)
+8: 
+8: [Test A] twoSum bit-exactness
+8:     [A] uniform[-1e100,1e100] n=1e6: tested=1000000 skipped=0 failures=0
+8:     [A] uniform[-1,1] n=1e6: tested=1000000 skipped=0 failures=0
+8:     [A] |a|>>|b| (b=a*2^-k) n=1e5: tested=100000 skipped=0 failures=0
+8:     [A] corpus x-product (|corpus|=167, pairs=13861): tested=13526 skipped=335 failures=0
+8:   Test A twoSum: total tested=2113526, skipped=335, failures=0
+8: 
+8: [Test B] Dekker twoProduct bit-exactness
+8:     [B] uniform[-1e100,1e100] n=1e6: tested=1000000 skipped=0 failures=0
+8:     [B] uniform[-1,1] n=1e6: tested=1000000 skipped=0 failures=0
+8:     [B] |a|>>|b| (b=a*2^-k) n=1e5: tested=100000 skipped=0 failures=0
+8:     [B] corpus x-product (|corpus|=167, pairs=13861): tested=10183 skipped=3678 failures=0
+8:   Test B Dekker twoProd: total tested=2110183, skipped=3678, failures=0
+8: 
+8: [Test C] named hard cases
+8:     twoSum  a == b (=1.0)                : PASS
+8:     twoSum  a == -b (=1.0,-1.0)          : PASS
+8:     twoSum  a == b (=pi)                 : PASS
+8:     twoSum  both subnormal               : PASS
+8:     twoSum  a=0, b=nonzero               : PASS
+8:     twoSum  a=nonzero, b=0               : PASS
+8:     twoProd a=0, b=nonzero               : PASS
+8:     twoProd a=nonzero, b=0               : PASS
+8:     twoSum  a=+0, b=-0                   : PASS
+8:     twoSum  a=-0, b=+0                   : PASS
+8:     twoSum  Bailey 1.0 + 2^-53           : PASS  (hi=1 lo=1.1102230246251565e-16, want hi=1 lo=2^-53=1.1102230246251565e-16)
+8:     twoProd pi * pi                      : PASS
+8:     twoProd e * e                        : PASS
+8:     twoProd sqrt(2) * sqrt(2)            : PASS
+8:   Test C named cases: 14/14 passed
+8: 
+8: [Test D] device parity (Cuda)
+8:     device twoSum : 100000/100000 passed
+8:     device twoProd: 100000/100000 passed
+8:   Test D device parity: 200000/200000 passed
+8: 
+8: === dd_eft_test: ALL PASSED ===
+ 8/23 Test  #8: dd_eft_test ......................   Passed    0.95 sec
+test 9
+      Start  9: ff_eft_test
+
+9: Test command: /home/rbarik/kokkos-ep-build-a100/tests/ff_eft_test
+9: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+9: Test timeout computed to be: 1800
+9: === ff_eft_test (T2.1): EFT bit-exactness for FF twoSum + Dekker twoProd ===
+9: Oracle: FP64 (exact — 25-bit sum / 48-bit product both fit in 53-bit mantissa)
+9: Splitter: 8193.0f = 2^13 + 1 (mirrors ff_math.hpp multiply)
+9: 
+9: [Test A] twoSum bit-exactness
+9:     [A] uniform[-1e+30,1e+30] n=1e6: tested=1000000 skipped=0 failures=0
+9:     [A] uniform[-1,1] n=1e6: tested=1000000 skipped=0 failures=0
+9:     [A] |a|>>|b| (b=a*2^-k, k in [1,20]) n=1e5: tested=100000 skipped=0 failures=0
+9:     [A] corpus x-product (|corpus|=167, pairs=13861): tested=13526 skipped=335 failures=0
+9:   Test A twoSum: total tested=2113526, skipped=335, failures=0
+9: 
+9: [Test B] Dekker twoProduct bit-exactness
+9:     [B] uniform[-1e+18,1e+18] n=1e6: tested=1000000 skipped=0 failures=0
+9:     [B] uniform[-1,1] n=1e6: tested=1000000 skipped=0 failures=0
+9:     [B] |a|>>|b| (b=a*2^-k, k in [1,20]) n=1e5: tested=100000 skipped=0 failures=0
+9:     [B] corpus x-product (|corpus|=167, pairs=13861): tested=10205 skipped=3656 failures=0
+9:   Test B Dekker twoProd: total tested=2110205, skipped=3656, failures=0
+9: 
+9: [Test C] named hard cases
+9:     twoSum  a == b (=1.0f)                 : PASS
+9:     twoSum  a == -b (=1.0f,-1.0f)          : PASS
+9:     twoSum  a == b (=pi_f)                 : PASS
+9:     twoSum  both subnormal                 : PASS
+9:     twoProd both subnormal                 : SKIP (out of Dekker domain)
+9:     twoSum  a=0, b=nonzero                 : PASS
+9:     twoSum  a=nonzero, b=0                 : PASS
+9:     twoProd a=0, b=nonzero                 : PASS
+9:     twoProd a=nonzero, b=0                 : PASS
+9:     twoSum  a=+0, b=-0                     : PASS
+9:     twoSum  a=-0, b=+0                     : PASS
+9:     twoSum  Bailey 1.0f + 2^-24            : PASS  (hi=1 lo=5.96046448e-08, want hi=1 lo=2^-24=5.96046448e-08)
+9:     twoProd pi_f * pi_f                    : PASS
+9:     twoProd e_f * e_f                      : PASS
+9:     twoProd sqrt2_f * sqrt2_f              : PASS
+9:   Test C named cases: 14 passed, 1 skipped, 0 failed (of 15)
+9: 
+9: [Test D] device parity (Cuda)
+9:     device twoSum : 200000 tested (0 skipped), 0 failures
+9:     device twoProd: 200000 tested (0 skipped), 0 failures
+9:   Test D device parity: 400000 passed, 0 skipped, 0 failed (of 400000)
+9: 
+9: === ff_eft_test: ALL PASSED ===
+ 9/23 Test  #9: ff_eft_test ......................   Passed    0.39 sec
+test 10
+      Start 10: ff_property_test
+Could not find executable /home/rbarik/kokkos-ep-build-a100/tests/ff_property_test
+Looked in the following places:
+/home/rbarik/kokkos-ep-build-a100/tests/ff_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/ff_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/ff_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/ff_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/ff_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/ff_property_test
+home/rbarik/kokkos-ep-build-a100/tests/ff_property_test
+home/rbarik/kokkos-ep-build-a100/tests/ff_property_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/ff_property_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/ff_property_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_property_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_property_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_property_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_property_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_property_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_property_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_property_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_property_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/ff_property_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/ff_property_test
+
+10: Test command: 
+10: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+Unable to find executable: /home/rbarik/kokkos-ep-build-a100/tests/ff_property_test
+10/23 Test #10: ff_property_test .................***Not Run   0.00 sec
+test 11
+      Start 11: ff_accuracy_test
+Could not find executable /home/rbarik/kokkos-ep-build-a100/tests/ff_accuracy_test
+Looked in the following places:
+/home/rbarik/kokkos-ep-build-a100/tests/ff_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/ff_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/ff_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/ff_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/ff_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/ff_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/ff_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/ff_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/ff_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/ff_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/ff_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/ff_accuracy_test
+
+11: Test command: 
+11: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+Unable to find executable: /home/rbarik/kokkos-ep-build-a100/tests/ff_accuracy_test
+11/23 Test #11: ff_accuracy_test .................***Not Run   0.00 sec
+test 12
+      Start 12: ff_cancellation_test
+Could not find executable /home/rbarik/kokkos-ep-build-a100/tests/ff_cancellation_test
+Looked in the following places:
+/home/rbarik/kokkos-ep-build-a100/tests/ff_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/ff_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/ff_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/ff_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/ff_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/ff_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/ff_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/ff_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/ff_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/ff_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/ff_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/ff_cancellation_test
+
+12: Test command: 
+12: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+Unable to find executable: /home/rbarik/kokkos-ep-build-a100/tests/ff_cancellation_test
+12/23 Test #12: ff_cancellation_test .............***Not Run   0.00 sec
+test 13
+      Start 13: dd_fma_guard_test
+Could not find executable /home/rbarik/kokkos-ep-build-a100/tests/dd_fma_guard_test
+Looked in the following places:
+/home/rbarik/kokkos-ep-build-a100/tests/dd_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/dd_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/dd_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/dd_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/dd_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/dd_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/dd_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/dd_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/dd_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/dd_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/dd_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/dd_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/dd_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/dd_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/dd_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/dd_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/dd_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/dd_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/dd_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/dd_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/dd_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/dd_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/dd_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/dd_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/dd_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/dd_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/dd_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/dd_fma_guard_test
+
+13: Test command: 
+13: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+Unable to find executable: /home/rbarik/kokkos-ep-build-a100/tests/dd_fma_guard_test
+13/23 Test #13: dd_fma_guard_test ................***Not Run   0.00 sec
+test 14
+      Start 14: dd_fma_guard_test_contract_on
+Could not find executable /home/rbarik/kokkos-ep-build-a100/tests/dd_fma_guard_test_contract_on
+Looked in the following places:
+/home/rbarik/kokkos-ep-build-a100/tests/dd_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/dd_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Release/dd_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Release/dd_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/dd_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/dd_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/dd_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/dd_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/dd_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/dd_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/dd_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/dd_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Development/dd_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Development/dd_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/dd_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/dd_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Release/dd_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Release/dd_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Debug/dd_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Debug/dd_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/dd_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/dd_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/dd_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/dd_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/dd_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/dd_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Development/dd_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Development/dd_fma_guard_test_contract_on
+
+14: Test command: 
+14: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+Unable to find executable: /home/rbarik/kokkos-ep-build-a100/tests/dd_fma_guard_test_contract_on
+14/23 Test #14: dd_fma_guard_test_contract_on ....***Not Run   0.00 sec
+test 15
+      Start 15: ff_fma_guard_test
+Could not find executable /home/rbarik/kokkos-ep-build-a100/tests/ff_fma_guard_test
+Looked in the following places:
+/home/rbarik/kokkos-ep-build-a100/tests/ff_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/ff_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/ff_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/ff_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/ff_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/ff_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/ff_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/ff_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/ff_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/ff_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/ff_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/ff_fma_guard_test
+
+15: Test command: 
+15: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+Unable to find executable: /home/rbarik/kokkos-ep-build-a100/tests/ff_fma_guard_test
+15/23 Test #15: ff_fma_guard_test ................***Not Run   0.00 sec
+test 16
+      Start 16: ff_fma_guard_test_contract_on
+Could not find executable /home/rbarik/kokkos-ep-build-a100/tests/ff_fma_guard_test_contract_on
+Looked in the following places:
+/home/rbarik/kokkos-ep-build-a100/tests/ff_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/ff_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Release/ff_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Release/ff_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Development/ff_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Development/ff_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/ff_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/ff_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Release/ff_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Release/ff_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Debug/ff_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/ff_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/ff_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/ff_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Development/ff_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Development/ff_fma_guard_test_contract_on
+
+16: Test command: 
+16: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+Unable to find executable: /home/rbarik/kokkos-ep-build-a100/tests/ff_fma_guard_test_contract_on
+16/23 Test #16: ff_fma_guard_test_contract_on ....***Not Run   0.00 sec
+test 17
+      Start 17: qf_eft_test
+Could not find executable /home/rbarik/kokkos-ep-build-a100/tests/qf_eft_test
+Looked in the following places:
+/home/rbarik/kokkos-ep-build-a100/tests/qf_eft_test
+/home/rbarik/kokkos-ep-build-a100/tests/qf_eft_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/qf_eft_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/qf_eft_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_eft_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_eft_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_eft_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_eft_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_eft_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_eft_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_eft_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_eft_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/qf_eft_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/qf_eft_test
+home/rbarik/kokkos-ep-build-a100/tests/qf_eft_test
+home/rbarik/kokkos-ep-build-a100/tests/qf_eft_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/qf_eft_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/qf_eft_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_eft_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_eft_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_eft_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_eft_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_eft_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_eft_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_eft_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_eft_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/qf_eft_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/qf_eft_test
+
+17: Test command: 
+17: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+Unable to find executable: /home/rbarik/kokkos-ep-build-a100/tests/qf_eft_test
+17/23 Test #17: qf_eft_test ......................***Not Run   0.00 sec
+test 18
+      Start 18: qf_nonoverlap_test
+Could not find executable /home/rbarik/kokkos-ep-build-a100/tests/qf_nonoverlap_test
+Looked in the following places:
+/home/rbarik/kokkos-ep-build-a100/tests/qf_nonoverlap_test
+/home/rbarik/kokkos-ep-build-a100/tests/qf_nonoverlap_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/qf_nonoverlap_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/qf_nonoverlap_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_nonoverlap_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_nonoverlap_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_nonoverlap_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_nonoverlap_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_nonoverlap_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_nonoverlap_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_nonoverlap_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_nonoverlap_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/qf_nonoverlap_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/qf_nonoverlap_test
+home/rbarik/kokkos-ep-build-a100/tests/qf_nonoverlap_test
+home/rbarik/kokkos-ep-build-a100/tests/qf_nonoverlap_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/qf_nonoverlap_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/qf_nonoverlap_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_nonoverlap_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_nonoverlap_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_nonoverlap_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_nonoverlap_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_nonoverlap_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_nonoverlap_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_nonoverlap_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_nonoverlap_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/qf_nonoverlap_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/qf_nonoverlap_test
+
+18: Test command: 
+18: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+Unable to find executable: /home/rbarik/kokkos-ep-build-a100/tests/qf_nonoverlap_test
+18/23 Test #18: qf_nonoverlap_test ...............***Not Run   0.00 sec
+test 19
+      Start 19: qf_property_test
+Could not find executable /home/rbarik/kokkos-ep-build-a100/tests/qf_property_test
+Looked in the following places:
+/home/rbarik/kokkos-ep-build-a100/tests/qf_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/qf_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/qf_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/qf_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/qf_property_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/qf_property_test
+home/rbarik/kokkos-ep-build-a100/tests/qf_property_test
+home/rbarik/kokkos-ep-build-a100/tests/qf_property_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/qf_property_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/qf_property_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_property_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_property_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_property_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_property_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_property_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_property_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_property_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_property_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/qf_property_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/qf_property_test
+
+19: Test command: 
+19: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+Unable to find executable: /home/rbarik/kokkos-ep-build-a100/tests/qf_property_test
+19/23 Test #19: qf_property_test .................***Not Run   0.00 sec
+test 20
+      Start 20: qf_accuracy_test
+Could not find executable /home/rbarik/kokkos-ep-build-a100/tests/qf_accuracy_test
+Looked in the following places:
+/home/rbarik/kokkos-ep-build-a100/tests/qf_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/qf_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/qf_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/qf_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/qf_accuracy_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/qf_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/qf_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/qf_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/qf_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/qf_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/qf_accuracy_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/qf_accuracy_test
+
+20: Test command: 
+20: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+Unable to find executable: /home/rbarik/kokkos-ep-build-a100/tests/qf_accuracy_test
+20/23 Test #20: qf_accuracy_test .................***Not Run   0.00 sec
+test 21
+      Start 21: qf_fma_guard_test
+Could not find executable /home/rbarik/kokkos-ep-build-a100/tests/qf_fma_guard_test
+Looked in the following places:
+/home/rbarik/kokkos-ep-build-a100/tests/qf_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/qf_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/qf_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/qf_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/qf_fma_guard_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/qf_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/qf_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/qf_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/qf_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/qf_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/qf_fma_guard_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/qf_fma_guard_test
+
+21: Test command: 
+21: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+Unable to find executable: /home/rbarik/kokkos-ep-build-a100/tests/qf_fma_guard_test
+21/23 Test #21: qf_fma_guard_test ................***Not Run   0.00 sec
+test 22
+      Start 22: qf_fma_guard_test_contract_on
+Could not find executable /home/rbarik/kokkos-ep-build-a100/tests/qf_fma_guard_test_contract_on
+Looked in the following places:
+/home/rbarik/kokkos-ep-build-a100/tests/qf_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/qf_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Release/qf_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Release/qf_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Development/qf_fma_guard_test_contract_on
+/home/rbarik/kokkos-ep-build-a100/tests/Development/qf_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/qf_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/qf_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Release/qf_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Release/qf_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Development/qf_fma_guard_test_contract_on
+home/rbarik/kokkos-ep-build-a100/tests/Development/qf_fma_guard_test_contract_on
+
+22: Test command: 
+22: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+Unable to find executable: /home/rbarik/kokkos-ep-build-a100/tests/qf_fma_guard_test_contract_on
+22/23 Test #22: qf_fma_guard_test_contract_on ....***Not Run   0.00 sec
+test 23
+      Start 23: qf_cancellation_test
+Could not find executable /home/rbarik/kokkos-ep-build-a100/tests/qf_cancellation_test
+Looked in the following places:
+/home/rbarik/kokkos-ep-build-a100/tests/qf_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/qf_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/qf_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/Release/qf_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/qf_cancellation_test
+/home/rbarik/kokkos-ep-build-a100/tests/Development/qf_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/qf_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/qf_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/qf_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/Release/qf_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/Debug/qf_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/MinSizeRel/qf_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/RelWithDebInfo/qf_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/Deployment/qf_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/qf_cancellation_test
+home/rbarik/kokkos-ep-build-a100/tests/Development/qf_cancellation_test
+
+23: Test command: 
+23: Working Directory: /home/rbarik/kokkos-ep-build-a100/tests
+Unable to find executable: /home/rbarik/kokkos-ep-build-a100/tests/qf_cancellation_test
+23/23 Test #23: qf_cancellation_test .............***Not Run   0.00 sec
+
+30% tests passed, 16 tests failed out of 23
+
+Total Test time (real) = 115.77 sec
+
+The following tests FAILED:
+	  1 - hello_test (Not Run)
+	  6 - dd_accuracy_test (Not Run)
+	 10 - ff_property_test (Not Run)
+	 11 - ff_accuracy_test (Not Run)
+	 12 - ff_cancellation_test (Not Run)
+	 13 - dd_fma_guard_test (Not Run)
+	 14 - dd_fma_guard_test_contract_on (Not Run)
+	 15 - ff_fma_guard_test (Not Run)
+	 16 - ff_fma_guard_test_contract_on (Not Run)
+	 17 - qf_eft_test (Not Run)
+	 18 - qf_nonoverlap_test (Not Run)
+	 19 - qf_property_test (Not Run)
+	 20 - qf_accuracy_test (Not Run)
+	 21 - qf_fma_guard_test (Not Run)
+	 22 - qf_fma_guard_test_contract_on (Not Run)
+	 23 - qf_cancellation_test (Not Run)
+Errors while running CTest
+Output from these tests are in: /home/rbarik/kokkos-ep-build-a100/Testing/Temporary/LastTest.log
+Use "--rerun-failed --output-on-failure" to re-run the failed cases verbosely.

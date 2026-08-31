@@ -12,6 +12,81 @@ that is a **finding for the STATUS block**, never a patch.
 Reet runs them on JLSE and hands the logs back; a later session analyzes and
 writes the STATUS block. S1 is **not complete** until that happens.
 
+> **STATUS: run executed, S1 closed.** Cobalt job `996777`, queue `gpu_a100`,
+> node `gpu07`, script mode, 2026-08-31. Results below; the authoritative
+> write-up is the **S1 block in `docs/UPSTREAM_PLAN_STATUS.md`**. Everything
+> from here down is the original authoring-half text, kept intact.
+
+## RESULTS (job 996777)
+
+**Hardware, confirmed by `nvidia-smi` inside the job** (`logs/run/00_env.log`):
+`NVIDIA A100-PCIE-40GB`, driver `610.43.02`, node `gpu07`. Kokkos install:
+`KOKKOS_ENABLE_CUDA`, `KOKKOS_ENABLE_CUDA_CONSTEXPR`, `KOKKOS_ENABLE_CUDA_LAMBDA`,
+`KOKKOS_ENABLE_LIBQUADMATH`, `KOKKOS_ARCH_AMPERE80` (`sm_80`), Kokkos 5.1.0 built
+at C++20. Toolchain: GCC 13.3.0, nvcc 12.9.86, CMake 3.28.3.
+
+Submitted with `-t 60`, not the `-t 120` recommended in step 4a below. That was
+harmless in the event — the job finished in 2 min 5 s because the long tests
+(`qf_accuracy_test`, the six demos) had no binaries. A future rerun with the
+suite actually built still needs `-t 120`.
+
+**No silent Serial fallback.** Every test that prints the banner reported
+`Execution space: Cuda`, and the device passes name the space explicitly —
+e.g. `[Test B] device tripwire (5 ops, 10^5 random on Cuda)`. The A100 really
+ran the kernels.
+
+### 7 of 23 registered tests had binaries — all 7 PASSED
+
+| ctest test | time | execution space |
+|---|---:|---|
+| `corpus_test` | 0.03 s | host by design (no Kokkos math — not device evidence) |
+| `dd_invariant_test` | 45.14 s | **Cuda** — host sweep + `[Test B] device tripwire` 5 ops × 10⁵, 0 failures |
+| `ff_invariant_test` | 39.14 s | **Cuda** — same shape, 0 failures |
+| `dd_property_test` | 29.53 s | **Cuda** — `[Device]` 3 Group A bit-exact + 2 Group B on 10⁵, all PASS |
+| `dd_e2e_test` | 0.55 s | **Cuda** init only, host math by design (not device evidence) |
+| `dd_eft_test` | 0.95 s | **Cuda** — `[Test D] device parity` 200 000/200 000 passed |
+| `ff_eft_test` | 0.39 s | **Cuda** — `[Test D] device parity` 400 000/400 000 passed |
+
+Total test time 115.77 s. **Zero assertion failures anywhere.**
+
+### 16 of 23 had no binary — `***Not Run`
+
+`hello_test`, `dd_accuracy_test`, `ff_property_test`, `ff_accuracy_test`,
+`ff_cancellation_test`, `dd_fma_guard_test`, `dd_fma_guard_test_contract_on`,
+`ff_fma_guard_test`, `ff_fma_guard_test_contract_on`, `qf_eft_test`,
+`qf_nonoverlap_test`, `qf_property_test`, `qf_accuracy_test`,
+`qf_fma_guard_test`, `qf_fma_guard_test_contract_on`, `qf_cancellation_test`.
+
+All six demos also failed to build, plus `kokkos_ep_bench_cost` — so there are
+**no device accuracy tables** to diff against README Section 2.
+
+**`ctest` printed `30% tests passed, 16 tests failed out of 23`. That line is
+misleading and must not be quoted on its own:** nothing ran and failed. ctest
+classifies a missing executable (`Unable to find executable`) as a failure. The
+correct reading is *7 attempted, 7 passed; 16 never built*.
+
+Cause: `__float128` cannot cross nvcc's device pass. This is exactly the
+"**`__float128` under nvcc**" entry under *Anticipated failure modes* below —
+the prediction landed. Full analysis, root cause and the proven fix are in the
+S1 STATUS block; the fix is routed to **S6**, not applied here (Rule 4).
+
+`logs/run/996777.error` contains only
+`/home/rbarik/.bashrc: line 13: module: command not found` — Lmod is not
+initialized in the Cobalt shell and `run_a100.sh` loads its own modules. Benign;
+nobody needs to chase it.
+
+### Committed artifacts
+
+`logs/build/` (login-node build) and `logs/run/` (job 996777) are both committed.
+`logs/run/996777.output`, `.error` and `.cobaltlog` are the raw Cobalt streams,
+moved here from the repo root. `logs/build/contraction_flags.log` was
+**regenerated post-hoc** by the analysis session from the surviving build tree —
+`build_login.sh` section 6 never ran because section 5 (the repo build) failed
+first. It answers C1–C3 below: **C1 = 0 `--fmad` occurrences (prediction
+confirmed)**, C2 = 9 `-ffp-contract` (6 `off` + 3 `fast`, host pass only),
+C3 = `GNU` 13.3.0. `logs/build/targets.log` was lost the same way and is not
+recoverable without a rebuild.
+
 ## Target
 
 | | |

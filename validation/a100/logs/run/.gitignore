@@ -1,0 +1,7 @@
+# The repo-root .gitignore excludes *.cobaltlog / *.error / *.output so stray
+# Cobalt artifacts do not pile up in the working tree. Inside THIS directory
+# they are the primary evidence for S1 and must be committed, so re-include
+# them. Keep this file if a later run drops a new <jobid>.* triplet here.
+!*.cobaltlog
+!*.error
+!*.output
