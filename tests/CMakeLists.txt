@@ -267,3 +267,15 @@ kokkos_ep_add_eft_test_contract_on(qf_fma_guard_test)  # -> qf_fma_guard_test_co
 # gated path here (it is covered by qf_fma_guard_test, T3.5). So this test mirrors
 # dd_e2e_test / ff_cancellation_test registration exactly (no EFT helper).
 kokkos_ep_add_test(qf_cancellation_test)
+
+# S10 Phase 2: TF (TripleFloat, 3×FP32) test suite. TF analogue of T3.1-T3.6 (QF),
+# T2.1-T2.6 (FF), T1.1-T1.6 (DD). Same registration pattern as QF: EFT test with
+# contraction-OFF + contraction-ON dual; property/accuracy/cancellation use plain
+# helper (no contraction flags).
+kokkos_ep_add_eft_test(tf_eft_test)                    # -> tf_eft_test              (OFF, gates)
+kokkos_ep_add_eft_test_contract_on(tf_eft_test)        # -> tf_eft_test_contract_on  (ON, reports)
+kokkos_ep_add_test(tf_property_test)                   # algebraic identities (Group A/B/C)
+kokkos_ep_add_test(tf_accuracy_test)                   # per-op digits vs quadmath oracle
+kokkos_ep_add_test(tf_cancellation_test)               # e2e cancellation kernels (K1-K4)
+kokkos_ep_add_eft_test(tf_fma_guard_test)              # -> tf_fma_guard_test              (OFF, gates)
+kokkos_ep_add_eft_test_contract_on(tf_fma_guard_test)  # -> tf_fma_guard_test_contract_on  (ON, reports)

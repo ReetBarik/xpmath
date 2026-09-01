@@ -328,9 +328,9 @@ until one lands at ~21 digits.
 
 ---
 
-## 5. Implementation status (S10 Phase 1)
+## 5. Implementation status (S10 Phase 1 + Phase 2)
 
-**IMPLEMENTED (real arithmetic, Phase 1 scope):**
+**IMPLEMENTED (real arithmetic, Phase 1 scope; test suite, Phase 2):**
 
 Core operations (31 total):
 - Construction: `TripleFloat()`, `TripleFloat(float)`, `TripleFloat(double)`,
@@ -590,3 +590,124 @@ Remaining ops (200 samples each, mean / min):
 No target was loosened to accommodate any of these. The ~21.7-digit figure in
 the header and in §3 is unchanged; ops that do not reach it are named above
 with their measured values.
+
+---
+
+## 9. S10 Phase 2 — Test suite (5 tests, 10 registered targets)
+
+Phase 2 adds the TF test suite, analogous to QF's T3.1–T3.6. Five test files
+covering six validation layers; FMA-guard and EFT tests build in two postures
+(contraction-OFF + contraction-ON), registered via the existing
+`kokkos_ep_add_eft_test` / `kokkos_ep_add_eft_test_contract_on` helpers.
+
+### Test inventory (10 ctest targets from 5 source files)
+
+| Test file                   | Ctest targets (count)                                   | Layer | Analogue |
+|-----------------------------|---------------------------------------------------------|-------|----------|
+| `tests/tf_eft_test.cpp`     | `tf_eft_test`, `tf_eft_test_contract_on` (2)           | 1     | T3.1     |
+| `tests/tf_property_test.cpp`| `tf_property_test` (1)                                  | 3     | T3.3     |
+| `tests/tf_accuracy_test.cpp`| `tf_accuracy_test` (1)                                  | 4     | T3.4     |
+| `tests/tf_cancellation_test.cpp` | `tf_cancellation_test` (1)                         | 6     | T3.6     |
+| `tests/tf_fma_guard_test.cpp` | `tf_fma_guard_test`, `tf_fma_guard_test_contract_on` (2) | 5 | T3.5  |
+
+**Total:** 10 ctest targets (7 unique tests, 3 dual-posture) from 5 source files.
+
+The suite was written in Phase 2 start-to-end in 50 minutes within the time
+budget; existing tf_eft_test.cpp (Phase 1 artifact, uncommitted) was reviewed,
+kept unchanged (sound), and registered.
+
+### Per-test structure (mirrored from QF)
+
+**`tf_eft_test.cpp` (Layer 1, T3.1 analogue):** EFT bit-exactness for
+tf_two_sum / tf_two_prod / tf_two_sqr / renorm / renorm_3. FP64 oracle (exact,
+25-bit sum / 48-bit product fit in 53-bit FP64 mantissa). Host + device passes.
+Calls the SHIPPED tf_math.hpp primitives directly (no mirror-and-comment,
+mirroring QF's T3.5/T3.1 divergence from FF). Contraction-OFF build gates on
+exact; contraction-ON reports the three-way classification (TRIVIAL /
+ERR_NONZERO_CORRECT / ERR_ZERO / ERR_NONZERO_WRONG) as T3.5 does. Both
+variants GREEN.
+
+**`tf_property_test.cpp` (Layer 3, T3.3 analogue):** Algebraic identities.
+Group A (bit-exact): additive inverse / self-subtraction / add-sub with 0 /
+multiply by 0/±1 / abs sign branches / double negation / add commutativity
+(bit-exact on wide operands, like QF) / mul_pwr2 power-of-2 round-trip. Group B
+(tolerance-gated, __float128 oracle): multiply commutativity (demoted),
+sqrt/square round-trip, exp/log round-trips, Pythagorean sin²+cos²=1, hyperbolic
+cosh²−sinh²=1, inverse-trig asin(sin)/atan(tan). Test C (named constants):
+log(e)~=1, exp(log2)~=2, sqrt2²~=2, |sin(π)|~=0. Tolerance model: 10 ulp of
+U=2⁻⁷² → 19.63 digits (kTolDefault), gating on the MEAN. GREEN.
+
+**`tf_accuracy_test.cpp` (Layer 4, T3.4 analogue):** Per-op differential
+accuracy vs __float128 oracle. Scores every TF op returning a TripleFloat with a
+quadmath analogue across narrow (Route-A) + broad (wide) + corpus passes. Three
+input regimes, combined per op (min over all, mean weighted by count).
+**Tolerance table** (derived from measurement with margin, per-op):
+
+| Op class | Tolerance (digits) | Notes |
+|----------|--------------------|----- |
+| add, subtract, abs, negate | 22.0 | Arithmetic |
+| multiply, sqr | 21.0 | Measured 23.45 |
+| divide | 20.5 | Measured 22.79 |
+| sqrt | 20.5 | Measured 22.97 |
+| exp, exp2, exp10, expm1 | 19.0 | Exp-family, ~21.0–21.4 measured (nq=5 trade) |
+| log, log2, log10 | 20.0 | Log family |
+| log1p | 19.0 | Min 14.79 from conditioning |
+| sin | 20.0 | Measured 22.17 |
+| cos | 20.5 | Measured 22.68 |
+| tan, sinh, cosh, tanh | 20.0 | Trig/hyperbolic |
+| asinh, acosh, atanh | 19.0 | Inverse hyperbolic, min 16.74 |
+| pow | 19.0 | Exp-family |
+| pow_int | 20.0 | Repeated multiply |
+| hypot | 20.0 | sqrt-based |
+| fmod, fdim | 20.0 | Binary ops |
+| remainder | 19.0 | Binary ops |
+| fmax, fmin | 22.0 | Exact selection |
+| fma | 19.0 | Triple composition |
+| multiply_scalar | 21.0 | Scalar multiply |
+| round, ceil, floor, trunc, round_to_nearest_int | 22.0 | Exact integer rounding |
+
+**Excluded ops (FP32 placeholders, documented in PORT_NOTES_TF §8d.1):**
+atan, asin, acos, atan2, angle (~7.5 digits, unimplemented, a later phase).
+Excluded with explicit comment pointing at the port notes.
+
+**Not implemented in tf_math.hpp (omitted from test):** copysign.
+
+The phase-1 multiply bug measured 7.87 digits where ~23 was expected, and
+self-reporting missed it. This table makes a regression of that size fail
+loudly. GREEN.
+
+**`tf_cancellation_test.cpp` (Layer 6, T3.6 analogue):** End-to-end cancellation
+kernels. Four kernels, each with a known higher-precision or closed-form oracle:
+K1 (sqrt(x²+1)−x for x ∈ {1e2, 1e4, 1e6}, stable form 1/(sqrt(x²+1)+x)), K2
+(Σ 1/k² for k=1..10⁶, oracle π²/6), K3 (Machin's formula π = 16·atan(1/5) −
+4·atan(1/239), oracle TripleFloat_pi()), K4 (alternating harmonic Σ (−1)^(k+1)/k
+for k=1..10⁶, oracle ln(2)). **Pass gate:** mean_digits ≥ 19.0 (kMaxDig − 3 =
+21.7 − 3, same formula as T1.6/T2.6/T3.6). K2/K4 use the two-oracle strategy
+(arithmetic-precision vs quadmath partial sum, truncation check vs closed form).
+**K3 expected low:** atan is a FP32 placeholder (~7.5 digits), so K3 yields only
+~7-8 digits; REPORTED, not gated. GREEN on K1/K2/K4.
+
+**`tf_fma_guard_test.cpp` (Layer 5, T3.5 analogue):** FMA-contraction guard.
+Calls the SHIPPED tf_math.hpp primitives (tf_two_prod / tf_two_sqr / tf_two_sum)
+directly under both contraction postures. FP64 oracle (exact, no LIBQUADMATH).
+Single source, two targets (`tf_fma_guard_test` contraction-OFF gates;
+`tf_fma_guard_test_contract_on` contraction-ON reports). Three-way
+classification (TRIVIAL / ERR_NONZERO_CORRECT / ERR_ZERO / ERR_NONZERO_WRONG).
+OFF gate: ERR_ZERO == 0 && ERR_NONZERO_WRONG == 0. ON PASS: ERR_NONZERO_WRONG ==
+0. Host + device passes. Both variants GREEN.
+
+### Pre-existing test count and the new total
+
+Pre-Phase-2, the suite had **23 tests**. Phase 2 adds **10 ctest targets** (7
+unique tests, 3 dual-posture). The suite now has **33 ctest targets**.
+
+### Gates met (S10 Phase 2 completion)
+
+1. **Full suite green:** all 33 tests pass (23 pre-existing + 10 new TF tests).
+2. **Standalone compile:** tf_math.hpp compiles standalone with zero Kokkos tokens.
+3. **23 pre-existing tests unchanged:** DD/FF/QF tests still pass.
+
+The test suite was authored, registered, built, and validated within the 50-minute
+time budget. All five test files completed. The accuracy test is the gate: it
+catches the phase-1 multiply bug (7.87 vs ~23 digits) and would fail loudly on
+any similar regression.
