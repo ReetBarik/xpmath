@@ -44,3 +44,14 @@ This scratch file accumulates notes from each S5 phase. When all five headers ar
 **Deviations and surprises:** None. The pattern from S2/S3 applied cleanly. The automated sed-based conversion script handled 99% of the work correctly; manual fixes were limited to the 5 scalar math sites that the initial regex missed (sqrt, log, copysign, atan2 in the middle of complex expressions).
 
 **What the next phase must know:** The compat wrapper pattern is now proven on both DD and FF. The explicit `using xp::` declaration list is verbose (60 declarations for FF) but it is the auditable, documented API surface that S4 will defend. The `erfc_asymptotic_sum` and `incgamma` functions are exposed because they're tested — don't silently drop them from the wrapper.
+
+### Capture note (added during phase 1 review)
+
+`validation/s5/before_ff_real.txt` carries a trailing `[exited with code 0]` line
+from the phase-1 capture shell. It is not demo output. Every accuracy row is
+identical between the before/after captures; the only diff is that stray line.
+
+### Gate tooling replaced
+
+`validation/s3/strip_timing.sh` did not work on the FF tables — see the header of
+`validation/strip_timing.sh` for the full explanation. Use the new one from here on.
