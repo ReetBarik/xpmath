@@ -139,16 +139,35 @@ struct OpTolerance {
   double tol;
 };
 
+// S10 Phase 3.5 (DEFECT 2) — THE CAP RULE.
+// -----------------------------------------------------------------------------
+// No tolerance may sit at or above kMaxDig (21.70). tf_digits() CLAMPS every
+// per-sample score to kMaxDig, so a gate of 22.00 is unreachable by
+// construction: a bit-exact op scores a perfect 21.70 on every sample and is
+// then marked FAIL. Eleven rows carried 22.00 and accounted for eleven of the
+// fourteen pre-Phase-3.5 failures. They are corrected below, per row, with the
+// value this harness measures.
+//
+// MARGIN CONVENTION. The inexact rows keep the file's existing convention
+// (measured mean minus a 1.0-2.6 digit margin). For the EXACT rows there is no
+// measurement spread to margin against — min == mean == 21.70 across all 409
+// samples — so the only thing a margin buys is tolerance for a regression, and
+// the correct gate is as close under the cap as the harness allows: 21.50, i.e.
+// 0.20 below. That is TIGHTER than the file's other exact rows (fdim, fma,
+// pow_int all score the cap and are gated at 19.0-20.0); those are left alone.
 static const OpTolerance kOpTols[] = {
-  // Arithmetic (measured means: add 24.61, sub 24.57, mul 23.45, div 22.79, sqrt 22.97)
-  {"add", 22.0},         // 2.6 margin below 24.61
-  {"subtract", 22.0},    // 2.6 margin
-  {"multiply", 21.0},    // 2.4 margin below 23.45
-  {"divide", 20.5},      // 2.3 margin below 22.79
-  {"sqrt", 20.5},        // 2.5 margin below 22.97
-  {"sqr", 21.0},         // same as multiply
-  {"abs", 22.0},         // exact, use add's margin
-  {"negate", 22.0},      // exact, use add's margin
+  // Arithmetic (measured means: add 21.70, sub 21.70, mul 21.08, div 21.69,
+  // sqrt 21.52, sqr 21.53 post-domain-fix)
+  {"add", 21.5},         // P3.5: was 22.00 (> cap). Measured 21.70 = cap, exact
+                         //       (min == mean, all 409 samples). Gate 0.20 under.
+  {"subtract", 21.5},    // P3.5: was 22.00 (> cap). Measured 21.70 = cap, exact.
+  {"multiply", 21.0},    // unchanged; measured 21.08
+  {"divide", 20.5},      // unchanged; measured 21.69
+  {"sqrt", 20.5},        // unchanged; measured 21.52
+  {"sqr", 21.0},         // unchanged; measured 21.53 once the FP32-underflow
+                         // corpus inputs are excluded by domain (see sqr_in_domain)
+  {"abs", 21.5},         // P3.5: was 22.00 (> cap). Measured 21.70 = cap, exact.
+  {"negate", 21.5},      // P3.5: was 22.00 (> cap). Measured 21.70 = cap, exact.
 
   // Transcendentals (measured: exp 21.35, log 22.01, sin 22.17, cos 22.68)
   {"exp", 19.0},         // 2.4 margin; known coarse (~21.0-21.4 per PORT_NOTES)
@@ -185,20 +204,23 @@ static const OpTolerance kOpTols[] = {
   {"hypot", 20.0},       // sqrt-based
 
   // Binary ops
-  {"fmod", 20.0},
+  {"fmod", 20.0},        // unchanged; 21.70 once fmod is QD's aint form (P3.5)
   {"remainder", 19.0},
   {"fdim", 20.0},
-  {"fmax", 22.0},        // exact selection
-  {"fmin", 22.0},        // exact selection
+  {"fmax", 21.5},        // P3.5: was 22.00 (> cap). Exact selection, measured
+                         //       21.70 = cap on all 201 samples.
+  {"fmin", 21.5},        // P3.5: was 22.00 (> cap). Exact selection, 21.70 = cap.
   {"fma", 19.0},         // triple composition
-  {"multiply_scalar", 21.0},  // scalar multiply
+  {"multiply_scalar", 21.0},  // unchanged; 21.70 once the oracle uses the FP32
+                              // constant the op is actually given (P3.5)
 
-  // Rounding family
-  {"round", 22.0},       // exact integer rounding
-  {"ceil", 22.0},
-  {"floor", 22.0},
-  {"trunc", 22.0},
-  {"round_to_nearest_int", 22.0},
+  // Rounding family. All five were at 22.00 (> cap).
+  {"round", 21.5},       // P3.5: 21.70 = cap once exact half-integers and their
+                         //       FP32 neighbours leave the corpus (round_in_domain)
+  {"ceil", 21.5},        // P3.5: was 22.00 (> cap). Measured 21.70 = cap, exact.
+  {"floor", 21.5},       // P3.5: was 22.00 (> cap). Measured 21.70 = cap, exact.
+  {"trunc", 21.5},       // P3.5: was 22.00 (> cap). Measured 21.70 = cap, exact.
+  {"round_to_nearest_int", 21.5},  // P3.5: as round (same function).
 };
 
 static double lookup_tolerance(const char* name) {
@@ -381,6 +403,84 @@ static bool inv_trig_in_domain(double x) {
   return x == 0.0 || std::fabs(x) >= 0x1p-100;
 }
 
+// sqr: exclude inputs whose SQUARE is not an FP32 normal. S10 Phase 3.5.
+// The corpus carries FLT_MIN, FLT_TRUE_MIN and neighbours; x*x for those is
+// 1e-76 .. 1e-90, far below FP32's 2^-149 smallest subnormal, so every word of
+// the product flushes to zero and the sample scores 0 digits. Fourteen such
+// samples pulled the sqr mean from 21.53 to 20.85. This is an EXPONENT-RANGE
+// limit of the FP32 word, not an accuracy limit of the k=3 algorithm — the same
+// argument inv_trig_in_domain above makes for the subnormal tail, and the one
+// PORT_NOTES_TF.md §10d makes for B1's sqrt bound — so it bounds the domain
+// rather than the tolerance. |x| >= 2^-63 makes x*x >= 2^-126 = FLT_MIN.
+// (multiply is not given the same predicate: it already passes, and Phase 3.5
+// was told not to move rows it does not have to.)
+static bool sqr_in_domain(double x) {
+  double f = std::fabs(x);
+  return f == 0.0 || f >= 0x1p-63;
+}
+
+// round family: exclude exact half-integers and their FP32 neighbours.
+// S10 Phase 3.5. TF's round_to_nearest_int is QD's nint, floor(x + 0.5)
+// (qd_inline.h:975 / qd.cpp nint), which breaks ties toward +infinity;
+// quadmath's roundq breaks them AWAY FROM ZERO. The two disagree on every
+// negative half-integer — nint(-1.5) = -1, roundq(-1.5) = -2 — and the corpus
+// supplies -0.5, -1.5, -2.5, -10.5, -19.5, -100.5, -1000.5 among others, each
+// scoring ~0 digits and dragging the mean to 21.18.
+//
+// This is the tie-semantics question qf_accuracy_test.cpp:104-113 already
+// declares out of scope, and it handles it the same way: keep Kokkos::round /
+// roundq as the oracle and keep exact ties out of the input set (QF excludes the
+// nint_half_integer corpus family; TF's corpus has no such switch, so the
+// predicate does it).
+//
+// TF needs ONE case QF does not: `floor(f0 + 0.5f)` is evaluated in FP32, so an
+// input just under a tie can round UP onto it in the ADD and then land on the
+// far side. 0.49999997 is the corpus case — 0.49999997f + 0.5f is 0.99999997,
+// which is half an FP32 ulp below 1 and ties-to-even up to exactly 1.0f, so nint
+// returns 1 where the nearest integer is 0. That is QD's own double-rounding
+// hazard evaluated at FP32 resolution, not a TF port error.
+//
+// The exclusion is deliberately NARROW: only exact ties and that inexact-add
+// case. It does NOT exclude a leading word that merely sits on a half-integer
+// with a nonzero tail — tf_math.hpp:701-702 ports QD's guard for that
+// (`|f0 - a.f0| == 0.5f && a.f1 < 0.0f -> f0 -= 1`) and gets those right. An
+// earlier one-ulp-band version of this predicate skipped 85 of 405 samples,
+// most of them cases TF handles correctly; this one skips the same 12 the
+// unfiltered domain did, plus the ties.
+static bool round_in_domain(double x) {
+  if (!std::isfinite(x)) return false;
+  if (std::fabs(x) >= 1e13) return false;              // nint's guard, as QF's rows
+  // (a) nint's FP32 add must not CHANGE the decision. Testing the add for
+  //     exactness alone is too broad — for |x| << 1 the add is inexact but
+  //     floor() lands on 0 either way (it skipped 38 harmless samples). Compare
+  //     the two floors instead, so only genuine flips are excluded.
+  float f0 = (float)x;
+  if (std::floor((double)(f0 + 0.5f)) != std::floor((double)f0 + 0.5)) return false;
+  // (b) exact tie: nint is half-UP, roundq is half-AWAY-FROM-ZERO. They disagree
+  //     on every negative half-integer; convention, not accuracy.
+  return std::fabs(x - std::floor(x)) != 0.5;
+}
+
+// multiply_scalar's scalar operand. Declared once so the OP and the ORACLE use
+// the SAME value. S10 Phase 3.5: the op was called with 3.14159f and the oracle
+// with the literal 3.14159Q, and float(3.14159) = 3.141590118408203125 differs
+// from the decimal by 3.77e-8 relative — 7.42 digits. That constant mismatch,
+// not the header, is the whole of the 7.50 this row used to score; with the
+// oracle corrected the row is bit-exact at the 21.70 cap. qf_accuracy_test.cpp
+// (:880, "Oracle: qf_to_q(a) * (float128)b") already widens the FP32 operand.
+static constexpr float kMulScalarB = 3.14159f;
+
+// multiply_scalar: exclude inputs whose PRODUCT is not an FP32 normal — the same
+// exponent-range argument sqr_in_domain makes. With the oracle corrected the row
+// measured 21.26 mean / 1.35 min, and the min is FLT_TRUE_MIN: 1.4013e-45 *
+// 3.14159 = 4.4023e-45, whose nearest FP32 subnormal is 4.2039e-45 (three times
+// FLT_TRUE_MIN), a 4.5% relative error = 1.35 digits. Two bits of mantissa is
+// all the format has left there. |x| >= 2^-124 keeps |x*b| above FLT_MIN.
+static bool mul_scalar_in_domain(double x) {
+  double f = std::fabs(x);
+  return f == 0.0 || f >= 0x1p-124;
+}
+
 // ============================================================================
 int main(int argc, char** argv) {
   Kokkos::initialize(argc, argv);
@@ -420,7 +520,8 @@ int main(int argc, char** argv) {
                                   [](auto a, auto b) { return a / b; },
                                   BinaryDomain{-1e15, 1e15, 0.01, 1e15}));
     report("sqrt", test_unary("sqrt", [](auto x) { return tf::sqrt(x); }, sqrtq, UnaryDomain{0.0, 1e30}));
-    report("sqr", test_unary("sqr", [](auto x) { return tf::sqr(x); }, [](auto x) { return x * x; }, UnaryDomain{-1e15, 1e15}));
+    report("sqr", test_unary("sqr", [](auto x) { return tf::sqr(x); }, [](auto x) { return x * x; },
+                              UnaryDomain{-1e15, 1e15, sqr_in_domain}));
     report("abs", test_unary("abs", [](auto x) { return tf::abs(x); }, fabsq, UnaryDomain{-1e30, 1e30}));
     report("negate", test_unary("negate", [](auto x) { return tf::negate(x); }, [](auto x) { return -x; }, UnaryDomain{-1e30, 1e30}));
 
@@ -496,18 +597,24 @@ int main(int argc, char** argv) {
     // copysign not implemented in tf_math.hpp
     report("fma", test_binary("fma", [](auto a, auto b) { return xp::fma(a, b, tf::TripleFloat(1.0)); },
                                [](auto a, auto b) { return fmaq(a, b, 1.0Q); }, BinaryDomain{-10.0, 10.0, -10.0, 10.0}));
-    report("multiply_scalar", test_unary("multiply_scalar", [](auto x) { return xp::multiply_scalar(x, 3.14159f); },
-                                          [](auto x) { return x * 3.14159Q; }, UnaryDomain{-1e15, 1e15}));
+    report("multiply_scalar", test_unary("multiply_scalar",
+                                          [](auto x) { return xp::multiply_scalar(x, kMulScalarB); },
+                                          [](auto x) { return x * (float128)kMulScalarB; },
+                                          UnaryDomain{-1e15, 1e15, mul_scalar_in_domain}));
 
     // Rounding family
     std::printf("\n[Rounding]\n");
-    report("round", test_unary("round", [](auto x) { return tf::round(x); }, roundq, UnaryDomain{-1e6, 1e6}));
+    // round / round_to_nearest_int carry round_in_domain (nint-vs-roundq tie
+    // semantics, out of scope per qf_accuracy_test.cpp:104-113). ceil/floor/trunc
+    // are directed roundings with no tie to break, so they keep the plain domain.
+    report("round", test_unary("round", [](auto x) { return tf::round(x); }, roundq,
+                                UnaryDomain{-1e6, 1e6, round_in_domain}));
     report("ceil", test_unary("ceil", [](auto x) { return tf::ceil(x); }, ceilq, UnaryDomain{-1e6, 1e6}));
     report("floor", test_unary("floor", [](auto x) { return tf::floor(x); }, floorq, UnaryDomain{-1e6, 1e6}));
     report("trunc", test_unary("trunc", [](auto x) { return tf::trunc(x); }, truncq, UnaryDomain{-1e6, 1e6}));
     report("round_to_nearest_int", test_unary("round_to_nearest_int",
                                                [](auto x) { return tf::round_to_nearest_int(x); },
-                                               roundq, UnaryDomain{-1e6, 1e6}));
+                                               roundq, UnaryDomain{-1e6, 1e6, round_in_domain}));
 
     std::printf("\n=== Summary ===\n");
     std::printf("Total ops tested: %d\n", total_ops);
@@ -522,8 +629,20 @@ int main(int argc, char** argv) {
           std::printf("  %s: %.2f < %.2f\n", name, mean, tol);
         }
       }
-      rc = ep_exit_code();
     }
+
+    // S10 Phase 3.5 (DEFECT 1). This assert is what makes the test able to fail.
+    // Until now main() went straight to `rc = ep_exit_code()`, and
+    // ep_exit_code() (test_utils.hpp:530) reads detail::ep_failure_count() —
+    // which NOTHING in this file incremented. The per-op verdicts above were
+    // printed, never registered, so the binary exited 0 while its own summary
+    // said `Failed: 14`, and its ctest green meant only that it ran.
+    // Mechanism copied from qf_accuracy_test.cpp:1114-1121: assert on the
+    // aggregate failure count FIRST, then read the exit code.
+    KOKKOS_EP_ASSERT(passed == total_ops,
+                     "one or more TF ops fell below their accuracy tolerance "
+                     "(mean < per-op gate) — see the FAIL rows above");
+    rc = ep_exit_code();
 
     std::printf("\n=== tf_accuracy_test: %s ===\n", rc == 0 ? "ALL PASSED" : "FAILURES PRESENT");
   }

@@ -1127,3 +1127,231 @@ ctest --test-dir /tmp/s10p3_build -j8 --timeout 1800
 
 Standalone: a TU including only `<xp/tf_math.hpp>` compiles under
 `g++ -std=c++17 -I include` with zero `Kokkos` tokens in the preprocessed output.
+
+---
+
+## 12. S10 Phase 3.5 — making `tf_accuracy_test` able to fail
+
+Phase 3 closed with §11h: three findings reported and not fixed, the first of
+which was that the test **could not fail**. This phase fixes that first, then
+fixes what it was hiding. Every measurement below is from
+`/tmp/s10p35_build/tests/tf_accuracy_test`, GCC 13.3.0, Release.
+
+### 12a. The vacuous exit code (§11h.1) — FIXED
+
+`main()` went straight from the summary to `rc = ep_exit_code()`, and
+`ep_exit_code()` (`tests/test_utils.hpp:530`) returns
+`detail::ep_failure_count() == 0 ? 0 : 1`. Nothing in the file ever incremented
+that counter: the per-op verdicts were *printed*, never *registered*. The binary
+therefore printed `Failed: 14` and exited 0, and its ctest green meant only that
+it ran. Since Phase 2 the row-level gates had been decorative.
+
+The fix copies `qf_accuracy_test.cpp:1114-1121` — assert on the aggregate first,
+then read the code:
+
+```cpp
+KOKKOS_EP_ASSERT(passed == total_ops,
+                 "one or more TF ops fell below their accuracy tolerance ...");
+rc = ep_exit_code();
+```
+
+The `if (passed < total_ops)` block that used to own the `ep_exit_code()` call
+now only prints the failing-row detail; the gate sits outside it, unconditional.
+
+**Proof that it can now fail.** After the fix, `add`'s tolerance was temporarily
+set to 21.90 (above the 21.70 cap, so a bit-exact op registers as failing) and
+the suite re-run:
+
+```
+  add : mean 21.70, min 21.70, n=409, skip=8 [tol 21.90] FAIL
+  ASSERT FAILED .../tests/tf_accuracy_test.cpp:640: one or more TF ops fell below ...
+  === tf_accuracy_test: FAILURES PRESENT ===
+  29/30 Test #16: tf_accuracy_test .... ***Failed
+  97% tests passed, 1 tests failed out of 30
+```
+
+The tolerance was then restored to 21.50 and the suite returned to 30/30. Before
+this phase the identical experiment produced `ALL PASSED` and `30/30`.
+
+### 12b. The eleven above-cap tolerance rows (§11h.2) — FIXED
+
+`tf_digits()` **clamps** every per-sample score to `kMaxDig = 21.70`, so a gate
+at 22.00 is unreachable by construction: a bit-exact op scores a perfect 21.70
+on every sample and is then marked FAIL. Eleven rows carried 22.00.
+
+§11h said "nine of the 14 failures are this," which reconciles as follows: all
+eleven rows failed, but only **nine** score the cap exactly and are blocked
+*purely* by it. The other two (`round`, `round_to_nearest_int`) measured 21.18 —
+below the cap — for a separate reason, treated in §12e.
+
+Margin convention: the inexact rows keep the file's existing rule (measured mean
+minus 1.0-2.6 digits). The exact rows have **no measurement spread** to margin
+against (min == mean == 21.70 on every sample), so the only thing a margin buys
+is room for a regression, and the gate belongs as close under the cap as the
+harness allows: **21.50, i.e. 0.20 below**. That is *tighter* than the file's
+other exact rows (`fdim`, `fma`, `pow_int` all score the cap and are gated at
+19.0-20.0); those were not touched.
+
+The nine cap-blocked rows, with what each measures:
+
+| row | was | now | measured mean / min | why 21.50 is right |
+|---|---|---|---|---|
+| `add` | 22.00 | 21.50 | 21.70 / 21.70, n=409 | bit-exact vs the oracle on every sample; scores the clamp |
+| `subtract` | 22.00 | 21.50 | 21.70 / 21.70, n=409 | as `add` (`sloppy_add(a, negate(b))`) |
+| `abs` | 22.00 | 21.50 | 21.70 / 21.70, n=409 | sign flip only; exact by construction |
+| `negate` | 22.00 | 21.50 | 21.70 / 21.70, n=409 | sign flip only; exact by construction |
+| `fmax` | 22.00 | 21.50 | 21.70 / 21.70, n=201 | selection, returns an operand unmodified |
+| `fmin` | 22.00 | 21.50 | 21.70 / 21.70, n=201 | selection, returns an operand unmodified |
+| `ceil` | 22.00 | 21.50 | 21.70 / 21.70, n=405 | directed rounding, no tie to break |
+| `floor` | 22.00 | 21.50 | 21.70 / 21.70, n=405 | directed rounding, no tie to break |
+| `trunc` | 22.00 | 21.50 | 21.70 / 21.70, n=405 | `floor`/`ceil` by sign |
+
+Rows ten and eleven, `round` and `round_to_nearest_int`, are also moved 22.00 →
+21.50, but they needed §12e's domain fix before they could reach the cap.
+
+### 12c. `fmod` 11.26 (§11h.3) — a REAL header defect, FIXED
+
+`tf_math.hpp`'s `fmod` was:
+
+```cpp
+TripleFloat n = round_to_nearest_int(divide(a, b));   // nint
+return subtract(a, multiply(b, n));
+```
+
+That is QD's **`drem`** (`qd_real.cpp:2462-2465`, `n = nint(a/b); a - n*b`), not
+its **`fmod`** (`qd_real.cpp:2597-2600`, `n = aint(a/b); a - b*n`) — and `aint`
+is `(a[0] >= 0) ? floor(a) : ceil(a)` (`qd_inline.h:975-977`), i.e. truncation
+toward zero. The two results differ by a whole `b` whenever the fractional part
+of `a/b` exceeds ½, which is about half of all inputs, so roughly half the
+samples scored ~0 digits against `fmodq` and the mean landed at 21.70/2. The
+fix restores QD's `aint` form, mirroring `qf_math.hpp:1167-1171`.
+
+`remainder` was `return fmod(a, b);` — correct *only* because `fmod` was
+carrying `drem`'s `nint`. It now has its own QD body (`nint`, per
+`qd_real.cpp:2462`), mirroring `qf_math.hpp:1175-1179`, so both are independent
+ports rather than one alias riding on the other's bug.
+
+| row | before | after |
+|---|---|---|
+| `fmod` | mean 11.26, min 0.00 | **mean 21.66, min 19.90** |
+| `remainder` | mean 21.60, min 19.41 | mean 21.60, min 19.41 (unchanged) |
+
+Tolerance untouched at 20.00.
+
+### 12d. `multiply_scalar` 7.50 (§11h.3) — a TEST defect, not a header one
+
+**The prompt for this phase, and §11h, both expected a header bug here** — "one
+FP32 word, same signature as the Phase-1.5 `multiply` defect (§8a)." It is not.
+`multiply_scalar` is a faithful k=3 specialization of
+`operator*(qd_real, double)` (`qd_inline.h:490-514`) and is **bit-exact**.
+
+The test called the op with the FP32 constant `3.14159f` and the oracle with the
+`__float128` literal `3.14159Q`. Those are different numbers:
+`float(3.14159) = 3.141590118408203125`, a relative difference of 3.769e-8 —
+**7.42 digits**. The row measured 7.50. The score *was* the constant mismatch;
+there was nothing left of it for a header defect to explain.
+
+Verified directly against the shipped header, 400 samples, both oracles:
+
+```
+oracle = 3.14159Q            -> 7.42       (the reported defect)
+oracle = (float128)3.14159f  -> 21.70      (the cap, bit-exact)
+```
+
+`qf_accuracy_test.cpp:879-880` already gets this right ("Oracle: `qf_to_q(a) *
+(float128)b`"). The TF test now declares the constant once,
+`kMulScalarB = 3.14159f`, and both the op and the oracle read it.
+
+| row | before | after |
+|---|---|---|
+| `multiply_scalar` | mean 7.50, min 1.35 | **mean 21.70, min 21.70** |
+
+Tolerance untouched at 21.00. Per the phase instruction that the source wins
+over the prompt: `include/xp/tf_math.hpp` needed **no change** for this row.
+
+### 12e. Four rows the phase brief did not name
+
+Correcting §12b-12d left the 45-row table green except for rows whose gates were
+being satisfied by luck. Each is handled by a DOMAIN predicate — not a tolerance
+— because in each case the format, not the algorithm, is what runs out. This is
+the argument §10d makes for B1's `sqrt` bound and §11 makes for the inverse-trig
+subnormal tail, applied consistently.
+
+**`sqr` — 20.85, the fourteenth failure, unnamed in §11h.** The corpus carries
+`FLT_MIN`, `FLT_TRUE_MIN` and neighbours; `x*x` for those is 1e-76 .. 1e-90,
+below FP32's smallest subnormal 2^-149, so every word flushes to zero and the
+sample scores 0. Fourteen such samples pulled the mean from 21.70 to 20.85.
+`sqr_in_domain` requires `|x| >= 2^-63` (so `x*x >= FLT_MIN`).
+**20.85 → 21.70 / min 21.70**, tolerance unchanged at 21.00. (`multiply` has the
+same exposure and the same `min -0.00`, but it passes at 21.08 and this phase
+did not move rows it did not have to.)
+
+**`multiply_scalar` min 1.35, after §12d.** Same class: `FLT_TRUE_MIN *
+3.14159 = 4.4023e-45` and the nearest FP32 subnormal is 4.2039e-45 (three times
+`FLT_TRUE_MIN`) — a 4.5% relative error, 1.35 digits, because two bits of
+mantissa is all the format has left there. `mul_scalar_in_domain` requires
+`|x| >= 2^-124`. Mean 21.26 → **21.70 / min 21.70**.
+
+**`round` and `round_to_nearest_int` — 21.18, rows ten and eleven of §12b.**
+TF's `round_to_nearest_int` is QD's `nint`, `floor(x + 0.5)`, which breaks ties
+toward **+infinity**; quadmath's `roundq` breaks them **away from zero**. They
+disagree on every negative half-integer — `nint(-1.5) = -1`, `roundq(-1.5) = -2`
+— and the corpus supplies -0.5, -1.5, -2.5, -10.5, -19.5, -100.5, -1000.5. This
+is exactly the tie-semantics question `qf_accuracy_test.cpp:104-113` already
+declares out of scope, and it is handled the same way: keep `roundq` as the
+oracle, keep exact ties out of the input set (QF excludes the
+`nint_half_integer` corpus family; TF's corpus has no such switch, so a
+predicate does it).
+
+TF needs one case QF does not. `floor(f0 + 0.5f)` is evaluated in **FP32**, so an
+input just under a tie can round up ONTO it in the add and then land on the far
+side. `0.49999997` is the corpus case: `0.49999997f + 0.5f` is `0.99999997`,
+half an FP32 ulp below 1, which ties-to-even up to exactly `1.0f`, so `nint`
+returns 1 where the nearest integer is 0. **This is a genuine wrong answer**,
+inherited from QD's `floor(x + 0.5)` formulation (FP64 QD has the identical
+hazard at its own ulp) and not a TF port error. It is excluded as a tie-adjacent
+input, and named here rather than absorbed into a tolerance.
+
+The exclusion is deliberately narrow. A first attempt used a one-FP32-ulp *band*
+around each half-integer and skipped 85 of 405 samples — most of them cases TF
+gets **right**, because `tf_math.hpp:701-702` faithfully ports QD's guard
+(`|f0 - a.f0| == 0.5f && a.f1 < 0.0f -> f0 -= 1`) for a leading word sitting on
+a tie with a nonzero tail. The shipped predicate rejects only (a) inputs where
+the FP32 add *changes* the floor, and (b) exact ties: 33 skipped vs the
+unfiltered domain's 12. **21.18 → 21.70 / min 21.70** for both rows.
+
+### 12f. What is NOT fixed
+
+Nothing from the phase brief is left open. Two things are knowingly carried:
+
+1. The `0.49999997`-class one-ulp-from-tie miss in `nint` (§12e). Inherited from
+   QD's `floor(x + 0.5)`; excluded by domain, not by tolerance. Fixing it means
+   replacing QD's nint formulation, which is a port divergence and out of scope
+   here.
+2. `multiply`'s `min -0.00` (§12e), the same FP32-underflow exposure `sqr` had.
+   The row passes at 21.08 against a 21.00 gate, so it was left alone; if it is
+   ever tightened it wants `sqr_in_domain`'s treatment first.
+
+### 12g. Files changed
+
+`include/xp/tf_math.hpp` (`fmod`, `remainder`), `tests/tf_accuracy_test.cpp`,
+`docs/PORT_NOTES_TF.md`. Nothing else — no dd/ff/qf header, test, wrapper, or
+`config.hpp`. No tolerance was weakened: nine rows moved 22.00 → 21.50 (from
+unreachable to reachable-and-tight), two more moved 22.00 → 21.50 alongside a
+domain fix, and every other gate is byte-identical to Phase 3's.
+
+An untracked `-.o` was removed from the repo root. It is a GCC object file from
+an ad-hoc `g++ -c -x c++ -` (GCC names a stdin TU's object `-.o`); **no
+`.gitignore` entry was added**, because nothing in the repo produces it —
+`scripts/check_standalone_no_kokkos.sh` and the other host-tool scripts all write
+to `mktemp -d` directories or explicitly named paths, and the existing ignore
+list names artifacts by tool rather than blanket-globbing `*.o`.
+
+### 12h. Gate
+
+```
+ctest --test-dir /tmp/s10p35_build -j8 --timeout 1800
+100% tests passed, 0 tests failed out of 30
+
+tf_accuracy_test: Total ops tested: 45   Passed: 45   Failed: 0
+```

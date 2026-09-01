@@ -1149,13 +1149,28 @@ XPMATH_INLINE_FUNCTION TripleFloat round(TripleFloat a) {
     return round_to_nearest_int(a);
 }
 
+// fmod(a, b) = a - b*aint(a/b), where aint TRUNCATES toward zero. Port of
+// QD 2.3.24 qd_real.cpp:2597-2600 (`qd_real n = aint(a / b); return (a - b*n);`)
+// with aint = qd_inline.h:975-977 (`(a[0] >= 0) ? floor(a) : ceil(a)`), which is
+// exactly xp::trunc. Mirrors qf_math.hpp:1167-1171.
+//
+// S10 Phase 3.5: this called round_to_nearest_int (nint) rather than trunc —
+// that is QD's `drem`, not its `fmod`. The two differ by a whole b whenever the
+// fractional part of a/b exceeds 1/2, i.e. on about half of all inputs, so half
+// the samples scored 0 digits and the row measured 11.26 against fmodq.
+// See PORT_NOTES_TF.md §12c.
 XPMATH_INLINE_FUNCTION TripleFloat fmod(TripleFloat a, TripleFloat b) {
-    TripleFloat n = round_to_nearest_int(divide(a, b));
+    TripleFloat n = trunc(divide(a, b));
     return subtract(a, multiply(b, n));
 }
 
+// remainder(a, b) = a - b*nint(a/b). Port of QD's `drem`, qd_real.cpp:2462-2465.
+// Mirrors qf_math.hpp:1175-1179. Through S10 Phase 3 this was `return fmod(a,b);`
+// and scored correctly only because fmod itself carried drem's nint; each now
+// has its own QD body.
 XPMATH_INLINE_FUNCTION TripleFloat remainder(TripleFloat a, TripleFloat b) {
-    return fmod(a, b);
+    TripleFloat n = round_to_nearest_int(divide(a, b));
+    return subtract(a, multiply(b, n));
 }
 
 XPMATH_INLINE_FUNCTION TripleFloat fdim(TripleFloat a, TripleFloat b) {
