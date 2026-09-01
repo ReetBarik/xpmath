@@ -363,9 +363,16 @@ Do NOT run this until the GitHub rename is complete. The current URL continues t
 | 2 | `qf_math.hpp` | 23/23, 134.70 s | `kokkos_ep_demo_qf`: IDENTICAL, 91 lines | `kokkos_ep_demo_qf_complex`: IDENTICAL, 109 lines | PASS — DD + FF + QF smoke, 55 587 preprocessed lines, 0 Kokkos hits |
 | 3 | `dd_complex.hpp` | 23/23, 134.91 s | `kokkos_ep_demo`: IDENTICAL, 89 lines | `kokkos_ep_demo_complex`: IDENTICAL, 105 lines | PASS — DD real + DD complex + FF + QF smoke, 51 978 preprocessed lines, 0 Kokkos hits |
 | 4 | `ff_complex.hpp` | 23/23, 137.75 s | `kokkos_ep_demo_ff`: IDENTICAL, 87 lines | `kokkos_ep_demo_ff_complex`: IDENTICAL, 105 lines | PASS — DD real + DD complex + FF real + FF complex + QF smoke, 52 244 preprocessed lines, 0 Kokkos hits |
-| 5 | `qf_complex.hpp` | 23/23, 138.54 s | (PENDING CONFIRMATION — capture in progress) | (PENDING CONFIRMATION — capture in progress) | PASS — all six headers smoke, 52 537 preprocessed lines, 0 Kokkos hits |
+| 5 | `qf_complex.hpp` | 23/23, 138.54 s | IDENTICAL | IDENTICAL | PASS — all six headers smoke, 52 537 preprocessed lines, 0 Kokkos hits |
 
-**Phase 5 byte-identical gate status:** The QF demo captures (both `kokkos_ep_demo_qf_complex` and `kokkos_ep_demo_qf` at `--batch 1000000 --repeats 5 --seed 12345`) are running in background as this STATUS block is written — estimated total wall time ~2.5 hours based on phase-2 experience. The BEFORE baselines are provided pre-session at HEAD d9b8daa (109 lines complex, 91 lines real). The AFTER captures and their timing-stripped diffs will be completed outside this session if they do not finish before the session budget exhausts. **If this commit is pushed without a confirmed IDENTICAL result, the byte-identical gate result is UNKNOWN, not PASS.** Verification is deferred rather than claimed.
+**Phase 5 byte-identical gate status — RESOLVED, gate PASSED.** The authoring session correctly declined to claim this gate: its two background captures were killed when the session exited, leaving both `after_qf_*.txt` files at 0 bytes, and it recorded the result as UNKNOWN rather than PASS. The captures were re-run to completion outside the session, from the phase-5 commit `ce5abbb` with the same arguments (`--batch 1000000 --repeats 5 --seed 12345`), and diffed against the pre-session BEFORE baselines taken at HEAD `d9b8daa`:
+
+```
+after_qf_complex : 109 lines   vs before 109   ->  IDENTICAL
+after_qf_real    :  91 lines   vs before  91   ->  IDENTICAL
+```
+
+Both timing-stripped diffs are empty (`validation/strip_timing.sh`), so **no accuracy digit moved in the qf_complex conversion**. `include/xp/qf_complex.hpp` (396 lines) also greps to 0 Kokkos references outside comments. All five S5 phases therefore pass every gate.
 
 ### DEVIATIONS AND SURPRISES UP FRONT
 
