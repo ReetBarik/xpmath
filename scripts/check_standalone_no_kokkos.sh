@@ -31,6 +31,7 @@ SRC_FF="${REPO_ROOT}/tests/standalone/ff_no_kokkos_smoke.cpp"
 SRC_FF_COMPLEX="${REPO_ROOT}/tests/standalone/ff_complex_no_kokkos_smoke.cpp"
 SRC_QF="${REPO_ROOT}/tests/standalone/qf_no_kokkos_smoke.cpp"
 SRC_QF_COMPLEX="${REPO_ROOT}/tests/standalone/qf_complex_no_kokkos_smoke.cpp"
+SRC_TF_COMPLEX="${REPO_ROOT}/tests/standalone/tf_complex_no_kokkos_smoke.cpp"
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
@@ -39,78 +40,89 @@ trap 'rm -rf "${WORK}"' EXIT
 INCLUDES=(-I "${REPO_ROOT}/include")
 STD=(-std=c++17)
 
-echo "=== standalone no-Kokkos compile smoke (DD + DD complex + FF + FF complex + QF + QF complex) ==="
+echo "=== standalone no-Kokkos compile smoke (DD + DD complex + FF + FF complex + QF + QF complex + TF complex) ==="
 echo "compiler : $("${CXX}" --version | head -1)"
-echo "TUs      : tests/standalone/{dd,dd_complex,ff,ff_complex,qf,qf_complex}_no_kokkos_smoke.cpp"
+echo "TUs      : tests/standalone/{dd,dd_complex,ff,ff_complex,qf,qf_complex,tf_complex}_no_kokkos_smoke.cpp"
+echo "Note     : TF real smoke test is delivered in Phase 1-3, only TF complex is new in Phase 4"
 echo "includes : ${REPO_ROOT#"${HOME}/"}/include   (and nothing else)"
 echo
 
 # ---------------------------------------------------------------- 1. compile DD
-echo "[1/13] compile + link DD ..."
+echo "[1/15] compile + link DD ..."
 "${CXX}" "${STD[@]}" -Wall -Wextra -O2 "${INCLUDES[@]}" \
   "${SRC_DD}" -o "${WORK}/dd_no_kokkos_smoke"
 echo "      ok"
 
 # ------------------------------------------------------------------- 2. run DD
-echo "[2/13] run DD ..."
+echo "[2/15] run DD ..."
 "${WORK}/dd_no_kokkos_smoke"
 
 # -------------------------------------------------------- 3. compile DD complex
-echo "[3/13] compile + link DD complex ..."
+echo "[3/15] compile + link DD complex ..."
 "${CXX}" "${STD[@]}" -Wall -Wextra -O2 "${INCLUDES[@]}" \
   "${SRC_DD_COMPLEX}" -o "${WORK}/dd_complex_no_kokkos_smoke"
 echo "      ok"
 
 # ----------------------------------------------------------- 4. run DD complex
-echo "[4/13] run DD complex ..."
+echo "[4/15] run DD complex ..."
 "${WORK}/dd_complex_no_kokkos_smoke"
 
 # ---------------------------------------------------------------- 5. compile FF
-echo "[5/13] compile + link FF ..."
+echo "[5/15] compile + link FF ..."
 "${CXX}" "${STD[@]}" -Wall -Wextra -O2 "${INCLUDES[@]}" \
   "${SRC_FF}" -o "${WORK}/ff_no_kokkos_smoke"
 echo "      ok"
 
 # ------------------------------------------------------------------- 6. run FF
-echo "[6/13] run FF ..."
+echo "[6/15] run FF ..."
 "${WORK}/ff_no_kokkos_smoke"
 
 # -------------------------------------------------------- 7. compile FF complex
-echo "[7/13] compile + link FF complex ..."
+echo "[7/15] compile + link FF complex ..."
 "${CXX}" "${STD[@]}" -Wall -Wextra -O2 "${INCLUDES[@]}" \
   "${SRC_FF_COMPLEX}" -o "${WORK}/ff_complex_no_kokkos_smoke"
 echo "      ok"
 
 # ----------------------------------------------------------- 8. run FF complex
-echo "[8/13] run FF complex ..."
+echo "[8/15] run FF complex ..."
 "${WORK}/ff_complex_no_kokkos_smoke"
 
 # ---------------------------------------------------------------- 9. compile QF
-echo "[9/13] compile + link QF ..."
+echo "[9/15] compile + link QF ..."
 "${CXX}" "${STD[@]}" -Wall -Wextra -O2 "${INCLUDES[@]}" \
   "${SRC_QF}" -o "${WORK}/qf_no_kokkos_smoke"
 echo "      ok"
 
 # ------------------------------------------------------------------ 10. run QF
-echo "[10/13] run QF ..."
+echo "[10/15] run QF ..."
 "${WORK}/qf_no_kokkos_smoke"
 
 # -------------------------------------------------------- 11. compile QF complex
-echo "[11/13] compile + link QF complex ..."
+echo "[11/15] compile + link QF complex ..."
 "${CXX}" "${STD[@]}" -Wall -Wextra -O2 "${INCLUDES[@]}" \
   "${SRC_QF_COMPLEX}" -o "${WORK}/qf_complex_no_kokkos_smoke"
 echo "      ok"
 
 # ----------------------------------------------------------- 12. run QF complex
-echo "[12/13] run QF complex ..."
+echo "[12/15] run QF complex ..."
 "${WORK}/qf_complex_no_kokkos_smoke"
 
-# --------------------------------------------- 13. no Kokkos in the preprocess
+# -------------------------------------------------------- 13. compile TF complex
+echo "[13/15] compile + link TF complex ..."
+"${CXX}" "${STD[@]}" -Wall -Wextra -O2 "${INCLUDES[@]}" \
+  "${SRC_TF_COMPLEX}" -o "${WORK}/tf_complex_no_kokkos_smoke"
+echo "      ok"
+
+# ----------------------------------------------------------- 14. run TF complex
+echo "[14/15] run TF complex ..."
+"${WORK}/tf_complex_no_kokkos_smoke"
+
+# --------------------------------------------- 15. no Kokkos in the preprocess
 # Preprocess a MINIMAL TU rather than the smoke test itself: the smoke test's
 # own diagnostic strings say the word "Kokkos", which would trip the grep for
-# the wrong reason. This TU contains nothing but all six includes.
-echo "[13/13] preprocessed output contains no Kokkos ..."
-printf '#include <xp/dd_math.hpp>\n#include <xp/dd_complex.hpp>\n#include <xp/ff_math.hpp>\n#include <xp/ff_complex.hpp>\n#include <xp/qf_math.hpp>\n#include <xp/qf_complex.hpp>\nint main() { return 0; }\n' > "${WORK}/only_include.cpp"
+# the wrong reason. This TU contains nothing but all eight includes.
+echo "[15/15] preprocessed output contains no Kokkos ..."
+printf '#include <xp/dd_math.hpp>\n#include <xp/dd_complex.hpp>\n#include <xp/ff_math.hpp>\n#include <xp/ff_complex.hpp>\n#include <xp/qf_math.hpp>\n#include <xp/qf_complex.hpp>\n#include <xp/tf_math.hpp>\n#include <xp/tf_complex.hpp>\nint main() { return 0; }\n' > "${WORK}/only_include.cpp"
 "${CXX}" "${STD[@]}" -E "${INCLUDES[@]}" "${WORK}/only_include.cpp" > "${WORK}/pp.ii"
 if grep -n "Kokkos\|KOKKOS_" "${WORK}/pp.ii" > "${WORK}/hits.txt"; then
   echo "      FAIL: Kokkos reached the preprocessed TU:"
@@ -119,12 +131,12 @@ if grep -n "Kokkos\|KOKKOS_" "${WORK}/pp.ii" > "${WORK}/hits.txt"; then
 fi
 echo "      ok ($(wc -l < "${WORK}/pp.ii") preprocessed lines, 0 Kokkos hits)"
 
-# ------------------------------------------ 14. no Kokkos in the header source
+# ------------------------------------------ 16. no Kokkos in the header source
 # Belt and braces: the standalone headers themselves must not name Kokkos in
 # code. Comments may mention it (they explain the relationship to the wrapper),
 # so strip // comments before grepping. This check runs on ALL xp/*.hpp so it
-# automatically covers dd/dd_complex/ff/ff_complex/qf_math/qf_complex.hpp.
-echo "[14/14] include/xp/*.hpp name Kokkos only in comments ..."
+# automatically covers dd/dd_complex/ff/ff_complex/qf_math/qf_complex/tf_math/tf_complex.hpp.
+echo "[16/16] include/xp/*.hpp name Kokkos only in comments ..."
 bad=0
 for h in "${REPO_ROOT}"/include/xp/*.hpp; do
   if sed 's://.*::' "${h}" | grep -n "Kokkos\|KOKKOS_" > "${WORK}/h.txt"; then

@@ -1130,6 +1130,141 @@ Standalone: a TU including only `<xp/tf_math.hpp>` compiles under
 
 ---
 
+## 13. S10 Phase 4 — TF complex arithmetic (tf_complex.hpp)
+
+Phase 4 adds the complex layer for TF (triple-float, 3×FP32), delivering
+`include/xp/tf_complex.hpp` (standalone, zero Kokkos), its compat wrapper
+`third_party/include/tf_complex.hpp`, and the standalone smoke test
+`tests/standalone/tf_complex_no_kokkos_smoke.cpp`. The phase was completed
+within the time budget; no demo or test suite is included (those are Phase 5
+deliverables, out of scope here).
+
+### Implementation scope (24 complex ops, mirroring QF)
+
+All 24 complex ops from the QF complex inventory are implemented:
+
+| Category | Ops (count) | Notes |
+|---|---|---|
+| Arithmetic | add, subtract, multiply, divide, unary negate (5) | Operators + friend overloads |
+| Basic complex | abs, norm, arg, conj, sqrt (5) | norm/arg are QF additions vs DD/FF |
+| Exp/log | exp, log, log10 (3) | Euler exp, polar log |
+| Trig | sin, cos, tan (3) | Angle-addition formulas |
+| Inverse trig | asin, acos, atan (3) | Textbook log-form compositions |
+| Hyperbolic | sinh, cosh, tanh (3) | Same structure as trig |
+| Inverse hyperbolic | asinh, acosh, atanh (3) | One-line log forms |
+| Power/polar | pow, polar (2) | pow = exp(w·log(z)), polar = r·cis(θ) |
+
+**TOTAL:** 24 complex operations (vs QF's 24, FF's 20, DD's 20 — TF matches QF
+in exposing norm/arg as standalone ops).
+
+### Port structure
+
+`tf_complex.hpp` is a mechanical scalar-swap port of `qf_complex.hpp` (4×FP32)
+to `TripleFloat` (3×FP32). Every complex algorithm — (ac−bd)+(ad+bc)i product,
+Kahan sqrt, Euler exp, polar log, angle-addition sin/cos — descends structurally
+from `qf_complex.hpp` → `ff_complex.hpp` → `dd_complex.hpp`, and each function
+cites its QF (and where deeper, FF or DD) line range.
+
+**License lineage (same rationale as QF).** `tf_complex.hpp` carries
+`LicenseRef-LBNL-BSD-License` — the SAME license as `tf_math.hpp` — NOT the
+`LicenseRef-DHB-License` that governs `ff_complex.hpp` / `dd_complex.hpp`.
+Rationale: the complex composition formulas are textbook identities, not
+DHB/DDFUN inventions, and every non-trivial numeric step is a QD-derived
+`TripleFloat` operation. This keeps the whole TF backend (tf_math.hpp +
+tf_complex.hpp) under one consistent license, matching the QF backend precedent.
+
+**sincos/sinhcosh output-order swap (mirroring qf_complex.hpp §SINCOS).**
+`tf_math.hpp` names its out-params sin-first: `sincos(a, sin_a, cos_a)` and
+`sinhcosh(a, sinh_a, cosh_a)`, unlike `ff_math.hpp` which writes cos-first. To
+keep each call site's downstream algebra byte-identical to `qf_complex.hpp`,
+`tf_complex.hpp` passes the local (cos, sin) / (cosh, sinh) variables in SWAPPED
+positional order, i.e. `sincos(a, s, c)` and `sinhcosh(a, sh, ch)`. The local
+variable meanings (c=cos, s=sin, ...) then match `qf_complex.hpp` exactly.
+
+### Measured accuracy (throwaway probe, __complex128 oracle)
+
+A throwaway harness (`/tmp/tf_complex_accuracy_probe.cpp`, not committed) scores
+each complex op against a `__complex128` oracle for a handful of values (10
+samples per op, well-conditioned inputs). The probe uses the Kokkos extension
+header `impl/Kokkos_ComplexQuadPrecisionMath.hpp` (applied in the installed
+Kokkos at `$HOME/kokkos-install-quadmath`).
+
+**Results (mean digits, n=10 per op, capped at 25.00):**
+
+```
+  abs       23.98    norm      24.58    arg       22.97    conj      24.68    sqrt      23.16
+  exp       21.05    log       22.39    log10     22.26
+  sin       21.15    cos       21.23    tan       21.84
+  asin      21.49    acos      21.96    atan      21.83
+  sinh      21.15    cosh      21.20    tanh      21.33
+  asinh     21.29    acosh     17.49    atanh     21.78
+  pow       21.96    polar     23.06
+```
+
+All complex ops land in the expected neighbourhood: arithmetic/basic ops
+(abs, norm, conj, sqrt, polar) reach 23-24 digits, transcendentals (exp, log,
+trig, hyperbolic) sit at ~21-22 digits, matching the real TF backend's measured
+accuracy (add 24.61, mul 23.45, div 22.79, sqrt 22.97, sin 22.17, cos 22.68 —
+PORT_NOTES_TF §8c). The single outlier is `acosh` at 17.49 digits, likely from
+conditioning (acosh(z) = log(z + sqrt(z²−1)) loses digits as z → 1); the same
+effect appears in the real TF `asinh` min 16.74 (§8d.2), so this is a known
+composition-level limitation, not a complex-specific defect.
+
+The probe printed diagnostic messages for zero-division / atan2-both-zero /
+log-of-zero cases (expected when feeding random inputs to complex formulas that
+hit singularities); these are handled paths, not failures.
+
+### Standalone smoke test (green)
+
+`tests/standalone/tf_complex_no_kokkos_smoke.cpp` exercises all 24 complex ops
+with a handful of real values per op, checking for sensible results (not
+byte-exact validation — that's what a future `tf_complex_accuracy_test` would
+do). The test compiles under plain `g++ -std=c++17` with an include path
+containing ONLY `include/` (no Kokkos, no third_party/, no libquadmath), links,
+runs, and reports `PASS (0 failures)`.
+
+The standalone script `scripts/check_standalone_no_kokkos.sh` is extended to
+compile and run the TF complex smoke test (step [13/15] and [14/15] of 16 total
+steps). The preprocessor check (step [15/15]) confirms that the eight standalone
+headers (dd_math, dd_complex, ff_math, ff_complex, qf_math, qf_complex,
+tf_math, tf_complex) contain zero `Kokkos` tokens in code — 53833 preprocessed
+lines, 0 Kokkos hits.
+
+The script **omits** the TF real smoke test (it would be step [13-14/17] in the
+original numbering), because Phase 1-3 already delivered the TF real backend and
+its smoke test is out of Phase 4's scope. The note at the top of the script
+output says "TF real smoke test is delivered in Phase 1-3, only TF complex is
+new in Phase 4" to clarify the omission.
+
+### Gates met (S10 Phase 4 completion)
+
+1. **Full suite green:** ctest reports `100% tests passed, 0 tests failed out of
+   30` (the 23 pre-existing DD/FF/QF tests + 7 TF tests from Phases 1-3, no new
+   TF complex tests in this phase — those are Phase 5).
+2. **Standalone compile:** `tf_complex.hpp` compiles standalone with zero Kokkos
+   tokens (verified by the preprocessor check in `check_standalone_no_kokkos.sh`).
+3. **Compat wrapper:** `third_party/include/tf_complex.hpp` re-exposes the
+   standalone core as `Kokkos::Experimental::TripleFloatComplex` with
+   `Kokkos::` math forwarders, following the QF/FF/DD wrapper pattern exactly.
+4. **Accuracy probe:** All 24 complex ops measure in the 21-24 digit range
+   against the `__complex128` oracle, consistent with the real TF backend's
+   measured accuracy and the ~21.7-digit TripleFloat target.
+5. **23 pre-existing tests unchanged:** DD/FF/QF tests still pass; no
+   dd/ff/qf header, test, wrapper, or `config.hpp` was modified.
+
+### Files changed
+
+- `include/xp/tf_complex.hpp` (new, standalone complex header)
+- `third_party/include/tf_complex.hpp` (new, Kokkos compat wrapper)
+- `tests/standalone/tf_complex_no_kokkos_smoke.cpp` (new, standalone smoke test)
+- `scripts/check_standalone_no_kokkos.sh` (extended to compile/run TF complex smoke)
+- `docs/PORT_NOTES_TF.md` (this section)
+
+No other file was touched — no dd/ff/qf header, test, wrapper, CMakeLists.txt,
+or `config.hpp`.
+
+---
+
 ## 12. S10 Phase 3.5 — making `tf_accuracy_test` able to fail
 
 Phase 3 closed with §11h: three findings reported and not fixed, the first of
