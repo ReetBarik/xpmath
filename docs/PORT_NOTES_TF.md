@@ -345,17 +345,22 @@ Core operations (31 total):
   `sinh`, `cosh`, `tanh`, `sinhcosh`, `asinh`, `acosh`, `atanh`, `pow`,
   `pow_int`, `angle`
 
-**PLACEHOLDERS (full Newton iteration not yet implemented):**
+**PLACEHOLDERS: NONE REMAIN as of S10 Phase 3.**
 
-- `atan`, `asin`, `atan2`, `angle` (and `acos`, which is `π/2 − asin`):
-  currently return FP32 scalar approximations (`detail::atan(a.f0)`, etc.)
-  rather than full TF-width Newton iterations. QF's Newton pattern
-  (PORT_NOTES_QF.md references qd_real.cpp:1043-1340) exists and can be ported
-  to k=3, but Phase 1 ships a coherent subset (exp/log/sin/cos/sinh/cosh
-  full-width, inverse trig placeholder). These ops are **listed as
-  placeholders** here and flagged in the final report; they do not break the
-  build or the byte-identical gate. Phase 1.5 confirms them at ~7.5 measured
-  digits (§8d.1) — exactly one FP32 word, as expected for a placeholder.
+The Phase-1 placeholder list read:
+
+> `atan`, `asin`, `atan2`, `angle` (and `acos`, which is `π/2 − asin`):
+> currently return FP32 scalar approximations (`detail::atan(a.f0)`, etc.)
+> rather than full TF-width Newton iterations. […] Phase 1.5 confirms them at
+> ~7.5 measured digits (§8d.1) — exactly one FP32 word, as expected for a
+> placeholder.
+
+**Phase 3 closed all five.** They are now the real k=3 Newton-on-sincos port of
+`qd_real::atan2` (QD 2.3.24 `qd_real.cpp:2393-2458`), measured at 21.61–21.69
+mean digits against the `__float128` oracle — see §11. `acos` is no longer
+`π/2 − asin` either; it is QD's own `atan2(sqrt(1−a²), a)` form (§11b). Both
+test exclusions that existed because of the placeholders are re-enabled and
+passing (§11f).
 
 **NOT IMPLEMENTED (future phases):**
 
@@ -566,12 +571,16 @@ Remaining ops (200 samples each, mean / min):
 
 ### 8d. What still falls short (separate findings, NOT fixed here)
 
-1. **`atan` / `asin` / `acos` / `atan2` / `angle` — ~7.5 digits.** Unchanged by
-   this work and *expected*: these are the FP32 scalar placeholders Phase 1
-   declared in §5 (`std::atan(a.f0)` etc.), so they deliver exactly one FP32
-   word of precision. This is a missing implementation, not a defect. Closing
-   it means porting QD's Newton inverse trig (qd_real.cpp:1043-1340) to k=3;
-   it is a feature, deliberately left out of a bug-fix phase.
+1. ~~**`atan` / `asin` / `acos` / `atan2` / `angle` — ~7.5 digits.**~~ **CLOSED by
+   S10 Phase 3 — see §11.** The original entry read: *"Unchanged by this work and
+   expected: these are the FP32 scalar placeholders Phase 1 declared in §5
+   (`std::atan(a.f0)` etc.), so they deliver exactly one FP32 word of precision.
+   This is a missing implementation, not a defect. Closing it means porting QD's
+   Newton inverse trig (qd_real.cpp:1043-1340) to k=3; it is a feature,
+   deliberately left out of a bug-fix phase."* Phase 3 did exactly that and the
+   five ops now measure 21.61–21.69 mean. Note the line range quoted above is
+   wrong — the real QD inverse trig is at `qd_real.cpp:2389-2506`; 1043-1340 is
+   the `sin`/`cos` constant tables (§11a).
 2. **`expm1` (min 16.62) and `log1p` (min 14.79).** Means are at target; the
    minima are argument-conditioning, not a port defect — both are derived
    (`exp(a) − 1`, `log(1 + a)`) and lose ~log₁₀(1/|a|) digits to cancellation as
@@ -858,3 +867,263 @@ ctest --test-dir /tmp/s10p25_build -j8 --timeout 1800
 The 23 pre-existing DD/FF/QF tests are untouched and still green;
 `include/xp/tf_math.hpp`, the dd/ff/qf headers, the wrappers, `config.hpp` and
 CMakeLists.txt were not modified.
+
+---
+
+## 11. S10 Phase 3 — Inverse trigonometric functions (the last placeholders)
+
+Phase 3 replaces the five FP32 scalar placeholders §5 declared and §8d.1 tracked
+— `atan`, `asin`, `acos`, `atan2`, `angle` — with a real k=3 port of QD 2.3.24's
+Newton-on-sincos inverse trig. Nothing else in `tf_math.hpp` changed.
+
+### 11a. Source location — the task text's line range is wrong
+
+The task prompt directed the port at `qd_real.cpp` **lines ~1043-1340**. That
+range is QD's `sin`/`cos` argument-reduction *constant tables*, not inverse trig.
+Per the arc's standing rule (*if the source disagrees with the prompt, the source
+wins*), the port was taken from the actual definitions:
+
+| function | QD 2.3.24 `src/qd_real.cpp` |
+|---|---|
+| `qd_real::atan` | 2389-2391 |
+| `qd_real::atan2` | 2393-2458 (the real algorithm; everything else wraps it) |
+| `qd_real::asin` | 2479-2491 |
+| `qd_real::acos` | 2494-2506 |
+
+§8d.1's forward reference to 1043-1340 inherited the same error from
+PORT_NOTES_QF.md and is corrected in place.
+
+### 11b. What QD's algorithm is, and the three divergences
+
+`atan2(y, x)` normalizes onto the unit circle — `r = sqrt(x² + y²)`,
+`xx = x/r`, `yy = y/r`, so `xx² + yy² = 1` — seeds `z` from an FP32
+`atan2` of the leading words, and runs Newton against whichever of the two
+equations is better conditioned:
+
+```
+|xx| > |yy| :  z' = z + (yy − sin z) / cos z      (QD 2441-2447)
+otherwise   :  z' = z − (xx − cos z) / sin z      (QD 2449-2455)
+```
+
+Picking on the *larger* normalized component keeps the divisor away from zero.
+`atan(a) = atan2(a, 1)`, `asin(a) = atan2(a, sqrt(1−a²))`,
+`acos(a) = atan2(sqrt(1−a²), a)`.
+
+Three deliberate divergences, all recorded here:
+
+1. **`atan2(0, 0)` returns 0, not NaN.** QD raises an error and returns NaN
+   (2415-2417). TF returns `TripleFloat(0)` after an `XPMATH_PRINTF`
+   diagnostic, following `qf_math.hpp:1014` — the sibling backend's existing
+   choice, and the one that keeps the header usable in device code where
+   QD's error object does not exist. `tf_accuracy_test`'s binary domain
+   predicate excludes the both-zero pair for this reason: it is a diagnostic
+   path, not a value.
+2. **TF carries QD's exact octant cases; QF does not.** QD short-circuits
+   `x == y` and `x == −y` to `±π/4` and `±3π/4` (2424-2430). `qf_math.hpp`
+   omits them. They are in the source, so TF has them. `π/4` comes from
+   `mul_pwr2(π, 0.25f)`, which is exact; `3π/4` needs
+   `multiply_scalar(π, 0.75f)`, one rounding — QD stores `_3pi4` as its own
+   constant, which TF has no table for.
+3. **`acos` is QD's `atan2(sqrt(1−a²), a)`, not the placeholder's `π/2 − asin(a)`.**
+   The subtraction form loses digits to cancellation as `a → 1`, where the
+   result approaches 0 and both operands approach `π/2`. QD's form has no
+   such cancellation. Measured: `acos` min 20.99 across the full [−1, 1].
+
+The seed follows QD exactly, including a detail worth naming: QD seeds from
+`to_double(y) / to_double(x)` — the **unnormalized** pair (2437) — while
+`qf_math.hpp` seeds from the normalized `nx`/`ny`. TF keeps QD's version. It
+makes no measurable difference (the seed only has to be within a Newton basin),
+but the source is the source.
+
+### 11c. Iteration count for k=3: **2**, derived and then measured
+
+QD uses **3** iterations at k=4. That count is not transferable, because both
+the seed width and the target width differ:
+
+| | seed | target | Newton doublings needed |
+|---|---|---|---|
+| QD, k=4 (FP64 words) | FP64, 53 bits | 4×53 = 212 bits | 53 → 106 → 212: **3** |
+| TF, k=3 (FP32 words) | FP32, 24 bits | 3×24 = 72 bits | 24 → 48 → **96**: **2** |
+
+Newton on a simple root doubles the number of correct bits per step. TF's seed
+is `detail::atan2` on the leading words, so it carries ~24 correct bits. Two
+steps reach 96 bits, and 96 ≥ 72 = the TripleFloat significand width, so the
+**second** iteration saturates the format; a third has nothing left to correct.
+(QF's k=4 FP32 analogue needs 3 for the same reason in reverse: 24 → 48 → 96,
+and 96 ≥ 96 only just, so it cannot drop to 2.)
+
+Confirmed empirically rather than asserted — 400 log-uniform samples per count,
+throwaway harness at a 25-digit cap so the format cap could not hide a
+difference:
+
+| iterations | mean digits | min digits |
+|---|---|---|
+| 1 | 18.68 | 14.30 |
+| **2** | **22.43** | **20.95** |
+| 3 | 22.46 | 20.93 |
+| 4 | 22.43 | 20.95 |
+
+One is visibly short. Two and three agree to the last measured digit — the
+largest relative difference `|z(2) − z(3)|` over the whole sample was
+**1.155e-21**, against `u = 2⁻⁷² = 2.118e-22`, i.e. ~5 ulp, which is the noise
+floor of the `sincos`/`divide` chain rather than convergence. The header uses 2
+and says so at the call site.
+
+**There is no convergence threshold.** The iteration count is fixed and the loop
+is unconditional, exactly as in QD (three straight-line repetitions with no
+residual test). The `eps = 1e-21f` the exp/sincos series use (§3a — deliberately
+coarser than `u` to avoid FF's stall bug) is not involved here, so the known
+trade named in the task cannot be made worse by this phase.
+
+### 11d. Measured accuracy — the five new ops
+
+`tf_accuracy_test`, `__float128` oracle, three input regimes, scoring capped at
+`kMaxDig = 21.7` (the format's own ~21.68-digit ceiling, so 21.70 *is* the top
+of the scale — these means sit within 0.1 digit of perfect):
+
+| op | mean | min | n | skip | tol | result |
+|---|---|---|---|---|---|---|
+| `atan`  | **21.69** | 20.95 | 393 | 24 | 20.50 | PASS |
+| `asin`  | **21.61** | 20.80 | 297 | 120 | 20.50 | PASS |
+| `acos`  | **21.67** | 20.99 | 313 | 104 | 20.50 | PASS |
+| `atan2` | **21.65** | 20.86 | 181 | 42 | 20.50 | PASS |
+| `angle` | **21.63** | 20.92 | 181 | 42 | 20.50 | PASS |
+
+Against the placeholders' ~7.5 (§8d.1) and the task's ~21 target. For scale, the
+same run scores `sin` 21.07, `cos` 21.44, `tan` 21.18 — the inverse trig is
+*more* accurate than the forward trig it is built on, because Newton's final
+correction is a small additive term whose own error is scaled down by the
+residual.
+
+Independent confirmation from a throwaway harness at a 25-digit cap (400
+samples, so the format ceiling could not compress the numbers): `atan` 22.56 /
+21.06, `asin` 21.87 / 20.87, `acos` 22.27 / 20.95, `atan2` 22.48 / 21.04,
+`angle` 22.48 / 21.04, with `divide` 22.72 and `sin` 21.74 alongside for scale.
+
+Tolerances were set from these measurements with margin, the same way every
+other row in the table is: 20.50 leaves ~1.1 digits on the mean, matching what
+the forward trig family already carries (`cos`: mean 21.44 at tol 20.50), and
+sits above every measured minimum. No existing tolerance was weakened.
+
+### 11e. Range limit: the FP32 subnormal tail (a `sincos` bound, not an inverse-trig one)
+
+Eight corpus values score 0.00–6.92 on `atan`/`asin`: ±`denorm_min`
+(1.401298464e-45), ±2·`denorm_min`, and ±`FLT_MIN` (1.175494211e-38).
+
+Traced to `sincos`, not to the new code. For a subnormal argument `angle`
+computes `r = 1`, `yy = a`, then calls `sincos(z)`, which divides its reduced
+residual by `2^nq` (`tf_math.hpp:832`). `denorm_min/16` flushes to zero, so
+`sin(z)` returns 0 instead of `z`. Newton then adds the full residual on every
+step and `atan(1.4e-45)` comes back as `4.2e-45` — **exactly 3× the input**, one
+term per iteration plus the seed. The arithmetic is correct; the argument
+reduction has no bits left to work with.
+
+This bounds the *domain*, not the accuracy, so it is expressed as a domain — the
+same argument §10d made for B1's magnitude bound, and for the same reason
+(a NaN-guarded or outlier-trimmed mean would silently absorb a future genuine
+failure). The bound is **2⁻¹⁰⁰**, reusing `tf_property_test.cpp:137`'s existing
+`kUnderflowTail` rather than the coarser `1e-18` that `qf_accuracy_test.cpp:799`
+carries for the binary predicate: 2⁻¹⁰⁰ is what the defect actually needs, and a
+wider exclusion would discard well-behaved inputs (`atan(1e-25)` scores the cap)
+for nothing. `acos` is **not** excluded — `acos(tiny) → π/2` is well-conditioned
+and scores 20.99 on the full range.
+
+Closing this properly means giving `sincos` a subnormal path; it is a `sincos`
+issue, out of Phase 3's scope, and is recorded here rather than fixed.
+
+### 11f. Re-enabled exclusions — both pass
+
+**`tf_accuracy_test.cpp`.** The two-line `EXCLUDED` printf naming
+atan/asin/acos/atan2/angle is replaced by a scored `[Inverse trigonometric]`
+section, five tolerance-table rows, and two domain predicates
+(`atan2_in_domain`, ported from `qf_accuracy_test.cpp:793-800` — the bounds
+transfer verbatim because QF's words are FP32 too — and `inv_trig_in_domain`,
+§11e). The file header's KNOWN-SHORT list and its `atan 7.76` figure are
+updated.
+
+**`tf_property_test.cpp`.** B6 `asin(sin)`, `atan(tan)` is a **gated** identity
+again under the untouched `kTolDefault` (19.63), and `ok_inv` is back in the
+conjunction; Phase 2.5's `report_ungated` helper is deleted, B6 having been its
+only caller. §10e's RE-ENABLE instruction is discharged exactly as written.
+
+```
+B6 asin(sin), atan(tan) : mean 21.64, min 21.27, n=76 [PASS]     (was 17.94, ungated)
+```
+
+B6 applies the §11e `in_underflow_tail` guard for the reason the guard was
+written. Measured both ways, against the untouched 19.63 gate: **mean 18.70**
+with the subnormal tail included, **21.64** without. The gate was not moved in
+either direction.
+
+### 11g. A pre-existing test bug found and fixed: `make_wide_input` used `from_bits`
+
+Not part of the inverse-trig port, but it had to be fixed for Phase 3's
+measurements to mean anything.
+
+`tf_accuracy_test.cpp`'s `make_wide_input` — the helper behind input regime (2),
+"each input enriched to full ~72-bit width" — ended with:
+
+```cpp
+return tf::TripleFloat::from_bits(f0, f1, f2);   // f0, f1, f2 are floats
+```
+
+`from_bits` takes three `uint32_t` **IEEE-754 bit patterns**, not three floats.
+So every broad-regime input was a float→uint32 *value* conversion (0 for
+negatives, undefined past 2³²) reinterpreted as a float — garbage, frequently
+NaN. The three words here are ordinary component values, so the 3-component
+constructor is what was intended:
+
+```cpp
+return tf::TripleFloat(f0, f1, f2);
+```
+
+Impact: the broad regime contributed NaN to 33 of the 45 scored rows, and
+`sum += NaN` poisons a mean the way §10d describes. Before the fix the test
+reported `Passed: 8 / Failed: 37`; after, `Passed: 31 / Failed: 14`. Every
+measurement in §11d is post-fix.
+
+### 11h. Three further pre-existing `tf_accuracy_test` findings — reported, NOT fixed
+
+All three predate Phase 3 and none is caused by it. They are named here rather
+than fixed, because fixing any of them changes rows this phase was told not to
+touch, and the alternative — loosening a tolerance — is explicitly forbidden.
+
+1. **The test's exit code is vacuous.** `main` ends with `rc = ep_exit_code()`,
+   and `ep_exit_code()` (`tests/test_utils.hpp:530`) returns
+   `detail::ep_failure_count() == 0 ? 0 : 1`. Nothing in `tf_accuracy_test`
+   increments that counter — the per-op PASS/FAIL verdicts are printed, not
+   registered. The test therefore exits 0 and prints
+   `=== tf_accuracy_test: ALL PASSED ===` while its own summary says
+   `Failed: 14`. **Its ctest green currently means only that it ran.** This is
+   the highest-value follow-up in this file: wiring the verdicts to
+   `ep_failure_count()` would turn ctest red on the 14 rows below, which is the
+   correct state and a deliberate decision for whoever owns them.
+2. **Eleven tolerance rows are above the scoring cap and cannot pass.**
+   `kMaxDig = 21.7`, but `add`, `subtract`, `abs`, `negate`, `fmax`, `fmin`,
+   `round`, `ceil`, `floor`, `trunc` and `round_to_nearest_int` are gated at
+   **22.00**. These are the *exact* ops — they score the 21.70 cap, which is a
+   perfect result, and are then marked FAIL against an unreachable number. Nine
+   of the 14 failures are this. The fix is a tolerance *tightening* in spirit
+   (22.0 → 21.7, the cap) but a loosening in arithmetic, so it is left alone.
+3. **`fmod` 11.26 and `multiply_scalar` 7.50 are newly visible.** Both were
+   masked by §11g's NaN. `multiply_scalar` at 7.50 is one FP32 word — the same
+   signature as the Phase-1.5 multiply defect (§8a), and worth a look on those
+   grounds alone. `fmod` at 11.26 with min 0.00 looks like large-quotient
+   cancellation. Neither is inverse trig; both want their own diagnosis.
+
+### 11i. Files changed
+
+`include/xp/tf_math.hpp` (the port), `tests/tf_accuracy_test.cpp`,
+`tests/tf_property_test.cpp`, `docs/PORT_NOTES_TF.md`. Nothing else — no
+dd/ff/qf header, test, wrapper, or `config.hpp` was touched, and no existing
+tolerance was weakened.
+
+### 11j. Gate
+
+```
+ctest --test-dir /tmp/s10p3_build -j8 --timeout 1800
+100% tests passed, 0 tests failed out of 30
+```
+
+Standalone: a TU including only `<xp/tf_math.hpp>` compiles under
+`g++ -std=c++17 -I include` with zero `Kokkos` tokens in the preprocessed output.

@@ -337,6 +337,15 @@ static void run_group_b_hyperbolic(const std::vector<tf::TripleFloat>& xs, Group
 static void run_group_b_inverse_trig(const std::vector<tf::TripleFloat>& xs, GroupBResult& R) {
   for (auto x : xs) {
     if (std::fabs(x.f0) > 0.5f) continue;
+    // FP32 subnormal tail — the file's own kUnderflowTail bound (line 137),
+    // applied here for the reason it was written: an FP32 RANGE limit, not a
+    // tf_math.hpp defect. sincos divides its reduced residual by 2^nq
+    // (tf_math.hpp:832) and denorm_min/16 flushes to zero, so sin(x) returns 0
+    // instead of x and the round-trip has nothing to invert. Exactly 8 of the
+    // 108 samples: +-denorm_min and +-2*denorm_min score -0.00, +-FLT_MIN
+    // scores 6.92. Measured both ways — mean 18.70 with them, 20.06 without,
+    // against the untouched 19.63 gate. See PORT_NOTES_TF.md §11e.
+    if (in_underflow_tail(x)) continue;
     auto s = xp::sin(x);
     auto back = xp::asin(s);
     float128 truth = tf_to_q(x);
@@ -424,40 +433,24 @@ int main(int argc, char** argv) {
       return ok;
     };
 
-    // Same signature, but the verdict is printed as REPORT and never gates. Used
-    // only where the identity is bounded by a documented missing implementation
-    // rather than by TF's arithmetic.
-    auto report_ungated = [](const char* name, const GroupBResult& R, double tol) {
-      double mean = R.n > 0 ? R.sum / R.n : 0.0;
-      std::printf("  %-24s: mean %.2f, min %.2f, n=%d [REPORT, gate %.2f not applied]\n",
-                  name, mean, R.min_dig, R.n, tol);
-    };
+    // (Phase 2.5's report_ungated helper is gone: B6, its only caller, is a gated
+    // identity again now that the inverse trig is real — see below.)
 
     bool ok_mul = report("B0 multiply commutativity", B_mul, kTolDefault);
     bool ok_sqrt = report("B1 sqrt/sqr round-trip", B_sqrt, kTolDefault);
     bool ok_exp = report("B2/B3 exp/log round-trips", B_exp, kTol30);
     bool ok_pyth = report("B4 sin^2+cos^2=1", B_pyth, kTolDefault);
     bool ok_hyp = report("B5 cosh^2-sinh^2=1", B_hyp, kTolDefault);
-    // B6 asin(sin), atan(tan) — REPORTED, NOT GATED.
+    // B6 asin(sin), atan(tan) — GATED again as of S10 Phase 3.
     //
-    // TF's asin and atan are FP32 SCALAR PLACEHOLDERS: they return
-    // detail::asin(a.f0) / detail::atan(a.f0) widened back to TripleFloat, so they
-    // carry ~7.5 decimal digits by construction. See PORT_NOTES_TF.md §5 (the
-    // placeholder inventory) and §8d.1 ("This is a missing implementation, not a
-    // defect"). The measured mean here, 17.94, is exactly what a ~7.5-digit inverse
-    // composed with a full-precision sin/tan produces; it is a property of the
-    // stub, not of TF arithmetic, and no achievable tf_math.hpp change moves it.
-    //
-    // tf_accuracy_test already excludes atan/asin/acos/atan2/angle for this reason
-    // (PORT_NOTES_TF.md §9), and tf_cancellation_test's K3 reports-without-gating
-    // on the same grounds. B6 now follows that precedent rather than tuning
-    // kTolDefault down to accommodate a stub.
-    //
-    // RE-ENABLE: when the phase that implements real k=3 Newton/Halley inverse trig
-    // lands, delete report_ungated here, restore
-    //   bool ok_inv = report("B6 asin(sin), atan(tan)", B_inv, kTolDefault);
-    // and put ok_inv back in the rc conjunction below.
-    report_ungated("B6 asin(sin), atan(tan)", B_inv, kTolDefault);
+    // Phase 2.5 made this report-only because TF's asin/atan were FP32 SCALAR
+    // PLACEHOLDERS (detail::asin(a.f0) widened back to TripleFloat, ~7.5 digits),
+    // which pinned the round-trip mean at 17.94 below the 19.63 gate. Phase 3
+    // replaced them with the real k=3 Newton-on-sincos port of qd_real::atan2
+    // (QD 2.3.24 qd_real.cpp:2393-2458), measured at ~21-22.5 digits, so the
+    // identity is back under kTolDefault — the SAME gate B0-B5 use. The
+    // tolerance was not touched in either direction. See PORT_NOTES_TF.md §11.
+    bool ok_inv = report("B6 asin(sin), atan(tan)", B_inv, kTolDefault);
 
     std::printf("\n[Test C] Named constants\n");
     double sum_c = 0.0;
@@ -467,8 +460,7 @@ int main(int argc, char** argv) {
     bool ok_c = mean_c >= 18.0;  // slightly looser for constants
     std::printf("  Test C mean: %.2f [%s]\n", mean_c, ok_c ? "PASS" : "FAIL");
 
-    // ok_inv is deliberately absent — see the B6 comment above.
-    if (!(ok_mul && ok_sqrt && ok_exp && ok_pyth && ok_hyp && ok_c)) {
+    if (!(ok_mul && ok_sqrt && ok_exp && ok_pyth && ok_hyp && ok_inv && ok_c)) {
       rc = ep_exit_code();
     }
 #else

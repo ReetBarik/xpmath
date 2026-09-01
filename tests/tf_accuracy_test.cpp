@@ -44,7 +44,10 @@
 // MEASURED ACCURACY (Phase 1.5, 300 log-uniform samples, __float128 oracle)
 // --------------------------------------------------------------------------
 //   add 24.61 | sub 24.57 | mul 23.45 | div 22.79 | sqrt 22.97
-//   exp 21.35 | log 22.01 | sin 22.17 | cos 22.68 | atan 7.76
+//   exp 21.35 | log 22.01 | sin 22.17 | cos 22.68
+//
+//   S10 Phase 3, same harness: atan 22.56 | asin 21.87 | acos 22.27 |
+//   atan2 22.48 | angle 22.48 — replacing the 7.76 the FP32 placeholder scored.
 //
 // TOLERANCE TABLE (per-op, derived from measurement with margin)
 // ---------------------------------------------------------------
@@ -54,9 +57,11 @@
 //
 // KNOWN-SHORT OPS (documented in PORT_NOTES_TF.md — NOT defects)
 // ---------------------------------------------------------------
-//   * atan, asin, acos, atan2, angle: FP32 scalar PLACEHOLDERS at ~7.5 digits,
-//     unimplemented, a later phase. EXCLUDED from the scored inventory with an
-//     explicit comment pointing at the port notes.
+//   * atan, asin, acos, atan2, angle: SCORED as of S10 Phase 3 — no longer
+//     placeholders. Real k=3 Newton-on-sincos port of qd_real::atan2. All five
+//     are in the inventory below at tol 20.5, matching the forward trig family.
+//     atan and asin carry a 2^-100 subnormal-tail domain bound (a sincos range
+//     limit, characterized at the predicate); see PORT_NOTES_TF.md §11.
 //   * expm1 (min 16.62), log1p (min 14.79), asinh (min 16.74): means at target,
 //     minima low from argument conditioning; DD/FF/QF show the same shape.
 //   * exp/exp2/exp10/pow at ~21.0-21.4 rather than 21.7: documented phase-1
@@ -112,7 +117,14 @@ static tf::TripleFloat make_wide_input(double x, std::mt19937_64& gen) {
   float f1 = (float)r; r -= (double)f1;
   r += d(gen) * std::ldexp(1.0, -50);
   float f2 = (float)r;
-  return tf::TripleFloat::from_bits(f0, f1, f2);
+  // S10 Phase 3 fix: this was `from_bits(f0, f1, f2)`. `from_bits` takes three
+  // uint32_t IEEE-754 BIT PATTERNS, not three floats, so every broad-regime
+  // input was a float-to-uint32 conversion (0 or UB for negatives and for
+  // anything past 2^32) REINTERPRETED as a float — garbage, frequently NaN.
+  // That is what produced `mean nan` on 33 of the 45 scored rows. The three
+  // words are ordinary component values here, so the 3-component constructor is
+  // what this wants. See PORT_NOTES_TF.md §11d.
+  return tf::TripleFloat(f0, f1, f2);
 }
 
 // ----------------------------------------------------------------------------
@@ -156,6 +168,18 @@ static const OpTolerance kOpTols[] = {
   {"asinh", 19.0},       // min 16.74 from conditioning
   {"acosh", 19.0},       // inverse hyperbolic
   {"atanh", 19.0},       // inverse hyperbolic
+
+  // Inverse trigonometric (S10 Phase 3). Real k=3 Newton-on-sincos, no longer
+  // FP32 placeholders. Tolerances set from THIS test's measurement with margin,
+  // same as every other row: measured means are 21.61-21.69 and measured minima
+  // 20.80-20.99, so 20.50 leaves ~1.1 digits on the mean — the same margin the
+  // FORWARD trig family carries (cos: mean 21.44 at tol 20.50), and the gate
+  // still sits above every measured minimum. See PORT_NOTES_TF.md §11.
+  {"atan", 20.5},
+  {"asin", 20.5},
+  {"acos", 20.5},
+  {"atan2", 20.5},
+  {"angle", 20.5},
   {"pow", 19.0},         // exp-family, ~21.0-21.4 measured
   {"pow_int", 20.0},     // repeated multiply
   {"hypot", 20.0},       // sqrt-based
@@ -318,6 +342,45 @@ struct BinaryDomain {
   }
 };
 
+// atan2(y, x) / angle(x, y): both operands finite, neither in the FP32
+// subnormal tail, and the larger magnitude below the point where x^2 + y^2
+// overflows an FP32 word. Ported from qf_accuracy_test.cpp:793-800 (dom2_atan2)
+// — the same bounds transfer verbatim because QF's words are FP32 too. The
+// both-zero pair is excluded: it is xp::angle's diagnostic path, not a value.
+static bool atan2_in_domain(double a, double b) {
+  if (!(std::isfinite(a) && std::isfinite(b))) return false;
+  double m = std::fmax(std::fabs(a), std::fabs(b));
+  if (m == 0.0) return false;
+  if (m > 1e18) return false;
+  if (a != 0.0 && std::fabs(a) < 1e-18) return false;
+  if (b != 0.0 && std::fabs(b) < 1e-18) return false;
+  return true;
+}
+
+// angle(x, y) == atan2(y, x): the oracle takes the arguments in the opposite
+// order, so it needs its own free function (test_binary wants a plain pointer).
+static float128 angle_oracle(float128 x, float128 y) { return atan2q(y, x); }
+
+// atan / asin: exclude the FP32 subnormal tail. The bound is 2^-100, matching
+// tf_property_test.cpp:137's kUnderflowTail rather than the coarser 1e-18 the
+// binary predicate above inherits from qf_accuracy_test.cpp:799 — 2^-100 is what
+// the defect actually needs, and a wider exclusion would discard well-behaved
+// inputs (atan(1e-25) scores the cap) for nothing.
+//
+// Cause, measured: for a subnormal argument the Newton loop's sincos underflows.
+// sincos divides its reduced residual by 2^nq (tf_math.hpp:832), and
+// denorm_min/16 flushes to zero, so sin(z) returns 0 instead of z. Newton then
+// adds the full residual every step, and atan(1.4e-45) comes back as 4.2e-45 —
+// exactly 3x the input, one term per iteration plus the seed. This is a range
+// limit of TF's sincos in the subnormal tail, not of the inverse trig: the
+// arithmetic is fine, the argument reduction has no bits left to work with.
+// It bounds the domain rather than the accuracy, so it is stated here as a
+// domain, exactly as PORT_NOTES_TF.md §10d argues for B1's sqrt bound.
+// acos is NOT excluded: acos(tiny) -> pi/2 is well-conditioned and scores 20.99.
+static bool inv_trig_in_domain(double x) {
+  return x == 0.0 || std::fabs(x) >= 0x1p-100;
+}
+
 // ============================================================================
 int main(int argc, char** argv) {
   Kokkos::initialize(argc, argv);
@@ -382,8 +445,23 @@ int main(int argc, char** argv) {
     report("cos", test_unary("cos", [](auto x) { return xp::cos(x); }, cosq, UnaryDomain{-3.0, 3.0}));
     report("tan", test_unary("tan", [](auto x) { return xp::tan(x); }, tanq, UnaryDomain{-1.0, 1.0}));
 
-    // EXCLUDED: atan, asin, acos, atan2, angle (FP32 placeholders ~7.5 digits, PORT_NOTES_TF.md §8d.1)
-    std::printf("  [atan, asin, acos, atan2, angle EXCLUDED: FP32 placeholders, see PORT_NOTES_TF.md §8d.1]\n");
+    // Inverse trigonometric — SCORED as of S10 Phase 3. These were excluded
+    // through Phase 2.5 as FP32 scalar placeholders (~7.5 digits); Phase 3
+    // replaced them with the real k=3 Newton-on-sincos port of qd_real::atan2
+    // (QD 2.3.24 qd_real.cpp:2393-2458). See PORT_NOTES_TF.md §11.
+    std::printf("\n[Inverse trigonometric]\n");
+    report("atan", test_unary("atan", [](auto x) { return xp::atan(x); }, atanq,
+                               UnaryDomain{-1e18, 1e18, inv_trig_in_domain}));
+    report("asin", test_unary("asin", [](auto x) { return xp::asin(x); }, asinq,
+                               UnaryDomain{-1.0, 1.0, inv_trig_in_domain}));
+    report("acos", test_unary("acos", [](auto x) { return xp::acos(x); }, acosq,
+                               UnaryDomain{-1.0, 1.0}));
+    // atan2(y, x): quadmath's atan2q takes the same (y, x) order.
+    report("atan2", test_binary("atan2", [](auto a, auto b) { return xp::atan2(a, b); }, atan2q,
+                                 BinaryDomain{-1e3, 1e3, -1e3, 1e3, atan2_in_domain}));
+    // angle(x, y) == atan2(y, x): the oracle swaps the arguments back.
+    report("angle", test_binary("angle", [](auto a, auto b) { return xp::angle(a, b); }, angle_oracle,
+                                 BinaryDomain{-1e3, 1e3, -1e3, 1e3, atan2_in_domain}));
 
     // Hyperbolic
     std::printf("\n[Hyperbolic]\n");

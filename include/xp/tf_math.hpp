@@ -928,42 +928,135 @@ XPMATH_INLINE_FUNCTION TripleFloat tanh(TripleFloat a) {
     return divide(s, c);
 }
 
-// Inverse trig/hyperbolic functions (Newton iterations, per QD pattern)
-// NOTE: atan, asin, atan2 are PLACEHOLDERS returning FP32 scalar approximations.
-// Full TF-width Newton iterations (analogous to QF's qd_real.cpp:1043-1340)
-// are deferred to future phases. These placeholders allow the header to compile
-// and provide basic functionality; they are flagged in PORT_NOTES_TF.md §5.
-XPMATH_INLINE_FUNCTION TripleFloat atan(TripleFloat a) {
-#if defined(XPMATH_ON_DEVICE_CUDA_OR_HIP)
-    return TripleFloat(::atan(a.f0));  // Placeholder: full Newton TBD
-#else
-    return TripleFloat(std::atan(a.f0));  // Placeholder: full Newton TBD
-#endif
-}
-
-XPMATH_INLINE_FUNCTION TripleFloat asin(TripleFloat a) {
-#if defined(XPMATH_ON_DEVICE_CUDA_OR_HIP)
-    return TripleFloat(::asin(a.f0));  // Placeholder: full Newton TBD
-#else
-    return TripleFloat(std::asin(a.f0));  // Placeholder: full Newton TBD
-#endif
-}
-
-XPMATH_INLINE_FUNCTION TripleFloat acos(TripleFloat a) {
-    TripleFloat pi_2 = mul_pwr2(TripleFloat_pi(), 0.5f);
-    return subtract(pi_2, asin(a));
-}
-
-XPMATH_INLINE_FUNCTION TripleFloat atan2(TripleFloat y, TripleFloat x) {
-#if defined(XPMATH_ON_DEVICE_CUDA_OR_HIP)
-    return TripleFloat(::atan2(y.f0, x.f0));  // Placeholder
-#else
-    return TripleFloat(std::atan2(y.f0, x.f0));  // Placeholder
-#endif
-}
-
+// ============================================================
+// Inverse trigonometric functions — Newton iteration on sin/cos
+//
+// Port of qd_real::atan2, QD 2.3.24 qd_real.cpp:2393-2458, specialized to k=3;
+// atan / asin / acos are QD's own wrappers around it (qd_real.cpp:2389-2391,
+// 2479-2491, 2494-2506). QD's strategy, quoted from its comment block
+// (qd_real.cpp:2394-2409): rather than a Taylor series for arctan, solve
+//
+//     sin(z) = y/r   or   cos(z) = x/r,      r = sqrt(x^2 + y^2)
+//
+// by Newton's iteration
+//
+//     z' = z + (y - sin z) / cos z      (equation 1)
+//     z' = z - (x - cos z) / sin z      (equation 2)
+//
+// with x, y normalized so x^2 + y^2 = 1. QD picks equation 1 when |x| > |y|
+// (larger denominator), equation 2 otherwise.
+//
+// k=3 ITERATION COUNT: 2 (QD uses 3 at k=4/FP64; see PORT_NOTES_TF.md §11a).
+// Newton on a simple root doubles the correct-bit count per step. The seed is
+// the FP32 std::atan2 of the LEADING WORDS only, so it carries ~24 bits (one
+// FP32 word); the iterates then run
+//     24 -> 48 -> 96 bits,
+// and 96 >= 72 = the TripleFloat width, so the SECOND iteration saturates.
+// QD's k=4 target is 212 bits from a 53-bit FP64 seed (53 -> 106 -> 212), which
+// is why it spends three. A third step here is pure cost: it cannot add bits
+// past the width, and each step costs a full sincos + divide. Measured at k=3,
+// 2 and 3 iterations agree to the last measured digit (§11c).
+//
+// There is NO separate convergence threshold: the iteration count is fixed, as
+// it is in QD (three straight-line repetitions, no residual test). The eps used
+// by exp/sincos (1e-21f, §3a) is not involved.
+// ============================================================
 XPMATH_INLINE_FUNCTION TripleFloat angle(TripleFloat x, TripleFloat y) {
-    return atan2(y, x);
+    const TripleFloat pi   = TripleFloat_pi();
+    const TripleFloat pi_2 = mul_pwr2(pi, 0.5f);    // exact: power-of-2 scaling
+    const TripleFloat pi_4 = mul_pwr2(pi, 0.25f);   // exact: power-of-2 scaling
+
+    // Degenerate axes.  QD qd_real.cpp:2411-2422.
+    if (x.f0 == 0.0f) {
+        if (y.f0 == 0.0f) {
+            // QD raises an error and returns NaN here (qd_real.cpp:2415-2417).
+            // TF follows qf_math.hpp:1014 and returns 0 with a diagnostic —
+            // see PORT_NOTES_TF.md §11b for this deliberate divergence.
+            XPMATH_PRINTF("TFATAN2: both arguments zero\n");
+            return TripleFloat(0.0f);
+        }
+        return (y.f0 > 0.0f) ? pi_2 : negate(pi_2);
+    }
+    if (y.f0 == 0.0f) {
+        return (x.f0 > 0.0f) ? TripleFloat(0.0f) : pi;
+    }
+
+    // Exact octant cases.  QD qd_real.cpp:2424-2430. (qf_math.hpp omits these;
+    // they are in the source, so TF carries them — PORT_NOTES_TF.md §11b.)
+    // 3pi/4 is one rounding off pi (multiply_scalar), unlike the exact pi/2 and
+    // pi/4 scalings; QD stores it as its own 4-word constant qd_real::_3pi4.
+    if (x == y || x == negate(y)) {
+        const TripleFloat pi_34 = multiply_scalar(pi, 0.75f);
+        if (x == y) return (y.f0 > 0.0f) ? pi_4 : negate(pi_34);
+        return (y.f0 > 0.0f) ? pi_34 : negate(pi_4);
+    }
+
+    // Normalize onto the unit circle.  QD qd_real.cpp:2432-2434.
+    TripleFloat r  = sqrt(add(sqr(x), sqr(y)));
+    TripleFloat xx = divide(x, r);
+    TripleFloat yy = divide(y, r);
+
+    // FP32 seed from the leading words.  QD seeds from to_double(y)/to_double(x),
+    // i.e. the UNNORMALIZED pair (qd_real.cpp:2437); kept here.
+    TripleFloat z = TripleFloat(detail::atan2(y.f0, x.f0));
+    TripleFloat sin_z, cos_z;
+
+    if (detail::fabs(xx.f0) > detail::fabs(yy.f0)) {
+        // Equation 1: z' = z + (yy - sin z)/cos z.  QD qd_real.cpp:2441-2447.
+        for (int k = 0; k < 2; ++k) {
+            sincos(z, sin_z, cos_z);
+            z = add(z, divide(subtract(yy, sin_z), cos_z));
+        }
+    } else {
+        // Equation 2: z' = z - (xx - cos z)/sin z.  QD qd_real.cpp:2449-2455.
+        for (int k = 0; k < 2; ++k) {
+            sincos(z, sin_z, cos_z);
+            z = subtract(z, divide(subtract(xx, cos_z), sin_z));
+        }
+    }
+
+    return z;
+}
+
+// atan2(y, x) = angle(x, y).  QD qd_real.cpp:2393 (STL argument order).
+XPMATH_INLINE_FUNCTION TripleFloat atan2(TripleFloat y, TripleFloat x) {
+    return angle(x, y);
+}
+
+// atan(a) = atan2(a, 1).  QD qd_real.cpp:2389-2391.
+XPMATH_INLINE_FUNCTION TripleFloat atan(TripleFloat a) {
+    return angle(TripleFloat(1.0f), a);
+}
+
+// asin(a) = atan2(a, sqrt(1 - a^2)).  QD qd_real.cpp:2479-2491.
+XPMATH_INLINE_FUNCTION TripleFloat asin(TripleFloat a) {
+    TripleFloat abs_a = abs(a);
+    if (abs_a.f0 > 1.0f) {
+        XPMATH_PRINTF("TFASIN: argument out of domain\n");
+        return TripleFloat(0.0f);
+    }
+    // |a| == 1 exactly: sqrt(1-a^2) is 0 and the Newton denominator degenerates.
+    // QD short-circuits to +-pi/2 (qd_real.cpp:2487-2489).
+    if (abs_a.f0 == 1.0f && abs_a.f1 == 0.0f && abs_a.f2 == 0.0f) {
+        TripleFloat pi_2 = mul_pwr2(TripleFloat_pi(), 0.5f);
+        return (a.f0 > 0.0f) ? pi_2 : negate(pi_2);
+    }
+    return angle(sqrt(subtract(TripleFloat(1.0f), sqr(a))), a);
+}
+
+// acos(a) = atan2(sqrt(1 - a^2), a).  QD qd_real.cpp:2494-2506.
+// NOTE this is QD's form, not the pi/2 - asin(a) the Phase-1 placeholder used:
+// the subtraction loses digits to cancellation as a -> 1.
+XPMATH_INLINE_FUNCTION TripleFloat acos(TripleFloat a) {
+    TripleFloat abs_a = abs(a);
+    if (abs_a.f0 > 1.0f) {
+        XPMATH_PRINTF("TFACOS: argument out of domain\n");
+        return TripleFloat(0.0f);
+    }
+    if (abs_a.f0 == 1.0f && abs_a.f1 == 0.0f && abs_a.f2 == 0.0f) {
+        return (a.f0 > 0.0f) ? TripleFloat(0.0f) : TripleFloat_pi();
+    }
+    return angle(a, sqrt(subtract(TripleFloat(1.0f), sqr(a))));
 }
 
 XPMATH_INLINE_FUNCTION TripleFloat asinh(TripleFloat a) {
