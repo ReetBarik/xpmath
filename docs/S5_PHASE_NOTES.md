@@ -139,3 +139,52 @@ abs, acos, acosh, asin, asinh, atan, atanh, conj, cos, cosh, exp, log, log10, po
 **Baseline captures:** BEFORE baselines provided pre-session at HEAD ab4f72f in validation/s5p3/before_dd_complex.txt and before_dd_real.txt. AFTER captures completed in ~6 minutes total.
 
 **Deviations and surprises:** None. The pattern from phases 1-2 applied cleanly. The dd_complex.hpp header is simpler than the real math headers (no scalar math dispatch sites, no constants, fewer functions), so the conversion was straightforward.
+
+---
+
+## Phase 4 — ff_complex.hpp (FF complex)
+
+**Converted:** `third_party/include/ff_complex.hpp` → `include/xp/ff_complex.hpp`
+(280 lines, standalone, zero Kokkos outside comments) plus a compat wrapper at
+the old path with **20 `using xp::` sites** (1 type alias + 19 functions). 
+`include/xp/config.hpp` reused unchanged — it is now shared by DD real, DD complex, FF real, FF complex, and QF.
+
+**Wrapper site count:** 20 explicit `using xp::` declarations (1 type alias + 19 functions:
+abs, acos, acosh, asin, asinh, atan, atanh, conj, cos, cosh, exp, log, log10, polar, pow, sin, sinh, sqrt, tan, tanh).
+
+**Mechanical translation sites:**
+- 41 occurrences of `KOKKOS_INLINE_FUNCTION` → `XPMATH_INLINE_FUNCTION`
+- 2 occurrences of `#ifndef __CUDA_ARCH__` → `#if !defined(XPMATH_ON_DEVICE)` (the ostream overload guards)
+- 1 occurrence of `Kokkos::printf` → `XPMATH_PRINTF`
+- Namespace: `namespace Kokkos { namespace Experimental {` → `namespace xp {` (one level)
+- Include: `#include <ff_math.hpp>` → `#include <xp/ff_math.hpp>`
+
+**Non-mechanical sites:** None. Every conversion was a mechanical token swap. No arithmetic changes, no algorithm modifications.
+
+**Kokkos::complex finding (confirmed):** Both Kokkos::complex references in ff_complex.hpp (lines 29, 289) are **only in comments** that explain the relationship to Kokkos::complex, not code. There is no actual Kokkos::complex interop to relocate — the complex type is a bespoke struct. This confirms the phase-3 finding for the FF complex header.
+
+**Smoke test extension:** Created `tests/standalone/ff_complex_no_kokkos_smoke.cpp` (130 lines, mirrors dd_complex_no_kokkos_smoke.cpp for FloatFloatComplex). Updated `scripts/check_standalone_no_kokkos.sh` to compile and run DD + DD complex + FF + FF complex + QF smoke tests (11 stages total, was 9), and to preprocess all five headers in the Kokkos-free gate. Script now reports "standalone no-Kokkos compile smoke (DD + DD complex + FF + FF complex + QF)".
+
+**Gates:**
+1. Build clean: ✓ (all targets built without errors)
+2. ctest 23/23: ✓ (100% tests passed, 0 failed out of 23, total time 137.75 sec)
+3. Byte-identical gate on `kokkos_ep_demo_ff_complex`: ✓
+   - BEFORE: 105 lines (captured at HEAD 393255f)
+   - AFTER: 105 lines
+   - FF complex accuracy columns (fields 6-9 in pipe-delimited output): BYTE-IDENTICAL
+4. Byte-identical gate on `kokkos_ep_demo_ff`: ✓
+   - BEFORE: 87 lines (captured at HEAD 393255f)
+   - AFTER: 87 lines
+   - FF real accuracy columns (fields 6-9 in pipe-delimited output): BYTE-IDENTICAL
+5. No-Kokkos smoke extended to FF complex: ✓
+   - DD real smoke: PASS (0 failures)
+   - DD complex smoke: PASS (0 failures)
+   - FF real smoke: PASS (0 failures)
+   - FF complex smoke: PASS (0 failures)
+   - QF smoke: PASS (0 failures)
+   - Preprocessed output: 52,244 lines, 0 Kokkos hits
+   - include/xp/*.hpp naming Kokkos only in comments: ok
+
+**Baseline captures:** BEFORE baselines provided pre-session at HEAD 393255f in validation/s5p4/before_ff_complex.txt (105 lines) and before_ff_real.txt (87 lines). AFTER captures completed in ~3 minutes for FF complex, ~4 minutes for FF real.
+
+**Deviations and surprises:** None. The pattern from phases 1-3 applied cleanly. The ff_complex.hpp header has the same structure as dd_complex.hpp (280 lines vs 288 lines), making the conversion straightforward. Wrapper site count matches dd_complex exactly (20 sites).

@@ -1,0 +1,11 @@
+{"op":"opaque","at":"","in":["Kokkos::log"],"val":0.425075464684805,"cond":1,"rel_err":2.2204460492503131e-16,"prov":["Kokkos::log","z1"]}
+{"op":"opaque","at":"","in":["Kokkos::log"],"val":0.19739555984988075,"cond":1,"rel_err":2.2204460492503131e-16,"prov":["Kokkos::log","z1"]}
+{"op":"opaque","at":"","in":["Kokkos::log"],"val":0,"cond":1,"rel_err":2.2204460492503131e-16,"prov":["Kokkos::log","z2"]}
+{"op":"opaque","at":"","in":["Kokkos::log"],"val":3.1415926535897922,"cond":1,"rel_err":2.2204460492503131e-16,"prov":["Kokkos::log","z2"]}
+{"op":"mul","at":"","in":["_","_"],"val":3.1415926535897931,"cond":1,"rel_err":2.2204460492503131e-16,"prov":[]}
+{"op":"neg","at":"","in":["z3"],"val":2,"cond":1,"rel_err":2.2204460492503131e-16,"prov":["z3"]}
+{"op":"neg","at":"","in":["z3"],"val":-0,"cond":1,"rel_err":2.2204460492503131e-16,"prov":["z3"]}
+{"op":"opaque","at":"","in":["Kokkos::log"],"val":0.69314718055994529,"cond":1,"rel_err":3.3306690738754696e-16,"prov":["Kokkos::log","z3"]}
+{"op":"opaque","at":"","in":["Kokkos::log"],"val":-0,"cond":1,"rel_err":3.3306690738754696e-16,"prov":["Kokkos::log","z3"]}
+{"op":"add","at":"","in":["Kokkos::log","_"],"val":0.69314718055994529,"cond":1,"rel_err":4.4408920985006262e-16,"prov":["Kokkos::log","z3"]}
+{"op":"add","at":"","in":["Kokkos::log","_"],"val":3.1415926535897931,"cond":1,"rel_err":4.4408920985006262e-16,"prov":["Kokkos::log","z3"]}

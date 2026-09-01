@@ -1,0 +1,8 @@
+/home/rbarik/kokkos-extended-precision-demo/build_t00/CMakeFiles/kokkos_ep_demo.dir
+/home/rbarik/kokkos-extended-precision-demo/build_t00/CMakeFiles/kokkos_ep_demo_complex.dir
+/home/rbarik/kokkos-extended-precision-demo/build_t00/CMakeFiles/edit_cache.dir
+/home/rbarik/kokkos-extended-precision-demo/build_t00/CMakeFiles/rebuild_cache.dir
+/home/rbarik/kokkos-extended-precision-demo/build_t00/CMakeFiles/list_install_components.dir
+/home/rbarik/kokkos-extended-precision-demo/build_t00/CMakeFiles/install.dir
+/home/rbarik/kokkos-extended-precision-demo/build_t00/CMakeFiles/install/local.dir
+/home/rbarik/kokkos-extended-precision-demo/build_t00/CMakeFiles/install/strip.dir

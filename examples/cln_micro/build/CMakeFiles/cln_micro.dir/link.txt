@@ -1,0 +1,1 @@
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/bin/c++ -DKOKKOS_DEPENDENCE CMakeFiles/cln_micro.dir/cln_micro.cpp.o -o cln_micro  /home/rbarik/kokkos-install/lib64/libkokkoscontainers.a /home/rbarik/kokkos-install/lib64/libkokkosalgorithms.a /home/rbarik/kokkos-install/lib64/libkokkossimd.a /home/rbarik/kokkos-install/lib64/libkokkoscore.a -ldl 
