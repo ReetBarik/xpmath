@@ -117,6 +117,20 @@ add_executable(kokkos_ep_demo_qf_complex src/demo_qf_complex.cpp)
 target_include_directories(kokkos_ep_demo_qf_complex PRIVATE ${THIRD_PARTY_INCLUDE})
 target_link_libraries(kokkos_ep_demo_qf_complex PRIVATE Kokkos::kokkos)
 
+# ---- TF (triple-float, 3xFP32) demos (S10 Phase 5 real + complex) ----------
+# TF real transcendentals exercised against the __float128 oracle (S10 P5) and
+# complex ops against the __complex128 oracle, same plumbing as the DD/FF/QF
+# demos. kokkos_ep_demo_tf_complex additionally needs the local
+# impl/Kokkos_ComplexQuadPrecisionMath.hpp wrapper (T0.3, probed in CMakeLists
+# lines 43-73), exactly as kokkos_ep_demo_ff_complex and kokkos_ep_demo_qf_complex do.
+add_executable(kokkos_ep_demo_tf src/demo_tf_real.cpp)
+target_include_directories(kokkos_ep_demo_tf PRIVATE ${THIRD_PARTY_INCLUDE})
+target_link_libraries(kokkos_ep_demo_tf PRIVATE Kokkos::kokkos)
+
+add_executable(kokkos_ep_demo_tf_complex src/demo_tf_complex.cpp)
+target_include_directories(kokkos_ep_demo_tf_complex PRIVATE ${THIRD_PARTY_INCLUDE})
+target_link_libraries(kokkos_ep_demo_tf_complex PRIVATE Kokkos::kokkos)
+
 # ---- Cost benchmark ----------------------------------------------------------
 # Times each backend against the incumbent at comparable precision (FF vs FP64,
 # DD/QF vs __float128) rather than against FP64 across the board. Same oracle
@@ -129,6 +143,7 @@ target_link_libraries(kokkos_ep_bench_cost PRIVATE Kokkos::kokkos)
 install(TARGETS kokkos_ep_demo kokkos_ep_demo_complex
                 kokkos_ep_demo_ff kokkos_ep_demo_ff_complex
                 kokkos_ep_demo_qf kokkos_ep_demo_qf_complex
+                kokkos_ep_demo_tf kokkos_ep_demo_tf_complex
                 kokkos_ep_bench_cost
         RUNTIME DESTINATION bin)
 
