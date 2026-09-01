@@ -123,6 +123,12 @@ inline float split_safe_max() {
   return std::numeric_limits<float>::max() / 8193.0f;
 }
 
+// twoProd/twoSqr domain. Ported from qf_fma_guard_test.cpp:187-204 (which is
+// itself T3.1's predicate): finite normal-or-zero operands, both below the
+// splitter-overflow bound, with the TRUE (exact FP64) product inside the FP32
+// normal range so BOTH p and its error term are representable. Dekker's
+// twoProduct is exact only absent underflow; outside this region a nonzero
+// residual is EXPECTED BEHAVIOUR, not a defect, and the pair is SKIPPED.
 inline bool prod_in_domain(float a, float b) {
   if (!std::isfinite(a) || !std::isfinite(b)) return false;
   const float fmin = std::numeric_limits<float>::min();
@@ -192,7 +198,23 @@ struct EftCount {
 enum class Op { Sum, Prod, Sqr };
 
 inline void check_pair(Op op, float a, float b, EftCount& c) {
-  bool in_domain = (op == Op::Sum) ? sum_in_domain(a, b) : prod_in_domain(a, b);
+  // Op::Sqr squares `a` and IGNORES `b`, so its domain must be evaluated at
+  // (a, a) — not at (a, b). Gating the sqr path on prod_in_domain(a, b) admitted
+  // pairs whose PRODUCT is in range while a*a is not: e.g. a = FLT_MIN with
+  // b = 2^24 has |a*b| = 2^-102 (in domain) but a*a = 1.4e-76, ~2^-252, which
+  // flushes to zero in FP32 so the exact residual is unrepresentable and
+  // tf_two_sqr's error term is legitimately inexact. That is the underflow
+  // exclusion prod_in_domain already encodes, applied to the wrong pair. QF gets
+  // this right by construction — qf_fma_guard_test.cpp:356/362/367
+  // (build_sqr_inputs) filters every squaring input through prod_in_domain(a, a),
+  // and its named cases do the same at :511. The device pass below (line ~343)
+  // was already correct; only this host path was not.
+  bool in_domain;
+  switch (op) {
+    case Op::Sum:  in_domain = sum_in_domain(a, b);   break;
+    case Op::Prod: in_domain = prod_in_domain(a, b);  break;
+    case Op::Sqr:  in_domain = prod_in_domain(a, a);  break;
+  }
   if (!in_domain) { ++c.skipped; return; }
   ++c.tested;
 
