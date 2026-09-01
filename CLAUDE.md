@@ -125,6 +125,8 @@ staleness guard) are committed. Nothing consumes it yet.
 
 - **README.md** — operation inventory, measured accuracy tables, algorithm references
 - **docs/UPSTREAM_PLAN.md** — standalone extraction + Kokkos upstream arc (S0–S10), active
+- **docs/KNOWN_ISSUES.md** — reproduced defects deliberately deferred, with evidence and
+  what closing each one involves. Read before assuming a surprising result is new.
 - **docs/UPSTREAM_PLAN_STATUS.md** — one STATUS block per completed sub-plan; read this before starting one
 - **docs/TEST_SUITE_PLAN.md** — test suite architecture and conventions
 - **docs/PERF_PLAN.md** — performance measurement plan (PARKED pending the upstream restructure)
