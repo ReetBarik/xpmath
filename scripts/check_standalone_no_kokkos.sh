@@ -4,7 +4,7 @@
 #
 # S2 / S5 deliverable — prove the standalone extended-precision core stands alone.
 #
-# Compiles tests/standalone/{dd,ff}_no_kokkos_smoke.cpp with plain g++ -std=c++17
+# Compiles tests/standalone/{dd,ff,qf}_no_kokkos_smoke.cpp with plain g++ -std=c++17
 # and an include path containing ONLY the repo's include/ directory:
 #   * no Kokkos install on the include path,
 #   * not even third_party/include/, so the Kokkos compat wrapper is
@@ -27,6 +27,7 @@ CXX="${1:-${CXX:-g++}}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC_DD="${REPO_ROOT}/tests/standalone/dd_no_kokkos_smoke.cpp"
 SRC_FF="${REPO_ROOT}/tests/standalone/ff_no_kokkos_smoke.cpp"
+SRC_QF="${REPO_ROOT}/tests/standalone/qf_no_kokkos_smoke.cpp"
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
@@ -35,38 +36,48 @@ trap 'rm -rf "${WORK}"' EXIT
 INCLUDES=(-I "${REPO_ROOT}/include")
 STD=(-std=c++17)
 
-echo "=== standalone no-Kokkos compile smoke (DD + FF) ==="
+echo "=== standalone no-Kokkos compile smoke (DD + FF + QF) ==="
 echo "compiler : $("${CXX}" --version | head -1)"
-echo "TUs      : tests/standalone/{dd,ff}_no_kokkos_smoke.cpp"
+echo "TUs      : tests/standalone/{dd,ff,qf}_no_kokkos_smoke.cpp"
 echo "includes : ${REPO_ROOT#"${HOME}/"}/include   (and nothing else)"
 echo
 
 # ---------------------------------------------------------------- 1. compile DD
-echo "[1/5] compile + link DD ..."
+echo "[1/7] compile + link DD ..."
 "${CXX}" "${STD[@]}" -Wall -Wextra -O2 "${INCLUDES[@]}" \
   "${SRC_DD}" -o "${WORK}/dd_no_kokkos_smoke"
 echo "      ok"
 
 # ------------------------------------------------------------------- 2. run DD
-echo "[2/5] run DD ..."
+echo "[2/7] run DD ..."
 "${WORK}/dd_no_kokkos_smoke"
 
-# ---------------------------------------------------------------- 2.5 compile FF
-echo "[3/5] compile + link FF ..."
+# ---------------------------------------------------------------- 3. compile FF
+echo "[3/7] compile + link FF ..."
 "${CXX}" "${STD[@]}" -Wall -Wextra -O2 "${INCLUDES[@]}" \
   "${SRC_FF}" -o "${WORK}/ff_no_kokkos_smoke"
 echo "      ok"
 
-# ------------------------------------------------------------------ 2.6 run FF
-echo "[4/5] run FF ..."
+# ------------------------------------------------------------------- 4. run FF
+echo "[4/7] run FF ..."
 "${WORK}/ff_no_kokkos_smoke"
 
-# --------------------------------------------- 3. no Kokkos in the preprocess
+# ---------------------------------------------------------------- 5. compile QF
+echo "[5/7] compile + link QF ..."
+"${CXX}" "${STD[@]}" -Wall -Wextra -O2 "${INCLUDES[@]}" \
+  "${SRC_QF}" -o "${WORK}/qf_no_kokkos_smoke"
+echo "      ok"
+
+# ------------------------------------------------------------------- 6. run QF
+echo "[6/7] run QF ..."
+"${WORK}/qf_no_kokkos_smoke"
+
+# --------------------------------------------- 7. no Kokkos in the preprocess
 # Preprocess a MINIMAL TU rather than the smoke test itself: the smoke test's
 # own diagnostic strings say the word "Kokkos", which would trip the grep for
-# the wrong reason. This TU contains nothing but both includes.
-echo "[5/5] preprocessed output contains no Kokkos ..."
-printf '#include <xp/dd_math.hpp>\n#include <xp/ff_math.hpp>\nint main() { return 0; }\n' > "${WORK}/only_include.cpp"
+# the wrong reason. This TU contains nothing but all three includes.
+echo "[7/7] preprocessed output contains no Kokkos ..."
+printf '#include <xp/dd_math.hpp>\n#include <xp/ff_math.hpp>\n#include <xp/qf_math.hpp>\nint main() { return 0; }\n' > "${WORK}/only_include.cpp"
 "${CXX}" "${STD[@]}" -E "${INCLUDES[@]}" "${WORK}/only_include.cpp" > "${WORK}/pp.ii"
 if grep -n "Kokkos\|KOKKOS_" "${WORK}/pp.ii" > "${WORK}/hits.txt"; then
   echo "      FAIL: Kokkos reached the preprocessed TU:"
@@ -75,12 +86,12 @@ if grep -n "Kokkos\|KOKKOS_" "${WORK}/pp.ii" > "${WORK}/hits.txt"; then
 fi
 echo "      ok ($(wc -l < "${WORK}/pp.ii") preprocessed lines, 0 Kokkos hits)"
 
-# ------------------------------------------ 4. no Kokkos in the header source
+# ------------------------------------------ 8. no Kokkos in the header source
 # Belt and braces: the standalone headers themselves must not name Kokkos in
 # code. Comments may mention it (they explain the relationship to the wrapper),
 # so strip // comments before grepping. This check runs on ALL xp/*.hpp so it
-# automatically covers ff_math.hpp.
-echo "[5/5] include/xp/*.hpp name Kokkos only in comments ..."
+# automatically covers dd/ff/qf_math.hpp.
+echo "[7/7] include/xp/*.hpp name Kokkos only in comments ..."
 bad=0
 for h in "${REPO_ROOT}"/include/xp/*.hpp; do
   if sed 's://.*::' "${h}" | grep -n "Kokkos\|KOKKOS_" > "${WORK}/h.txt"; then

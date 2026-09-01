@@ -55,3 +55,39 @@ identical between the before/after captures; the only diff is that stray line.
 
 `validation/s3/strip_timing.sh` did not work on the FF tables — see the header of
 `validation/strip_timing.sh` for the full explanation. Use the new one from here on.
+
+## Phase 2 — qf_math.hpp (QF real)
+
+**Converted:** `third_party/include/qf_math.hpp` → `include/xp/qf_math.hpp`
+(1243 lines, standalone, zero Kokkos outside comments) plus a compat wrapper at
+the old path with **65 `using xp::` sites**. `include/xp/config.hpp` reused
+unchanged — it is now shared by DD, FF and QF.
+
+**Gate results (all green):**
+
+| gate | result |
+|---|---|
+| build + ctest | 23/23, 0 failed, 134.70 s |
+| byte-identical `kokkos_ep_demo_qf` | IDENTICAL |
+| byte-identical `kokkos_ep_demo_qf_complex` | IDENTICAL |
+| no-Kokkos smoke (DD + FF + QF) | PASS — 0 Kokkos hits in 55 587 preprocessed lines |
+| `include/xp/qf_math.hpp` Kokkos refs outside comments | 0 |
+
+**Non-mechanical sites:** none. The auto-generated 4×FP32 `from_bits` constants
+were copied verbatim; no expression was reordered.
+
+**Deviation — baseline captured from a pristine worktree.** The phase-2 authoring
+session was killed by its wall clock *after* completing the conversion but *before*
+its BEFORE captures finished, leaving two 0-byte files. Because the working tree was
+by then already converted, the baseline could not simply be re-run. It was instead
+captured from a detached `git worktree` at the pre-conversion commit (4fba10d), with
+an assertion that `include/xp/qf_math.hpp` was absent from that tree before building.
+The comparison is therefore genuinely pre- vs post-conversion.
+
+**Timing note for the remaining phases.** QF is by far the most expensive backend to
+gate: the sum of median per-op times is ~219 µs, so at `--batch 1000000 --repeats 5`
+each QF demo is ~18 minutes of pure kernel time, and the before+after pair for the two
+QF demos took roughly 2.5 hours. Three sessions in a row have now died on demo
+captures rather than on conversion work. **For phases 3–5 the baseline captures should
+be taken outside the authoring session**, so the session only has to convert and can
+finish inside its budget.
