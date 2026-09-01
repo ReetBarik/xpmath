@@ -91,3 +91,51 @@ QF demos took roughly 2.5 hours. Three sessions in a row have now died on demo
 captures rather than on conversion work. **For phases 3–5 the baseline captures should
 be taken outside the authoring session**, so the session only has to convert and can
 finish inside its budget.
+
+---
+
+## Phase 3 — dd_complex.hpp (DD complex)
+
+**Converted:** `third_party/include/dd_complex.hpp` → `include/xp/dd_complex.hpp`
+(288 lines, standalone, zero Kokkos outside comments) plus a compat wrapper at
+the old path with **20 `using xp::` sites** (1 type alias + 19 functions). 
+`include/xp/config.hpp` reused unchanged — it is now shared by DD real, DD complex, FF and QF.
+
+**Wrapper site count:** 20 explicit `using xp::` declarations (1 type alias + 19 functions:
+abs, acos, acosh, asin, asinh, atan, atanh, conj, cos, cosh, exp, log, log10, polar, pow, sin, sinh, sqrt, tan, tanh).
+
+**Mechanical translation sites:**
+- 41 occurrences of `KOKKOS_INLINE_FUNCTION` → `XPMATH_INLINE_FUNCTION`
+- 2 occurrences of `#ifndef __CUDA_ARCH__` → `#if !defined(XPMATH_ON_DEVICE)` (the ostream overload guards)
+- 1 occurrence of `Kokkos::printf` → `XPMATH_PRINTF`
+- Namespace: `namespace Kokkos { namespace Experimental {` → `namespace xp {` (one level)
+- Include: `#include <dd_math.hpp>` → `#include <xp/dd_math.hpp>`
+
+**Non-mechanical sites:** None. Every conversion was a mechanical token swap. No arithmetic changes, no algorithm modifications.
+
+**Kokkos::complex finding (confirmed):** All three complex headers (dd_complex.hpp, ff_complex.hpp, qf_complex.hpp) reference `Kokkos::complex` **only in comments** (lines 23, 39, 320 in dd_complex.hpp; all explain the relationship to Kokkos, not code). There is no actual Kokkos::complex interop to relocate — the complex types are bespoke structs. The ~7 Kokkos::complex sites flagged in the plan were all comment text. This finding transfers to phases 4 and 5.
+
+**Smoke test extension:** Created `tests/standalone/dd_complex_no_kokkos_smoke.cpp` (117 lines, mirrors dd_no_kokkos_smoke.cpp for DoubleDoubleComplex). Updated `scripts/check_standalone_no_kokkos.sh` to compile and run DD + DD complex + FF + QF smoke tests (9 stages total, was 7), and to preprocess all four headers in the Kokkos-free gate. Script now reports "standalone no-Kokkos compile smoke (DD + DD complex + FF + QF)".
+
+**Gates:**
+1. Build clean: ✓ (all targets built without errors)
+2. ctest 23/23: ✓ (100% tests passed, 0 failed out of 23, total time 134.91 sec)
+3. Byte-identical gate on `kokkos_ep_demo_complex`: ✓
+   - BEFORE: 105 lines (captured at HEAD ab4f72f)
+   - AFTER: 105 lines
+   - DD complex accuracy columns (fields 6-9 in pipe-delimited output): BYTE-IDENTICAL
+4. Byte-identical gate on `kokkos_ep_demo`: ✓
+   - BEFORE: 89 lines (captured at HEAD ab4f72f)
+   - AFTER: 89 lines
+   - DD real accuracy columns (fields 6-9 in pipe-delimited output): BYTE-IDENTICAL
+5. No-Kokkos smoke extended to DD complex: ✓
+   - DD real smoke: PASS (0 failures)
+   - DD complex smoke: PASS (0 failures)
+   - FF smoke: PASS (0 failures)
+   - QF smoke: PASS (0 failures)
+   - Preprocessed output: 51,978 lines, 0 Kokkos hits
+   - include/xp/*.hpp naming Kokkos only in comments: ok
+
+**Baseline captures:** BEFORE baselines provided pre-session at HEAD ab4f72f in validation/s5p3/before_dd_complex.txt and before_dd_real.txt. AFTER captures completed in ~6 minutes total.
+
+**Deviations and surprises:** None. The pattern from phases 1-2 applied cleanly. The dd_complex.hpp header is simpler than the real math headers (no scalar math dispatch sites, no constants, fewer functions), so the conversion was straightforward.
