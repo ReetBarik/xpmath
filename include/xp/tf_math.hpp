@@ -1189,4 +1189,20 @@ XPMATH_INLINE_FUNCTION TripleFloat fma(TripleFloat a, TripleFloat b, TripleFloat
     return add(multiply(a, b), c);
 }
 
+// hypot(a, b) = sqrt(a^2 + b^2).  QD has no hypot; composition (cf. qf:1160).
+XPMATH_INLINE_FUNCTION TripleFloat hypot(TripleFloat a, TripleFloat b) {
+    return sqrt(add(sqr(a), sqr(b)));
+}
+
+// copysign(a, b) = magnitude of a, sign of b. Exact sign manipulation; no QD
+// analogue (cf. qf:1182-1186). Check the sign of the LOW words too: an
+// expansion's words can have mixed signs and a naive f0-only check gets this
+// wrong. The sign of a TF expansion is the sign of its FIRST NONZERO word.
+XPMATH_INLINE_FUNCTION TripleFloat copysign(TripleFloat a, TripleFloat b) {
+    TripleFloat r = abs(a);
+    if (b.f0 < 0.0f || (b.f0 == 0.0f && (b.f1 < 0.0f || (b.f1 == 0.0f && b.f2 < 0.0f))))
+        return negate(r);
+    return r;
+}
+
 }  // namespace xp

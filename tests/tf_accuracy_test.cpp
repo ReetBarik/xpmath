@@ -210,6 +210,7 @@ static const OpTolerance kOpTols[] = {
   {"fmax", 21.5},        // P3.5: was 22.00 (> cap). Exact selection, measured
                          //       21.70 = cap on all 201 samples.
   {"fmin", 21.5},        // P3.5: was 22.00 (> cap). Exact selection, 21.70 = cap.
+  {"copysign", 21.5},    // P6: exact sign manipulation (to be measured)
   {"fma", 19.0},         // triple composition
   {"multiply_scalar", 21.0},  // unchanged; 21.70 once the oracle uses the FP32
                               // constant the op is actually given (P3.5)
@@ -579,7 +580,7 @@ int main(int argc, char** argv) {
                                BinaryDomain{0.5, 100.0, -2.0, 2.0}));
     report("pow_int", test_unary("pow_int", [](auto x) { return xp::pow_int(x, 7); },
                                   [](auto x) { return powq(x, 7.0Q); }, UnaryDomain{0.1, 10.0}));
-    report("hypot", test_binary("hypot", [](auto a, auto b) { return xp::sqrt(xp::add(xp::sqr(a), xp::sqr(b))); },
+    report("hypot", test_binary("hypot", [](auto a, auto b) { return xp::hypot(a, b); },
                                  hypotq, BinaryDomain{-100.0, 100.0, -100.0, 100.0}));
 
     // Binary ops
@@ -594,7 +595,8 @@ int main(int argc, char** argv) {
                                 BinaryDomain{-100.0, 100.0, -100.0, 100.0}));
     report("fmin", test_binary("fmin", [](auto a, auto b) { return xp::fmin(a, b); }, fminq,
                                 BinaryDomain{-100.0, 100.0, -100.0, 100.0}));
-    // copysign not implemented in tf_math.hpp
+    report("copysign", test_binary("copysign", [](auto a, auto b) { return xp::copysign(a, b); }, copysignq,
+                                    BinaryDomain{-100.0, 100.0, -100.0, 100.0}));
     report("fma", test_binary("fma", [](auto a, auto b) { return xp::fma(a, b, tf::TripleFloat(1.0)); },
                                [](auto a, auto b) { return fmaq(a, b, 1.0Q); }, BinaryDomain{-10.0, 10.0, -10.0, 10.0}));
     report("multiply_scalar", test_unary("multiply_scalar",

@@ -1490,3 +1490,54 @@ ctest --test-dir /tmp/s10p35_build -j8 --timeout 1800
 
 tf_accuracy_test: Total ops tested: 45   Passed: 45   Failed: 0
 ```
+
+---
+
+## 14. S10 Phase 6 — TF copysign and hypot
+
+Phase 5 delivered two TF demos (real and complex), which surfaced a gap: TF was
+missing `copysign` and `hypot` present in every sibling backend (DD/FF/QF), and
+the real demo excluded both as a "deliberate API subset". Phase 6 closes the gap.
+
+### Implementation
+
+**`copysign(TripleFloat a, TripleFloat b)`** — magnitude of a, sign of b. Exact
+sign manipulation; no QD analogue. Implementation mirrors QF's (qf_math.hpp:1182-
+1186): take the absolute value of a, then negate if b is negative. The sign of a
+TF expansion is the sign of its **first nonzero word** — a naive f0-only check
+fails when f0=0.0 (an expansion's words can have mixed signs). Port checks all
+three words in cascade: `b.f0 < 0 || (b.f0==0 && (b.f1 < 0 || (b.f1==0 && b.f2 < 0)))`.
+
+**`hypot(TripleFloat a, TripleFloat b)`** — sqrt(a² + b²). Simple composition
+`sqrt(sqr(a) + sqr(b))`, matching DD/FF/QF. QD has no hypot; the comment at
+qf_math.hpp:1160 confirms this is the established pattern across all backends.
+No overflow/underflow scaling is implemented — TF inherits FF's FP32 range
+~[3.9e-31, 8.3e34], and the composition is safe within the usable domain.
+
+### Measured accuracy (tf_accuracy_test, __float128 oracle)
+
+- copysign: mean 21.70, min 21.70 (exact, at the scoring cap)
+- hypot: mean 21.05, min −0.00 (skip=22)
+
+### Tolerances set
+
+- copysign: 21.50 (0.20 below the cap, matching the other exact ops)
+- hypot: 20.00 (already present in the table from Phase 2, composition via sqrt)
+
+### Files changed
+
+`include/xp/tf_math.hpp` (copysign, hypot),
+`third_party/include/tf_math.hpp` (Kokkos forwarders),
+`tests/tf_accuracy_test.cpp` (copysign tolerance row, copysign test call,
+hypot lambda → xp::hypot), `src/demo_tf_real.cpp` (Hypot and Copysign enum
+entries, all switch cases), `docs/PORT_NOTES_TF.md`,
+`docs/UPSTREAM_PLAN_STATUS.md`.
+
+### Gate
+
+```
+ctest --test-dir /tmp/s10p6_build -j8 --timeout 1800
+100% tests passed, 0 tests failed out of 30
+```
+
+Demo: 39 ops (restored from 38 — copysign and hypot added).

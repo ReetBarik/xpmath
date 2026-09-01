@@ -93,7 +93,7 @@ enum class Op {
   Sqrt, Abs, Exp, Log, Exp2, Exp10, Expm1, Log2, Log10, Log1p,
   Sin, Cos, Tan, Asin, Acos, Atan,
   Sinh, Cosh, Tanh, Acosh, Asinh, Atanh,
-  Pow, Fmod, Remainder, Fmax, Fmin, Fdim,
+  Pow, Hypot, Fmod, Remainder, Copysign, Fmax, Fmin, Fdim,
   Fma,
   Ceil, Floor, Round, Trunc,
 };
@@ -104,7 +104,7 @@ static const Op kAllOps[] = {
   Op::Log2, Op::Log10, Op::Log1p,
   Op::Sin, Op::Cos, Op::Tan, Op::Asin, Op::Acos, Op::Atan,
   Op::Sinh, Op::Cosh, Op::Tanh, Op::Acosh, Op::Asinh, Op::Atanh,
-  Op::Pow, Op::Fmod, Op::Remainder,
+  Op::Pow, Op::Hypot, Op::Fmod, Op::Remainder, Op::Copysign,
   Op::Fmax, Op::Fmin, Op::Fdim,
   Op::Fma,
   Op::Ceil, Op::Floor, Op::Round, Op::Trunc,
@@ -148,8 +148,10 @@ bool parse_op(const std::string& s, Op& out) {
   if (s == "asinh")     { out = Op::Asinh;     return true; }
   if (s == "atanh")     { out = Op::Atanh;     return true; }
   if (s == "pow")       { out = Op::Pow;       return true; }
+  if (s == "hypot")     { out = Op::Hypot;     return true; }
   if (s == "fmod")      { out = Op::Fmod;      return true; }
   if (s == "remainder") { out = Op::Remainder; return true; }
+  if (s == "copysign")  { out = Op::Copysign;  return true; }
   if (s == "fmax")      { out = Op::Fmax;      return true; }
   if (s == "fmin")      { out = Op::Fmin;      return true; }
   if (s == "fdim")      { out = Op::Fdim;      return true; }
@@ -191,8 +193,10 @@ const char* op_name(Op op) {
     case Op::Asinh:     return "asinh";
     case Op::Atanh:     return "atanh";
     case Op::Pow:       return "pow";
+    case Op::Hypot:     return "hypot";
     case Op::Fmod:      return "fmod";
     case Op::Remainder: return "remainder";
+    case Op::Copysign:  return "copysign";
     case Op::Fmax:      return "fmax";
     case Op::Fmin:      return "fmin";
     case Op::Fdim:      return "fdim";
@@ -303,8 +307,10 @@ void fill_inputs(Op op, double* ha, double* hb, double* hc, int n, uint64_t seed
     case Op::Asinh:     unary(-1e8,   1e8);   break;
     case Op::Atanh:     unary(-0.999, 0.999); break;
     case Op::Pow:       binary(0.5, 20.0, 0.1, 5.0);   break;
+    case Op::Hypot:     binary(0.0, 1e8, 0.0, 1e8);    break;
     case Op::Fmod:      binary(0.1, 100.0, 0.1, 10.0); break;
     case Op::Remainder: binary(0.1, 100.0, 0.1, 10.0); break;
+    case Op::Copysign:  binary(-1e8, 1e8, -1.0, 1.0);  break;
     case Op::Fmax: case Op::Fmin: case Op::Fdim: binary(-1e8, 1e8, -1e8, 1e8); break;
     case Op::Fma: {
       std::uniform_real_distribution<double> da(0.1,10.0), db(0.1,10.0), dc(-10.0,10.0);
@@ -348,8 +354,10 @@ void host_quadmath_reference(Op op, const double* ha, const double* hb, const do
       case Op::Asinh:     out[i] = Kokkos::asinh(fa);                   break;
       case Op::Atanh:     out[i] = Kokkos::atanh(fa);                   break;
       case Op::Pow:       out[i] = Kokkos::pow(fa, fb);                 break;
+      case Op::Hypot:     out[i] = Kokkos::hypot(fa, fb);               break;
       case Op::Fmod:      out[i] = Kokkos::fmod(fa, fb);                break;
       case Op::Remainder: out[i] = Kokkos::remainder(fa, fb);           break;
+      case Op::Copysign:  out[i] = Kokkos::copysign(fa, fb);            break;
       case Op::Fmax:      out[i] = Kokkos::fmax(fa, fb);                break;
       case Op::Fmin:      out[i] = Kokkos::fmin(fa, fb);                break;
       case Op::Fdim:      out[i] = Kokkos::fdim(fa, fb);                break;
@@ -540,10 +548,14 @@ OpResult run_op(Op op, const Config& cfg) {
       st_tf=time_kernel_fence(cfg.repeats,[&](){Kokkos::parallel_for("tf_atanh",pol,KOKKOS_LAMBDA(int i){rtf(i)=tf::atanh(atf(i));});}); break;
     case Op::Pow:
       st_tf=time_kernel_fence(cfg.repeats,[&](){Kokkos::parallel_for("tf_pow",pol,KOKKOS_LAMBDA(int i){rtf(i)=tf::pow(atf(i),btf(i));});}); break;
+    case Op::Hypot:
+      st_tf=time_kernel_fence(cfg.repeats,[&](){Kokkos::parallel_for("tf_hypot",pol,KOKKOS_LAMBDA(int i){rtf(i)=tf::hypot(atf(i),btf(i));});}); break;
     case Op::Fmod:
       st_tf=time_kernel_fence(cfg.repeats,[&](){Kokkos::parallel_for("tf_fmod",pol,KOKKOS_LAMBDA(int i){rtf(i)=tf::fmod(atf(i),btf(i));});}); break;
     case Op::Remainder:
       st_tf=time_kernel_fence(cfg.repeats,[&](){Kokkos::parallel_for("tf_rem",pol,KOKKOS_LAMBDA(int i){rtf(i)=tf::remainder(atf(i),btf(i));});}); break;
+    case Op::Copysign:
+      st_tf=time_kernel_fence(cfg.repeats,[&](){Kokkos::parallel_for("tf_copysign",pol,KOKKOS_LAMBDA(int i){rtf(i)=tf::copysign(atf(i),btf(i));});}); break;
     case Op::Fmax:
       st_tf=time_kernel_fence(cfg.repeats,[&](){Kokkos::parallel_for("tf_fmax",pol,KOKKOS_LAMBDA(int i){rtf(i)=tf::fmax(atf(i),btf(i));});}); break;
     case Op::Fmin:
@@ -618,10 +630,14 @@ OpResult run_op(Op op, const Config& cfg) {
       st_dbl=time_kernel_fence(cfg.repeats,[&](){Kokkos::parallel_for("dbl_atanh",pol,KOKKOS_LAMBDA(int i){rd(i)=Kokkos::atanh(ad(i));});}); break;
     case Op::Pow:
       st_dbl=time_kernel_fence(cfg.repeats,[&](){Kokkos::parallel_for("dbl_pow",pol,KOKKOS_LAMBDA(int i){rd(i)=Kokkos::pow(ad(i),bd(i));});}); break;
+    case Op::Hypot:
+      st_dbl=time_kernel_fence(cfg.repeats,[&](){Kokkos::parallel_for("dbl_hypot",pol,KOKKOS_LAMBDA(int i){rd(i)=Kokkos::hypot(ad(i),bd(i));});}); break;
     case Op::Fmod:
       st_dbl=time_kernel_fence(cfg.repeats,[&](){Kokkos::parallel_for("dbl_fmod",pol,KOKKOS_LAMBDA(int i){rd(i)=Kokkos::fmod(ad(i),bd(i));});}); break;
     case Op::Remainder:
       st_dbl=time_kernel_fence(cfg.repeats,[&](){Kokkos::parallel_for("dbl_rem",pol,KOKKOS_LAMBDA(int i){rd(i)=Kokkos::remainder(ad(i),bd(i));});}); break;
+    case Op::Copysign:
+      st_dbl=time_kernel_fence(cfg.repeats,[&](){Kokkos::parallel_for("dbl_copysign",pol,KOKKOS_LAMBDA(int i){rd(i)=Kokkos::copysign(ad(i),bd(i));});}); break;
     case Op::Fmax:
       st_dbl=time_kernel_fence(cfg.repeats,[&](){Kokkos::parallel_for("dbl_fmax",pol,KOKKOS_LAMBDA(int i){rd(i)=Kokkos::fmax(ad(i),bd(i));});}); break;
     case Op::Fmin:
