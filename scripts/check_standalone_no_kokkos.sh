@@ -55,7 +55,7 @@ echo "[2/4] run ..."
 # own diagnostic strings say the word "Kokkos", which would trip the grep for
 # the wrong reason. This TU contains nothing but the include.
 echo "[3/4] preprocessed output contains no Kokkos ..."
-printf '#include <EPLIB/dd_math.hpp>\nint main() { return 0; }\n' > "${WORK}/only_include.cpp"
+printf '#include <xp/dd_math.hpp>\nint main() { return 0; }\n' > "${WORK}/only_include.cpp"
 "${CXX}" "${STD[@]}" -E "${INCLUDES[@]}" "${WORK}/only_include.cpp" > "${WORK}/pp.ii"
 if grep -n "Kokkos\|KOKKOS_" "${WORK}/pp.ii" > "${WORK}/hits.txt"; then
   echo "      FAIL: Kokkos reached the preprocessed TU:"
@@ -68,9 +68,9 @@ echo "      ok ($(wc -l < "${WORK}/pp.ii") preprocessed lines, 0 Kokkos hits)"
 # Belt and braces: the standalone headers themselves must not name Kokkos in
 # code. Comments may mention it (they explain the relationship to the wrapper),
 # so strip // comments before grepping.
-echo "[4/4] include/EPLIB/*.hpp name Kokkos only in comments ..."
+echo "[4/4] include/xp/*.hpp name Kokkos only in comments ..."
 bad=0
-for h in "${REPO_ROOT}"/include/EPLIB/*.hpp; do
+for h in "${REPO_ROOT}"/include/xp/*.hpp; do
   if sed 's://.*::' "${h}" | grep -n "Kokkos\|KOKKOS_" > "${WORK}/h.txt"; then
     echo "      FAIL: $(basename "${h}") references Kokkos in code:"
     cat "${WORK}/h.txt"

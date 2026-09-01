@@ -1,4 +1,4 @@
-# Kokkos extended-precision demo
+# xpmath — Extended-precision arithmetic library
 
 ## Section 1 — Motivation
 
@@ -12,7 +12,7 @@ x86_64-only, so code needing extra precision *inside* a portable compute kernel
 has had nowhere to go.
 
 This repository provides three portable, software-emulated extended-precision
-backends that run inside Kokkos kernels — **DD** (double-double), **FF**
+backends usable in plain C++, CUDA, HIP, SYCL, and Kokkos — **DD** (double-double), **FF**
 (float-float), and **QF** (quad-float). All three are written against Kokkos
 alone, carry no hardware dependency, and compile for any Kokkos execution space:
 CPU, GPU, and everything else Kokkos targets. Each is validated for accuracy

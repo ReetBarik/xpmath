@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**NOTE:** The GitHub repo name remains `kokkos-extended-precision-demo` pending a manual rename by the maintainer (GitHub auto-redirects old URLs). The recommended new name is `xpmath`.
+
 ## Project Overview
 
 Three portable extended-precision backends as header-only C++ in `third_party/include/`:

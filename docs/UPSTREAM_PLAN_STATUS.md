@@ -231,3 +231,106 @@ Keeps the X, more distinctive and more greppable than a two-letter token, no cla
 - **[tuwien-cms/libxprec](https://github.com/tuwien-cms/libxprec)** — C++11, MIT, header-plus-library double-double, CMake target `XPrec::xprec`, documented per-operation error bounds in multiples of u². **This is the closest existing thing to the DD backend, and the RFC must answer "why not just vendor libxprec?"** The honest answers are: it is DD only (no FF, no QF), it is not written for device execution across CUDA/HIP/SYCL, and it does not carry the Kokkos-facing API surface — but the question will be asked, so answer it first.
 - **QD** (Hida, Li, Bailey) — the double-double/quad-double library the QF backend already ports. Prior art the repo is downstream of, not merely adjacent to.
 - **[oprecomp/FloatX](https://github.com/oprecomp/FloatX)** — header-only C++ emulation of *low*-precision floating-point types. The opposite direction on the precision axis, the same "portable emulated FP type in C++" shape; useful as the counterexample that frames the space.
+## S3 — Name ratification + rename sweep
+
+**Commits:** (this commit — rename sweep, STATUS block, validation/s3/ evidence)
+
+**Outcome.** The ratified naming (xp:: / XPMATH_ / include/xp/, from S2 naming memo Candidate C) is applied everywhere S2 introduced the EPLIB placeholder, and the rename is byte-identical. All four gates passed: **ctest 23/23 in 141.71 s** (pre-rename at HEAD 12268e3 was 23/23 in ~137 s, within run variance); **byte-identical gate on both DD demos** (timing-stripped diffs empty, 87 lines real / 105 lines complex, matching S2 baselines exactly); **standalone no-Kokkos compile smoke passed** all four stages (compile+link, run PASS (0 failures), 49749 preprocessed lines with 0 Kokkos hits, headers name Kokkos only in comments); and **`git grep -i eplib` returns nothing** outside the three historical-document exclusions (docs/UPSTREAM_PLAN*.md, docs/PORT_NOTES*.md, docs/TEST_SUITE_PLAN.md). The rename is mechanical, complete, and numerically inert.
+
+### Rename scope
+
+| Token class | Old | New | Occurrences |
+|---|---|---|---:|
+| Namespace | `eplib::` | `xp::` | 92 |
+| Namespace (detail) | `eplib::detail::` | `xp::detail::` | (within namespace blocks) |
+| Inline macro | `EPLIB_INLINE_FUNCTION` | `XPMATH_INLINE_FUNCTION` | 131 |
+| Printf macro | `EPLIB_PRINTF` | `XPMATH_PRINTF` | 19 |
+| Device predicate (wide) | `EPLIB_ON_DEVICE` | `XPMATH_ON_DEVICE` | 7 |
+| Device predicate (narrow) | `EPLIB_ON_DEVICE_CUDA_OR_HIP` | `XPMATH_ON_DEVICE_CUDA_OR_HIP` | 4 |
+| Diagnostics knob | `EPLIB_ENABLE_DIAGNOSTICS` | `XPMATH_ENABLE_DIAGNOSTICS` | 5 |
+| Directory path | `include/EPLIB/` | `include/xp/` | 1 `git mv` + 14 include-path references |
+| Prose | `EPLIB` / `eplib` in comments/docs | `xp` / `XPMATH_` contextually | 8 |
+
+**Files touched (8):**
+- `include/xp/config.hpp` (git mv from EPLIB/, full rename)
+- `include/xp/dd_math.hpp` (git mv from EPLIB/, full rename)
+- `third_party/include/dd_math.hpp` (compat wrapper — updated include path + right-hand sides of using-declarations)
+- `tests/standalone/dd_no_kokkos_smoke.cpp` (include path + xp:: calls)
+- `scripts/check_standalone_no_kokkos.sh` (include/xp/ glob in stage 4)
+- `CMakeLists.txt` (comment updating include path)
+- `README.md` (title → "xpmath — Extended-precision arithmetic library", intro updated to mention standalone C++/CUDA/HIP/SYCL portability)
+- `CLAUDE.md` (note about pending GitHub repo rename)
+
+**Files NOT touched (historical documents, per instructions):**
+- docs/UPSTREAM_PLAN_STATUS.md S0/S1/S2 blocks (including the S2 naming memo, which must keep saying EPLIB was the placeholder)
+- docs/UPSTREAM_PLAN.md (S2 section text may keep EPLIB references as the spec that introduced it; S3 sub-plan text already says "placeholder → final name")
+- docs/PORT_NOTES*.md, docs/TEST_SUITE_PLAN.md (port/test history)
+
+### DEVIATIONS AND SURPRISES UP FRONT
+
+**(a) GitHub repo rename is DEFERRED to Reet (per instructions).** The project recommends the GitHub repo name **`xpmath`** (drops "kokkos" from the current `kokkos-extended-precision-demo`, aligns with the ratified library name). Reet will rename the repo in GitHub settings; GitHub auto-redirects old URLs, so existing clones keep working. **After the GitHub rename, Reet should run:**
+
+```bash
+git remote set-url origin https://github.com/ReetBarik/xpmath.git
+```
+
+The current remote URL (`https://github.com/ReetBarik/kokkos-extended-precision-demo.git`) continues to work via GitHub's redirect and was NOT modified in this commit (per instructions).
+
+**(b) CMake project name, package name, and target name are NOT yet renamed.** Those live in CMakeLists.txt project() and install() calls, which S2 did not touch — the standalone slice has no CMake packaging yet. S5/S6 will introduce CMake packaging for the standalone core (CMake target `xpmath::xpmath`, package `xpmath`), so deferring the project-name change to that sub-plan avoids a rename-before-creation.
+
+**(c) The docs/UPSTREAM_PLAN.md S2 section was left with its EPLIB placeholder references intact (judgment call).** That section introduced the placeholder and documents S2's design; rewriting it to xp:: would make the S2 naming memo's "EPLIB was the placeholder" statement point at nothing. The S3 sub-plan text (lines 250–278) already states "placeholder → final name" generically, so it remains accurate without a find-replace pass. This is a KEPT historical reference, not an omission.
+
+### Gate results
+
+| Gate | Result |
+|---|---|
+| 1. Build + ctest 23/23 | **PASS** — 100% tests passed, 0 failed out of 23, 141.71 s (pre-rename HEAD 12268e3: 23/23, ~137 s within run variance) |
+| 2a. Byte-identical, `kokkos_ep_demo` (DD real) | **PASS** — timing-stripped diff empty, 87 lines (S2 baseline: 87 lines) |
+| 2b. Byte-identical, `kokkos_ep_demo_complex` (DD complex) | **PASS** — timing-stripped diff empty, 105 lines (S2 baseline: 105 lines) |
+| 3. `scripts/check_standalone_no_kokkos.sh` | **PASS** — all 4 stages: compile+link ok, run PASS (0 failures), 49749 preprocessed lines with 0 Kokkos hits, include/xp/*.hpp name Kokkos only in comments |
+| 4. `git grep -i eplib` clean outside historical docs | **PASS** — 0 hits excluding docs/UPSTREAM_PLAN*.md, docs/PORT_NOTES*.md, docs/TEST_SUITE_PLAN.md |
+
+Evidence for gates 2a/2b committed under `validation/s3/`: `before_dd_real.txt`, `after_dd_real.txt`, `before_dd_complex.txt`, `after_dd_complex.txt`, and the `strip_timing.sh` stripper (copied from validation/s2/ unmodified, reusable as-is).
+
+### What S5 must know — the exact final token set
+
+The placeholder → final mapping is complete and S5 must match it exactly when renaming the five remaining headers (ff_math, qf_math, dd_complex, ff_complex, qf_complex):
+
+| Token | Final spelling |
+|---|---|
+| Namespace | `xp::` |
+| Detail namespace | `xp::detail::` |
+| Macro prefix | `XPMATH_` |
+| Include path | `include/xp/` |
+| Inline function macro | `XPMATH_INLINE_FUNCTION` |
+| Printf macro | `XPMATH_PRINTF` |
+| Device predicate (wide) | `XPMATH_ON_DEVICE` |
+| Device predicate (narrow) | `XPMATH_ON_DEVICE_CUDA_OR_HIP` |
+| Diagnostics knob | `XPMATH_ENABLE_DIAGNOSTICS` |
+
+**CMake package and target (S5/S6):** package name `xpmath`, target `xpmath::xpmath`.
+
+**Compat wrapper pattern (proven in S2, reapply verbatim to the five remaining headers):**
+1. Standalone core at `include/xp/<name>.hpp`, `namespace xp`, zero Kokkos.
+2. Thin wrapper left at old `third_party/include/<name>.hpp` path: type alias (`using FloatFloat = xp::FloatFloat;`), explicit `using xp::f;` declarations (never `using namespace xp;`), `Kokkos::`-namespace math forwarders.
+3. Free operators absent from wrapper (ADL finds them).
+
+**Reminder from S2 deviation (c)2:** the coupling census undercounts. Grep for bare unqualified math calls (not only `Kokkos::`-qualified), or a device build will fail. S2 had to add `atan2` and `ldexp` beyond the plan's list.
+
+**Byte-identical gate tooling is committed and reusable.** `validation/s3/strip_timing.sh` (identical to S2's) works on both real and complex demo output unmodified. S5 runs it for the remaining four demos (ff real, ff complex, qf real, qf complex).
+
+### Recommended GitHub repo name and remote-set-url command for Reet
+
+**Recommended repo name:** `xpmath`
+
+**Rationale:** Aligns with the ratified library name (xp:: namespace, xpmath CMake package), drops "kokkos" to reflect the standalone architecture (usable from plain C++/CUDA/HIP/SYCL, not Kokkos-only), and matches the naming memo's Candidate C recommendation.
+
+**Remote set-url command (AFTER Reet renames the repo in GitHub settings):**
+
+```bash
+git remote set-url origin https://github.com/ReetBarik/xpmath.git
+```
+
+Do NOT run this until the GitHub rename is complete. The current URL continues to work via GitHub's auto-redirect.
+
+---

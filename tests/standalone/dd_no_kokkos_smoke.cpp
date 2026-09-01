@@ -26,7 +26,7 @@
 // library away, and coarse enough that they never disagree with the real
 // accuracy suite.
 
-#include <EPLIB/dd_math.hpp>  // the ONLY project header this TU may include
+#include <xp/dd_math.hpp>  // the ONLY project header this TU may include
 
 #include <cmath>
 #include <cstdio>
@@ -41,7 +41,7 @@ int failures = 0;
 // implementation that is merely *working* clears this by 19 orders of
 // magnitude; the point is to detect "returns 0" or "returns NaN", not to
 // measure digits.
-void near(const char* what, eplib::DoubleDouble got, double want) {
+void near(const char* what, xp::DoubleDouble got, double want) {
   const double g = got.hi + got.lo;
   const double scale = (std::fabs(want) > 1.0) ? std::fabs(want) : 1.0;
   const bool ok = std::isfinite(g) && std::fabs(g - want) <= 1.0e-12 * scale;
@@ -53,14 +53,14 @@ void near(const char* what, eplib::DoubleDouble got, double want) {
 }  // namespace
 
 int main() {
-  using eplib::DoubleDouble;
+  using xp::DoubleDouble;
 
-  std::printf("standalone no-Kokkos smoke: eplib::DoubleDouble\n");
-  std::printf("  EPLIB_INLINE_FUNCTION and the scalar-math dispatch resolved\n"
+  std::printf("standalone no-Kokkos smoke: xp::DoubleDouble\n");
+  std::printf("  XPMATH_INLINE_FUNCTION and the scalar-math dispatch resolved\n"
               "  without any Kokkos header being reachable.\n\n");
 
   // --- construction, the bit-pattern factory, and the constants -----------
-  const DoubleDouble pi = eplib::DoubleDouble_pi();
+  const DoubleDouble pi = xp::DoubleDouble_pi();
   near("DoubleDouble_pi()", pi, M_PI);
   near("from_bits round trip", DoubleDouble::from_bits(0x3ff0000000000000ULL, 0x0ULL), 1.0);
 
@@ -82,13 +82,13 @@ int main() {
   // --- transcendentals: the scalar-math dispatch under load ---------------
   // sqrt/log/copysign/atan2/ldexp are the five host-or-device scalar calls the
   // header makes; exp, log and sqrt below route through all of them.
-  near("sqrt(2)", eplib::sqrt(DoubleDouble(2.0)), std::sqrt(2.0));
-  near("exp(1)", eplib::exp(DoubleDouble(1.0)), std::exp(1.0));
-  near("log(exp(2))", eplib::log(eplib::exp(DoubleDouble(2.0))), 2.0);
-  near("sin(pi/6)", eplib::sin(eplib::divide_scalar(pi, 6.0)), 0.5);
-  near("atan2(1,1)", eplib::atan2(DoubleDouble(1.0), DoubleDouble(1.0)), M_PI / 4.0);
-  near("tgamma(5)", eplib::tgamma(DoubleDouble(5.0)), 24.0);
-  near("erf(1)", eplib::erf(DoubleDouble(1.0)), std::erf(1.0));
+  near("sqrt(2)", xp::sqrt(DoubleDouble(2.0)), std::sqrt(2.0));
+  near("exp(1)", xp::exp(DoubleDouble(1.0)), std::exp(1.0));
+  near("log(exp(2))", xp::log(xp::exp(DoubleDouble(2.0))), 2.0);
+  near("sin(pi/6)", xp::sin(xp::divide_scalar(pi, 6.0)), 0.5);
+  near("atan2(1,1)", xp::atan2(DoubleDouble(1.0), DoubleDouble(1.0)), M_PI / 4.0);
+  near("tgamma(5)", xp::tgamma(DoubleDouble(5.0)), 24.0);
+  near("erf(1)", xp::erf(DoubleDouble(1.0)), std::erf(1.0));
 
   // --- ADL and the host-only ostream overload -----------------------------
   std::ostringstream os;

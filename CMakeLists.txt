@@ -74,8 +74,9 @@ endif()
 
 set(THIRD_PARTY_INCLUDE "${CMAKE_SOURCE_DIR}/third_party/include")
 
-# S2: the standalone, Kokkos-free extended-precision core lives in include/EPLIB/.
-# The compat wrappers in third_party/include/ resolve `#include <EPLIB/...>`
+# S2 (renamed in S3): the standalone, Kokkos-free extended-precision core
+# lives in include/xp/. The compat wrappers in third_party/include/ resolve
+# `#include <xp/...>`
 # through this directory, so every target that already gets THIRD_PARTY_INCLUDE
 # needs it as well. Appended to the same variable (which tests/CMakeLists.txt
 # also consumes) so no individual target's include list has to change.

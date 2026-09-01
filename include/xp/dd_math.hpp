@@ -16,31 +16,31 @@
 // Modifications from the original DDFUN v04 sources:
 //   * Translated from Fortran-90 (ddfuna.f90, ddfune.f90) to
 //     header-only C++17.
-//   * Every function EPLIB_INLINE_FUNCTION for host + device
+//   * Every function XPMATH_INLINE_FUNCTION for host + device
 //     portability across CUDA/HIP/SYCL/OpenMP-target.
-//   * Namespaced as eplib::DoubleDouble with STL-style
+//   * Namespaced as xp::DoubleDouble with STL-style
 //     free-function names.
 //   * See docs/TEST_SUITE_PLAN.md "Upstreaming considerations" for
 //     naming and API conventions.
 
 #pragma once
 
-// Double-double real arithmetic — eplib::DoubleDouble. ~31 decimal digits
+// Double-double real arithmetic — xp::DoubleDouble. ~31 decimal digits
 // from an unevaluated sum of two FP64 components (hi + lo, |lo| <= ulp(hi)/2).
 //
 // Ported from DDFUN (David H. Bailey, Lawrence Berkeley National Lab) Fortran
 // sources (ddfuna.f90, ddfune.f90).
 //
 // DEPENDENCIES: none beyond the C++17 standard library. In particular this
-// header does NOT include or require Kokkos — see EPLIB/config.hpp for how the
+// header does NOT include or require Kokkos — see xp/config.hpp for how the
 // four portability facilities it needs (inline annotation, on-device
 // detection, scalar math dispatch, diagnostic printf) are supplied. Kokkos
 // users get today's `Kokkos::Experimental::DoubleDouble` API unchanged through
 // the compat wrapper at third_party/include/dd_math.hpp, which is the only
 // place `namespace Kokkos` is mentioned.
 //
-// NAME IS A PLACEHOLDER: `eplib::` is provisional pending the S2 naming memo
-// (docs/UPSTREAM_PLAN_STATUS.md); S3 applies the ratified name.
+// NAMING (ratified via S2 naming memo + S3): xp:: = extended precision,
+// companion to MxP (mixed precision). See include/xp/config.hpp for rationale.
 //
 // Naming conventions (T0.4):
 //   * Type + math live in one flat namespace so an upstream move is
@@ -62,38 +62,38 @@
 //     add/subtract/multiply/divide are not forwarded — they are for operators
 //     and explicit ADL only.
 
-#include <EPLIB/config.hpp>
+#include <xp/config.hpp>
 #include <cstdint>
 #include <cstring>
 #include <cmath>
 
-#if !defined(EPLIB_ON_DEVICE)
+#if !defined(XPMATH_ON_DEVICE)
 #  include <iomanip>
 #  include <ostream>
 #endif
 
-namespace eplib {
+namespace xp {
 // ============================================================
 // Forward declarations (struct uses them in operator bodies)
 // ============================================================
 struct DoubleDouble;
-EPLIB_INLINE_FUNCTION DoubleDouble add(DoubleDouble a, DoubleDouble b);
-EPLIB_INLINE_FUNCTION DoubleDouble subtract(DoubleDouble a, DoubleDouble b);
-EPLIB_INLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b);
-EPLIB_INLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b);
-EPLIB_INLINE_FUNCTION DoubleDouble multiply_scalar(DoubleDouble a, double b);
-EPLIB_INLINE_FUNCTION DoubleDouble divide_scalar(DoubleDouble a, double b);
-EPLIB_INLINE_FUNCTION DoubleDouble negate(DoubleDouble a);
-EPLIB_INLINE_FUNCTION DoubleDouble abs(DoubleDouble a);
-EPLIB_INLINE_FUNCTION DoubleDouble sqrt(DoubleDouble a);
-EPLIB_INLINE_FUNCTION DoubleDouble round_to_nearest_int(DoubleDouble a);
-EPLIB_INLINE_FUNCTION DoubleDouble pow_int(DoubleDouble a, int n);
-EPLIB_INLINE_FUNCTION DoubleDouble exp(DoubleDouble a);
-EPLIB_INLINE_FUNCTION DoubleDouble log(DoubleDouble a);
-EPLIB_INLINE_FUNCTION DoubleDouble pow(DoubleDouble a, DoubleDouble b);
-EPLIB_INLINE_FUNCTION void   sinhcosh(DoubleDouble a, DoubleDouble& x, DoubleDouble& y);
-EPLIB_INLINE_FUNCTION void   sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble& y);
-EPLIB_INLINE_FUNCTION DoubleDouble angle(DoubleDouble x, DoubleDouble y);
+XPMATH_INLINE_FUNCTION DoubleDouble add(DoubleDouble a, DoubleDouble b);
+XPMATH_INLINE_FUNCTION DoubleDouble subtract(DoubleDouble a, DoubleDouble b);
+XPMATH_INLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b);
+XPMATH_INLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b);
+XPMATH_INLINE_FUNCTION DoubleDouble multiply_scalar(DoubleDouble a, double b);
+XPMATH_INLINE_FUNCTION DoubleDouble divide_scalar(DoubleDouble a, double b);
+XPMATH_INLINE_FUNCTION DoubleDouble negate(DoubleDouble a);
+XPMATH_INLINE_FUNCTION DoubleDouble abs(DoubleDouble a);
+XPMATH_INLINE_FUNCTION DoubleDouble sqrt(DoubleDouble a);
+XPMATH_INLINE_FUNCTION DoubleDouble round_to_nearest_int(DoubleDouble a);
+XPMATH_INLINE_FUNCTION DoubleDouble pow_int(DoubleDouble a, int n);
+XPMATH_INLINE_FUNCTION DoubleDouble exp(DoubleDouble a);
+XPMATH_INLINE_FUNCTION DoubleDouble log(DoubleDouble a);
+XPMATH_INLINE_FUNCTION DoubleDouble pow(DoubleDouble a, DoubleDouble b);
+XPMATH_INLINE_FUNCTION void   sinhcosh(DoubleDouble a, DoubleDouble& x, DoubleDouble& y);
+XPMATH_INLINE_FUNCTION void   sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble& y);
+XPMATH_INLINE_FUNCTION DoubleDouble angle(DoubleDouble x, DoubleDouble y);
 
 // ============================================================
 // DoubleDouble struct
@@ -102,24 +102,24 @@ struct DoubleDouble {
     double hi;
     double lo;
 
-    EPLIB_INLINE_FUNCTION DoubleDouble() : hi(0.0), lo(0.0) {}
-    EPLIB_INLINE_FUNCTION DoubleDouble(double h) : hi(h), lo(0.0) {}
-    EPLIB_INLINE_FUNCTION DoubleDouble(double h, double l) : hi(h), lo(l) {}
-    EPLIB_INLINE_FUNCTION DoubleDouble(const DoubleDouble& o) : hi(o.hi), lo(o.lo) {}
-    EPLIB_INLINE_FUNCTION DoubleDouble& operator=(const DoubleDouble& o) { hi=o.hi; lo=o.lo; return *this; }
+    XPMATH_INLINE_FUNCTION DoubleDouble() : hi(0.0), lo(0.0) {}
+    XPMATH_INLINE_FUNCTION DoubleDouble(double h) : hi(h), lo(0.0) {}
+    XPMATH_INLINE_FUNCTION DoubleDouble(double h, double l) : hi(h), lo(l) {}
+    XPMATH_INLINE_FUNCTION DoubleDouble(const DoubleDouble& o) : hi(o.hi), lo(o.lo) {}
+    XPMATH_INLINE_FUNCTION DoubleDouble& operator=(const DoubleDouble& o) { hi=o.hi; lo=o.lo; return *this; }
 
     // Factory: build a DoubleDouble from the IEEE-754 bit patterns of its two
     // components. Safe on host (memcpy) and device (__longlong_as_double).
     // Replaces the former free bit-pattern constructor function.
     //
-    // The guard is EPLIB_ON_DEVICE_CUDA_OR_HIP, deliberately NOT the general
-    // EPLIB_ON_DEVICE: __longlong_as_double is a CUDA/HIP global-namespace
+    // The guard is XPMATH_ON_DEVICE_CUDA_OR_HIP, deliberately NOT the general
+    // XPMATH_ON_DEVICE: __longlong_as_double is a CUDA/HIP global-namespace
     // intrinsic with no SYCL equivalent, so a SYCL device build must take the
     // std::memcpy path. Both paths are the identical bit reinterpretation, so
     // this widening is a portability fix with no numerical content.
-    static EPLIB_INLINE_FUNCTION DoubleDouble from_bits(uint64_t hi_bits, uint64_t lo_bits) {
+    static XPMATH_INLINE_FUNCTION DoubleDouble from_bits(uint64_t hi_bits, uint64_t lo_bits) {
         double h, l;
-#if !defined(EPLIB_ON_DEVICE_CUDA_OR_HIP)
+#if !defined(XPMATH_ON_DEVICE_CUDA_OR_HIP)
         std::memcpy(&h, &hi_bits, sizeof(double));
         std::memcpy(&l, &lo_bits, sizeof(double));
 #else
@@ -129,41 +129,41 @@ struct DoubleDouble {
         return DoubleDouble(h, l);
     }
 
-    EPLIB_INLINE_FUNCTION DoubleDouble operator-() const { return negate(*this); }
-    EPLIB_INLINE_FUNCTION DoubleDouble operator+(DoubleDouble b) const { return add(*this, b); }
-    EPLIB_INLINE_FUNCTION DoubleDouble operator-(DoubleDouble b) const { return subtract(*this, b); }
-    EPLIB_INLINE_FUNCTION DoubleDouble operator*(DoubleDouble b) const { return multiply(*this, b); }
-    EPLIB_INLINE_FUNCTION DoubleDouble operator/(DoubleDouble b) const { return divide(*this, b); }
-    EPLIB_INLINE_FUNCTION DoubleDouble operator*(double b)  const { return multiply_scalar(*this, b); }
-    EPLIB_INLINE_FUNCTION DoubleDouble operator/(double b)  const { return divide_scalar(*this, b); }
-    EPLIB_INLINE_FUNCTION DoubleDouble operator+(double b)  const { return add(*this, DoubleDouble(b)); }
-    EPLIB_INLINE_FUNCTION DoubleDouble operator-(double b)  const { return subtract(*this, DoubleDouble(b)); }
+    XPMATH_INLINE_FUNCTION DoubleDouble operator-() const { return negate(*this); }
+    XPMATH_INLINE_FUNCTION DoubleDouble operator+(DoubleDouble b) const { return add(*this, b); }
+    XPMATH_INLINE_FUNCTION DoubleDouble operator-(DoubleDouble b) const { return subtract(*this, b); }
+    XPMATH_INLINE_FUNCTION DoubleDouble operator*(DoubleDouble b) const { return multiply(*this, b); }
+    XPMATH_INLINE_FUNCTION DoubleDouble operator/(DoubleDouble b) const { return divide(*this, b); }
+    XPMATH_INLINE_FUNCTION DoubleDouble operator*(double b)  const { return multiply_scalar(*this, b); }
+    XPMATH_INLINE_FUNCTION DoubleDouble operator/(double b)  const { return divide_scalar(*this, b); }
+    XPMATH_INLINE_FUNCTION DoubleDouble operator+(double b)  const { return add(*this, DoubleDouble(b)); }
+    XPMATH_INLINE_FUNCTION DoubleDouble operator-(double b)  const { return subtract(*this, DoubleDouble(b)); }
 
-    EPLIB_INLINE_FUNCTION DoubleDouble& operator+=(DoubleDouble b) { *this = *this + b; return *this; }
-    EPLIB_INLINE_FUNCTION DoubleDouble& operator-=(DoubleDouble b) { *this = *this - b; return *this; }
-    EPLIB_INLINE_FUNCTION DoubleDouble& operator*=(DoubleDouble b) { *this = *this * b; return *this; }
-    EPLIB_INLINE_FUNCTION DoubleDouble& operator/=(DoubleDouble b) { *this = *this / b; return *this; }
-    EPLIB_INLINE_FUNCTION DoubleDouble& operator+=(double b) { *this = *this + b; return *this; }
-    EPLIB_INLINE_FUNCTION DoubleDouble& operator-=(double b) { *this = *this - b; return *this; }
-    EPLIB_INLINE_FUNCTION DoubleDouble& operator*=(double b) { *this = multiply_scalar(*this, b); return *this; }
-    EPLIB_INLINE_FUNCTION DoubleDouble& operator/=(double b) { *this = divide_scalar(*this, b); return *this; }
+    XPMATH_INLINE_FUNCTION DoubleDouble& operator+=(DoubleDouble b) { *this = *this + b; return *this; }
+    XPMATH_INLINE_FUNCTION DoubleDouble& operator-=(DoubleDouble b) { *this = *this - b; return *this; }
+    XPMATH_INLINE_FUNCTION DoubleDouble& operator*=(DoubleDouble b) { *this = *this * b; return *this; }
+    XPMATH_INLINE_FUNCTION DoubleDouble& operator/=(DoubleDouble b) { *this = *this / b; return *this; }
+    XPMATH_INLINE_FUNCTION DoubleDouble& operator+=(double b) { *this = *this + b; return *this; }
+    XPMATH_INLINE_FUNCTION DoubleDouble& operator-=(double b) { *this = *this - b; return *this; }
+    XPMATH_INLINE_FUNCTION DoubleDouble& operator*=(double b) { *this = multiply_scalar(*this, b); return *this; }
+    XPMATH_INLINE_FUNCTION DoubleDouble& operator/=(double b) { *this = divide_scalar(*this, b); return *this; }
 
-    EPLIB_INLINE_FUNCTION bool operator==(DoubleDouble b) const { return hi==b.hi && lo==b.lo; }
-    EPLIB_INLINE_FUNCTION bool operator!=(DoubleDouble b) const { return !(*this == b); }
-    EPLIB_INLINE_FUNCTION bool operator<(DoubleDouble b)  const { return hi<b.hi || (hi==b.hi && lo<b.lo); }
-    EPLIB_INLINE_FUNCTION bool operator>(DoubleDouble b)  const { return hi>b.hi || (hi==b.hi && lo>b.lo); }
-    EPLIB_INLINE_FUNCTION bool operator<=(DoubleDouble b) const { return !(b < *this); }
-    EPLIB_INLINE_FUNCTION bool operator>=(DoubleDouble b) const { return !(*this < b); }
+    XPMATH_INLINE_FUNCTION bool operator==(DoubleDouble b) const { return hi==b.hi && lo==b.lo; }
+    XPMATH_INLINE_FUNCTION bool operator!=(DoubleDouble b) const { return !(*this == b); }
+    XPMATH_INLINE_FUNCTION bool operator<(DoubleDouble b)  const { return hi<b.hi || (hi==b.hi && lo<b.lo); }
+    XPMATH_INLINE_FUNCTION bool operator>(DoubleDouble b)  const { return hi>b.hi || (hi==b.hi && lo>b.lo); }
+    XPMATH_INLINE_FUNCTION bool operator<=(DoubleDouble b) const { return !(b < *this); }
+    XPMATH_INLINE_FUNCTION bool operator>=(DoubleDouble b) const { return !(*this < b); }
 };
 
-EPLIB_INLINE_FUNCTION DoubleDouble operator+(double a, DoubleDouble b) { return add(DoubleDouble(a), b); }
-EPLIB_INLINE_FUNCTION DoubleDouble operator-(double a, DoubleDouble b) { return subtract(DoubleDouble(a), b); }
-EPLIB_INLINE_FUNCTION DoubleDouble operator*(double a, DoubleDouble b) { return multiply_scalar(b, a); }
-EPLIB_INLINE_FUNCTION DoubleDouble operator/(double a, DoubleDouble b) { return divide(DoubleDouble(a), b); }
+XPMATH_INLINE_FUNCTION DoubleDouble operator+(double a, DoubleDouble b) { return add(DoubleDouble(a), b); }
+XPMATH_INLINE_FUNCTION DoubleDouble operator-(double a, DoubleDouble b) { return subtract(DoubleDouble(a), b); }
+XPMATH_INLINE_FUNCTION DoubleDouble operator*(double a, DoubleDouble b) { return multiply_scalar(b, a); }
+XPMATH_INLINE_FUNCTION DoubleDouble operator/(double a, DoubleDouble b) { return divide(DoubleDouble(a), b); }
 
 // Host-only: <ostream> is not usable in a device compilation pass. Guarded by
-// EPLIB_ON_DEVICE (all three vendors), not the CUDA-only spelling.
-#if !defined(EPLIB_ON_DEVICE)
+// XPMATH_ON_DEVICE (all three vendors), not the CUDA-only spelling.
+#if !defined(XPMATH_ON_DEVICE)
 inline std::ostream& operator<<(std::ostream& os, const DoubleDouble& d) {
     os << "[" << std::setprecision(16) << std::scientific << d.hi
        << ", " << d.lo << "]";
@@ -174,23 +174,23 @@ inline std::ostream& operator<<(std::ostream& os, const DoubleDouble& d) {
 // ============================================================
 // Constants via bit-pattern construction (safe on host + device)
 // ============================================================
-EPLIB_INLINE_FUNCTION DoubleDouble DoubleDouble_pi()          { return DoubleDouble::from_bits(0x400921fb54442d18ULL, 0x3ca1a62633145c07ULL); }
-EPLIB_INLINE_FUNCTION DoubleDouble DoubleDouble_e()           { return DoubleDouble::from_bits(0x4005bf0a8b145769ULL, 0x3ca4d57ee2b1013aULL); }
-EPLIB_INLINE_FUNCTION DoubleDouble DoubleDouble_log2()        { return DoubleDouble::from_bits(0x3fe62e42fefa39efULL, 0x3c7abc9e3b39803fULL); }
-EPLIB_INLINE_FUNCTION DoubleDouble DoubleDouble_log10()       { return DoubleDouble::from_bits(0x40026bb1bbb55516ULL, 0xbcaf48ad494ea3eaULL); } // ln(10)
-EPLIB_INLINE_FUNCTION DoubleDouble DoubleDouble_sqrt2()       { return DoubleDouble::from_bits(0x3ff6a09e667f3bcdULL, 0xbc9bdd3413b26456ULL); }
-EPLIB_INLINE_FUNCTION DoubleDouble DoubleDouble_euler_gamma() { return DoubleDouble::from_bits(0x3fe2788cfc6fb619ULL, 0xbc56cb90701fbfabULL); }
+XPMATH_INLINE_FUNCTION DoubleDouble DoubleDouble_pi()          { return DoubleDouble::from_bits(0x400921fb54442d18ULL, 0x3ca1a62633145c07ULL); }
+XPMATH_INLINE_FUNCTION DoubleDouble DoubleDouble_e()           { return DoubleDouble::from_bits(0x4005bf0a8b145769ULL, 0x3ca4d57ee2b1013aULL); }
+XPMATH_INLINE_FUNCTION DoubleDouble DoubleDouble_log2()        { return DoubleDouble::from_bits(0x3fe62e42fefa39efULL, 0x3c7abc9e3b39803fULL); }
+XPMATH_INLINE_FUNCTION DoubleDouble DoubleDouble_log10()       { return DoubleDouble::from_bits(0x40026bb1bbb55516ULL, 0xbcaf48ad494ea3eaULL); } // ln(10)
+XPMATH_INLINE_FUNCTION DoubleDouble DoubleDouble_sqrt2()       { return DoubleDouble::from_bits(0x3ff6a09e667f3bcdULL, 0xbc9bdd3413b26456ULL); }
+XPMATH_INLINE_FUNCTION DoubleDouble DoubleDouble_euler_gamma() { return DoubleDouble::from_bits(0x3fe2788cfc6fb619ULL, 0xbc56cb90701fbfabULL); }
 
 // ============================================================
 // Primitive arithmetic
 // ============================================================
 
-EPLIB_INLINE_FUNCTION DoubleDouble negate(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble negate(DoubleDouble a) {
     return DoubleDouble(-a.hi, -a.lo);
 }
 
 // TwoSum (Knuth)
-EPLIB_INLINE_FUNCTION DoubleDouble add(DoubleDouble a, DoubleDouble b) {
+XPMATH_INLINE_FUNCTION DoubleDouble add(DoubleDouble a, DoubleDouble b) {
     double t1 = a.hi + b.hi;
     double e  = t1 - a.hi;
     double t2 = ((b.hi - e) + (a.hi - (t1 - e))) + a.lo + b.lo;
@@ -199,7 +199,7 @@ EPLIB_INLINE_FUNCTION DoubleDouble add(DoubleDouble a, DoubleDouble b) {
     return DoubleDouble(hi, lo);
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble subtract(DoubleDouble a, DoubleDouble b) {
+XPMATH_INLINE_FUNCTION DoubleDouble subtract(DoubleDouble a, DoubleDouble b) {
     double t1 = a.hi - b.hi;
     double e  = t1 - a.hi;
     double t2 = ((-b.hi - e) + (a.hi - (t1 - e))) + a.lo - b.lo;
@@ -209,7 +209,7 @@ EPLIB_INLINE_FUNCTION DoubleDouble subtract(DoubleDouble a, DoubleDouble b) {
 }
 
 // TwoProduct (Dekker splitting)
-EPLIB_INLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b) {
+XPMATH_INLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b) {
     const double split = 134217729.0;
     double cona = a.hi * split, conb = b.hi * split;
     double a1 = cona - (cona - a.hi), b1 = conb - (conb - b.hi);
@@ -225,7 +225,7 @@ EPLIB_INLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b) {
     return DoubleDouble(hi, lo);
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b) {
+XPMATH_INLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b) {
     const double split = 134217729.0;
     double s1  = a.hi / b.hi;
     double cona = s1 * split, conb = b.hi * split;
@@ -248,7 +248,7 @@ EPLIB_INLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b) {
     return DoubleDouble(hi, lo);
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble multiply_scalar(DoubleDouble a, double b) {
+XPMATH_INLINE_FUNCTION DoubleDouble multiply_scalar(DoubleDouble a, double b) {
     const double split = 134217729.0;
     double cona = a.hi * split, conb = b * split;
     double a1   = cona - (cona - a.hi), b1 = conb - (conb - b);
@@ -264,7 +264,7 @@ EPLIB_INLINE_FUNCTION DoubleDouble multiply_scalar(DoubleDouble a, double b) {
     return DoubleDouble(hi, lo);
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble divide_scalar(DoubleDouble a, double b) {
+XPMATH_INLINE_FUNCTION DoubleDouble divide_scalar(DoubleDouble a, double b) {
     const double split = 134217729.0;
     double t1  = a.hi / b;
     double cona = t1 * split, conb = b * split;
@@ -282,7 +282,7 @@ EPLIB_INLINE_FUNCTION DoubleDouble divide_scalar(DoubleDouble a, double b) {
 }
 
 // Exact product of two doubles
-EPLIB_INLINE_FUNCTION DoubleDouble two_prod(double da, double db) {
+XPMATH_INLINE_FUNCTION DoubleDouble two_prod(double da, double db) {
     const double split = 134217729.0;
     double cona = da * split, conb = db * split;
     double a1   = cona - (cona - da), b1 = conb - (conb - db);
@@ -296,28 +296,28 @@ EPLIB_INLINE_FUNCTION DoubleDouble two_prod(double da, double db) {
 // Basic math
 // ============================================================
 
-EPLIB_INLINE_FUNCTION DoubleDouble abs(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble abs(DoubleDouble a) {
     return (a.hi >= 0.0) ? a : DoubleDouble(-a.hi, -a.lo);
 }
 
 // Nearest integer
-EPLIB_INLINE_FUNCTION DoubleDouble round_to_nearest_int(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble round_to_nearest_int(DoubleDouble a) {
     if (a.hi == 0.0) return DoubleDouble(0.0);
     const double T105 = detail::ldexp(1.0, 105); // 2^105
     const double T52  = detail::ldexp(1.0, 52);  // 2^52
     DoubleDouble CON = DoubleDouble(T105, T52);
     if (a.hi >= T105) {
-        EPLIB_PRINTF("DDNINT: argument too large\n");
+        XPMATH_PRINTF("DDNINT: argument too large\n");
         return DoubleDouble(0.0);
     }
     if (a.hi > 0.0) return subtract(add(a, CON), CON);
     else            return add(subtract(a, CON), CON);
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble sqrt(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble sqrt(DoubleDouble a) {
     if (a.hi == 0.0) return DoubleDouble(0.0);
     if (a.hi < 0.0) {
-        EPLIB_PRINTF("DDSQRT: negative argument\n");
+        XPMATH_PRINTF("DDSQRT: negative argument\n");
         return DoubleDouble(0.0);
     }
     double t1 = 1.0 / detail::sqrt(a.hi);
@@ -329,11 +329,11 @@ EPLIB_INLINE_FUNCTION DoubleDouble sqrt(DoubleDouble a) {
 }
 
 // Integer power
-EPLIB_INLINE_FUNCTION DoubleDouble pow_int(DoubleDouble a, int n) {
+XPMATH_INLINE_FUNCTION DoubleDouble pow_int(DoubleDouble a, int n) {
     const double cl2 = 1.4426950408889633;
     if (a.hi == 0.0) {
         if (n >= 0) return DoubleDouble(0.0);
-        EPLIB_PRINTF("DDNPWR: zero base with negative exponent\n");
+        XPMATH_PRINTF("DDNPWR: zero base with negative exponent\n");
         return DoubleDouble(0.0);
     }
     int nn = (n < 0) ? -n : n;
@@ -357,12 +357,12 @@ EPLIB_INLINE_FUNCTION DoubleDouble pow_int(DoubleDouble a, int n) {
 // Exp / Log family
 // ============================================================
 
-EPLIB_INLINE_FUNCTION DoubleDouble exp(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble exp(DoubleDouble a) {
     const int nq = 6;
     const double eps = 1.0e-32;
     DoubleDouble al2 = DoubleDouble_log2();
     if (a.hi >= 300.0) {
-        EPLIB_PRINTF("DDEXP: argument too large\n");
+        XPMATH_PRINTF("DDEXP: argument too large\n");
         return DoubleDouble(0.0);
     }
     if (a.hi <= -300.0) return DoubleDouble(0.0);
@@ -385,16 +385,16 @@ EPLIB_INLINE_FUNCTION DoubleDouble exp(DoubleDouble a) {
         s0 = add(s3, s2);
         s3 = s0;
         if (detail::fabs(s2.hi) <= eps * detail::fabs(s3.hi)) break;
-        if (l1 == 100) { EPLIB_PRINTF("DDEXP: iteration limit\n"); return DoubleDouble(0.0); }
+        if (l1 == 100) { XPMATH_PRINTF("DDEXP: iteration limit\n"); return DoubleDouble(0.0); }
     }
     for (int i = 0; i < nq; ++i) s3 = multiply(s3, s3);
 
     return multiply_scalar(s3, detail::ldexp(1.0, nz)); // multiply by 2^nz
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble log(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble log(DoubleDouble a) {
     if (a.hi <= 0.0) {
-        EPLIB_PRINTF("DDLOG: non-positive argument\n");
+        XPMATH_PRINTF("DDLOG: non-positive argument\n");
         return DoubleDouble(0.0);
     }
     // Initial approximation then 3 Newton steps: b <- b + (a - exp(b)) / exp(b)
@@ -408,28 +408,28 @@ EPLIB_INLINE_FUNCTION DoubleDouble log(DoubleDouble a) {
     return b;
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble log2(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble log2(DoubleDouble a) {
     return divide(log(a), DoubleDouble_log2());
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble log10(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble log10(DoubleDouble a) {
     return divide(log(a), DoubleDouble_log10());
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble log1p(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble log1p(DoubleDouble a) {
     // log(1+a); use direct formula for moderate a
     return log(add(DoubleDouble(1.0), a));
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble exp2(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble exp2(DoubleDouble a) {
     return exp(multiply(a, DoubleDouble_log2()));
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble exp10(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble exp10(DoubleDouble a) {
     return exp(multiply(a, DoubleDouble_log10()));
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble expm1(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble expm1(DoubleDouble a) {
     if (detail::fabs(a.hi) > 0.5) {
         // |exp(a)-1| > e^0.5-1 ~ 0.65: subtraction of 1 causes no significant cancellation
         return subtract(exp(a), DoubleDouble(1.0));
@@ -451,12 +451,12 @@ EPLIB_INLINE_FUNCTION DoubleDouble expm1(DoubleDouble a) {
 
 // sincos: compute (cos(a), sin(a)) via argument reduction + Taylor series
 // x = cos(a), y = sin(a)
-EPLIB_INLINE_FUNCTION void sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble& y) {
+XPMATH_INLINE_FUNCTION void sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble& y) {
     const int itrmx = 1000, nq = 5;
     const double eps = 1.0e-32;
     if (a.hi == 0.0) { x = DoubleDouble(1.0); y = DoubleDouble(0.0); return; }
     if (a.hi >= 1.0e60) {
-        EPLIB_PRINTF("DDCSSNR: argument too large\n");
+        XPMATH_PRINTF("DDCSSNR: argument too large\n");
         x = DoubleDouble(0.0); y = DoubleDouble(0.0); return;
     }
     DoubleDouble pi2 = multiply_scalar(DoubleDouble_pi(), 2.0);
@@ -477,7 +477,7 @@ EPLIB_INLINE_FUNCTION void sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble&
         s3t = add(s1t, s0);
         s0  = s3t;
         if (detail::fabs(s1t.hi) < eps) break;
-        if (i1 == itrmx) { EPLIB_PRINTF("DDCSSNR: iteration limit\n"); return; }
+        if (i1 == itrmx) { XPMATH_PRINTF("DDCSSNR: iteration limit\n"); return; }
     }
     // Double-angle nq times: sin(2x) = 2*sin(x)*cos(x), cos(2x) = 1 - 2*sin²(x)
     DoubleDouble f2 = DoubleDouble(0.5);
@@ -497,19 +497,19 @@ EPLIB_INLINE_FUNCTION void sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble&
     x = s0; y = s1t;
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble sin(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble sin(DoubleDouble a) {
     DoubleDouble c, s; sincos(a, c, s); return s;
 }
-EPLIB_INLINE_FUNCTION DoubleDouble cos(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble cos(DoubleDouble a) {
     DoubleDouble c, s; sincos(a, c, s); return c;
 }
-EPLIB_INLINE_FUNCTION DoubleDouble tan(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble tan(DoubleDouble a) {
     DoubleDouble c, s; sincos(a, c, s); return divide(s, c);
 }
 
 // Angle of point (x, y) = atan2(y, x). Internal DDFUN primitive (DDANG); the
 // public STL-ordered wrapper is atan2(y, x) below.
-EPLIB_INLINE_FUNCTION DoubleDouble angle(DoubleDouble x, DoubleDouble y) {
+XPMATH_INLINE_FUNCTION DoubleDouble angle(DoubleDouble x, DoubleDouble y) {
     DoubleDouble pi = DoubleDouble_pi();
     if (x.hi == 0.0 && y.hi == 0.0) return DoubleDouble(0.0);
     if (x.hi == 0.0) return (y.hi > 0.0) ? multiply_scalar(pi, 0.5) : multiply_scalar(pi, -0.5);
@@ -536,26 +536,26 @@ EPLIB_INLINE_FUNCTION DoubleDouble angle(DoubleDouble x, DoubleDouble y) {
     return a;
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble asin(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble asin(DoubleDouble a) {
     if (detail::fabs(a.hi) > 1.0) {
-        EPLIB_PRINTF("DDASIN: argument out of range\n");
+        XPMATH_PRINTF("DDASIN: argument out of range\n");
         return DoubleDouble(0.0);
     }
     DoubleDouble t = sqrt(subtract(DoubleDouble(1.0), multiply(a, a)));
     return angle(t, a); // atan2(a, sqrt(1-a^2))
 }
-EPLIB_INLINE_FUNCTION DoubleDouble acos(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble acos(DoubleDouble a) {
     if (detail::fabs(a.hi) > 1.0) {
-        EPLIB_PRINTF("DDACOS: argument out of range\n");
+        XPMATH_PRINTF("DDACOS: argument out of range\n");
         return DoubleDouble(0.0);
     }
     DoubleDouble t = sqrt(subtract(DoubleDouble(1.0), multiply(a, a)));
     return angle(a, t); // atan2(sqrt(1-a^2), a)
 }
-EPLIB_INLINE_FUNCTION DoubleDouble atan(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble atan(DoubleDouble a) {
     return angle(DoubleDouble(1.0), a); // atan2(a, 1)
 }
-EPLIB_INLINE_FUNCTION DoubleDouble atan2(DoubleDouble y, DoubleDouble x) {
+XPMATH_INLINE_FUNCTION DoubleDouble atan2(DoubleDouble y, DoubleDouble x) {
     return angle(x, y);
 }
 
@@ -564,20 +564,20 @@ EPLIB_INLINE_FUNCTION DoubleDouble atan2(DoubleDouble y, DoubleDouble x) {
 // ============================================================
 
 // x = cosh(a), y = sinh(a)
-EPLIB_INLINE_FUNCTION void sinhcosh(DoubleDouble a, DoubleDouble& x, DoubleDouble& y) {
+XPMATH_INLINE_FUNCTION void sinhcosh(DoubleDouble a, DoubleDouble& x, DoubleDouble& y) {
     DoubleDouble s0 = exp(a);
     DoubleDouble s1 = divide(DoubleDouble(1.0), s0);
     x = multiply_scalar(add(s0, s1), 0.5);
     y = multiply_scalar(subtract(s0, s1), 0.5);
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble sinh(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble sinh(DoubleDouble a) {
     DoubleDouble c, s; sinhcosh(a, c, s); return s;
 }
-EPLIB_INLINE_FUNCTION DoubleDouble cosh(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble cosh(DoubleDouble a) {
     DoubleDouble c, s; sinhcosh(a, c, s); return c;
 }
-EPLIB_INLINE_FUNCTION DoubleDouble tanh(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble tanh(DoubleDouble a) {
     // tanh(x) = expm1(2x) / (expm1(2x) + 2), reflected for negative x
     // Avoids dividing two nearly-equal large numbers from sinhcosh
     if (a.hi < 0.0) return negate(tanh(negate(a)));
@@ -585,19 +585,19 @@ EPLIB_INLINE_FUNCTION DoubleDouble tanh(DoubleDouble a) {
     return divide(e, add(e, DoubleDouble(2.0)));
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble asinh(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble asinh(DoubleDouble a) {
     // Reflect: asinh(-a) = -asinh(a). For positive a, a + sqrt(a²+1) >= 1 always,
     // so log argument never causes cancellation.
     if (a.hi < 0.0) return negate(asinh(negate(a)));
     return log(add(a, sqrt(add(multiply(a, a), DoubleDouble(1.0)))));
 }
-EPLIB_INLINE_FUNCTION DoubleDouble acosh(DoubleDouble a) {
-    if (a.hi < 1.0) { EPLIB_PRINTF("DDACOSH: argument < 1\n"); return DoubleDouble(0.0); }
+XPMATH_INLINE_FUNCTION DoubleDouble acosh(DoubleDouble a) {
+    if (a.hi < 1.0) { XPMATH_PRINTF("DDACOSH: argument < 1\n"); return DoubleDouble(0.0); }
     DoubleDouble t1 = subtract(multiply(a, a), DoubleDouble(1.0));
     return log(add(a, sqrt(t1)));
 }
-EPLIB_INLINE_FUNCTION DoubleDouble atanh(DoubleDouble a) {
-    if (detail::fabs(a.hi) >= 1.0) { EPLIB_PRINTF("DDATANH: |argument| >= 1\n"); return DoubleDouble(0.0); }
+XPMATH_INLINE_FUNCTION DoubleDouble atanh(DoubleDouble a) {
+    if (detail::fabs(a.hi) >= 1.0) { XPMATH_PRINTF("DDATANH: |argument| >= 1\n"); return DoubleDouble(0.0); }
     DoubleDouble t1 = add(DoubleDouble(1.0), a);
     DoubleDouble t2 = subtract(DoubleDouble(1.0), a);
     return multiply_scalar(log(divide(t1, t2)), 0.5);
@@ -607,52 +607,52 @@ EPLIB_INLINE_FUNCTION DoubleDouble atanh(DoubleDouble a) {
 // Multi-argument operations
 // ============================================================
 
-EPLIB_INLINE_FUNCTION DoubleDouble pow(DoubleDouble a, DoubleDouble b) {
+XPMATH_INLINE_FUNCTION DoubleDouble pow(DoubleDouble a, DoubleDouble b) {
     if (a.hi <= 0.0) {
         if (a.hi == 0.0 && b.hi > 0.0) return DoubleDouble(0.0);
-        EPLIB_PRINTF("DDPOW: non-positive base\n");
+        XPMATH_PRINTF("DDPOW: non-positive base\n");
         return DoubleDouble(0.0);
     }
     return exp(multiply(log(a), b));
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble hypot(DoubleDouble a, DoubleDouble b) {
+XPMATH_INLINE_FUNCTION DoubleDouble hypot(DoubleDouble a, DoubleDouble b) {
     return sqrt(add(multiply(a, a), multiply(b, b)));
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble ceil(DoubleDouble a);
-EPLIB_INLINE_FUNCTION DoubleDouble floor(DoubleDouble a);
-EPLIB_INLINE_FUNCTION DoubleDouble trunc(DoubleDouble a);
-EPLIB_INLINE_FUNCTION DoubleDouble round(DoubleDouble a);
+XPMATH_INLINE_FUNCTION DoubleDouble ceil(DoubleDouble a);
+XPMATH_INLINE_FUNCTION DoubleDouble floor(DoubleDouble a);
+XPMATH_INLINE_FUNCTION DoubleDouble trunc(DoubleDouble a);
+XPMATH_INLINE_FUNCTION DoubleDouble round(DoubleDouble a);
 
-EPLIB_INLINE_FUNCTION DoubleDouble fmod(DoubleDouble a, DoubleDouble b) {
+XPMATH_INLINE_FUNCTION DoubleDouble fmod(DoubleDouble a, DoubleDouble b) {
     DoubleDouble q = divide(a, b);
     DoubleDouble qt = trunc(q);
     return subtract(a, multiply(b, qt));
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble remainder(DoubleDouble a, DoubleDouble b) {
+XPMATH_INLINE_FUNCTION DoubleDouble remainder(DoubleDouble a, DoubleDouble b) {
     DoubleDouble q = divide(a, b);
     DoubleDouble qn = round_to_nearest_int(q);
     return subtract(a, multiply(b, qn));
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble copysign(DoubleDouble a, DoubleDouble b) {
+XPMATH_INLINE_FUNCTION DoubleDouble copysign(DoubleDouble a, DoubleDouble b) {
     DoubleDouble r = abs(a);
     if (b.hi < 0.0 || (b.hi == 0.0 && b.lo < 0.0)) return negate(r);
     return r;
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble fmax(DoubleDouble a, DoubleDouble b) {
+XPMATH_INLINE_FUNCTION DoubleDouble fmax(DoubleDouble a, DoubleDouble b) {
     return (a > b) ? a : b;
 }
-EPLIB_INLINE_FUNCTION DoubleDouble fmin(DoubleDouble a, DoubleDouble b) {
+XPMATH_INLINE_FUNCTION DoubleDouble fmin(DoubleDouble a, DoubleDouble b) {
     return (a < b) ? a : b;
 }
-EPLIB_INLINE_FUNCTION DoubleDouble fdim(DoubleDouble a, DoubleDouble b) {
+XPMATH_INLINE_FUNCTION DoubleDouble fdim(DoubleDouble a, DoubleDouble b) {
     return (a > b) ? subtract(a, b) : DoubleDouble(0.0);
 }
-EPLIB_INLINE_FUNCTION DoubleDouble fma(DoubleDouble a, DoubleDouble b, DoubleDouble c) {
+XPMATH_INLINE_FUNCTION DoubleDouble fma(DoubleDouble a, DoubleDouble b, DoubleDouble c) {
     return add(multiply(a, b), c);
 }
 
@@ -660,20 +660,20 @@ EPLIB_INLINE_FUNCTION DoubleDouble fma(DoubleDouble a, DoubleDouble b, DoubleDou
 // Rounding
 // ============================================================
 
-EPLIB_INLINE_FUNCTION DoubleDouble floor(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble floor(DoubleDouble a) {
     DoubleDouble n = round_to_nearest_int(a);
     if (n > a) return subtract(n, DoubleDouble(1.0));
     return n;
 }
-EPLIB_INLINE_FUNCTION DoubleDouble ceil(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble ceil(DoubleDouble a) {
     DoubleDouble n = round_to_nearest_int(a);
     if (n < a) return add(n, DoubleDouble(1.0));
     return n;
 }
-EPLIB_INLINE_FUNCTION DoubleDouble trunc(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble trunc(DoubleDouble a) {
     return (a.hi >= 0.0) ? floor(a) : ceil(a);
 }
-EPLIB_INLINE_FUNCTION DoubleDouble round(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble round(DoubleDouble a) {
     return round_to_nearest_int(a);
 }
 
@@ -700,7 +700,7 @@ EPLIB_INLINE_FUNCTION DoubleDouble round(DoubleDouble a) {
 // bit-for-bit what B3 shipped while erfc() gets the overflow-safe form.
 //
 // Preconditions: az = |z| > 0 and z2 = z·z, both finite or +inf.
-EPLIB_INLINE_FUNCTION DoubleDouble erfc_asymptotic_sum(DoubleDouble az, DoubleDouble z2) {
+XPMATH_INLINE_FUNCTION DoubleDouble erfc_asymptotic_sum(DoubleDouble az, DoubleDouble z2) {
     const double eps = 1.0e-32;   // just under DD's u² = 2⁻¹⁰⁶ ~ 1.23e-32
     DoubleDouble two_z2 = multiply_scalar(z2, 2.0);
     DoubleDouble term = divide(DoubleDouble(1.0), az), sum = term;
@@ -751,7 +751,7 @@ EPLIB_INLINE_FUNCTION DoubleDouble erfc_asymptotic_sum(DoubleDouble az, DoubleDo
 // instead of a full DD/DD divide. This is the DD-vs-B5 boundary: B5's overflow
 // safety was load-bearing at FP32; here it buys cap independence, not
 // correctness.
-EPLIB_INLINE_FUNCTION DoubleDouble erf(DoubleDouble z) {
+XPMATH_INLINE_FUNCTION DoubleDouble erf(DoubleDouble z) {
     // DD relative resolution is u² = 2⁻¹⁰⁶ ≈ 1.23e-32; a finer eps could not
     // fire. This is the convergent (Taylor) branch's primary exit; the
     // divergent asymptotic branch's exits live in erfc_asymptotic_sum().
@@ -862,7 +862,7 @@ EPLIB_INLINE_FUNCTION DoubleDouble erf(DoubleDouble z) {
 // that band needs a different algorithm (a Lentz continued fraction, A&S
 // 7.1.14, or a triple-double erf). The dd_accuracy_test row gates on the MEAN
 // and passes at 27.97 vs 25.91; the pointwise band is a separate, open concern.
-EPLIB_INLINE_FUNCTION DoubleDouble erfc(DoubleDouble z) {
+XPMATH_INLINE_FUNCTION DoubleDouble erfc(DoubleDouble z) {
     // See derivation above. Sits above erf()'s own kTaylorMax = 6.0 seam, so
     // [6.0, 6.5) of the lo-word shelf is still served by the fallback.
     const double kDirectMin = 6.5;
@@ -924,7 +924,7 @@ EPLIB_INLINE_FUNCTION DoubleDouble erfc(DoubleDouble z) {
 // Reference for the method: C. Lanczos, "A Precision Approximation of the Gamma
 // Function", J. SIAM Numer. Anal. B 1 (1964) 86-96; P. Godfrey (2001), "A note
 // on the computation of the convergent Lanczos complex Gamma approximation".
-EPLIB_INLINE_FUNCTION DoubleDouble tgamma(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble tgamma(DoubleDouble a) {
     if (a.hi < 0.5) {
         // Reflection. DoubleDouble_pi() is already a full two-word DD constant.
         DoubleDouble pi = DoubleDouble_pi();
@@ -977,7 +977,7 @@ EPLIB_INLINE_FUNCTION DoubleDouble tgamma(DoubleDouble a) {
 }
 
 // Bessel J0 via series
-EPLIB_INLINE_FUNCTION DoubleDouble bessel_j0(DoubleDouble x) {
+XPMATH_INLINE_FUNCTION DoubleDouble bessel_j0(DoubleDouble x) {
     const double eps = 1.0e-32;
     DoubleDouble x2 = multiply_scalar(multiply(x, x), -0.25);
     DoubleDouble term = DoubleDouble(1.0), sum = DoubleDouble(1.0);
@@ -989,7 +989,7 @@ EPLIB_INLINE_FUNCTION DoubleDouble bessel_j0(DoubleDouble x) {
     return sum;
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble bessel_j1(DoubleDouble x) {
+XPMATH_INLINE_FUNCTION DoubleDouble bessel_j1(DoubleDouble x) {
     const double eps = 1.0e-32;
     DoubleDouble x2 = multiply_scalar(multiply(x, x), -0.25);
     DoubleDouble term = multiply_scalar(x, 0.5), sum = term;
@@ -1001,7 +1001,7 @@ EPLIB_INLINE_FUNCTION DoubleDouble bessel_j1(DoubleDouble x) {
     return sum;
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble bessel_jn(int n, DoubleDouble x) {
+XPMATH_INLINE_FUNCTION DoubleDouble bessel_jn(int n, DoubleDouble x) {
     if (n == 0) return bessel_j0(x);
     if (n == 1) return bessel_j1(x);
     // Downward recurrence
@@ -1015,18 +1015,18 @@ EPLIB_INLINE_FUNCTION DoubleDouble bessel_jn(int n, DoubleDouble x) {
     return j_cur;
 }
 
-EPLIB_INLINE_FUNCTION DoubleDouble bessel_y0(DoubleDouble x) {
+XPMATH_INLINE_FUNCTION DoubleDouble bessel_y0(DoubleDouble x) {
     // Y0(x) = (2/pi)*(J0(x)*log(x/2) + sum...)  — simplified
     DoubleDouble two_over_pi = divide_scalar(DoubleDouble(2.0), DoubleDouble_pi().hi);
     DoubleDouble j0 = bessel_j0(x);
     return multiply(two_over_pi, multiply(j0, log(multiply_scalar(x, 0.5))));
 }
-EPLIB_INLINE_FUNCTION DoubleDouble bessel_y1(DoubleDouble x) {
+XPMATH_INLINE_FUNCTION DoubleDouble bessel_y1(DoubleDouble x) {
     DoubleDouble two_over_pi = divide_scalar(DoubleDouble(2.0), DoubleDouble_pi().hi);
     DoubleDouble j1 = bessel_j1(x);
     return multiply(two_over_pi, multiply(j1, log(multiply_scalar(x, 0.5))));
 }
-EPLIB_INLINE_FUNCTION DoubleDouble bessel_yn(int n, DoubleDouble x) {
+XPMATH_INLINE_FUNCTION DoubleDouble bessel_yn(int n, DoubleDouble x) {
     if (n == 0) return bessel_y0(x);
     if (n == 1) return bessel_y1(x);
     DoubleDouble y0 = bessel_y0(x), y1 = bessel_y1(x);
@@ -1040,8 +1040,8 @@ EPLIB_INLINE_FUNCTION DoubleDouble bessel_yn(int n, DoubleDouble x) {
 }
 
 // Zeta function — Euler-Maclaurin for s > 1
-EPLIB_INLINE_FUNCTION DoubleDouble zeta(DoubleDouble s) {
-    if (s.hi <= 1.0) { EPLIB_PRINTF("DDZETA: s <= 1\n"); return DoubleDouble(0.0); }
+XPMATH_INLINE_FUNCTION DoubleDouble zeta(DoubleDouble s) {
+    if (s.hi <= 1.0) { XPMATH_PRINTF("DDZETA: s <= 1\n"); return DoubleDouble(0.0); }
     const int N = 50;
     DoubleDouble sum = DoubleDouble(0.0);
     for (int k = 1; k <= N; ++k)
@@ -1053,7 +1053,7 @@ EPLIB_INLINE_FUNCTION DoubleDouble zeta(DoubleDouble s) {
 }
 
 // Exponential integral Ei(x) via series (x > 0)
-EPLIB_INLINE_FUNCTION DoubleDouble expint(DoubleDouble x) {
+XPMATH_INLINE_FUNCTION DoubleDouble expint(DoubleDouble x) {
     DoubleDouble eg = DoubleDouble_euler_gamma();
     DoubleDouble sum = add(eg, log(abs(x)));
     DoubleDouble term = x;
@@ -1066,7 +1066,7 @@ EPLIB_INLINE_FUNCTION DoubleDouble expint(DoubleDouble x) {
 }
 
 // Incomplete gamma P(a,x) via series
-EPLIB_INLINE_FUNCTION DoubleDouble incgamma(DoubleDouble a, DoubleDouble x) {
+XPMATH_INLINE_FUNCTION DoubleDouble incgamma(DoubleDouble a, DoubleDouble x) {
     const double eps = 1.0e-32;
     DoubleDouble term = divide(exp(negate(x)), a);
     DoubleDouble sum  = term;
@@ -1078,4 +1078,4 @@ EPLIB_INLINE_FUNCTION DoubleDouble incgamma(DoubleDouble a, DoubleDouble x) {
     return multiply(sum, exp(multiply(a, log(x))));
 }
 
-}  // namespace eplib
+}  // namespace xp

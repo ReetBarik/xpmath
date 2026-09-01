@@ -3,9 +3,15 @@
 //
 // Portability configuration for the standalone extended-precision core.
 //
-// NAME IS A PLACEHOLDER. `EPLIB` / `eplib::` are provisional (see the S2
-// naming memo in docs/UPSTREAM_PLAN_STATUS.md); S3 applies the ratified
-// name. Nothing outside this directory should hard-code the token.
+// NAMING RATIONALE (ratified via S2 naming memo + S3):
+// xp:: = extended precision, the companion to MxP (mixed precision).
+// The X-for-extended convention traces through XBLAS ("Extended and Mixed
+// Precision BLAS", Li/Demmel et al., ACM TOMS 28(2) 2002), whose reference
+// implementation uses double-double, and whose report is hosted by David H.
+// Bailey -- author of the DDFUN this repo ports and the QD the QF backend
+// descends from. Short namespace (xp::), long macro prefix (XPMATH_) mirrors
+// Kokkos' own Kokkos:: / KOKKOS_ split, and avoids a hazardous two-character
+// macro prefix in the global namespace.
 
 #pragma once
 
@@ -25,14 +31,14 @@
 // compile with `g++ -std=c++17` on a machine with no Kokkos installed.
 
 #include <cmath>   // scalar math dispatch below
-#include <cstdio>  // EPLIB_PRINTF
+#include <cstdio>  // XPMATH_PRINTF
 
 // ============================================================
 // 1. On-device detection
 // ============================================================
 // Replaces the CUDA-only `#ifndef __CUDA_ARCH__` idiom used throughout the
 // original headers. Each vendor spells "this is the device compilation pass"
-// differently; EPLIB_ON_DEVICE unifies the three so a single guard covers
+// differently; XPMATH_ON_DEVICE unifies the three so a single guard covers
 // CUDA, HIP and SYCL instead of silently only covering CUDA.
 //
 // Rationale for each token:
@@ -45,21 +51,21 @@
 // consumer cannot accidentally get `0` treated as "on device".
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) || \
     defined(__SYCL_DEVICE_ONLY__)
-#define EPLIB_ON_DEVICE
+#define XPMATH_ON_DEVICE
 #endif
 
 // A narrower predicate: "the vendor's global-namespace device intrinsics and
 // device math library are available". CUDA and HIP both provide the classic
 // __longlong_as_double / ::sqrt style global-namespace device entry points;
 // SYCL does not, and instead guarantees the std:: math subset in device code.
-// Keeping this separate from EPLIB_ON_DEVICE is what lets SYCL take the
+// Keeping this separate from XPMATH_ON_DEVICE is what lets SYCL take the
 // portable path everywhere rather than a CUDA-shaped one.
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#define EPLIB_ON_DEVICE_CUDA_OR_HIP
+#define XPMATH_ON_DEVICE_CUDA_OR_HIP
 #endif
 
 // ============================================================
-// 2. EPLIB_INLINE_FUNCTION
+// 2. XPMATH_INLINE_FUNCTION
 // ============================================================
 // The direct replacement for KOKKOS_INLINE_FUNCTION (~720 uses across the six
 // headers). Every function in the library is a header-inline leaf, so the
@@ -76,20 +82,20 @@
 //   otherwise              : plain `inline` (host C++, OpenMP, OpenMP-target,
 //       and Kokkos's Serial/OpenMP/Threads backends all need nothing more).
 //
-// A consumer may pre-define EPLIB_INLINE_FUNCTION to force a specific
+// A consumer may pre-define XPMATH_INLINE_FUNCTION to force a specific
 // spelling (e.g. to inject __forceinline__); the guard below respects it.
-#if !defined(EPLIB_INLINE_FUNCTION)
+#if !defined(XPMATH_INLINE_FUNCTION)
 #if defined(__CUDACC__) || defined(__HIPCC__)
-#define EPLIB_INLINE_FUNCTION __host__ __device__ inline
+#define XPMATH_INLINE_FUNCTION __host__ __device__ inline
 #elif defined(SYCL_LANGUAGE_VERSION)
-#define EPLIB_INLINE_FUNCTION inline
+#define XPMATH_INLINE_FUNCTION inline
 #else
-#define EPLIB_INLINE_FUNCTION inline
+#define XPMATH_INLINE_FUNCTION inline
 #endif
 #endif
 
 // ============================================================
-// 3. EPLIB_PRINTF — diagnostic policy
+// 3. XPMATH_PRINTF — diagnostic policy
 // ============================================================
 // The numeric headers print a one-line diagnostic on a domain violation
 // (~40 sites, e.g. "DDSQRT: negative argument"). Kokkos::printf provided a
@@ -107,24 +113,24 @@
 //     VALUES of the guarded functions are unaffected — every diagnostic site
 //     returns the same value with or without the print — so this is a
 //     debuggability loss, not a numerical one.
-//   * EPLIB_ENABLE_DIAGNOSTICS: defaults to 1 (today's behaviour, which the
+//   * XPMATH_ENABLE_DIAGNOSTICS: defaults to 1 (today's behaviour, which the
 //     byte-identical gate depends on). Define it to 0 to compile every
 //     diagnostic out entirely — worth doing in a hot device kernel, where an
 //     unreachable printf still costs registers and a format-string constant.
 //
 // Variadic-macro form (not a function) so that at 0 the arguments are never
 // evaluated and the format strings are not emitted into the binary.
-#if !defined(EPLIB_ENABLE_DIAGNOSTICS)
-#define EPLIB_ENABLE_DIAGNOSTICS 1
+#if !defined(XPMATH_ENABLE_DIAGNOSTICS)
+#define XPMATH_ENABLE_DIAGNOSTICS 1
 #endif
 
-#if EPLIB_ENABLE_DIAGNOSTICS && !defined(__SYCL_DEVICE_ONLY__)
-#define EPLIB_PRINTF(...) ::printf(__VA_ARGS__)
+#if XPMATH_ENABLE_DIAGNOSTICS && !defined(__SYCL_DEVICE_ONLY__)
+#define XPMATH_PRINTF(...) ::printf(__VA_ARGS__)
 #else
-#define EPLIB_PRINTF(...) ((void)0)
+#define XPMATH_PRINTF(...) ((void)0)
 #endif
 
-namespace eplib {
+namespace xp {
 namespace detail {
 
 // ============================================================
@@ -151,16 +157,16 @@ namespace detail {
 //     guarantees the std:: math subset is usable in device code, and on the
 //     host std:: is the only spelling the standard guarantees at all.
 //
-// Why `detail::` qualification at the call sites: namespace eplib also
+// Why `detail::` qualification at the call sites: namespace xp also
 // defines exp/log/sqrt/ceil/floor/copysign/atan for the EXTENDED types. An
-// unqualified call from inside eplib would drag those into the overload set;
+// unqualified call from inside xp would drag those into the overload set;
 // `detail::` makes the scalar intent explicit and unambiguous.
 //
 // The set is the union over all six backends (dd/ff/qf, real + complex), so
 // some entries are unused by any single header — that is deliberate: this is
 // the one place the policy is stated, and S5 must not have to reopen it.
 // dd_math.hpp additionally needs atan2 and ldexp; both are included below.
-#if defined(EPLIB_ON_DEVICE_CUDA_OR_HIP)
+#if defined(XPMATH_ON_DEVICE_CUDA_OR_HIP)
 using ::atan;
 using ::atan2;
 using ::ceil;
@@ -189,4 +195,4 @@ using std::sqrt;
 #endif
 
 }  // namespace detail
-}  // namespace eplib
+}  // namespace xp

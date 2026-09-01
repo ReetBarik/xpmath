@@ -4,7 +4,7 @@
 //
 // KOKKOS COMPATIBILITY WRAPPER for the standalone double-double core.
 //
-// The implementation moved to include/EPLIB/dd_math.hpp (namespace eplib,
+// The implementation moved to include/xp/dd_math.hpp (namespace xp,
 // zero Kokkos dependency). This file is what `#include <dd_math.hpp>` has
 // always resolved to, and it keeps that API byte-for-byte: after including
 // it, `Kokkos::Experimental::DoubleDouble`, every free function that used to
@@ -13,25 +13,25 @@
 // tests, the DD demos — needs a single edit.
 //
 // Licensing is unchanged: the algorithms are the DDFUN v04 port (David H.
-// Bailey, DHB-License); see include/EPLIB/dd_math.hpp for the full notice.
+// Bailey, DHB-License); see include/xp/dd_math.hpp for the full notice.
 //
-// NAME IS A PLACEHOLDER: `eplib::` is provisional pending the S2 naming memo
-// (docs/UPSTREAM_PLAN_STATUS.md); S3 applies the ratified name. Because every
-// Kokkos-facing name below is an alias, the rename touches only this file's
-// right-hand sides.
+// NAMING (ratified via S2 naming memo + S3): xp:: = extended precision,
+// companion to MxP (mixed precision). See include/xp/config.hpp for rationale.
+// Every Kokkos-facing name below is an alias, so the rename touched only this
+// file's right-hand sides.
 
 #pragma once
 
 #include <Kokkos_Core.hpp>
 
-#include <EPLIB/dd_math.hpp>
+#include <xp/dd_math.hpp>
 
 // ============================================================
 // Re-exposure under namespace Kokkos::Experimental
 // ============================================================
-// Explicit using-declarations rather than `using namespace eplib;`. Three
+// Explicit using-declarations rather than `using namespace xp;`. Three
 // reasons: (1) the Kokkos-visible API surface stays an auditable list rather
-// than "whatever eplib happens to declare"; (2) a using-DIRECTIVE participates
+// than "whatever xp happens to declare"; (2) a using-DIRECTIVE participates
 // in qualified lookup in a way that is easy to get subtly wrong when Kokkos
 // itself declares same-named overloads in Kokkos::Experimental (sqrt, exp,
 // ... for half_t), whereas a using-DECLARATION simply merges into that
@@ -39,104 +39,104 @@
 // Kokkos would be adopting.
 //
 // The type alias is what makes `Kokkos::Experimental::DoubleDouble` name the
-// same type as `eplib::DoubleDouble` — not a distinct wrapper — so the two
+// same type as `xp::DoubleDouble` — not a distinct wrapper — so the two
 // spellings are interchangeable in every signature, including across the
 // dd_complex.hpp boundary.
 //
 // Operators are deliberately absent: `dd + dd`, `1.0 * dd` and
-// `os << dd` are found by ADL through the argument's real namespace (eplib),
+// `os << dd` are found by ADL through the argument's real namespace (xp),
 // so re-declaring them here would be redundant.
 namespace Kokkos {
 namespace Experimental {
 
 // --- the type -----------------------------------------------------------
-using DoubleDouble = eplib::DoubleDouble;
+using DoubleDouble = xp::DoubleDouble;
 
 // --- constants ----------------------------------------------------------
-using eplib::DoubleDouble_e;
-using eplib::DoubleDouble_euler_gamma;
-using eplib::DoubleDouble_log10;
-using eplib::DoubleDouble_log2;
-using eplib::DoubleDouble_pi;
-using eplib::DoubleDouble_sqrt2;
+using xp::DoubleDouble_e;
+using xp::DoubleDouble_euler_gamma;
+using xp::DoubleDouble_log10;
+using xp::DoubleDouble_log2;
+using xp::DoubleDouble_pi;
+using xp::DoubleDouble_sqrt2;
 
 // --- primitive arithmetic -----------------------------------------------
-using eplib::add;
-using eplib::divide;
-using eplib::divide_scalar;
-using eplib::multiply;
-using eplib::multiply_scalar;
-using eplib::negate;
-using eplib::subtract;
-using eplib::two_prod;
+using xp::add;
+using xp::divide;
+using xp::divide_scalar;
+using xp::multiply;
+using xp::multiply_scalar;
+using xp::negate;
+using xp::subtract;
+using xp::two_prod;
 
 // --- basic math ---------------------------------------------------------
-using eplib::abs;
-using eplib::pow_int;
-using eplib::round_to_nearest_int;
-using eplib::sqrt;
+using xp::abs;
+using xp::pow_int;
+using xp::round_to_nearest_int;
+using xp::sqrt;
 
 // --- exp / log family ---------------------------------------------------
-using eplib::exp;
-using eplib::exp10;
-using eplib::exp2;
-using eplib::expm1;
-using eplib::log;
-using eplib::log10;
-using eplib::log1p;
-using eplib::log2;
+using xp::exp;
+using xp::exp10;
+using xp::exp2;
+using xp::expm1;
+using xp::log;
+using xp::log10;
+using xp::log1p;
+using xp::log2;
 
 // --- trigonometric ------------------------------------------------------
-using eplib::acos;
-using eplib::angle;
-using eplib::asin;
-using eplib::atan;
-using eplib::atan2;
-using eplib::cos;
-using eplib::sin;
-using eplib::sincos;
-using eplib::tan;
+using xp::acos;
+using xp::angle;
+using xp::asin;
+using xp::atan;
+using xp::atan2;
+using xp::cos;
+using xp::sin;
+using xp::sincos;
+using xp::tan;
 
 // --- hyperbolic ---------------------------------------------------------
-using eplib::acosh;
-using eplib::asinh;
-using eplib::atanh;
-using eplib::cosh;
-using eplib::sinh;
-using eplib::sinhcosh;
-using eplib::tanh;
+using xp::acosh;
+using xp::asinh;
+using xp::atanh;
+using xp::cosh;
+using xp::sinh;
+using xp::sinhcosh;
+using xp::tanh;
 
 // --- multi-argument -----------------------------------------------------
-using eplib::copysign;
-using eplib::fdim;
-using eplib::fma;
-using eplib::fmax;
-using eplib::fmin;
-using eplib::fmod;
-using eplib::hypot;
-using eplib::pow;
-using eplib::remainder;
+using xp::copysign;
+using xp::fdim;
+using xp::fma;
+using xp::fmax;
+using xp::fmin;
+using xp::fmod;
+using xp::hypot;
+using xp::pow;
+using xp::remainder;
 
 // --- rounding -----------------------------------------------------------
-using eplib::ceil;
-using eplib::floor;
-using eplib::round;
-using eplib::trunc;
+using xp::ceil;
+using xp::floor;
+using xp::round;
+using xp::trunc;
 
 // --- special functions --------------------------------------------------
-using eplib::bessel_j0;
-using eplib::bessel_j1;
-using eplib::bessel_jn;
-using eplib::bessel_y0;
-using eplib::bessel_y1;
-using eplib::bessel_yn;
-using eplib::erf;
-using eplib::erfc;
-using eplib::erfc_asymptotic_sum;
-using eplib::expint;
-using eplib::incgamma;
-using eplib::tgamma;
-using eplib::zeta;
+using xp::bessel_j0;
+using xp::bessel_j1;
+using xp::bessel_jn;
+using xp::bessel_y0;
+using xp::bessel_y1;
+using xp::bessel_yn;
+using xp::erf;
+using xp::erfc;
+using xp::erfc_asymptotic_sum;
+using xp::expint;
+using xp::incgamma;
+using xp::tgamma;
+using xp::zeta;
 
 }  // namespace Experimental
 }  // namespace Kokkos
