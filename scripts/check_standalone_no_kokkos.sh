@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: LicenseRef-DHB-License
 # SPDX-FileCopyrightText: Copyright (c) 2026 UChicago Argonne, LLC
 #
-# S2 deliverable 4 — prove the standalone extended-precision core stands alone.
+# S2 / S5 deliverable — prove the standalone extended-precision core stands alone.
 #
-# Compiles tests/standalone/dd_no_kokkos_smoke.cpp with plain g++ -std=c++17
+# Compiles tests/standalone/{dd,ff}_no_kokkos_smoke.cpp with plain g++ -std=c++17
 # and an include path containing ONLY the repo's include/ directory:
 #   * no Kokkos install on the include path,
 #   * not even third_party/include/, so the Kokkos compat wrapper is
@@ -25,7 +25,8 @@ set -euo pipefail
 
 CXX="${1:-${CXX:-g++}}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SRC="${REPO_ROOT}/tests/standalone/dd_no_kokkos_smoke.cpp"
+SRC_DD="${REPO_ROOT}/tests/standalone/dd_no_kokkos_smoke.cpp"
+SRC_FF="${REPO_ROOT}/tests/standalone/ff_no_kokkos_smoke.cpp"
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
@@ -34,28 +35,38 @@ trap 'rm -rf "${WORK}"' EXIT
 INCLUDES=(-I "${REPO_ROOT}/include")
 STD=(-std=c++17)
 
-echo "=== S2 no-Kokkos compile smoke ==="
+echo "=== standalone no-Kokkos compile smoke (DD + FF) ==="
 echo "compiler : $("${CXX}" --version | head -1)"
-echo "TU       : ${SRC#"${REPO_ROOT}/"}"
+echo "TUs      : tests/standalone/{dd,ff}_no_kokkos_smoke.cpp"
 echo "includes : ${REPO_ROOT#"${HOME}/"}/include   (and nothing else)"
 echo
 
-# ---------------------------------------------------------------- 1. compile
-echo "[1/4] compile + link ..."
+# ---------------------------------------------------------------- 1. compile DD
+echo "[1/5] compile + link DD ..."
 "${CXX}" "${STD[@]}" -Wall -Wextra -O2 "${INCLUDES[@]}" \
-  "${SRC}" -o "${WORK}/dd_no_kokkos_smoke"
+  "${SRC_DD}" -o "${WORK}/dd_no_kokkos_smoke"
 echo "      ok"
 
-# ------------------------------------------------------------------- 2. run
-echo "[2/4] run ..."
+# ------------------------------------------------------------------- 2. run DD
+echo "[2/5] run DD ..."
 "${WORK}/dd_no_kokkos_smoke"
+
+# ---------------------------------------------------------------- 2.5 compile FF
+echo "[3/5] compile + link FF ..."
+"${CXX}" "${STD[@]}" -Wall -Wextra -O2 "${INCLUDES[@]}" \
+  "${SRC_FF}" -o "${WORK}/ff_no_kokkos_smoke"
+echo "      ok"
+
+# ------------------------------------------------------------------ 2.6 run FF
+echo "[4/5] run FF ..."
+"${WORK}/ff_no_kokkos_smoke"
 
 # --------------------------------------------- 3. no Kokkos in the preprocess
 # Preprocess a MINIMAL TU rather than the smoke test itself: the smoke test's
 # own diagnostic strings say the word "Kokkos", which would trip the grep for
-# the wrong reason. This TU contains nothing but the include.
-echo "[3/4] preprocessed output contains no Kokkos ..."
-printf '#include <xp/dd_math.hpp>\nint main() { return 0; }\n' > "${WORK}/only_include.cpp"
+# the wrong reason. This TU contains nothing but both includes.
+echo "[5/5] preprocessed output contains no Kokkos ..."
+printf '#include <xp/dd_math.hpp>\n#include <xp/ff_math.hpp>\nint main() { return 0; }\n' > "${WORK}/only_include.cpp"
 "${CXX}" "${STD[@]}" -E "${INCLUDES[@]}" "${WORK}/only_include.cpp" > "${WORK}/pp.ii"
 if grep -n "Kokkos\|KOKKOS_" "${WORK}/pp.ii" > "${WORK}/hits.txt"; then
   echo "      FAIL: Kokkos reached the preprocessed TU:"
@@ -67,8 +78,9 @@ echo "      ok ($(wc -l < "${WORK}/pp.ii") preprocessed lines, 0 Kokkos hits)"
 # ------------------------------------------ 4. no Kokkos in the header source
 # Belt and braces: the standalone headers themselves must not name Kokkos in
 # code. Comments may mention it (they explain the relationship to the wrapper),
-# so strip // comments before grepping.
-echo "[4/4] include/xp/*.hpp name Kokkos only in comments ..."
+# so strip // comments before grepping. This check runs on ALL xp/*.hpp so it
+# automatically covers ff_math.hpp.
+echo "[5/5] include/xp/*.hpp name Kokkos only in comments ..."
 bad=0
 for h in "${REPO_ROOT}"/include/xp/*.hpp; do
   if sed 's://.*::' "${h}" | grep -n "Kokkos\|KOKKOS_" > "${WORK}/h.txt"; then
