@@ -83,12 +83,76 @@ from `qf_complex.hpp:369-370`, `ff_complex.hpp:291-293`, `dd_complex.hpp:286-289
 acosh(z) = log(z + sqrt(z*z - 1))
 ```
 
-For real `z < -1`, the principal square root returns the **positive** root, so
-`z + sqrt(z²−1)` is a difference of two nearly equal quantities of opposite sign.
-It cancels catastrophically, and the logarithm of what survives is noise. The
-standard remedy is to select the branch on the sign of `Re(z)` — e.g. compute
-`acosh(z) = ±log(z ± sqrt(z²−1))` with the sign chosen so the addition does not
-cancel, or route through `2·log(sqrt((z+1)/2) + sqrt((z−1)/2))`.
+**The defect is that `sqrt(z²−1)` selects the WRONG BRANCH for `Re(z) < 0`**, not
+catastrophic cancellation. The distinction matters: a cancellation fix would leave
+the bug fully intact.
+
+The falsifying argument: cancellation loses digits that scale with `|z|` (roughly
+0.87 digits at `z = -2`, rising to 4.3 at `z = -100`). The measured scores above
+are **flat at 0.11, 0.00, 0.00 across a 50× magnitude range**. A conditioning
+failure cannot be flat.
+
+Direct measurement in `std::complex<double>` against `std::acosh` reference:
+
+```
+z = -2        true  +1.316957896924817 +3.141592653589793i
+              repo  -1.316957896924816 +3.141592653589793i    0.11 digits
+              Kahan +1.316957896924817 +3.141592653589793i   16.19 digits
+
+z = -5        true  +2.292431669561178 ...
+              repo  -2.292431669561173 ...                    0.00 digits
+              Kahan +2.292431669561178 ...                   17.00 digits
+
+z = -100      true  +5.298292365610485 ...
+              repo  -5.298292365610980 ...                    0.00 digits
+              Kahan +5.298292365610484 ...                   15.84 digits
+
+z = -2+1e-6i  true  +1.316957896925009 +3.141592076239524i
+              repo  -1.316957896925009 -3.141592076239524i    0.00 digits
+              Kahan +1.316957896925009 +3.141592076239524i   17.00 digits
+
+z = +2        repo and Kahan both 17.00 (control: right half-plane is fine)
+```
+
+**Three observations:**
+1. The real part is NEGATED, with magnitude correct to ~15 digits. The negation is
+   not bit-exact (`-1.316957896924816` vs `...817`): a small cancellation effect
+   is present, but it is a rounding artifact (~0.1 digit), not the cause.
+2. At `z = -2 + 1e-6i` (off the cut), the **imaginary part is also sign-flipped**.
+   Both components are inverted — the signature of a branch error, not lost digits.
+3. The current form squares `z` and therefore overflows. At `z = 1e150` the repo
+   form returns finite but Kahan's form stays finite; at `z = 1e160` and beyond,
+   repo returns `INF/NaN` while Kahan remains finite. For the FP32-word backends
+   (FF, TF, QF), the squaring limit is ~1.8e19 against an FP32 range of ~3.4e38,
+   so Kahan buys roughly 19 decades of usable domain as a side effect (derived from
+   the double case; not measured at FP32 word width).
+
+**The fix is Kahan's branch-correct form** (Kahan 1987, "Branch Cuts for Complex
+Elementary Functions"):
+
+```c++
+acosh(z) = 2·log( sqrt((z+1)/2) + sqrt((z−1)/2) )
+```
+
+It is branch-correct with **no case analysis**: for `Re(z) < 0` both roots are
+near-purely-imaginary with the same sign; for `Re(z) > 0` both are near-real
+positive, so the addition never subtracts. Verified above: it scores 15.84–17.00
+where the current form scores 0.00–0.11.
+
+**Prediction that did NOT reproduce:** Kahan's form was predicted to degrade near
+`z = 1` (forming `1 + u` with `u` small). Measured in double, Kahan is **better**
+there: `z = 1 + 1e-4` repo 12.83, Kahan 13.69; `z = 1 + 1e-10` repo 10.56, Kahan
+11.64. This was checked at double precision only and may still require attention at
+DD's 31-digit scale, where a series branch
+`acosh(1+w) = sqrt(2w)·(1 − w/12 + 3w²/160 − ...)` may be needed for tiny `w`.
+
+**Sibling risk** (unverified predictions): The same `log`/`sqrt` cancellation-or-
+branch structure appears in `asin`, `acos`, `atan`, `asinh`, `atanh`. Specific
+predictions: `asinh(z) = log(z + sqrt(z²+1))` may be wrong for `Re(z) << 0`;
+`atanh` may fail as `z → 0`; `acos` implemented as `π/2 − asin` may fail as
+`z → 1`. Also: is complex `acos` implemented via `acosh` in these headers? If so
+it would inherit the same branch bug, and the existing test grid (right half-plane)
+would have missed it.
 
 ### Why it was not fixed when found
 
@@ -146,7 +210,7 @@ tolerance — see `docs/PORT_NOTES_TF.md` §12f. Closing it means diverging from
 
 ---
 
-## KI-3 — `scripts/build_with_kokkos.sh` cannot build Kokkos 5.1
+## KI-3 — `scripts/build_with_kokkos.sh` cannot build Kokkos 5.1 **[RESOLVED]**
 
 **Severity: low (documented workaround), scope: pre-existing.**
 
@@ -158,6 +222,10 @@ Found in S1. `validation/a100/build_login.sh` was corrected to 20 for its own Ko
 configure, and `CLAUDE.md` documents the trap, but the script itself was left alone
 as out of scope. It remains a live trap for anyone following the documented build
 path.
+
+**Resolution:** Changed lines 67 and 74 from `-DCMAKE_CXX_STANDARD=17` to
+`-DCMAKE_CXX_STANDARD=20` in the script. Line 103 correctly remains at 17 (it
+configures this repo, not Kokkos). Fixed 2026-09-02, commit TBD.
 
 ---
 
