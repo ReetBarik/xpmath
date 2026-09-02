@@ -50,6 +50,46 @@ the Layer-1 EFT unit test (see [EFT tests](#eft-tests-layer-1) below).
 | `qf_fma_guard_test` | T3.5 | QF analogue of `ff_fma_guard_test`, **contraction OFF** — the **shipped** Dekker EFTs `qf_two_prod` **and** `qf_two_sqr` (splitter `8193.0f` = 2¹³+1) built `-ffp-contract=off`; **fail-gates** on any collapsed/wrong error term (a stronger form of T3.1). Calls the shipped `qf_math.hpp` primitives **directly** (no mirror-and-comment, cf. `qf_eft_test`). **FP64 oracle** (exact — 48-bit product fits FP64's 53-bit mantissa), so runs **unconditionally** (no LIBQUADMATH gate, no SKIP-77). `qf_two_sum` included as a contraction-immune **control** |
 | `qf_fma_guard_test_contract_on` | T3.5 | QF analogue, **contraction ON** — the *same source* built `-ffp-contract=fast`; **reports** per-op three-way `{ERR_ZERO / ERR_NONZERO_CORRECT / ERR_NONZERO_WRONG}` counts and warns on drift vs `qf_fma_guard_baseline.txt`. **PASS iff `ERR_NONZERO_WRONG == 0`** (any `ERR_ZERO`/`CORRECT` mix is acceptable — collapse under contraction is *informative*, not a fault of `qf_math.hpp`) |
 | `qf_cancellation_test` | T3.6    | QF analogue of `dd_e2e_test` / `ff_cancellation_test`: same four cancellation kernels (√(x²+1)−x, Σ1/k², Machin's π, alternating harmonic) scored in digits vs `__float128`/closed-form oracles; **mean-gated at 29−3 = 26.0** (QF's cap minus headroom); K1 naive-vs-stable compares QF against **FP32** (QF's base scalar) at x∈{1e2,1e4,1e6}; runtime-SKIPs without LIBQUADMATH |
+| `dd_complex_accuracy_test` | — | Per-op accuracy gate for the **24 complex ops** of `dd_complex.hpp` (add sub mul div abs conj sqrt exp log log10 sin cos tan asin acos atan sinh cosh tanh asinh acosh atanh pow polar). **Corpus-scored, not oracle-linked**: reads binary128 references from `data/xp_corpus_complex.bin` and needs **neither `-lquadmath` nor `-fext-numeric-literals`** — see [Decoupled complex accuracy tests](#decoupled-complex-accuracy-tests) below. Per-element score is `min(d_re, d_im)`; **fail-gates on the MEAN** against a per-op table set from measurement with ~0.3 digits of margin. `acosh` excludes `Re(z) < 0` (**KI-1**, wrong branch in all four backends) by domain predicate. Runs unconditionally on every toolchain |
+| `ff_complex_accuracy_test` | — | FF analogue, cap 14. `FloatFloat(double)` keeps only ~48 bits, so FF alone is scored on a slightly different input than the oracle saw — which is why its `add`/`sub` gates sit at 13.13/13.14 where DD/QF/TF hold those bit-exact |
+| `qf_complex_accuracy_test` | — | QF analogue, cap 29 |
+| `tf_complex_accuracy_test` | — | TF analogue, cap 21.7 |
+
+## Decoupled complex accuracy tests
+
+The four `*_complex_accuracy_test` targets are the only tests in the suite that
+score against a `__float128` oracle **without linking libquadmath**. The split:
+
+- **Generator** (`scripts/gen_corpus.cpp`, host-only, links `-lquadmath`) emits
+  inputs plus a `__complex128` reference per (op, element) into a versioned binary.
+  `tests/data/xp_corpus_complex.bin` is that file, committed: 24 ops × 2000
+  elements, seed 12345, checksum `0xdec61578158e39e7`.
+- **Consumer** (`tests/corpus_binary.hpp`) decodes each 16-byte binary128 into an
+  exact 3-double expansion plus a separately-held binary exponent (159 bits ≥
+  binary128's 113), and scores in plain `double`. No `<quadmath.h>`, no
+  `__float128` required — the header's `ref_to_float128()` convenience is guarded
+  behind `KOKKOS_EP_CORPUS_HAVE_FLOAT128` and nothing depends on it. The decoder
+  was validated bit-exactly against `__float128` over 220k random binary128
+  patterns and 200k perturbation trials.
+
+Why it matters: hipcc and icpx are clang-based and have no GCC-flavoured quadmath,
+so every other oracle-scored test runtime-SKIPs (exit 77) there and an AMD or Intel
+run reports **no accuracy signal at all**. These four run everywhere. They are
+registered through `kokkos_ep_add_standalone_test()`, which deliberately does not
+link `Kokkos::kokkos`, does not apply `KOKKOS_EP_QUADMATH_DEFINE`, and sets no
+`SKIP_RETURN_CODE`.
+
+Regenerating the corpus (only needed if the op inventory or sampling changes):
+
+```bash
+g++ -std=c++17 -O2 -fext-numeric-literals -I include scripts/gen_corpus.cpp \
+    -lquadmath -o gen_corpus
+./gen_corpus --complex-only --n 2000 --out tests/data/xp_corpus_complex.bin
+```
+
+The loader hard-FAILS (it does not skip) on a missing file, a format-version
+mismatch, a generator-version mismatch or a checksum mismatch, so a stale corpus
+cannot quietly turn into a green test.
 
 ## How to run
 

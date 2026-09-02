@@ -138,6 +138,44 @@ function(kokkos_ep_add_eft_test_contract_on name)
     KOKKOS_EP_BASELINE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/${_base}_baseline.txt")
 endfunction()
 
+# --- Helper: standalone test, no Kokkos and no libquadmath ----------------
+# For tests that must keep running on toolchains where the GCC-flavoured
+# __float128 oracle does not exist. hipcc and icpx are clang-based; there,
+# KOKKOS_EP_QUADMATH_DEFINE is unset and every oracle-scored test above
+# runtime-SKIPs with exit 77, so an AMD or Intel run reports no accuracy signal
+# at all. The *_complex_accuracy_test targets close that hole by reading
+# precomputed binary128 references from a file instead of computing them:
+#
+#   tests/data/xp_corpus_complex.bin   generated ONCE on an x86_64 GCC host by
+#                                      scripts/gen_corpus.cpp (which does link
+#                                      libquadmath), committed, consumed anywhere.
+#
+# So this helper deliberately does NOT do three things kokkos_ep_add_test does:
+#   * no Kokkos::kokkos link      — the sources include only include/xp/, and a
+#                                   Kokkos link would re-import -arch=sm_XX and
+#                                   the rest of the interface flags into a TU
+#                                   that has no device code;
+#   * no KOKKOS_EP_QUADMATH_DEFINE — the consumer side must not compile a
+#                                   quadmath path even when one is available,
+#                                   or the decoupling would be untested here;
+#   * no SKIP_RETURN_CODE 77       — there is nothing to skip. A missing or stale
+#                                   corpus is a hard FAIL with instructions,
+#                                   not a silent pass.
+#
+# Include path is include/ (the standalone core) plus this directory (for
+# corpus_binary.hpp); third_party/include is intentionally absent, mirroring
+# scripts/check_standalone_no_kokkos.sh, so a Kokkos compat wrapper cannot
+# accidentally satisfy an include.
+function(kokkos_ep_add_standalone_test name)
+  add_executable(${name} ${name}.cpp)
+  target_include_directories(${name} PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_definitions(${name} PRIVATE
+    KOKKOS_EP_COMPLEX_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/data/xp_corpus_complex.bin")
+  add_test(NAME ${name} COMMAND ${name})
+endfunction()
+
 # --- Registered tests -----------------------------------------------------
 kokkos_ep_add_test(hello_test)
 kokkos_ep_add_test(corpus_test)
@@ -279,3 +317,22 @@ kokkos_ep_add_test(tf_accuracy_test)                   # per-op digits vs quadma
 kokkos_ep_add_test(tf_cancellation_test)               # e2e cancellation kernels (K1-K4)
 kokkos_ep_add_eft_test(tf_fma_guard_test)              # -> tf_fma_guard_test              (OFF, gates)
 kokkos_ep_add_eft_test_contract_on(tf_fma_guard_test)  # -> tf_fma_guard_test_contract_on  (ON, reports)
+
+# COMPLEX accuracy, all four backends. Until these landed, every target above
+# scored REAL arithmetic only — `grep -c complex tests/CMakeLists.txt` was 0 —
+# and the complex headers were covered solely by the demos, which print a table
+# nobody diffs per-op against an oracle. That is how KI-1 (complex acosh returns
+# the wrong branch for Re(z) < 0, in ALL FOUR backends) survived from the
+# original DD port through FF, QF and TF. See docs/KNOWN_ISSUES.md.
+#
+# Standalone helper, NOT kokkos_ep_add_test: these read precomputed binary128
+# references from tests/data/xp_corpus_complex.bin and therefore run on
+# toolchains with no libquadmath, where the oracle-scored tests above only skip.
+# 24 ops each (add sub mul div abs conj sqrt exp log log10 sin cos tan asin acos
+# atan sinh cosh tanh asinh acosh atanh pow polar), per-op tolerance table set
+# from measurement. NOT EFT tests, so no contraction flags — verified
+# insensitive to -O0/-O2/-O3 and -ffp-contract=off/fast.
+kokkos_ep_add_standalone_test(dd_complex_accuracy_test)
+kokkos_ep_add_standalone_test(ff_complex_accuracy_test)
+kokkos_ep_add_standalone_test(qf_complex_accuracy_test)
+kokkos_ep_add_standalone_test(tf_complex_accuracy_test)
