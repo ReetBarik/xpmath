@@ -101,8 +101,8 @@ comparing FF against DD to page between two distant sections.
 | `mul` | TF | 21.70 | 21.30 | 3e-14 .. 3e+20 | 97% | below 3e-18: 10.59; above 1e+21: 0.00 | 30 | UNDERFLOW |
 | `mul` | FF | 14.00 | 13.79 | 1e-17 .. 3e+20 | 98% | below 3e-20: 6.70; above 1e+21: 0.00 | 25 | UNDERFLOW |
 | `div` | DD | 31.00 | 30.95 | 1e-30 .. 1e+30 | 100% | below 1e-323: 14.55 | 4 | ARG_RANGE |
-| `div` | QF | 29.00 | 28.47 | 1e-06 .. 1e+24 | 96% | below 1e-21: 11.81; above 3e+24: 0.00 | 19 | UNDERFLOW (**2 unexplained**) |
-| `div` | TF | 21.70 | 21.44 | 1e-12 .. 1e+24 | 98% | below 1e-22: 9.81; above 3e+24: 0.00 | 14 | UNDERFLOW (**2 unexplained**) |
+| `div` | QF | 29.00 | 28.50 | 1e-06 .. 1e+24 | 96% | below 1e-21: 11.81; above 3e+24: 0.00 | 17 | UNDERFLOW |
+| `div` | TF | 21.70 | 21.47 | 1e-12 .. 1e+24 | 98% | below 1e-22: 9.81; above 3e+24: 0.00 | 12 | UNDERFLOW |
 | `div` | FF | 14.00 | 13.92 | 3e-21 .. 1e+24 | 99% | below 1e-323: 0.00; above 3e+24: 0.00 | 6 | ARG_RANGE |
 | `fma` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | -- |
 | `fma` | QF | 29.00 | 27.85 | 1 .. 1 | 90% | below 1: 14.31; above 1.15: 14.25 | 31 | ARG_RANGE (**12 unexplained**) |
@@ -139,7 +139,7 @@ for each cell that has any:
 - `add` — QF 1 pts (log sweep, |x| = 10^e); TF 1 pts (log sweep, |x| = 10^e); FF 100 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
 - `sub` — QF 1 pts (log sweep, |x| = 10^e); TF 1 pts (log sweep, |x| = 10^e); FF 87 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
 - `mul` — DD 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); QF 35 pts (log sweep, |x| = 10^e); TF 30 pts (log sweep, |x| = 10^e); FF 25 pts (log sweep, |x| = 10^e)
-- `div` — DD 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); QF 19 pts (log sweep, |x| = 10^e); TF 14 pts (log sweep, |x| = 10^e); FF 6 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `div` — DD 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); QF 17 pts (log sweep, |x| = 10^e); TF 12 pts (log sweep, |x| = 10^e); FF 6 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
 - `fma` — QF 31 pts (log sweep, |x| = 10^e); TF 63 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 129 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
 - `abs` — QF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
 - `copysign` — QF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
@@ -297,12 +297,12 @@ for each cell that has any:
 | op | backend | cap | mean | trusted \|x\| | at cap | boundary (digits) | fails | dominant class |
 |---|---|---:|---:|---|---:|---|---:|---|
 | `sinh` | DD | 31.00 | 29.95 | 0.001 .. 316.2 | 96% | below 1e-323: 0.00; above 1000: 0.00 | 10 | OVERFLOW |
-| `sinh` | QF | 29.00 | 15.44 | 1e-30 .. 43.98 | 52% | below 1e-323: 0.00; above 72.26: 14.21 | 748 | OVERFLOW (**14 unexplained**) |
-| `sinh` | TF | 21.70 | 11.69 | 1e-30 .. 59.69 | 54% | below 1e-323: 0.00; above 91.11: 0.00 | 734 | OVERFLOW |
+| `sinh` | QF | 29.00 | 15.78 | 1e-30 .. 87.96 | 56% | below 1e-323: 0.00; above 91.11: 0.00 | 734 | OVERFLOW |
+| `sinh` | TF | 21.70 | 11.80 | 1e-30 .. 87.96 | 56% | below 1e-323: 0.00; above 91.11: 0.00 | 734 | OVERFLOW |
 | `sinh` | FF | 14.00 | 7.54 | 1e-30 .. 62.83 | 54% | below 1e-323: 0.00; above 91.11: 0.00 | 734 | OVERFLOW |
 | `cosh` | DD | 31.00 | 30.35 | 0 .. 316.2 | 100% | above 1000: 0.00 | 6 | OVERFLOW |
-| `cosh` | QF | 29.00 | 15.53 | 0 .. 43.98 | 52% | above 72.26: 14.21 | 744 | OVERFLOW (**14 unexplained**) |
-| `cosh` | TF | 21.70 | 11.76 | 0 .. 59.69 | 54% | above 91.11: 0.00 | 730 | OVERFLOW |
+| `cosh` | QF | 29.00 | 15.87 | 0 .. 87.96 | 56% | above 91.11: 0.00 | 730 | OVERFLOW |
+| `cosh` | TF | 21.70 | 11.87 | 0 .. 87.96 | 56% | above 91.11: 0.00 | 730 | OVERFLOW |
 | `cosh` | FF | 14.00 | 7.59 | 0 .. 62.83 | 54% | above 91.11: 0.00 | 730 | OVERFLOW |
 | `tanh` | DD | 31.00 | 30.99 | 0 .. 1e+30 | 100% | -- | 0 | -- |
 | `tanh` | QF | 29.00 | 28.90 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 4 | ARG_RANGE |
@@ -324,8 +324,8 @@ for each cell that has any:
 **Where the failures sit.** The grid family carrying the most failures
 for each cell that has any:
 
-- `sinh` — DD 10 pts (log sweep, |x| = 10^e); QF 748 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 734 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 734 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `cosh` — DD 6 pts (log sweep, |x| = 10^e); QF 744 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 730 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 730 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `sinh` — DD 10 pts (log sweep, |x| = 10^e); QF 734 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 734 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 734 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `cosh` — DD 6 pts (log sweep, |x| = 10^e); QF 730 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 730 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 730 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
 - `tanh` — QF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
 - `asinh` — DD 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); QF 52 pts (log sweep, |x| = 10^e); TF 72 pts (log sweep, |x| = 10^e); FF 48 pts (log sweep, |x| = 10^e)
 - `acosh` — QF 44 pts (log sweep, |x| = 10^e); TF 44 pts (log sweep, |x| = 10^e); FF 44 pts (log sweep, |x| = 10^e)
@@ -350,8 +350,8 @@ for each cell that has any:
 | `mul` | TF | 21.70 | 20.83 | 100 .. 1e+08 | 92% | below 10: 10.62; above 1e+08: 7.52 | 63 | UNEXPLAINED (**41 unexplained**) |
 | `mul` | FF | 14.00 | 13.63 | 10 .. 1e+08 | 96% | below 10: 0.36; above 1e+08: 0.00 | 45 | UNEXPLAINED (**24 unexplained**) |
 | `div` | DD | 31.00 | 29.59 | 0 .. 1e-09 | 89% | above 0.99: 13.14 | 7 | UNEXPLAINED (**5 unexplained**) |
-| `div` | QF | 29.00 | 25.38 | 1e+04 .. 1e+08 | 73% | below 1e+04: 13.22; above 1e+08: 13.51 | 184 | UNEXPLAINED (**166 unexplained**) |
-| `div` | TF | 21.70 | 19.58 | 1e-22 .. 1e-20 | 82% | below 1e-23: 5.88; above 1e-19: 10.49 | 174 | UNEXPLAINED (**164 unexplained**) |
+| `div` | QF | 29.00 | 25.46 | 1e+04 .. 1e+08 | 73% | below 1e+04: 13.22; above 1e+08: 13.51 | 181 | UNEXPLAINED (**163 unexplained**) |
+| `div` | TF | 21.70 | 19.65 | 1e-22 .. 1e-20 | 82% | below 1e-23: 5.88; above 1e-19: 10.49 | 171 | UNEXPLAINED (**161 unexplained**) |
 | `div` | FF | 14.00 | 12.38 | 0.99 .. 1 | 87% | below 0.99: 0.00; above 1: 0.00 | 197 | CONDITIONING (**17 unexplained**) |
 | `abs` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | -- |
 | `abs` | QF | 29.00 | 28.67 | 1e-09 .. 1e+15 | 97% | below 1e-17: 11.79 | 12 | UNEXPLAINED (**12 unexplained**) |
@@ -372,7 +372,7 @@ for each cell that has any:
 - `add` — QF 6 pts (perpendicular approach to the real axis); TF 4 pts (perpendicular approach to the real axis); FF 84 pts (perpendicular approach to the real axis)
 - `sub` — QF 6 pts (perpendicular approach to the real axis); TF 6 pts (perpendicular approach to the real axis); FF 96 pts (perpendicular approach to the real axis)
 - `mul` — QF 76 pts (perpendicular approach to the real axis); TF 63 pts (perpendicular approach to the real axis); FF 45 pts (perpendicular approach to the real axis)
-- `div` — DD 7 pts (polar shells); QF 184 pts (perpendicular approach to the real axis); TF 174 pts (perpendicular approach to the real axis); FF 197 pts (perpendicular approach to the real axis)
+- `div` — DD 7 pts (polar shells); QF 181 pts (perpendicular approach to the real axis); TF 171 pts (perpendicular approach to the real axis); FF 197 pts (perpendicular approach to the real axis)
 - `abs` — QF 12 pts (the real axis on a geometric ladder); TF 6 pts (the real axis on a geometric ladder)
 - `polar` — QF 21 pts (perpendicular approach to the real axis); FF 52 pts (perpendicular approach to the real axis)
 
@@ -395,8 +395,8 @@ for each cell that has any:
 | `log10` | TF | 21.70 | 17.95 | 2 .. 2.236 | 69% | below 2: 0.00; above 10: 0.00 | 226 | CONDITIONING (**6 unexplained**) |
 | `log10` | FF | 14.00 | 11.45 | 2 .. 2.236 | 68% | below 2: 0.00; above 10: 0.00 | 228 | CONDITIONING (**24 unexplained**) |
 | `pow` | DD | 31.00 | 28.21 | 2 .. 2.236 | 90% | below 2: 0.00; above 10: 0.00 | 83 | CONDITIONING |
-| `pow` | QF | 29.00 | 24.94 | 2 .. 2.002 | 81% | below 2: 14.11; above 2.236: 8.92 | 163 | CONDITIONING (**42 unexplained**) |
-| `pow` | TF | 21.70 | 18.76 | 2 .. 2.002 | 79% | below 2: 0.00; above 2.236: 8.92 | 151 | CONDITIONING (**43 unexplained**) |
+| `pow` | QF | 29.00 | 25.38 | 2 .. 2.002 | 83% | below 2: 14.11; above 2.236: 8.92 | 135 | CONDITIONING (**11 unexplained**) |
+| `pow` | TF | 21.70 | 19.08 | 2 .. 2.002 | 80% | below 2: 0.00; above 2.236: 8.92 | 122 | CONDITIONING (**11 unexplained**) |
 | `pow` | FF | 14.00 | 12.13 | 0.5 .. 0.5 | 70% | below 0.5: 0.08; above 0.9: 0.00 | 114 | CONDITIONING (**24 unexplained**) |
 | `sqrt` | DD | 31.00 | 29.57 | 2 .. 2.236 | 95% | below 2: 0.00; above 10: 0.00 | 82 | UNEXPLAINED (**82 unexplained**) |
 | `sqrt` | QF | 29.00 | 26.21 | 2 .. 2.236 | 80% | below 2: 0.00; above 10: 0.00 | 92 | UNEXPLAINED (**92 unexplained**) |
@@ -409,7 +409,7 @@ for each cell that has any:
 - `exp` — DD 75 pts (polar shells); QF 219 pts (perpendicular approach to the real axis); TF 193 pts (perpendicular approach to the real axis); FF 243 pts (perpendicular approach to the real axis)
 - `log` — DD 84 pts (the real axis on a geometric ladder); QF 259 pts (perpendicular approach to the real axis); TF 226 pts (the real axis on a geometric ladder); FF 228 pts (the real axis on a geometric ladder)
 - `log10` — DD 84 pts (the real axis on a geometric ladder); QF 259 pts (perpendicular approach to the real axis); TF 226 pts (the real axis on a geometric ladder); FF 228 pts (the real axis on a geometric ladder)
-- `pow` — DD 83 pts (the real axis on a geometric ladder); QF 163 pts (the real axis on a geometric ladder); TF 151 pts (the real axis on a geometric ladder); FF 114 pts (the real axis on a geometric ladder)
+- `pow` — DD 83 pts (the real axis on a geometric ladder); QF 135 pts (the real axis on a geometric ladder); TF 122 pts (the real axis on a geometric ladder); FF 114 pts (the real axis on a geometric ladder)
 - `sqrt` — DD 82 pts (the real axis on a geometric ladder); QF 92 pts (the real axis on a geometric ladder); TF 87 pts (the real axis on a geometric ladder); FF 82 pts (the real axis on a geometric ladder)
 
 ---
@@ -468,8 +468,8 @@ for each cell that has any:
 | `acos` | TF | 21.70 | 18.61 | 1.005 .. 2 | 67% | below 1: 0.00; above 1e+07: 10.18 | 131 | UNEXPLAINED (**115 unexplained**) |
 | `acos` | FF | 14.00 | 11.32 | 2 .. 2.236 | 59% | below 2: 0.00; above 10: 0.00 | 177 | UNEXPLAINED (**157 unexplained**) |
 | `atan` | DD | 31.00 | 25.19 | 0 .. 1e-17 | 60% | above 1e-08: 8.13 | 256 | UNEXPLAINED (**250 unexplained**) |
-| `atan` | QF | 29.00 | 22.32 | 0.99 .. 1 | 53% | below 0.99: 13.73; above 1: 14.48 | 330 | UNEXPLAINED (**316 unexplained**) |
-| `atan` | TF | 21.70 | 15.82 | 0.99 .. 1 | 52% | below 0.99: 7.26; above 1: 10.81 | 365 | UNEXPLAINED (**359 unexplained**) |
+| `atan` | QF | 29.00 | 22.33 | 0.99 .. 1 | 53% | below 0.99: 13.73; above 1: 14.48 | 330 | UNEXPLAINED (**314 unexplained**) |
+| `atan` | TF | 21.70 | 15.83 | 0.99 .. 1 | 52% | below 0.99: 7.26; above 1: 10.81 | 365 | UNEXPLAINED (**357 unexplained**) |
 | `atan` | FF | 14.00 | 9.51 | 0.99 .. 1 | 52% | below 0.99: 0.00; above 1: 0.00 | 454 | UNEXPLAINED (**448 unexplained**) |
 | `asinh` | DD | 31.00 | 29.34 | 10 .. 1e+15 | 86% | below 10: 0.00 | 10 | UNEXPLAINED (**8 unexplained**) |
 | `asinh` | QF | 29.00 | 25.86 | 100 .. 1e+15 | 70% | below 100: 14.49 | 58 | UNEXPLAINED (**47 unexplained**) |
@@ -480,8 +480,8 @@ for each cell that has any:
 | `acosh` | TF | 21.70 | 17.38 | 2 .. 2.236 | 68% | below 2: 0.00; above 10: 0.00 | 251 | CONDITIONING (**122 unexplained**) |
 | `acosh` | FF | 14.00 | 10.77 | 2 .. 2.236 | 68% | below 2: 0.00; above 10: 0.00 | 311 | UNEXPLAINED (**182 unexplained**) |
 | `atanh` | DD | 31.00 | 27.35 | 0 .. 0.1 | 76% | above 1: 0.00 | 135 | UNEXPLAINED (**126 unexplained**) |
-| `atanh` | QF | 29.00 | 23.82 | 1e-28 .. 1e-08 | 65% | below 1e-30: 13.95; above 0.5: 13.10 | 237 | UNEXPLAINED (**195 unexplained**) |
-| `atanh` | TF | 21.70 | 17.41 | 1e-28 .. 0.1 | 60% | above 0.5: 7.36 | 245 | UNEXPLAINED (**212 unexplained**) |
+| `atanh` | QF | 29.00 | 23.84 | 1e-28 .. 1e-08 | 65% | below 1e-30: 13.95; above 0.5: 13.10 | 237 | UNEXPLAINED (**193 unexplained**) |
+| `atanh` | TF | 21.70 | 17.42 | 1e-28 .. 0.1 | 60% | above 0.5: 7.36 | 245 | UNEXPLAINED (**210 unexplained**) |
 | `atanh` | FF | 14.00 | 10.76 | 1e-29 .. 0.1 | 60% | below 1e-30: 0.00; above 0.5: 0.00 | 305 | UNEXPLAINED (**267 unexplained**) |
 
 **Where the failures sit.** The grid family carrying the most failures
@@ -503,9 +503,9 @@ for each cell that has any:
 | UNDERFLOW | 4167 |
 | OVERFLOW | 11633 |
 | ARG_RANGE | 342 |
-| CONDITIONING | 10346 |
-| UNEXPLAINED | 9347 |
-| **total triaged** | **35835** |
+| CONDITIONING | 10360 |
+| UNEXPLAINED | 9238 |
+| **total triaged** | **35740** |
 
 Out of 428,592 scored points.
 

@@ -1465,7 +1465,7 @@ well-conditioned there — so the loss is the algorithm's, not the format's.
 **None of them were fixed when this block was written** — that session measured
 and documented only. **KI-6 and KI-7 have since been resolved** (2026-09-02,
 commit `ad82f4f`), **KI-8** (2026-09-02, commit `4cd7dcb`) and **KI-9**
-(2026-09-02, commit `KI9FIXSHA`); KI-10 and KI-11 remain open. `docs/DOMAINS.md`
+(2026-09-02, commit `82427f6`); KI-10 and KI-11 remain open. `docs/DOMAINS.md`
 records the resulting usable ranges per backend per op, and is generated from the
 same data — it was regenerated after each fix, so the counts quoted in the KI-6,
 KI-7, KI-8 and KI-9 *Extent* sections above are the pre-fix numbers and no longer
@@ -1926,7 +1926,7 @@ escapes; tightening NaN to +inf there would need an overflow probe in the QF/TF
 renormalizers and is not worth a divide on every call. Recorded here rather than
 opened as a new KI.
 
-> **Addendum (KI-9, `KI9FIXSHA`).** That residual wrinkle is now closed, and it
+> **Addendum (KI-9, `82427f6`).** That residual wrinkle is now closed, and it
 > was worse than "one edge point": KI-8's scaled path divides by `max(|a|,|b|)`,
 > and QF/TF `divide` was returning NaN for any operand past 4.15e34 (KI-9). So
 > `QF/TF hypot` was NaN from 1e35 *upward* — not only at the genuine-overflow
@@ -2030,7 +2030,7 @@ down by a power of two before splitting and scale the product back afterwards.
 
 ### Resolution (2026-09-02)
 
-Fixed in **`KI9FIXSHA`** (`qf_math.hpp`, `tf_math.hpp`). DD and FF were already
+Fixed in **`82427f6`** (`qf_math.hpp`, `tf_math.hpp`). DD and FF were already
 clean — FF had re-derived the same guard independently at B8/B9
 (`ff_math.hpp:245`), and DD's FP64 words put the threshold at 6.7e299.
 
@@ -2128,7 +2128,19 @@ below it the direct form is used and is up to 21.9 digits better.
 
 **Sweep effect.** Monotone gate exit **0** against
 `validation/sweep/sweep_baseline.csv` (428,592 points): **0 decreased**, 304
-increased, 428,288 unchanged. No accepted decreases. `ctest` 34/34.
+increased, 428,288 unchanged. No accepted decreases. `ctest` 34/34;
+`check_standalone_no_kokkos.sh` PASS; `check_domains_fresh.sh` PASS after
+regeneration. Triage UNEXPLAINED went **9,348 → 9,238** (−110). The 304 gains
+are QF/TF `sinh`/`cosh` at large negative arguments and the QF/TF `div`, `mul`,
+`hypot` and complex `abs`/`div` points in the 4.15e34–3.4e38 band; the
+UNEXPLAINED drop is smaller than the gain count because many of those points were
+already classified OVERFLOW or CONDITIONING rather than UNEXPLAINED.
+
+**No accuracy-test tolerance was ratcheted.** The QF and TF accuracy tests
+exercise `sinh`/`cosh` on |x| < 40 and `hypot` on ±1e6, both entirely inside the
+untouched region — the split guard fires only above 4.15e34 and the sinhcosh
+crossover only below −40 — so no measured row moved and there is nothing to
+tighten against.
 
 ---
 
