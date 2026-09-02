@@ -1462,9 +1462,13 @@ and conditioning were subtracted, and each is a case where the true result is
 comfortably inside the backend's representable range and the operation is
 well-conditioned there — so the loss is the algorithm's, not the format's.
 
-**None of them are fixed.** This session measured and documented only.
-`docs/DOMAINS.md` records the resulting usable ranges per backend per op, and
-is generated from the same data.
+**None of them were fixed when this block was written** — that session measured
+and documented only. **KI-6 and KI-7 have since been resolved** (2026-09-02,
+commit `ad82f4f`); KI-8 through KI-11 remain open. `docs/DOMAINS.md` records the
+resulting usable ranges per backend per op, and is generated from the same data —
+it was regenerated after the KI-6/KI-7 fix, so the counts quoted in the KI-6 and
+KI-7 *Extent* sections above are the pre-fix numbers and no longer match the
+current CSVs.
 
 ---
 
@@ -1518,7 +1522,7 @@ apply the guard to their own argument, not to the reduced one.
 
 ### Resolution (2026-09-02)
 
-Fixed in **`TBD-FIX`**, all four backends (`dd_math.hpp`, `ff_math.hpp`,
+Fixed in **`ad82f4f`**, all four backends (`dd_math.hpp`, `ff_math.hpp`,
 `qf_math.hpp`, `tf_math.hpp`).
 
 **Two independent bugs, not one.** The guard was only half the story.
@@ -1730,7 +1734,7 @@ and much faster than evaluating the exponential at all.
 
 ### Resolution (2026-09-02)
 
-Fixed in **`TBD-FIX`**, same commit as [KI-6](#ki-6).
+Fixed in **`ad82f4f`**, same commit as [KI-6](#ki-6).
 
 **Was KI-7 downstream of KI-6? Partly — and the remainder is a separate defect.**
 This was checked, not assumed, and the entry above ("Downstream of KI-6") is
