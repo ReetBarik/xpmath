@@ -660,9 +660,12 @@ flags but which buries the real diff in reference noise. Build the sweep with
 
 ---
 
-## KI-5 — Four more defects in the complex inverse-function family, in ALL FOUR backends
+## KI-5 — Four more defects in the complex inverse-function family, in ALL FOUR backends **[RESOLVED]**
 
-> **(a) and (d) are RESOLVED.** (b) `atanh` and (c) `acos` direct form remain open.
+> **All four are RESOLVED.** (a) and (d) 2026-09-02 commit `f421a0e`;
+> (b) and (c) 2026-09-02, commit `TBD-FIX-BC` — see the two resolution blocks below.
+> (c) is resolved with a **documented accepted regression**; read that block before
+> trusting `acos` at `|z| ~ 1e8` with `Im(z) < 0`.
 
 **Severity: high ((a) and (d) reach total loss of the result), scope: all four
 backends (DD, FF, QF, TF), pre-existing, same `log`/`sqrt` family as KI-1.**
@@ -899,6 +902,110 @@ means adding it. That is the largest piece of work in KI-5.
 
 ---
 
+### (b) Resolution (2026-09-02, commit `TBD-FIX-BC`)
+
+Closed in all four `*_complex.hpp`, and it took a new **real** `log1p` as well as
+the new complex one. Three pieces.
+
+**1. The real `log1p` was never a `log1p`.** All four headers spelled it
+`log(add(1, a))`, the exact composition a `log1p` exists to avoid. Replacing that
+was a prerequisite, not a side quest: a complex `log1p` built on it would have
+inherited the same loss. Two attempts were needed.
+
+  * *Goldberg's correction alone is not enough.* `u = fl(1+a); log(u)*a/(u-1)`
+    repairs the rounding of the ARGUMENT and assumes `log(u)` is accurate for the
+    `u` it is handed. It is not, here: `log` seeds from the FP64 log of the
+    leading limb and takes ONE Newton step `x <- x + a*exp(-x) - 1`, which for
+    `u = 1 + e` returns `e` itself against a true `e - e²/2`. Measured:
+    `log1p(4e-20)` on DD scored **19.70**, not 31 — precisely the `2·log10(1/e)`
+    that one Newton step buys. Recorded here because the result looks like a
+    working fix until it is measured.
+  * *What shipped* is the series, for `|a| < 1/4`:
+    `log1p(a) = 2·atanh(t)`, `t = a/(2+a)`, `atanh(t) = t + t³/3 + t⁵/5 + …`.
+    The atanh form rather than the alternating `log(1+a)` series because its terms
+    are all positive and it converges in `t²`: `|a| < 1/4` gives `|t| < 1/7`, about
+    19 terms for DD. Outside `|a| < 1/4` the body is the ORIGINAL `log(1+a)`,
+    unchanged. That is deliberate — the first cut applied Goldberg there too and
+    the monotone gate caught it costing 583 points up to `-0.87` digits (TF at
+    `a = -1.85`), because with no cancellation to undo the correction is two extra
+    roundings and nothing else.
+
+**2. Complex `log1p`, new in all four headers** (`Re = ½·log1p(2·Re(w) + |w|²)`,
+`Im = atan2(Im(w), 1 + Re(w))`). The formulation is Kahan 1987's. **Divergence
+from the sources, recorded as instructed:** QD 2.3.24 (`/tmp/qdsrc/QD`) has no
+complex layer at all, so it offers nothing to copy or diverge from; Kahan's
+residual weakness — the real part loses relative accuracy on the circle
+`|1+w| = 1`, where `2·Re(w) + |w|²` itself cancels — is inherited knowingly. That
+locus is measure-zero, the answer on it is `~0`, and every hypot-based alternative
+loses the same digits in the same place.
+
+**3. `atanh` rebuilt on it**, expanded into components so no complex divide is
+needed either:
+
+```
+Re atanh(z) = ¼·log1p( 4x / ((1-x)² + y²) )
+Im atanh(z) = ½·atan2( 2y, 1 - x² - y² )
+```
+
+**THRESHOLD (`kXpAtanhSmall = 0.0625`, L-infinity on the leading limbs).** The new
+form is used only where the old one loses. `(1-x)² + y²` squares its operands, so
+it overflows for `|z|` above sqrt of the word range (`~1.3e154` FP64-word,
+`~1.8e19` FP32-word) where the old ratio form is finite — switching
+unconditionally would trade a conditioning defect for an overflow defect. The
+first cut used `0.5`; the gate showed 43 points across the four backends losing up
+to `-1.09` digits (QF at `z = -0.49 - 0.098i`) to rounding churn in `0.0625 < |z|
+< 0.5`, where the old form was already at cap. Tightening to `0.0625` — exactly
+representable, so the compare is exact — keeps every small-`z` win and leaves
+**one** atanh regression in the whole sweep.
+
+**4. A second defect, found by measurement while fixing the first: the signed zero
+on the cuts** — the `atanh` analogue of (d). Approaching `x > 1` from `Im = +0`
+gives `Im atanh = +π/2` and from `Im = -0` gives `-π/2`; by oddness the same
+`+π/2` holds for `x < -1` with `Im = +0`. The old form's complex divide destroyed
+the sign of `Im(z)`'s zero and returned `+π/2` for both conventions, so **every
+`x -0i` cut point scored 0.00 on the imaginary component, in all four backends**.
+The sign is now read off `Im(z)` with `detail::copysign` before the arithmetic can
+lose it, as in (d).
+
+Measured, `atanh` on the shipped backends (min over the two components,
+`/tmp` harness against the `__complex128` oracle; caps DD 31 / QF 29 / TF 21.7 /
+FF 14):
+
+```
+point                DD before -> after   QF before -> after   TF before -> after   FF before -> after
+-------------------------------------------------------------------------------------------------------
+1e-2  + 0i             28.94 -> 31.00       27.63 -> 29.00       19.00 -> 21.70       12.18 -> 14.00
+1e-6  + 0i             24.52 -> 31.00       22.12 -> 29.00       15.56 -> 21.70        9.40 -> 14.00
+1e-10 + 0i             20.97 -> 31.00       22.06 -> 29.00       11.51 -> 21.70        7.87 -> 14.00
+1e-14 + 0i             17.55 -> 31.00       22.12 -> 29.00       15.10 -> 21.70        7.76 -> 14.00
+1e-20 + 0i             31.00 -> 31.00       29.00 -> 29.00       15.35 -> 21.70        7.50 -> 14.00
+1e-8  + 1e-8i          23.08 -> 31.00       22.50 -> 29.00       16.19 -> 21.70        8.22 -> 14.00
+1e-16 + 3e-17i         16.61 -> 31.00       22.23 -> 29.00       15.31 -> 21.70        7.77 -> 14.00
+0.5   + 0i  [control]  30.74 -> 30.74       27.89 -> 27.89       21.33 -> 21.33       13.61 -> 13.61
+0.3   + 0.7i [control] 29.91 -> 29.91       27.01 -> 27.01       20.76 -> 20.76       12.82 -> 12.82
+ 2 + 0i  [cut]         30.74 -> 30.74       27.89 -> 27.89       21.33 -> 21.33       13.61 -> 13.61
+ 2 - 0i  [cut]          0.00 -> 30.74        0.00 -> 27.89        0.00 -> 21.33        0.00 -> 13.61
+-2 + 0i  [cut]         29.93 -> 29.93       28.59 -> 28.59       21.30 -> 21.30       13.69 -> 13.69
+-2 - 0i  [cut]          0.00 -> 29.93        0.00 -> 28.59        0.00 -> 21.30        0.00 -> 13.69
+```
+
+Every point in the conditioning region reaches the type's cap; the four `-0i` cut
+rows go from total loss to the same score as their `+0i` partners. Corpus means
+over the 1780-point complex grid: DD 25.74 -> 27.35, QF 22.34 -> 23.49,
+TF 16.07 -> 17.14, FF 9.75 -> 10.59. Real `log1p` means over the 1652-point real
+grid: DD 29.11 -> 30.76, QF 26.93 -> 28.37, TF 20.04 -> 21.44, FF 12.60 -> 13.86.
+
+**Real-header additions, stated explicitly because the task scope asked.** The
+complex `log1p` genuinely needed one, so `log1p` in all four of `dd_math.hpp`,
+`ff_math.hpp`, `qf_math.hpp` and `tf_math.hpp` was rewritten as described in (1).
+No other real-header function was touched, and no new constants were added.
+
+**Residual regressions from (b): two points in 428,592.** `TF r log1p` point 278
+`21.70 -> 21.47` and `QF c atanh` point 16 `20.58 -> 20.31`, both series-vs-`log`
+rounding churn at the type's cap. Accepted.
+
+---
+
 ### (c) `acos(z) = π/2 − asin(z)` degrades as `z → 1`
 
 `include/xp/dd_complex.hpp:241-246` — confirmed by reading, the implementation
@@ -946,6 +1053,156 @@ cancellation instead — and, separately, defect (d) below, because it is built 
 `acos(z) = 2·atan( sqrt((1−z)/(1+z)) )` form or the `acos(z) = -i·log(z + i·sqrt(1−z²))`
 identity with the subtraction restructured. Either is a formulation change, not a
 one-liner, and it must not regress the well-conditioned interior.
+
+---
+
+### (c) Resolution (2026-09-02, commit `TBD-FIX-BC`) — **with an accepted regression**
+
+Closed in all four `*_complex.hpp`. `π/2 − asin` is gone.
+
+**Which formulation, and why.** Kahan 1987's log form,
+`acos(z) = -2i·log( sqrt((1+z)/2) + i·sqrt((1-z)/2) )` — the exact companion of
+the `acosh` adopted for KI-1, so the two share one verified branch layout. It was
+chosen over Kahan's other form `2·atan(sqrt((1-z)/(1+z)))` because the atan form
+adds a complex `atan` on top of a complex divide by `(1+z)`, which is singular at
+`z = -1` — the OTHER end of the principal interval — so it moves the bad point
+rather than removing it. The log form needs only `sqrt` and `log`, never forms
+`z²` or `1/(1+z)`, and so has no overflow at large `|z|` and no singularity at
+either end.
+
+**It is NOT routed through `acosh`.** `acos(z) = ±i·acosh(z)` does hold, but the
+sign flips with the half-plane AND with the side of each cut, so sharing the body
+would reintroduce exactly the case analysis Kahan's form exists to avoid. The two
+stay separate; they are a handful of lines each.
+
+**But the pure log form is only half right, and the monotone gate is what said
+so.** `Im(acos z) = -2·ln|w|` with `w = sqrt((1+z)/2) + i·sqrt((1-z)/2)`, and
+`|w| → 1` exactly where `Im(acos z) → 0`, i.e. for `z` near the real segment
+`[-1,1]`. There the log is taken of a number whose information sits below the
+leading 1 — the same disease as (b), relocated. Measured on the full sweep: 4016 decreases across the four backends, worst
+`31.00 -> 1.23` on DD at grid point 766, `z = 0 + 1e-30i`. A strictly worse
+trade than the defect being fixed.
+
+**What shipped is per-component**, and the split is exact rather than a
+compromise: `Im(acos z) = -Im(asin z)` is an identity (`π/2` is real), so the
+`π/2 − asin` cancellation was only ever in the REAL part. So
+
+```
+Re(acos z) = 2·arg( sqrt((1+z)/2) + i·sqrt((1-z)/2) )    <- Kahan, well conditioned
+Im(acos z) = -Im(asin z)                                  <- exact identity, no cancellation
+```
+
+which takes each form's good component and leaves both bad ones. This also
+inherits (d)'s cut fix on the imaginary part for free. Decreases fell from 4016 to 949.
+
+**`sqrt_signed_cut`, new helper in each complex header.** The header's complex
+`sqrt` tests `z.im.hi < 0.0`, which is FALSE for `-0.0`, so for `u < 0` it puts
+both zero conventions on the `+i` sheet. `acos` needs the corrected sheet at all
+four cut points, so the correction is applied locally. `multiply_scalar` does not
+carry a signed zero through either (it renormalizes, and `quick_two_sum(-0,+0)` is
+`+0`), so the caller passes the sign it read off the original `Im(z)` rather than
+trusting the halved copy. **The underlying `sqrt` defect is NOT fixed** — that
+would move every other caller, `acosh` included, in one undocumented step. It is
+recorded here as a known defect in its own right and left for a separate change.
+
+**Branch verification, both half-planes and both sides of both cuts**, each
+against the `__complex128` oracle: `z=0 -> π/2`; `z=1 -> 0`; `z=-1 -> π`;
+`z=2+0i -> -1.3170i`; `z=2-0i -> +1.3170i`; `z=-2+0i -> π-1.3170i`;
+`z=-2-0i -> π+1.3170i`; and the four interior points `(±0.3, ±0.7)`, all at or
+within 1.5 digits of cap.
+
+Measured, `acos` on the shipped backends (min over the two components,
+standalone harness against the `__complex128` oracle):
+
+```
+point                 DD before -> after   QF before -> after   TF before -> after   FF before -> after
+-------------------------------------------------------------------------------------------------------
+1 - 1e-2                30.37 -> 31.00       28.64 -> 29.00       21.56 -> 21.70       14.00 -> 13.57
+1 - 1e-6                28.88 -> 30.74       25.30 -> 29.00       18.05 -> 21.70       10.36 -> 10.26
+1 - 1e-10               27.11 -> 31.00       24.66 -> 29.00       17.28 -> 21.70        9.31 -> 14.00
+1 - 1e-14               25.01 -> 31.00       18.82 -> 25.67       15.69 -> 21.70        7.20 -> 14.00
+2 + 1e-20i              11.31 -> 30.05        8.76 -> 23.40        2.06 -> 21.43        0.00 -> 14.00
+1e-30 + 0i              31.00 -> 30.20       29.00 -> 29.00       21.70 -> 21.70        0.00 -> 14.00
+1 + 1e-10i              25.72 -> 25.72       24.20 -> 24.30       16.69 -> 17.64        8.86 ->  9.71
+1 + 1e-20i              20.78 -> 20.78        6.38 ->  5.25        6.38 ->  5.25        4.05 ->  5.25
+1e6 + 1e6i              20.14 -> 20.44       21.69 -> 21.69       13.77 -> 13.77        9.77 ->  9.77
+0 [control]             31.00 -> 31.00       29.00 -> 29.00       21.70 -> 21.70       14.00 -> 14.00
+ 2 + 0i  [cut]          30.05 -> 30.05       28.32 -> 28.32       21.43 -> 21.43       14.00 -> 14.00
+ 2 - 0i  [cut]          31.00 -> 31.00       29.00 -> 29.00       20.90 -> 20.90       13.90 -> 13.90
+-1 + 0i  [cut]          31.00 -> 31.00       29.00 -> 29.00       21.70 -> 21.70       14.00 -> 14.00
+```
+
+Read the table with the component split in mind; it explains the wins and the
+flat rows alike. The `z -> 1` block is the defect this closes, and it is the
+REAL part that moves: at `1 - 1e-14`, DD 25.01 -> 31.00, QF 18.82 -> 25.67,
+TF 15.69 -> 21.70, FF 7.20 -> 14.00. `2 + 1e-20i` -- just off the cut, where the
+old path also drove `asin` through `1 - z^2`, so the loss compounded -- is the
+largest single gain: DD up 18.7 digits, FF from total loss to cap. The FF
+`1e-30` row likewise goes 0.00 -> 14.00.
+
+The rows that DO NOT move are those whose minimum sits on the IMAGINARY
+component, which now comes from `-Im(asin z)` and is therefore exactly what
+`asin` scored before. `1e6 + 1e6i` is 20.44 / 21.69 / 13.77 / 9.77 on both
+sides, and the cut rows are unchanged to the digit. This change does not claim
+to improve `acos` at large `|z|` off the axis -- `asin` bounds it there.
+
+Four rows go DOWN and are listed rather than dropped. FF `1 - 1e-2`
+14.00 -> 13.57, FF `1 - 1e-6` 10.36 -> 10.26 and DD `1e-30` 31.00 -> 30.20 are
+sub-digit rounding churn at cap. QF and TF at `1 + 1e-20i` go 6.38 -> 5.25:
+that point is a hair off the branch point `z = 1`, where `sqrt((1-z)/2)` is
+evaluated at ~1e-20 and neither form has digits to keep -- both numbers are
+noise around a near-zero answer, and DD, which has the range to resolve it, is
+unchanged at 20.78.
+
+Corpus means over the 1780-point complex sweep grid: DD 26.52 -> 27.98,
+QF 23.46 -> 24.53, TF 16.90 -> 18.10, FF 9.91 -> 11.05. On the complex accuracy
+test's own 1572-element `acos` corpus the DD mean moves 27.58 -> 27.63 and, more
+to the point, the per-element MINIMUM rises 0.00 -> 16.01: after this change no
+DD `acos` corpus element is completely wrong.
+
+#### ACCEPTED REGRESSION — `acos` at `|z| ~ 1e8` with `Im(z) < 0`
+
+The monotone gate exits **1**: 949 decreases against 4945 increases over 428,592
+points, worst `-7.85`. 947 of the 949 are complex `acos`; the other two belong to
+(b) and are listed there. The distribution is 584 under `0.5` digits, 216 in
+`0.5–1`, 88 in `1–4`, 61 above `4`.
+
+**The worst cluster is one ring and one mechanism.** Every drop past `-6` digits
+is on the `|z| = 1e8` polar ring with `Im(z) < 0`. Coordinates of the worst six
+(op `c acos`, point indices into `validation/sweep/sweep_grid.csv`):
+
+```
+TF pt 381  z = ( 8.3147e7, -5.5557e7)   21.70 -> 13.85   -7.85
+TF pt 380  z = ( 7.0711e7, -7.0711e7)   21.70 -> 13.97   -7.73
+TF pt 371  z = (-8.3147e7, -5.5557e7)   21.70 -> 14.20   -7.50
+DD pt 382  z = ( 9.2388e7, -3.8268e7)   31.00 -> 23.72   -7.28
+FF pt 381  z = ( 8.3147e7, -5.5557e7)   13.56 ->  6.29   -7.27
+TF pt 383  z = ( 9.8079e7, -1.9509e7)   21.12 -> 13.88   -7.24
+```
+
+**Mechanism.** For `|z| >> 1`, `(1+z)/2 ≈ z/2` and `(1-z)/2 ≈ -z/2`, so with
+`θ = arg(z)` the two roots satisfy `rm ≈ ∓i·rp` for `θ ≷ 0`. Then
+`w = rp + i·rm` is `2·rp` for `θ > 0` — and a DIFFERENCE OF NEAR-EQUAL ROOTS for
+`θ < 0`. `arg(w)`, and hence `Re(acos z)`, loses the digits that cancellation
+eats: about `log10|z|/2 + O(1)`, which is the ~7 observed at `|z| = 1e8`.
+
+**A fix was attempted and measured worse, twice, so it is not shipped.**
+`acos(conj z) = conj(acos z)` holds identically including on both cuts, so
+reflecting the cancelling half-plane should remove the loss. Reflecting `Im < 0`
+took the gate from 949 decreases to **1915** (worst `-14.56`); reflecting `Im > 0`
+gave **1648** (worst `-7.28`). Both are worse than no reflection, so the
+cancellation above is not the whole story — the reflection also moves the `asin`
+evaluation, and something in that path costs more than the cancellation saves.
+Diagnosing that is a separate piece of work and is left open. Recorded so the next
+session does not spend the same hour rediscovering that the obvious fix regresses.
+
+**Why accept.** The trade is 4945 points up against 949 down; every corpus mean in
+every backend rises; the ops the change targets go from partial-to-total loss to
+cap; and the loss is confined to a region where the OLD form was at cap for the
+wrong reason — `π/2 − asin` happened not to cancel there. It is the same shape of
+decision as KI-1's, which accepted 2022 decreases on a smaller win. Do not
+re-baseline to hide it: the baseline is regenerated in a separate commit and this
+block is the record of what moved.
 
 ---
 

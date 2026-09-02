@@ -1134,7 +1134,24 @@ XPMATH_INLINE_FUNCTION TripleFloat expm1(TripleFloat a) {
     return subtract(exp(a), TripleFloat(1.0f));
 }
 
+// Series 2*atanh(a/(2+a)) for |a| < 1/4, plain log(1+a) outside; see
+// dd_math.hpp's log1p for the derivation (KI-5(b)), including why Goldberg's
+// correction was measured and rejected. The old body log(a+1) lost
+// log10(1/|a|) digits for small a.
 XPMATH_INLINE_FUNCTION TripleFloat log1p(TripleFloat a) {
+    if (detail::fabs(a.f0) < 0.25f) {
+        TripleFloat t   = divide(a, add(TripleFloat(2.0f), a));
+        TripleFloat t2  = multiply(t, t);
+        TripleFloat sum = t;
+        TripleFloat trm = t;
+        for (int k = 3; k < 80; k += 2) {
+            trm = multiply(trm, t2);
+            TripleFloat incr = divide(trm, TripleFloat((float)k));
+            sum = add(sum, incr);
+            if (detail::fabs(incr.f0) <= 1.0e-24f * detail::fabs(sum.f0)) break;
+        }
+        return multiply_scalar(sum, 2.0f);
+    }
     return log(add(a, TripleFloat(1.0f)));
 }
 

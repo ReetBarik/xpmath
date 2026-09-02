@@ -667,7 +667,24 @@ XPMATH_INLINE_FUNCTION FloatFloat log10(FloatFloat a) {
     return divide(log(a), FloatFloat_log10());
 }
 
+// log1p(a) = log(1+a). Series 2*atanh(a/(2+a)) for |a| < 1/4, plain log(1+a)
+// outside; see the derivation on dd_math.hpp's log1p (KI-5(b)), including why
+// Goldberg's correction was measured and rejected. The old body
+// `log(add(1, a))` kept no more than log10(1/|a|) digits for small a.
 XPMATH_INLINE_FUNCTION FloatFloat log1p(FloatFloat a) {
+    if (detail::fabs(a.hi) < 0.25f) {
+        FloatFloat t   = divide(a, add(FloatFloat(2.0f), a));
+        FloatFloat t2  = multiply(t, t);
+        FloatFloat sum = t;
+        FloatFloat trm = t;
+        for (int k = 3; k < 80; k += 2) {
+            trm = multiply(trm, t2);
+            FloatFloat incr = divide(trm, FloatFloat((float)k));
+            sum = add(sum, incr);
+            if (detail::fabs(incr.hi) <= 1.0e-17f * detail::fabs(sum.hi)) break;
+        }
+        return multiply_scalar(sum, 2.0f);
+    }
     return log(add(FloatFloat(1.0f), a));
 }
 

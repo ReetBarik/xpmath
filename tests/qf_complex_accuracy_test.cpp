@@ -341,14 +341,14 @@ static const OpTol kOpTols[kOpCount] = {
     {"cos",     27.47},  //  27.77   12.85  1264   zeros of sin/cos near k*pi
     {"tan",     26.62},  //  26.92    0.00  1486   conditioning-limited
     {"asin",    25.66},  //  25.96    0.00  1563   conditioning-limited; KI-5(d) fixed: on-cut sheet
-    {"acos",    25.55},  //  25.85    0.00  1572   conditioning-limited; KI-5(d) via asin
+    {"acos",    25.55},  //  25.87    0.00  1572   KI-5(c) fixed (Kahan Re + exact Im)
     {"atan",    22.45},  //  22.75    0.00  1540   conditioning-limited
     {"sinh",    27.57},  //  27.87   12.85  1539   zeros of sin/cos near k*pi
     {"cosh",    27.48},  //  27.78   12.85  1279   zeros of sin/cos near k*pi
     {"tanh",    26.57},  //  26.87    0.00  1472   zeros of sin/cos near k*pi
     {"asinh",   25.64},  //  25.94    0.00  1580   KI-5(a) fixed: reflected for Re(z) << 0
     {"acosh",   26.16},  //  26.46    0.00  1571   KI-1 fixed (Kahan): whole plane, was 957 elems
-    {"atanh",   25.21},  //  25.51   14.36  1538   conditioning-limited
+    {"atanh",   26.77},  //  27.07   14.44  1538   KI-5(b) fixed (complex log1p): ratcheted, was 25.21
     {"pow",     27.13},  //  27.43   13.48  1256   conditioning-limited
     {"polar",   27.77},  //  28.08   13.28  1338   zeros of sin/cos near k*pi
 };

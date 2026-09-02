@@ -242,6 +242,40 @@ XPMATH_INLINE_FUNCTION TripleFloatComplex log(TripleFloatComplex z) {
 }
 
 // log10(z) = log(z)/ln(10).  qf_complex.hpp:264-267 / ff_complex.hpp:197-200 / dd_complex.hpp:192-196.
+// KI-5(b). Complex log1p(w) = log(1+w), accurate for small |w| -- the library
+// had no complex log1p before this. Writing log(1 + w) directly is what made
+// complex `atanh` collapse near the origin: 1 + w rounds w's information away
+// before the log ever runs.
+//
+//     |1+w|^2 = 1 + (2*Re(w) + |w|^2)
+//     Re log1p(w) = 0.5f * log1p( 2*Re(w) + |w|^2 )        <- REAL log1p
+//     Im log1p(w) = atan2( Im(w), 1 + Re(w) )
+//
+// The whole point of the real part is the argument `2*Re(w) + |w|^2`: it is the
+// small quantity by which |1+w|^2 differs from 1, formed WITHOUT ever adding 1,
+// and handed to the real log1p (dd_math.hpp), which was rebuilt on the
+// 2*atanh(a/(2+a)) series in the same change so that it can actually keep it.
+//
+// The imaginary part needs no such care. atan2(y, 1+x) for small w returns
+// ~Im(w); its sensitivity to the rounding of 1 + Re(w) is d/dx atan2 = -y/|1+w|^2
+// ~ -Im(w), so the absolute error eps in the second argument arrives as a
+// RELATIVE error of eps in the answer. Nothing is lost.
+//
+// Divergence from the sources, recorded deliberately. QD 2.3f.24 (/tmp/qdsrc/QD)
+// has no complex layer at all, so it offers no complex log1p to copy. Kahan 1987
+// gives the formulation above (his `logp1`/`clogp1` discussion, and the same
+// expression underlies his catanh); the residual weakness is his too -- when
+// 2*Re(w) + |w|^2 itself cancels, i.e. on the circle |1+w| = 1, the real part
+// loses relative accuracy. That locus is measure-zero, the answer there is ~0,
+// and every hypot-based alternative loses the same digits on the same circle.
+// Accepted rather than worked around.
+XPMATH_INLINE_FUNCTION TripleFloatComplex log1p(TripleFloatComplex w) {
+    TripleFloat t = add(multiply_scalar(w.re, 2.0f),
+                         add(multiply(w.re, w.re), multiply(w.im, w.im)));
+    return TripleFloatComplex(multiply_scalar(log1p(t), 0.5f),
+                               atan2(w.im, add(TripleFloat(1.0f), w.re)));
+}
+
 XPMATH_INLINE_FUNCTION TripleFloatComplex log10(TripleFloatComplex z) {
     TripleFloatComplex lg = log(z);
     TripleFloat ln10 = TripleFloat_log10();
@@ -301,10 +335,91 @@ XPMATH_INLINE_FUNCTION TripleFloatComplex asin(TripleFloatComplex z) {
     return TripleFloatComplex(lg.im, negate(lg.re));  // × (-i): (a+bi)(-i) = b - ai
 }
 // acos(z) = π/2 - asin(z).  qf_complex.hpp:310-313 / ff_complex.hpp:237-241 / dd_complex.hpp:232-237.
+// Principal sqrt of (u, v) with the sign of a ZERO v respected. The header's
+// complex sqrt above tests `z.im.f0 < 0.0f`, which is false for -0.0f, so for u < 0
+// it puts BOTH zero conventions on the +i sheet. That is the same class of defect
+// as KI-5(d) and it is corrected locally here rather than inside sqrt itself,
+// which would move every other caller (acosh included) in one undocumented step.
+// The general sqrt defect is recorded in docs/KNOWN_ISSUES.md, not fixed here.
+// `vsign` is +1/-1, the intended sign of v when v is a zero: multiply_scalar does
+// NOT carry a signed zero through (it renormalizes, and quick_two_sum(-0,+0) is
+// +0), so the caller passes the sign it read off the original Im(z) rather than
+// trusting the halved copy.
+XPMATH_INLINE_FUNCTION TripleFloatComplex sqrt_signed_cut(TripleFloat u, TripleFloat v, float vsign) {
+    TripleFloatComplex r = sqrt(TripleFloatComplex(u, v));
+    if (v.f0 == 0.0f && u.f0 < 0.0f && vsign != detail::copysign(1.0f, r.im.f0))
+        r.im = negate(r.im);
+    return r;
+}
+// KI-5(c) fix. acos(z) = -2i * log( sqrt((1+z)/2) + i*sqrt((1-z)/2) ) -- Kahan
+// 1987, the exact companion of the acosh form adopted for KI-1 below.
+//
+// The old body was `pi/2 - asin(z)`, which is unconditionally stable nowhere near
+// z = 1: acos(1) = 0, so as z -> 1 the difference cancels two quantities that
+// both tend to pi/2 and the ANSWER's own magnitude tends to 0. Every digit of
+// the result is a digit the subtraction destroyed. It is worse off the real axis
+// -- acos(2 + 1e-20i) scored 11.31f on DD, 0.00f on FF -- because asin there is
+// itself computed through 1 - z^2, so the loss compounds.
+//
+// Why Kahan's log form and not his other one, acos(z) = 2*atan(sqrt((1-z)/(1+z))).
+// Both are well conditioned at z -> 1. The log form was chosen because (a) it is
+// structurally identical to the acosh already in this header, so the two share a
+// verified branch layout and one reader's understanding covers both, (b) it needs
+// only sqrt/log, which are the two best-tested primitives here, where the atan
+// form adds a complex atan on top of a complex divide by (1+z) -- a divide that
+// is singular at z = -1, the OTHER end of the principal interval, so that form
+// simply moves the bad point rather than removing it, and (c) it never forms z^2
+// or 1/(1+z), hence no overflow at large |z| and no singularity at either end.
+//
+// BUT THE PURE LOG FORM IS ONLY HALF RIGHT, and the monotone gate is what said
+// so. Writing w for the bracket, Im(acos z) = -2*ln|w|, and |w| -> 1 exactly
+// where Im(acos z) -> 0, i.e. for z near the real segment [-1,1]. There the log
+// is taken of a number whose information sits below the leading 1 -- the same
+// disease as KI-5(b), relocated. Measured: 4016 sweep points down across the
+// four backends, worst 31.00 -> 1.23 on DD at z = 0 + 1e-30i. Strictly worse
+// than the defect being fixed.
+//
+// SO THIS IS PER-COMPONENT, and the split is exact rather than a compromise.
+// Im(acos z) = -Im(asin z) is an IDENTITY (pi/2 is real), so the pi/2 - asin
+// cancellation was only ever in the real part:
+//
+//     Re(acos z) = 2*arg( sqrt((1+z)/2) + i*sqrt((1-z)/2) )   <- Kahan, stable
+//     Im(acos z) = -Im(asin z)                                <- exact identity
+//
+// Each form's good component, neither's bad one. This also inherits KI-5(d)'s
+// cut fix on the imaginary part for free. Decreases fell from 4016 to 949.
+//
+// ACCEPTED LOSS, recorded in docs/KNOWN_ISSUES.md KI-5(c): for |z| >> 1 with
+// arg(z) < 0 the two roots satisfy rm ~ -i*rp, so w = rp + i*rm is a difference
+// of near-equal roots and arg(w) loses about log10|z|/2 digits -- up to 7.85 on
+// the |z| = 1e8 polar ring. Reflecting by acos(conj z) = conj(acos z) should
+// remove it and was tried both ways; both measured WORSE (1915 and 1648
+// decreases against 949), so no reflection ships. See the KNOWN_ISSUES entry
+// before retrying it.
+//
+// This is NOT routed through acosh even though acos(z) = +-i*acosh(z) holds. The
+// sign of that relation flips with the half-plane AND with the side of each cut,
+// so sharing the body would mean reintroducing exactly the case analysis Kahan's
+// form exists to avoid; the two functions are three lines each and stay separate.
+//
+// BRANCH CHECK (each verified against the __complex128 oracle, both half-planes
+// and both sides of both cuts): z=0 -> pi/2; z=1 -> 0; z=-1 -> pi;
+// z=2+0i -> -1.3170i; z=2-0i -> +1.3170i; z=-2+0i -> pi-1.3170i;
+// z=-2-0i -> pi+1.3170i. The last four are the cut points, and they are why
+// sqrt_signed_cut exists: at z = 2+-0i the argument of the SECOND root is
+// negative-real with a signed zero imaginary part, and at z = -2+-0i it is the
+// FIRST root, so both calls need the corrected sheet.
 XPMATH_INLINE_FUNCTION TripleFloatComplex acos(TripleFloatComplex z) {
-    TripleFloat pi_over_2 = multiply_scalar(TripleFloat_pi(), 0.5f);
-    TripleFloatComplex asin_z = asin(z);
-    return TripleFloatComplex(subtract(pi_over_2, asin_z.re), negate(asin_z.im));
+    const TripleFloat one(1.0f);
+    const TripleFloat half_im = multiply_scalar(z.im, 0.5f);
+    const float s_im = detail::copysign(1.0f, z.im.f0);
+    TripleFloatComplex rp = sqrt_signed_cut(
+        multiply_scalar(add(one, z.re), 0.5f), half_im, s_im);
+    TripleFloatComplex rm = sqrt_signed_cut(
+        multiply_scalar(subtract(one, z.re), 0.5f), negate(half_im), -s_im);
+    // w = rp + i*rm, with i*(a+bi) = -b + ai
+    TripleFloatComplex w(subtract(rp.re, rm.im), add(rp.im, rm.re));
+    return TripleFloatComplex(multiply_scalar(atan2(w.im, w.re), 2.0f), negate(asin(z).im));
 }
 // atan(z) = (i/2)·log((1 - iz)/(1 + iz)).  qf_complex.hpp:317-324 /
 // ff_complex.hpp:243-251 / dd_complex.hpp:238-247.
@@ -385,10 +500,76 @@ XPMATH_INLINE_FUNCTION TripleFloatComplex acosh(TripleFloatComplex z) {
                               multiply_scalar(lg.im, 2.0f));
 }
 // atanh(z) = ½·log((1 + z)/(1 - z)).  qf_complex.hpp:373-376 / ff_complex.hpp:295-299 / dd_complex.hpp:290-295.
+// KI-5(b) fix. Two independent defects lived in the old one-line body
+// `0.5f*log((1+z)/(1-z))`, and both are repaired here.
+//
+// (1) CONDITIONING AS z -> 0. The ratio (1+z)/(1-z) -> 1, so the log is taken of
+// a number whose entire information content sits below the leading 1. The
+// argument reduction throws away log10(1/|z|) digits before log() is even
+// entered, and the measured score falls off one digit per decade of |z|. The
+// remedy is the classical one: 0.5f*log1p(2z/(1-z)), expanded here into its real
+// and imaginary components so no complex divide is needed either --
+//
+//     Re atanh(z) = 0.25f * log1p( 4x / ((1-x)^2 + y^2) )
+//     Im atanh(z) = 0.5f  * atan2( 2y, 1 - x^2 - y^2 )
+//
+// which is 0.5f*log1p(w) with w = 2z/(1-z) written out: 2*Re(w) + |w|^2 collapses
+// to 4x/|1-z|^2 and arg(1+w) to atan2(2y, 1-x^2-y^2). For small z the log1p
+// argument is ~4x, small and formed without cancellation, and the real log1p
+// (dd_math.hpp, rebuilt on the 2*atanh(a/(2+a)) series in this same change)
+// keeps it.
+//
+// THRESHOLD (kXpAtanhSmall = 0.0625, L-infinity on the leading limbs). The new form
+// is used only where the old one is actually losing. Two reasons to gate rather
+// than switch unconditionally. First, ((1-x)^2 + y^2) squares its operands, so
+// it overflows to Inf for |z| above sqrt of the word type's range (~1.3e154 for
+// the FP64-word backend, ~1.8e19 for the FP32-word ones) where the old ratio
+// form is perfectly finite -- a switch would trade a conditioning defect for an
+// overflow defect. Second, at |z| >= 0.5f the old form already scores at the
+// type's cap (measured: DD 30.74f/31.00f at z = 0.5f), so there is nothing to win
+// and only rounding churn to lose -- the first cut of this fix used 0.5 and the
+// gate caught 43 points across the four backends losing up to 1.09 digits to
+// exactly that churn in 0.0625 < |z| < 0.5, so the threshold is 0.0625 (2^-4,
+// exactly representable, so the compare is exact) and one atanh decrease
+// remains in the whole 428,592-point sweep. L-infinity, not hypot(), for the same reasons
+// given on asinh above: no overflow, two compares, and the leading limb settles
+// it except within an ulp of the boundary.
+//
+// (2) THE SIGNED ZERO ON THE CUTS -- the atanh analogue of KI-5(d), found by
+// measurement while fixing (1), and fixed here because it is in the same body.
+// The cuts are (-inf,-1] and [1,+inf). Approaching x > 1 from Im = +0 gives
+// Im atanh = +pi/2, and from Im = -0 gives -pi/2; by oddness the SAME +pi/2
+// holds for x < -1 with Im = +0. The old form computed (1+z)/(1-z) with a
+// complex divide, whose multiplies destroy the sign of Im(z)'s zero, and so
+// returned +pi/2 for both conventions: every `x -0i` cut point scored 0.00f on
+// the imaginary component, in all four backends. The sign is read off Im(z)
+// directly with detail::copysign -- these types do carry a signed zero through
+// construction, copy and negate, they only lose it in arithmetic -- and pi/2 is
+// installed with it. The two conventions that were already right are unchanged.
 XPMATH_INLINE_FUNCTION TripleFloatComplex atanh(TripleFloatComplex z) {
-    TripleFloatComplex one = TripleFloatComplex(TripleFloat(1.0f));
-    TripleFloatComplex lg  = log((one + z) / (one - z));
-    return TripleFloatComplex(multiply_scalar(lg.re, 0.5f), multiply_scalar(lg.im, 0.5f));
+    const TripleFloat one(1.0f);
+    const float t = 0.0625f;   // kXpAtanhSmall
+    TripleFloatComplex r;
+    if (detail::fabs(z.re.f0) < t && detail::fabs(z.im.f0) < t) {
+        TripleFloat omx = subtract(one, z.re);
+        TripleFloat den = add(multiply(omx, omx), multiply(z.im, z.im));
+        r.re = multiply_scalar(
+            log1p(divide(multiply_scalar(z.re, 4.0f), den)), 0.25f);
+        r.im = multiply_scalar(
+            atan2(multiply_scalar(z.im, 2.0f),
+                  subtract(one, add(multiply(z.re, z.re), multiply(z.im, z.im)))),
+            0.5f);
+    } else {
+        TripleFloatComplex lg = log((TripleFloatComplex(one) + z) / (TripleFloatComplex(one) - z));
+        r.re = multiply_scalar(lg.re, 0.5f);
+        r.im = multiply_scalar(lg.im, 0.5f);
+    }
+    if (z.im.f0 == 0.0f && detail::fabs(z.re.f0) > 1.0f) {
+        TripleFloat half_pi = multiply_scalar(TripleFloat_pi(), 0.5f);
+        if (detail::copysign(1.0f, z.im.f0) < 0.0f) half_pi = negate(half_pi);
+        r.im = half_pi;
+    }
+    return r;
 }
 
 // ============================================================

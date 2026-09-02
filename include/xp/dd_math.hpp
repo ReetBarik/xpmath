@@ -429,8 +429,56 @@ XPMATH_INLINE_FUNCTION DoubleDouble log10(DoubleDouble a) {
     return divide(log(a), DoubleDouble_log10());
 }
 
+// log1p(a) = log(1+a), accurate for small |a|.
+//
+// KI-5(b). The old body was `log(add(1, a))`, which is not a log1p at all: for
+// |a| << 1 the sum discards everything below the leading 1, so the result keeps
+// only log10(1/|a|) fewer digits than the type has. That is exactly the loss the
+// caller asked to avoid, and it is what made complex `atanh` collapse as z -> 0.
+//
+// The obvious repair does NOT work here, and was measured before being dropped.
+//
+// (i) REJECTED: Goldberg's correction (Higham, "Accuracy and Stability of
+// Numerical Algorithms", 2nd ed., problem 1.5): with u = fl(1+a), log1p(a) =
+// log(u)*a/(u-1). `u - 1` is EXACT whenever 0.5 <= u.hi <= 2, so a/(u-1) is
+// exactly the factor by which rounding 1+a perturbed the argument. But that
+// repairs the ARGUMENT and assumes log(u) is accurate for the u it is given. It
+// is not, here: `log` seeds from the FP64 log of the leading limb and takes ONE
+// Newton step x <- x + a*exp(-x) - 1; for u = 1 + e the seed is 0 and the step
+// returns e itself, whose relative error against log(1+e) = e - e^2/2 is e/2.
+// Measured: with Goldberg alone, log1p(4e-20) on DD scored 19.70 digits, not 31
+// -- exactly the 2*log10(1/e) that one Newton step buys. Applying it for larger
+// |a| as well, where there is no cancellation to undo, cost 583 sweep points up
+// to 0.87 digits to its two extra roundings. So it is not used at all.
+//
+// (ii) WHAT SHIPS: a series for small |a|, which never calls log:
+//
+//     log1p(a) = 2*atanh(t),  t = a/(2+a),  atanh(t) = t + t^3/3 + t^5/5 + ...
+//
+// The atanh form rather than the plain alternating log(1+a) series because its
+// terms are all positive (no cancellation) and it converges in t^2, so |a| < 1/4
+// gives |t| < 1/7 and t^2 < 1/48 -- about 19 terms for DD's 32 digits. Forming
+// t costs one divide, which is the whole price. Outside |a| < 1/4 the body is
+// the ORIGINAL log(1+a), bit-identical to before this change.
+//
+// Edge cases: a == 0 gives t == 0 and returns 0 with its sign; a == -1 falls
+// through to log(0) = -inf; large a falls through unchanged. Same body in all
+// four backends, with the threshold fixed at 1/4 and only the convergence
+// epsilon retyped.
 XPMATH_INLINE_FUNCTION DoubleDouble log1p(DoubleDouble a) {
-    // log(1+a); use direct formula for moderate a
+    if (detail::fabs(a.hi) < 0.25) {
+        DoubleDouble t   = divide(a, add(DoubleDouble(2.0), a));
+        DoubleDouble t2  = multiply(t, t);
+        DoubleDouble sum = t;
+        DoubleDouble trm = t;
+        for (int k = 3; k < 80; k += 2) {
+            trm = multiply(trm, t2);
+            DoubleDouble incr = divide(trm, DoubleDouble((double)k));
+            sum = add(sum, incr);
+            if (detail::fabs(incr.hi) <= 1.0e-34 * detail::fabs(sum.hi)) break;
+        }
+        return multiply_scalar(sum, 2.0);
+    }
     return log(add(DoubleDouble(1.0), a));
 }
 

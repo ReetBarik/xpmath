@@ -938,8 +938,25 @@ XPMATH_INLINE_FUNCTION QuadFloat log2(QuadFloat a) {
     return divide(log(a), QuadFloat_log2());
 }
 
-// log1p(a) = log(1 + a).  QD has no log1p; composition (cf. dd_math.hpp:404).
+// log1p(a) = log(1 + a).  QD has no log1p.  Series 2*atanh(a/(2+a)) for
+// |a| < 1/4, plain log(1+a) outside; see dd_math.hpp's log1p for the derivation
+// (KI-5(b)), including why Goldberg's correction was measured and rejected.
+// The old body was the plain composition log(1+a), which loses log10(1/|a|)
+// digits for small a.
 XPMATH_INLINE_FUNCTION QuadFloat log1p(QuadFloat a) {
+    if (detail::fabs(a.f0) < 0.25f) {
+        QuadFloat t   = divide(a, add(QuadFloat(2.0f), a));
+        QuadFloat t2  = multiply(t, t);
+        QuadFloat sum = t;
+        QuadFloat trm = t;
+        for (int k = 3; k < 80; k += 2) {
+            trm = multiply(trm, t2);
+            QuadFloat incr = divide(trm, QuadFloat((float)k));
+            sum = add(sum, incr);
+            if (detail::fabs(incr.f0) <= 1.0e-32f * detail::fabs(sum.f0)) break;
+        }
+        return multiply_scalar(sum, 2.0f);
+    }
     return log(add(QuadFloat(1.0f), a));
 }
 
