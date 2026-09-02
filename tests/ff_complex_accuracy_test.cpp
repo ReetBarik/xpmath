@@ -299,10 +299,7 @@ static bool ref_in_window(const cb::QuadRef& q) {
 // "Why it was not fixed when found"). Delete this predicate — in all four
 // *_complex_accuracy_test.cpp files — the day the branch selection in the four
 // *_complex.hpp headers is corrected; that is the acceptance test for the fix.
-static bool acosh_in_domain(double are, double /*aim*/) { return are >= 0.0; }
-
-static bool extra_in_domain(int op, double are, double aim) {
-  if (op == kAcosh) return acosh_in_domain(are, aim);
+static bool extra_in_domain(int /*op*/, double /*are*/, double /*aim*/) {
   return true;
 }
 
@@ -348,14 +345,14 @@ static const OpTol kOpTols[kOpCount] = {
     {"sin",     12.66},  //  12.96    0.00  1535   zeros of sin/cos near k*pi
     {"cos",     12.59},  //  12.89    0.00  1264   zeros of sin/cos near k*pi
     {"tan",     12.26},  //  12.56    0.00  1486   conditioning-limited
-    {"asin",    10.11},  //  10.41    0.00  1563   conditioning-limited
-    {"acos",     9.98},  //  10.29    0.00  1572   conditioning-limited
+    {"asin",    10.82},  //  11.12    0.00  1563   conditioning-limited; KI-5(d) fixed: on-cut sheet
+    {"acos",    10.69},  //  10.99    0.00  1572   conditioning-limited; KI-5(d) via asin
     {"atan",     9.28},  //   9.59    0.00  1540   conditioning-limited
     {"sinh",    12.68},  //  12.98    0.00  1539   zeros of sin/cos near k*pi
     {"cosh",    12.61},  //  12.91    0.00  1279   zeros of sin/cos near k*pi
     {"tanh",    12.22},  //  12.53    0.00  1472   zeros of sin/cos near k*pi
     {"asinh",   11.51},  //  11.81    0.00  1580   KI-5(a) fixed: reflected for Re(z) << 0
-    {"acosh",   11.05},  //  11.35    0.00   957   KI-1, Re(z) >= 0 only
+    {"acosh",   11.48},  //  11.78    0.00  1571   KI-1 fixed (Kahan): whole plane, was 957 elems
     {"atanh",   10.61},  //  10.91    0.00  1538   conditioning-limited
     {"pow",     12.58},  //  12.88    0.00  1256   conditioning-limited
     {"polar",   12.76},  //  13.06    0.00  1338   zeros of sin/cos near k*pi

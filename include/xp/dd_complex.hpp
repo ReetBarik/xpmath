@@ -228,12 +228,30 @@ XPMATH_INLINE_FUNCTION DoubleDoubleComplex tan(DoubleDoubleComplex z) {
 // ============================================================
 // Complex inverse trig
 // ============================================================
+// KI-5(d) fix. On the real cut (Im(z) == +-0 and |Re(z)| > 1) the sheet of
+// sqrt(1 - z^2) is fixed by the SIGN of Im(z)'s zero, and the subtraction that
+// forms 1 - z^2 destroys it: in round-to-nearest both 0 - (+0) and 0 - (-0)
+// give +0, so both approaches land on the same sheet and exactly one of the two
+// C99 Annex G conventions comes out wrong at every cut point. The sign is read
+// off Im(z) directly instead -- the expansion types do preserve a signed zero
+// through construction and copy, they only lose it in arithmetic -- and the
+// root is placed on the sheet it selects. Since Im(1 - z^2) = -2*Re(z)*Im(z),
+// the root is negative-imaginary exactly when Re and Im share a sign. The
+// correction is a no-op on the two conventions that were already right, so it
+// cannot move any other point. All four complex headers carry this same block.
 XPMATH_INLINE_FUNCTION DoubleDoubleComplex asin(DoubleDoubleComplex z) {
     // asin(z) = -i * log(iz + sqrt(1 - z^2))
     DoubleDoubleComplex iz  = DoubleDoubleComplex(negate(z.im), z.re);
     DoubleDoubleComplex z2  = z * z;
     DoubleDoubleComplex one_minus_z2 = DoubleDoubleComplex(DoubleDouble(1.0)) - z2;
-    DoubleDoubleComplex sum = iz + sqrt(one_minus_z2);
+    DoubleDoubleComplex root = sqrt(one_minus_z2);
+    if (z.im.hi == 0.0 && detail::fabs(z.re.hi) > 1.0) {
+        const bool want_neg = (detail::copysign(1.0, z.re.hi) ==
+                               detail::copysign(1.0, z.im.hi));
+        const bool have_neg = (detail::copysign(1.0, root.im.hi) < 0.0);
+        if (want_neg != have_neg) root.im = negate(root.im);
+    }
+    DoubleDoubleComplex sum = iz + root;
     DoubleDoubleComplex lg  = log(sum);
     // multiply by -i: (a+bi)*(-i) = b - ai
     return DoubleDoubleComplex(lg.im, negate(lg.re));
@@ -343,9 +361,27 @@ XPMATH_INLINE_FUNCTION DoubleDoubleComplex asinh(DoubleDoubleComplex z) {
     }
     return log(z + sqrt(z*z + DoubleDoubleComplex(DoubleDouble(1.0))));
 }
+// KI-1 fix. acosh(z) = 2*log( sqrt((z+1)/2) + sqrt((z-1)/2) ) -- Kahan 1987,
+// "Branch Cuts for Complex Elementary Functions". The older form
+// log(z + sqrt(z*z - 1)) takes the WRONG sqrt sheet throughout Re(z) < 0 and
+// returns essentially -acosh(z) there, an O(1) wrong value rather than lost
+// digits. Kahan's form is branch-correct with no case analysis: for Re(z) < 0
+// both roots are near-purely-imaginary with the same sign, for Re(z) > 0 both
+// are near-real positive, so the addition never subtracts. It also never forms
+// z*z, which is what made the old form overflow to Inf/NaN above sqrt of the
+// word type's range (~1.3e154 for the FP64-word backend, ~1.8e19 for the
+// FP32-word ones). Halving is per component via multiply_scalar, exact because
+// 0.5 is a power of two; a complex multiply by (0.5, 0) would round.
 XPMATH_INLINE_FUNCTION DoubleDoubleComplex acosh(DoubleDoubleComplex z) {
-    // acosh(z) = log(z + sqrt(z^2 - 1))
-    return log(z + sqrt(z*z - DoubleDoubleComplex(DoubleDouble(1.0))));
+    const DoubleDouble one(1.0);
+    const DoubleDouble half_im = multiply_scalar(z.im, 0.5);
+    DoubleDoubleComplex rp = sqrt(DoubleDoubleComplex(
+        multiply_scalar(add(z.re, one), 0.5), half_im));
+    DoubleDoubleComplex rm = sqrt(DoubleDoubleComplex(
+        multiply_scalar(subtract(z.re, one), 0.5), half_im));
+    DoubleDoubleComplex lg = log(rp + rm);
+    return DoubleDoubleComplex(multiply_scalar(lg.re, 2.0),
+                               multiply_scalar(lg.im, 2.0));
 }
 XPMATH_INLINE_FUNCTION DoubleDoubleComplex atanh(DoubleDoubleComplex z) {
     // atanh(z) = (1/2)*log((1+z)/(1-z))

@@ -280,11 +280,23 @@ XPMATH_INLINE_FUNCTION TripleFloatComplex tan(TripleFloatComplex z) {
 // ff_complex.hpp:227-235 / dd_complex.hpp:222-231. iz built by literal-lifted
 // components; the 1 promoted via TripleFloat(1.0f) inside the single-arg
 // TripleFloatComplex ctor (imag→0).
+// KI-5(d) fix; see dd_complex.hpp:231-241 for the full rationale. On the real
+// cut (Im(z) == +-0, |Re(z)| > 1) the sheet of sqrt(1 - z^2) is fixed by the
+// sign of Im(z)'s zero, which the subtraction destroys (0 - (+-0) == +0 in
+// round-to-nearest). Read it off Im(z) instead: Im(1 - z^2) = -2*Re*Im, so the
+// root is negative-imaginary exactly when Re and Im share a sign.
 XPMATH_INLINE_FUNCTION TripleFloatComplex asin(TripleFloatComplex z) {
     TripleFloatComplex iz  = TripleFloatComplex(negate(z.im), z.re);
     TripleFloatComplex z2  = z * z;
     TripleFloatComplex one_minus_z2 = TripleFloatComplex(TripleFloat(1.0f)) - z2;
-    TripleFloatComplex sum = iz + sqrt(one_minus_z2);
+    TripleFloatComplex root = sqrt(one_minus_z2);
+    if (z.im.f0 == 0.0f && detail::fabs(z.re.f0) > 1.0f) {
+        const bool want_neg = (detail::copysign(1.0f, z.re.f0) ==
+                               detail::copysign(1.0f, z.im.f0));
+        const bool have_neg = (detail::copysign(1.0f, root.im.f0) < 0.0f);
+        if (want_neg != have_neg) root.im = negate(root.im);
+    }
+    TripleFloatComplex sum = iz + root;
     TripleFloatComplex lg  = log(sum);
     return TripleFloatComplex(lg.im, negate(lg.re));  // × (-i): (a+bi)(-i) = b - ai
 }
@@ -357,8 +369,20 @@ XPMATH_INLINE_FUNCTION TripleFloatComplex asinh(TripleFloatComplex z) {
     return log(z + sqrt(z*z + TripleFloatComplex(TripleFloat(1.0f))));
 }
 // acosh(z) = log(z + sqrt(z² - 1)).  qf_complex.hpp:369-370 / ff_complex.hpp:291-293 / dd_complex.hpp:286-289.
+// KI-1 fix: Kahan 1987's branch-correct form, acosh(z) = 2*log(sqrt((z+1)/2) +
+// sqrt((z-1)/2)). See dd_complex.hpp:346-357 for the full rationale. The old
+// log(z + sqrt(z*z - 1)) form was on the wrong sqrt sheet throughout
+// Re(z) < 0, and overflowed above |z| ~ 1.8e19 where z*z leaves FP32 range.
 XPMATH_INLINE_FUNCTION TripleFloatComplex acosh(TripleFloatComplex z) {
-    return log(z + sqrt(z*z - TripleFloatComplex(TripleFloat(1.0f))));
+    const TripleFloat one(1.0f);
+    const TripleFloat half_im = multiply_scalar(z.im, 0.5f);
+    TripleFloatComplex rp = sqrt(TripleFloatComplex(
+        multiply_scalar(add(z.re, one), 0.5f), half_im));
+    TripleFloatComplex rm = sqrt(TripleFloatComplex(
+        multiply_scalar(subtract(z.re, one), 0.5f), half_im));
+    TripleFloatComplex lg = log(rp + rm);
+    return TripleFloatComplex(multiply_scalar(lg.re, 2.0f),
+                              multiply_scalar(lg.im, 2.0f));
 }
 // atanh(z) = ½·log((1 + z)/(1 - z)).  qf_complex.hpp:373-376 / ff_complex.hpp:295-299 / dd_complex.hpp:290-295.
 XPMATH_INLINE_FUNCTION TripleFloatComplex atanh(TripleFloatComplex z) {

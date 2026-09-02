@@ -298,11 +298,23 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex tan(QuadFloatComplex z) {
 // asin(z) = -i·log(iz + sqrt(1 - z²)).  ff_complex.hpp:206-213 /
 // dd_complex.hpp:222-231. iz built by literal-lifted components; the 1 promoted
 // via QuadFloat(1.0f) inside the single-arg QuadFloatComplex ctor (imag→0).
+// KI-5(d) fix; see dd_complex.hpp:231-241 for the full rationale. On the real
+// cut (Im(z) == +-0, |Re(z)| > 1) the sheet of sqrt(1 - z^2) is fixed by the
+// sign of Im(z)'s zero, which the subtraction destroys (0 - (+-0) == +0 in
+// round-to-nearest). Read it off Im(z) instead: Im(1 - z^2) = -2*Re*Im, so the
+// root is negative-imaginary exactly when Re and Im share a sign.
 XPMATH_INLINE_FUNCTION QuadFloatComplex asin(QuadFloatComplex z) {
     QuadFloatComplex iz  = QuadFloatComplex(negate(z.im), z.re);
     QuadFloatComplex z2  = z * z;
     QuadFloatComplex one_minus_z2 = QuadFloatComplex(QuadFloat(1.0f)) - z2;
-    QuadFloatComplex sum = iz + sqrt(one_minus_z2);
+    QuadFloatComplex root = sqrt(one_minus_z2);
+    if (z.im.f0 == 0.0f && detail::fabs(z.re.f0) > 1.0f) {
+        const bool want_neg = (detail::copysign(1.0f, z.re.f0) ==
+                               detail::copysign(1.0f, z.im.f0));
+        const bool have_neg = (detail::copysign(1.0f, root.im.f0) < 0.0f);
+        if (want_neg != have_neg) root.im = negate(root.im);
+    }
+    QuadFloatComplex sum = iz + root;
     QuadFloatComplex lg  = log(sum);
     return QuadFloatComplex(lg.im, negate(lg.re));  // × (-i): (a+bi)(-i) = b - ai
 }
@@ -375,8 +387,20 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex asinh(QuadFloatComplex z) {
     return log(z + sqrt(z*z + QuadFloatComplex(QuadFloat(1.0f))));
 }
 // acosh(z) = log(z + sqrt(z² - 1)).  ff_complex.hpp:259-261 / dd_complex.hpp:286-289.
+// KI-1 fix: Kahan 1987's branch-correct form, acosh(z) = 2*log(sqrt((z+1)/2) +
+// sqrt((z-1)/2)). See dd_complex.hpp:346-357 for the full rationale. The old
+// log(z + sqrt(z*z - 1)) form was on the wrong sqrt sheet throughout
+// Re(z) < 0, and overflowed above |z| ~ 1.8e19 where z*z leaves FP32 range.
 XPMATH_INLINE_FUNCTION QuadFloatComplex acosh(QuadFloatComplex z) {
-    return log(z + sqrt(z*z - QuadFloatComplex(QuadFloat(1.0f))));
+    const QuadFloat one(1.0f);
+    const QuadFloat half_im = multiply_scalar(z.im, 0.5f);
+    QuadFloatComplex rp = sqrt(QuadFloatComplex(
+        multiply_scalar(add(z.re, one), 0.5f), half_im));
+    QuadFloatComplex rm = sqrt(QuadFloatComplex(
+        multiply_scalar(subtract(z.re, one), 0.5f), half_im));
+    QuadFloatComplex lg = log(rp + rm);
+    return QuadFloatComplex(multiply_scalar(lg.re, 2.0f),
+                            multiply_scalar(lg.im, 2.0f));
 }
 // atanh(z) = ½·log((1 + z)/(1 - z)).  ff_complex.hpp:262-266 / dd_complex.hpp:290-295.
 XPMATH_INLINE_FUNCTION QuadFloatComplex atanh(QuadFloatComplex z) {

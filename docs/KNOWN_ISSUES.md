@@ -10,7 +10,7 @@ This file is the backlog. It is not a status document — see
 
 ---
 
-## KI-1 — Complex `acosh` is wrong throughout the left half-plane, in ALL FOUR backends
+## KI-1 — Complex `acosh` is wrong throughout the left half-plane, in ALL FOUR backends **[RESOLVED]**
 
 > **Scope corrected 2026-09-02.** The title used to say "on the negative real
 > axis". The complex accuracy tests added on 2026-09-02 show the defect covers the
@@ -198,6 +198,147 @@ test like this would have caught KI-1 on the day DD was written.
 
 Probe used to produce the table above: `/tmp/acosh_all.cpp` (throwaway, not
 committed; it links all four headers and scores each against `cacoshq`).
+
+### Resolution (2026-09-02, commit `fe42970`)
+
+`log(z + sqrt(z*z - 1))` replaced by Kahan's form in all four `*_complex.hpp`
+headers:
+
+```c++
+acosh(z) = 2*log( sqrt((z+1)/2) + sqrt((z-1)/2) )
+```
+
+Halving is done per component with `multiply_scalar(..., 0.5)` rather than by a
+complex multiply by `(0.5, 0)`: 0.5 is a power of two, so the component form is
+exact where the complex multiply would round. Measured, the two spellings score
+identically to 0.01 digit at every probe point, so this is a cost choice (it saves
+four multiplies and two adds per call), not an accuracy one.
+
+Per-point scores against a `cacoshq` oracle, each backend at its own word width
+(caps DD 31, QF 29, TF 21.7, FF 14):
+
+```
+point            DD before  after   QF before  after   TF before  after   FF before  after
+------------------------------------------------------------------------------------------
+-2   + 0i            0.00   30.53       0.00   28.10       0.00   20.69       0.00   14.00
+-5   + 0i            0.00   30.98       0.00   28.05       0.00   21.12       0.00   14.00
+-100 + 0i            0.00   31.00       0.00   29.00       0.00   21.51       0.00   14.00
+-5   + 3i            0.00   30.38       0.00   27.37       0.00   21.67       0.00   13.49
+-2   + 1e-6i         0.00   23.08       0.00   23.08       0.00   20.79       0.00   14.00
+ 0   - 1i            0.00   30.23       0.00   28.39       0.00   20.78       0.00   13.85
++2   + 0i           31.00   30.53      29.00   28.10      20.90   20.69      13.90   14.00
++1.5 + 0i           30.04   30.44      29.00   27.62      21.70   20.24      13.30   13.61
++5   + 3i           30.54   30.38      27.83   27.37      21.70   21.67      13.43   13.49
+ 0.5 + 0i           30.75   31.00      28.91   28.96      21.70   21.62      13.48   13.97
+-0.5 + 0i           31.00   30.75      28.96   28.91      21.70   21.70      14.00   13.48
+ 0   + 1i           30.10   30.23      29.00   28.39      20.40   20.78      13.37   13.85
+1e18 + 0i           31.00   31.00       0.00   29.00       0.00   21.70       0.00   14.00
+1e150+ 0i            0.00   19.26       0.00    0.00       0.00    0.00       0.00    0.00
+```
+
+`0 - 1i` is worth noting: it is not on the negative real axis at all, and the old
+form scored 0.00 there while `0 + 1i` scored 30.10. The wrong sheet reaches the
+whole lower imaginary axis too, which the original filing did not record.
+
+The `1e18` row is the overflow side benefit, confirmed at FP32 word width and not
+merely derived from the double case: QF, TF and FF all go 0.00 -> cap because
+Kahan's form never forms `z*z`. DD gains at `1e150` (0.00 -> 19.26). The claim in
+the filing above that the FP32 backends gain "roughly 19 decades" is confirmed in
+direction; the `1e150` row shows the FP32 backends still lose the *whole value* at
+that magnitude for unrelated reasons (their own `exp`/`log` range), so the gain is
+bounded by the word type, not unlimited.
+
+**The near-`z = 1` concern did NOT materialise at DD scale.** The filing flagged it
+as unverified above double precision. Measured at all four widths, the two forms
+are bit-identical there — `1 + 1e-4` scores 13.26 for both in DD/QF/TF, `1 + 1e-10`
+scores 7.38 for both, and `1 + 1e-20` scores 0.00 for both. Those numbers are
+conditioning of `acosh` near its branch point, not a property of either
+formulation, and they are backend-independent (DD, QF and TF all read 13.26/7.38),
+which is the tell. **No series branch was added**, and none is warranted by
+measurement. FF alone differs and Kahan is the better one there (`1 + 1e-4`:
+11.50 -> 11.73).
+
+The four `acosh_in_domain` predicates were deleted from
+`tests/{dd,ff,qf,tf}_complex_accuracy_test.cpp` — the acceptance test named in
+"To close" — so `acosh` is now scored over all 1571 in-window corpus elements
+instead of the 957 with `Re(z) >= 0`. Corpus means over the *same* full element
+set, before and after:
+
+```
+backend   acosh before   after     verdict before
+DD            16.41      28.43     FAIL (tol 25.06)
+QF            15.42      26.46     FAIL (tol 24.55)
+TF            11.27      19.30     FAIL (tol 17.87)
+FF             7.05      11.78     FAIL (tol 11.05)
+```
+
+Tolerance rows ratcheted to 28.13 / 26.16 / 19.00 / 11.48 (0.30 margin, the file's
+convention). ctest 34/34.
+
+### Accepted regression — complex `acosh` on the imaginary axis near the origin
+
+The monotone gate reports 2022 decreased points against 4293 increased, and
+**every decreased point is complex `acosh`** — `asin` and `acos` decrease nowhere
+(see KI-5 (d)'s resolution). The decreases are accepted, not fixed. Per-cell:
+
+```
+cell           mean before -> after    zeros before -> after    dec    inc
+DD c acosh        14.36  ->  25.79        888  ->  130          534    978
+QF c acosh        12.45  ->  22.98        916  ->  164          581    958
+TF c acosh         9.31  ->  17.03        932  ->  209          462    992
+FF c acosh         5.81  ->  10.59        964  ->  279          445    963
+```
+
+Restricted to `Re(z) < 0` (852 grid points), the mean goes 1.78 -> 25.49 (DD),
+1.65 -> 23.12 (QF), 1.25 -> 17.02 (TF), 0.80 -> 10.72 (FF).
+
+**Where the losses are.** 1706 of the 2022 are under 1 digit. The 44 drops above 10
+digits are all one cluster, in the grid's `cut-re` family at `re = 0` with `|im|`
+between 1e-30 and 1e-22 — the imaginary axis just off the origin. Worst points
+(`validation/sweep/sweep_grid.csv`, complex kind):
+
+```
+grid pt   re   im        DD before -> after     QF               TF
+   766     0   1e-30       31.00 ->  1.23     29.00 -> (n/a)   21.70 -> (n/a)
+   764     0   1e-29       31.00 ->  2.44
+   762     0   1e-28       31.00 ->  3.50
+   760     0   1e-27       31.00 ->  4.40     29.00 ->  3.56   21.70 ->  0.00
+   758     0   1e-26       31.00 ->  5.31     29.00 ->  4.40
+   752     0   1e-24       31.00 ->  8.33     29.00 ->  6.80   21.70 ->  0.37
+```
+
+Over that cluster (`re == 0`, `|im| < 1e-15`, 32 points) the mean goes 15.02 ->
+8.81 (DD), 11.89 -> 7.42 (QF), 8.23 -> 2.31 (TF), 4.16 -> 0.44 (FF).
+
+**Why.** For `z = i*eps`, `acosh(z) = eps + i*pi/2 + O(eps^3)`: the real part is
+smaller than the imaginary part by up to 30 orders of magnitude, and the scoring
+rule measures it *relatively*, so recovering it needs the whole `eps` to survive.
+The old form's intermediate `z + sqrt(z^2 - 1)` is *purely imaginary* — exactly
+`i*(eps + 1)` — so the complex `abs` reduces to `|im|`, `1 + eps` is stored
+losslessly in the expansion's low word, and `log` returns `eps` intact. Kahan's
+form splits the same quantity across two components of equal size (both roots land
+near `0.7071*(1 + i)`), so `abs` must compute `sqrt(re^2 + im^2)`, which rounds at
+absolute ~1e-32 in DD — one percent of an `eps` of 1e-30. That is the measured
+1.23 digits.
+
+This is a conditioning loss in one component of one op on one line of the plane,
+and it is the price of the identity, not a bug in the new code: any formulation
+that does not keep the intermediate purely imaginary pays it. It is **accepted**
+because the thing bought is not comparable — an entire half-plane of O(1)
+sign-flipped results becomes correct. A wrong sign over `Re(z) < 0` is worse than a
+lost 30th digit of a real part that is 1e-30 next to a `pi/2`.
+
+Closing it later, if wanted, means giving complex `acosh` a dedicated small-`|z|`
+branch using `acosh(z) = i*acos(z)` for `|z| << 1`, or a complex `log1p`. Both are
+larger than this fix and neither is needed for correctness. Not filed as a new KI
+because it is recorded here with coordinates and is reproducible from
+`validation/sweep/`.
+
+The remaining 1978 sub-10-digit drops are spread over the `cut-re`, `cut-im`,
+`polar` and `axis` families and are ordinary rounding-path differences: Kahan's
+form takes two `sqrt`s and one `log` where the old took one `sqrt`, one `log` and a
+squaring, so points that happened to round favourably under one form do not under
+the other. Mean drop across all 2022 is 1.0-1.2 digits.
 
 ---
 
@@ -520,6 +661,8 @@ flags but which buries the real diff in reference noise. Build the sweep with
 ---
 
 ## KI-5 — Four more defects in the complex inverse-function family, in ALL FOUR backends
+
+> **(a) and (d) are RESOLVED.** (b) `atanh` and (c) `acos` direct form remain open.
 
 **Severity: high ((a) and (d) reach total loss of the result), scope: all four
 backends (DD, FF, QF, TF), pre-existing, same `log`/`sqrt` family as KI-1.**
@@ -885,6 +1028,102 @@ depending on a signed zero surviving an arithmetic operation. The fix must be
 checked at `Im = -0` as well as `Im = +0`; testing only `+0` is what let this
 survive.
 
+### Resolution of (d) (2026-09-02, commit `fe42970`)
+
+**First question answered: signed zero DOES round-trip in the expansion types.**
+This decided whether an honest fix was possible at all, so it was measured before
+anything was changed. Probing the raw leading word (`.hi` for DD/FF, `.f0` for
+QF/TF) — *not* a `__float128` round-trip, which silently sums `-0.0 + 0.0` to `+0.0`
+and reports a false negative:
+
+```
+                     DD   FF   QF   TF     correct?
+ctor(-0.0) signbit    1    1    1    1     yes -- construction preserves it
+copy signbit          1    1    1    1     yes
+negate(+0.0)          1    1    1    1     yes
+negate(-0.0)          0    0    0    0     yes  (that is +0)
+Complex(2, -0.0).im   1    1    1    1     yes -- it reaches the callee intact
+multiply_scalar(-0,1) 0    0    0    0     NO  -- lost in arithmetic
+Im(z*z) for (2,-0)    0    0    0    0     NO  -- should be -0
+Im(1 - z*z)           0    0    0    0     NO  -- the documented collapse
+```
+
+So the C99 Annex G convention **is** honourable in these types. The sign survives
+construction and copy and is intact on entry to `asin`; it is destroyed only by the
+arithmetic on the way to `sqrt`. The fix therefore reads it off `Im(z)` at the top
+rather than trying to recover it downstream — which is what the filing above
+recommended, and it works.
+
+**What changed.** In all four `*_complex.hpp` headers, `asin` still computes
+`root = sqrt(1 - z*z)`, but on the cut it then puts the root on the sheet the input
+selects:
+
+```c++
+if (z.im.hi == 0.0 && detail::fabs(z.re.hi) > 1.0) {
+    const bool want_neg = (detail::copysign(1.0, z.re.hi) ==
+                           detail::copysign(1.0, z.im.hi));
+    const bool have_neg = (detail::copysign(1.0, root.im.hi) < 0.0);
+    if (want_neg != have_neg) root.im = negate(root.im);
+}
+```
+
+`Im(1 - z^2) = -2*Re*Im`, so the root is negative-imaginary exactly when `Re` and
+`Im` share a sign. `detail::copysign` is used rather than `signbit` because
+`copysign` is already in `config.hpp`'s dispatch and is device-safe on every
+backend; adding `signbit` to the dispatch was avoidable. **No change to
+`config.hpp`, and none to the real-arithmetic headers.**
+
+The guard is `Im == 0 && |Re| > 1` — exactly the cut — and it is a **no-op on the
+two conventions that were already correct**, so it cannot move any point off the
+cut. The gate confirms this: `asin` and `acos` decrease at zero points in all four
+backends.
+
+**Measured, all four on-cut cases at both signed zeros:**
+
+```
+point         DD before  after   QF before  after   TF before  after   FF before  after
+-2 +0i           30.05   30.05      28.32   28.32      21.43   21.43      14.00   14.00
+-2 -0i            0.00   31.00       0.00   29.00       0.00   20.90       0.00   13.90
++2 +0i            0.00   30.05       0.00   28.32       0.00   21.43       0.00   14.00
++2 -0i           31.00   31.00      29.00   29.00      20.90   20.90      13.90   13.90
+-100 +0i         28.38   28.38      27.08   27.08      18.88   18.88      11.00   11.00
+-100 -0i          0.00   31.00       0.00   28.22       0.00   21.70       0.00   14.00
++100 +0i          0.00   28.38       0.00   27.08       0.00   18.88       0.00   11.00
++100 -0i         31.00   31.00      28.22   28.22      21.70   21.70      14.00   14.00
+```
+
+Every previously-failing convention now scores at or near cap, and every
+previously-correct one is unchanged to the digit. Off-cut controls (`|Re| < 1`, and
+`±1e-20i`) are unchanged. `-1 +0i` and `+1 -0i` — the branch points, where the
+guard deliberately does not fire — score at cap in all four.
+
+**`acos` is fixed for free, and it is confirmed by measurement, not assumed.**
+`acos(z) = pi/2 - asin(z)` (`dd_complex.hpp:253-258`) was not touched. Its on-cut
+column is identical to `asin`'s row for row in all four backends: `-2 -0i` goes
+0.00 -> 31.00 in DD, `+2 +0i` 0.00 -> 30.05, and so on. Corpus means over the full
+element set:
+
+```
+backend   asin before -> after     acos before -> after
+DD           25.89  ->  27.60         25.88  ->  27.58
+QF           24.38  ->  25.96         24.27  ->  25.85
+TF           17.50  ->  18.65         17.42  ->  18.56
+FF           10.41  ->  11.12         10.29  ->  10.99
+```
+
+Tolerance rows ratcheted accordingly in all four
+`tests/*_complex_accuracy_test.cpp`. On the dense sweep the `asin` cell's zero
+count goes 72 -> 0 in DD, and `acos`'s 74 -> 2.
+
+**KI-5 (c) is NOT closed by this and was not touched.** `acos`'s remaining zeros,
+and points such as `acos(2 + 1e-20i)` scoring 11.31 (DD) / 8.76 (QF) / 2.06 (TF) /
+0.00 (FF), are the `pi/2 - asin` cancellation, which is (c) and is out of this
+session's scope. Those scores are unchanged by this fix. Likewise (a)'s `asinh` was
+already resolved and (b)'s `atanh` is untouched.
+
+Probes used: `/tmp/ki1_probe.cpp`, `/tmp/ki1_probe2.cpp`, `/tmp/ki1_after.cpp`
+(throwaway, not committed).
+
 ---
 
 ### Why nothing caught these
@@ -921,8 +1160,9 @@ measurement and documentation only.
 
 1. **(a)** `asinh`: add the odd-function reflection for `Re(z) < 0`, in all four
    `*_complex.hpp` headers. Cheapest of the five.
-2. **(d)** `asin`: fix the signed-zero sheet selection; `acos` is fixed for free.
-   Add on-cut test points at **both** `Im = +0` and `Im = -0`.
+2. ~~**(d)** `asin`: fix the signed-zero sheet selection; `acos` is fixed for
+   free.~~ **Done 2026-09-02**, commit `fe42970` — see "Resolution of (d)"
+   above. `acos` was indeed fixed for free, confirmed by measurement.
 3. **(c)** `acos`: restructure away from `π/2 − asin`.
 4. **(b)** `atanh`: add a complex `log1p` and switch to the `log1p` form.
 5. Re-run the dense sweep and diff against `validation/sweep/` — the monotone gate

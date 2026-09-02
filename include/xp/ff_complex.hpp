@@ -224,12 +224,24 @@ XPMATH_INLINE_FUNCTION FloatFloatComplex tan(FloatFloatComplex z) {
 // ============================================================
 // Complex inverse trig
 // ============================================================
+// KI-5(d) fix; see dd_complex.hpp:231-241 for the full rationale. On the real
+// cut (Im(z) == +-0, |Re(z)| > 1) the sheet of sqrt(1 - z^2) is fixed by the
+// sign of Im(z)'s zero, which the subtraction destroys (0 - (+-0) == +0 in
+// round-to-nearest). Read it off Im(z) instead: Im(1 - z^2) = -2*Re*Im, so the
+// root is negative-imaginary exactly when Re and Im share a sign.
 XPMATH_INLINE_FUNCTION FloatFloatComplex asin(FloatFloatComplex z) {
     // asin(z) = -i * log(iz + sqrt(1 - z^2))
     FloatFloatComplex iz  = FloatFloatComplex(negate(z.im), z.re);
     FloatFloatComplex z2  = z * z;
     FloatFloatComplex one_minus_z2 = FloatFloatComplex(FloatFloat(1.0f)) - z2;
-    FloatFloatComplex sum = iz + sqrt(one_minus_z2);
+    FloatFloatComplex root = sqrt(one_minus_z2);
+    if (z.im.hi == 0.0f && detail::fabs(z.re.hi) > 1.0f) {
+        const bool want_neg = (detail::copysign(1.0f, z.re.hi) ==
+                               detail::copysign(1.0f, z.im.hi));
+        const bool have_neg = (detail::copysign(1.0f, root.im.hi) < 0.0f);
+        if (want_neg != have_neg) root.im = negate(root.im);
+    }
+    FloatFloatComplex sum = iz + root;
     FloatFloatComplex lg  = log(sum);
     // multiply by -i: (a+bi)*(-i) = b - ai
     return FloatFloatComplex(lg.im, negate(lg.re));
@@ -297,9 +309,20 @@ XPMATH_INLINE_FUNCTION FloatFloatComplex asinh(FloatFloatComplex z) {
     }
     return log(z + sqrt(z*z + FloatFloatComplex(FloatFloat(1.0f))));
 }
+// KI-1 fix: Kahan 1987's branch-correct form, acosh(z) = 2*log(sqrt((z+1)/2) +
+// sqrt((z-1)/2)). See dd_complex.hpp:346-357 for the full rationale. The old
+// log(z + sqrt(z*z - 1)) form was on the wrong sqrt sheet throughout
+// Re(z) < 0, and overflowed above |z| ~ 1.8e19 where z*z leaves FP32 range.
 XPMATH_INLINE_FUNCTION FloatFloatComplex acosh(FloatFloatComplex z) {
-    // acosh(z) = log(z + sqrt(z^2 - 1))
-    return log(z + sqrt(z*z - FloatFloatComplex(FloatFloat(1.0f))));
+    const FloatFloat one(1.0f);
+    const FloatFloat half_im = multiply_scalar(z.im, 0.5f);
+    FloatFloatComplex rp = sqrt(FloatFloatComplex(
+        multiply_scalar(add(z.re, one), 0.5f), half_im));
+    FloatFloatComplex rm = sqrt(FloatFloatComplex(
+        multiply_scalar(subtract(z.re, one), 0.5f), half_im));
+    FloatFloatComplex lg = log(rp + rm);
+    return FloatFloatComplex(multiply_scalar(lg.re, 2.0f),
+                             multiply_scalar(lg.im, 2.0f));
 }
 XPMATH_INLINE_FUNCTION FloatFloatComplex atanh(FloatFloatComplex z) {
     // atanh(z) = (1/2)*log((1+z)/(1-z))
