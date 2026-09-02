@@ -477,37 +477,44 @@ XPMATH_INLINE_FUNCTION void sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble
     DoubleDouble s2  = round_to_nearest_int(s1);
     DoubleDouble s3  = subtract(a, multiply(pi2, s2));
     if (s3.hi == 0.0) { x = DoubleDouble(1.0); y = DoubleDouble(0.0); return; }
-    int is = (s3.hi < 0.0) ? -1 : 1;
     double scale = 1.0 / (double)(1 << nq);
-    DoubleDouble s0 = multiply_scalar(s3, scale);
-    DoubleDouble s1t = s0;
-    DoubleDouble s2sq = multiply(s0, s0);
-    // Sine series: s0 accumulates sin(s3/2^nq)
-    for (int i1 = 1; i1 <= itrmx; ++i1) {
-        double t2 = -(2.0*i1) * (2.0*i1 + 1.0);
-        DoubleDouble s3t = multiply(s2sq, s1t);
-        s1t = divide_scalar(s3t, t2);
-        s3t = add(s1t, s0);
-        s0  = s3t;
-        if (detail::fabs(s1t.hi) < eps) break;
-        if (i1 == itrmx) { XPMATH_PRINTF("DDCSSNR: iteration limit\n"); return; }
+    DoubleDouble r  = multiply_scalar(s3, scale);   // r = s3 / 2^nq, |r| < pi/2^nq
+    // For subnormal |a| the scaling underflows r to zero, and then the relative
+    // convergence test below is vacuous (0 < eps*0 is false) and the series runs
+    // to itrmx. Answer it directly: sin(a) = a and cos(a) = 1 to far beyond DD
+    // precision for any |a| this small.
+    if (r.hi == 0.0) { x = DoubleDouble(1.0); y = s3; return; }
+    DoubleDouble r2 = multiply(r, r);
+
+    // sin(r) = r - r^3/3! + r^5/5! - ...
+    // cos(r) = 1 - r^2/2! + r^4/4! - ...
+    DoubleDouble sin_r = r,               cos_r = DoubleDouble(1.0);
+    DoubleDouble sterm = r,               cterm = DoubleDouble(1.0);
+    for (int k = 1; k <= itrmx; ++k) {
+        sterm = divide_scalar(multiply(sterm, r2), -(double)((2*k) * (2*k + 1)));
+        sin_r = add(sin_r, sterm);
+        cterm = divide_scalar(multiply(cterm, r2), -(double)((2*k - 1) * (2*k)));
+        cos_r = add(cos_r, cterm);
+        if (detail::fabs(sterm.hi) < eps * detail::fabs(sin_r.hi) &&
+            detail::fabs(cterm.hi) < eps) break;
+        // break, not return: returning here would leave x/y unassigned.
+        if (k == itrmx) { XPMATH_PRINTF("DDCSSNR: iteration limit\n"); break; }
     }
-    // Double-angle nq times: sin(2x) = 2*sin(x)*cos(x), cos(2x) = 1 - 2*sin²(x)
-    DoubleDouble f2 = DoubleDouble(0.5);
-    DoubleDouble s4 = multiply(s0, s0);
-    DoubleDouble s5 = subtract(f2, s4);
-    s0 = multiply_scalar(s5, 2.0);
-    for (int j = 2; j <= nq; ++j) {
-        s4 = multiply(s0, s0);
-        s5 = subtract(s4, f2);
-        s0 = multiply_scalar(s5, 2.0);
+
+    // Joint doubling nq times: sin(2x) = 2*sin(x)*cos(x), cos(2x) = cos^2(x) - sin^2(x).
+    // Both series are carried through; the sine is never reconstructed from the
+    // cosine via +/-sqrt(1 - cos^2). That reconstruction (a) is only sign-correct
+    // for |s3| < pi, which round_to_nearest_int does not guarantee at half-integer
+    // near-ties, and (b) amplifies the relative error of cos by cot^2(s3), which
+    // diverges as s3 -> +/-pi. Matches ff/qf/tf_math.hpp. See KI-4.
+    for (int j = 0; j < nq; ++j) {
+        DoubleDouble new_sin = multiply_scalar(multiply(sin_r, cos_r), 2.0);
+        DoubleDouble new_cos = subtract(multiply(cos_r, cos_r), multiply(sin_r, sin_r));
+        sin_r = new_sin;
+        cos_r = new_cos;
     }
-    // s0 now = cos(s3). Recover sin.
-    s4 = multiply(s0, s0);
-    s5 = subtract(DoubleDouble(1.0), s4);
-    s1t = sqrt(s5);
-    if (is < 0) { s1t.hi = -s1t.hi; s1t.lo = -s1t.lo; }
-    x = s0; y = s1t;
+
+    x = cos_r; y = sin_r;
 }
 
 XPMATH_INLINE_FUNCTION DoubleDouble sin(DoubleDouble a) {

@@ -278,12 +278,21 @@ inline const ExpectedMinDropAnnotation* lookup_expected_min_drop(const char* op_
     {"fdim",      "near-cancellation loses leading digits (matches FP64); PORT_NOTES §5", 0.0},
     {"fma",       "near-cancellation loses leading digits (matches FP64); PORT_NOTES §5", 0.0},
     {"asin",      "derivative 1/sqrt(1-a^2) -> inf near |a|=1; PORT_NOTES §5",            0.0},
-    {"acos",      "derivative 1/sqrt(1-a^2) -> inf near |a|=1; PORT_NOTES §5",            0.0},
+    // Ratcheted from 0.0 with KI-4 (joint-doubling sincos). acos runs through
+    // angle()->sincos, and the observed min rose to DD 29.96 / FF 10.08 / QF 25.91;
+    // 5.0 keeps a 5-digit margin under the worst backend while no longer
+    // sanctioning a total loss.
+    {"acos",      "derivative 1/sqrt(1-a^2) -> inf near |a|=1; PORT_NOTES §5",            5.0},
     {"atanh",     "1/(1-a^2) blows up near |a|=1; PORT_NOTES §5",                          0.0},
     {"remainder", "a - b*nint(a/b) -> 0 with fixed abs error near multiples of b; PORT_NOTES §5", 0.0},
     {"exp",       "output denormal range: lo falls into subnormal, loses bits; PORT_NOTES §5", 0.0},
-    {"sin",       "near +/-pi needs triple-float arg reduction (out of scope); PORT_NOTES §5", 0.0},
-    {"cos",       "near +/-pi needs triple-float arg reduction (out of scope); PORT_NOTES §5", 0.0},
+    // sin/cos ratcheted from 0.0 with KI-4. Conditioning near +/-pi still costs
+    // roughly half the digits, but a *total* loss there was KI-4's sign flip, not
+    // conditioning. Observed min DD 15.42 / FF 6.06 / QF 21.73 (sin) and DD 15.24 /
+    // FF 6.02 / QF 21.87 (cos); 3.0 sits well under FF, the binding backend.
+    // tan and asin stay at 0.0: QF's min is genuinely -0.00 / 0.00 on those.
+    {"sin",       "near +/-pi needs triple-float arg reduction (out of scope); PORT_NOTES §5", 3.0},
+    {"cos",       "near +/-pi needs triple-float arg reduction (out of scope); PORT_NOTES §5", 3.0},
     {"tan",       "near +/-pi needs triple-float arg reduction (out of scope); PORT_NOTES §5", 0.0},
   };
   for (const auto& e : kTable) {

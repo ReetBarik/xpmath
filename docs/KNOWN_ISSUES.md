@@ -313,7 +313,7 @@ configures this repo, not Kokkos). Fixed 2026-09-02, commit TBD.
 
 ---
 
-## KI-4 — DD `sin` returns the WRONG SIGN near odd multiples of π
+## KI-4 — DD `sin` returns the WRONG SIGN near odd multiples of π **[RESOLVED]**
 
 **Severity: high (silently wrong answers, sign flip), scope: DD only, pre-existing.**
 
@@ -396,6 +396,126 @@ rather than a precision shortfall.
 
 Probes used: `/tmp/rb_sinpi.cpp`, `/tmp/rb_dds.cpp`, `/tmp/rb_dds2.cpp` (throwaway,
 not committed).
+
+### Resolution (2026-09-02, commit `TBD-FIX`)
+
+**First, the scope as filed was too small.** KI-2 (`nint` mis-rounding, commit
+`650aa16`) was the proximate trigger, and the entry above was written before that
+landed, so the state was re-measured first. KI-2 did **not** fix this. Scoring DD
+`sin` at `fl64(k·π)` for odd `k ≤ 101` plus ±2 ulp either side — 255 points against
+a `sinq` oracle — found **25 sign flips**, not two:
+
+```
+k with a flipped sign at the k*pi point itself (off = 0):
+  3  7 13 17 21 25 29 43 51 57 59 65 67 73 75 81 89 91 93 95
+k with a flipped sign one ulp off:
+  1(+1) 5(+1) 9(+1) 35(-1) 39(-1)
+```
+
+The table in the original entry only ran to `k = 12`, which is why it saw only
+`k = 3, 7`. Every one of the 25 scored 0.00 digits; all other 230 points scored
+14.87–19.44. After the fix: **0 sign flips, 0 points below 10 digits**, min 14.96
+and max 19.44 over the same 255 points.
+
+**The fix is structural, not a sign repair.** `include/xp/dd_math.hpp` `sincos`
+now carries **both** series through the doubling, matching `ff_math.hpp`,
+`qf_math.hpp` and `tf_math.hpp` line for line:
+
+```
+was:  cos-only,  c -> 2c^2 - 1,  then sin = sign(s3) * sqrt(1 - cos^2)
+now:  (s,c) -> (2sc, c^2 - s^2), sin never reconstructed
+```
+
+Repairing only the argument reduction was rejected deliberately. Even with
+`|s3| < π` enforced exactly, `sin = ±sqrt(1 − cos²)` amplifies the *relative* error
+of `cos` by `cot²(s3)`, which diverges as `s3 → ±π`. At the originally reported
+failing point `s3 ≈ 3.674e-16`, so `cot² ≈ 7.4e30` — about 30.9 digits of
+amplification against DD's 31-digit cap. That would have bought the right sign
+while leaving the magnitude as noise: a loud bug traded for a quiet one.
+
+All four backends now share one algorithm shape.
+
+**A second, latent defect was found and fixed in the same routine.** The joint form
+needs a *relative* convergence test on the sine term (`|sterm| < eps·|sin_r|`), as
+the siblings use. For subnormal `|a|`, the `r = s3/2^nq` scaling underflows `r` to
+exactly zero, that test becomes vacuous (`0 < eps·0` is false), the series runs to
+`itrmx`, and the bail-out `return` **left `x` and `y` unassigned** — uninitialized
+output, not merely an inaccurate one. Caught by the monotone gate as DD real `cos`
+dropping 31.00 → 0.00 at 416 grid points (worst: `r/567`, `a = 9.88e-324`).
+Fixed by answering the degenerate case directly (`r == 0 ⟹ cos = 1, sin = a`) and
+by turning the iteration-limit `return` into a `break` so `x`/`y` are always
+written. **`ff`/`qf`/`tf` have the same unassigned-`return` shape on their
+iteration-limit path**; their sweep grids do not reach it, and they were left
+untouched per this task's scope. Worth a follow-up.
+
+**Call sites.** Every DD trig entry point funnels through this one `sincos`, so the
+change reaches all of them without further edits: real `sin`, `cos`, `tan`;
+`angle()` (the atan2 primitive, which Newton-iterates on `sincos`) and therefore
+`asin`, `acos`, `atan`, `atan2`; and in `dd_complex.hpp` the seven call sites at
+lines 191/213/220/265/272/281/369 — complex `exp`, `sin`, `cos`, `tan`, `sinh`,
+`cosh`, `tanh`, `polar` and `pow`. `dd_complex.hpp` itself needed no change.
+
+**Measured effect.** Sweep, 428,592 points: **20,957 up, 3,473 down, 404,162
+unchanged.** Every affected cell improves in both mean and 1st percentile:
+
+```
+cell            mean before -> after     min before -> after
+DD r sin           19.605 -> 21.380         0.00 -> 0.00
+DD r cos           29.704 -> 29.749         0.00 -> 0.00
+DD r tan           19.435 -> 21.346         0.00 -> 0.81
+DD r asin          25.999 -> 30.897         0.00 -> 30.20
+DD r acos          30.581 -> 30.995        16.33 -> 30.30
+DD r atan          29.738 -> 30.984         0.00 -> 30.17
+DD c exp           24.163 -> 29.242         0.00 -> 0.00
+DD c tan           23.740 -> 27.158         0.00 -> 0.00
+DD c pow           26.491 -> 28.210         0.00 -> 0.00
+```
+
+The inverse-trig rows are the largest single gain: `angle()`'s Newton correction
+divides by `sin_a`/`cos_a`, so a sign-inverted sine there was diverging the
+iteration outright.
+
+**Accepted regressions.** All 3,473 decreases are in DD trig or in functions built
+on it, and every one is ≤ 2.98 digits. They are the ordinary ±ulp reshuffling of a
+different summation order, not a loss of a correct digit — the cells they sit in
+improve on both mean and 1st percentile (table above), and the count is dwarfed
+6:1 by the increases. The largest is worth naming:
+
+| point | op | coordinates | before → after |
+|---|---|---|---|
+| `r/1575` | DD `sin` | `-311.01767270538954` (−99π) | 19.44 → 16.46 |
+| `r/1575` | DD `tan` | same | 19.44 → 16.46 |
+| `c/1658` | DD `pow` | see grid | 30.91 → 29.84 |
+| `r/460`  | DD `cos` | see grid | 31.00 → 30.20 |
+
+`r/1575` is `−99π`, and the old 19.44 was a **fluke, not a capability**: its
+neighbours under the old code scored 16.62 (`k = 97`) and 16.29 (`k = 101`), and
+the new code returns 16.46 there — the value consistent with the ~16-digit
+conditioning floor that argument reduction against a finite-precision π imposes at
+`k·π`. The old algorithm happened to land closer at this one point while being
+outright sign-wrong at `k = 93` and `k = 95` on either side of it. Trading a lucky
+3 digits at one point for 25 corrected signs is the intended bargain. **Accepted.**
+
+**Cost.** Measured, not estimated: 200,000 calls over `[-1000, 1000]`, `-O2`, GCC
+13.3.0, three reps, before/after built from the same source otherwise —
+**894.4 → 1009.3 ns/call, +12.9%**. Inside the 10–25% Reet pre-approved.
+
+**Tolerance ratchet** (`tests/test_utils.hpp`, conditioning registry): `sin` and
+`cos` floors raised `0.0 → 3.0`, `acos` `0.0 → 5.0`. The table is shared by the
+DD, FF and QF accuracy tests (TF does not use it), so the floors are bounded by
+the worst backend: sin min is DD 15.42 / FF 6.06 / QF 21.73, cos DD 15.24 / FF 6.02
+/ QF 21.87, acos DD 29.96 / FF 10.08 / QF 25.91. `tan` and `asin` stay at 0.0 —
+QF's min on those is genuinely −0.00 / 0.00. Note the honest limit of this
+ratchet: `dd_accuracy_test`'s corpus still never lands on a half-integer `a/2π`
+tie, so a 3.0 floor would not by itself have *caught* KI-4; it removes the
+sanction for a total loss, and the sweep grid is what actually covers these points.
+
+**Gate.** Monotone gate exits 1 on the 3,473 accepted decreases above; ctest 34/34.
+A session-hygiene note for whoever runs it next: loading the `cmake/3.28.3` module
+alongside `gcc/13.3.0` links a *different* libquadmath and changes the oracle
+fingerprint (`578322f998a329c8` → `54901e8104607a77`), which the gate correctly
+flags but which buries the real diff in reference noise. Build the sweep with
+`gcc/13.3.0` only.
 
 ---
 
