@@ -15,6 +15,7 @@ scripts/test_ffmul
 scripts/gen_qf_constants
 scripts/test_qfmul
 scripts/gen_corpus
+scripts/sweep_accuracy
 
 # Shared cross-backend validation corpus emitted by scripts/gen_corpus
 # (multi-GB at the default --n; the generator is committed, its output is not).
