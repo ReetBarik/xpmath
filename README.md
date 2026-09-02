@@ -74,6 +74,21 @@ the result was correct to every digit the format can hold, not that error was
 zero. Inputs are drawn per operation from an `mt19937_64` reseeded with `--seed`
 each time, so a single-operation run reproduces the corresponding row exactly.
 
+**Where each operation stops being trustworthy — [`docs/DOMAINS.md`](docs/DOMAINS.md).**
+The tables below report accuracy on a random corpus drawn from each operation's
+comfortable range. They do not tell you where an operation *fails*, and every
+backend has such ranges. `docs/DOMAINS.md` covers all 4 backends x 63 operations,
+generated from a 428,592-point sweep: for each cell it gives the input band where
+the operation holds 90% of its cap, the measured digit count at the boundary
+where it degrades, and a classification of the cause. The headline limits: the
+three FP32-word backends (FF, QF, TF) bottom out near 1e-31 and top out at 3.4e38
+where DD reaches ~2e-292 and 1.8e308; `hypot` and complex `abs` on those three
+backends overflow above |x| ≈ 1.8e19 because they never scale; and `exp` on every
+backend flushes to zero past |x| ≈ 300, discarding ~170 decades DD could
+otherwise represent. Of the 44,911 points scoring below half their cap, most are
+format or conditioning limits, but 16,164 are neither — those are filed as KI-6
+through KI-11 in [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md).
+
 **Accuracy only — no cost figures are reported here.** How to present the cost
 of each backend is still an open question and is deliberately left out rather
 than stated badly. The measurements below come from a single-threaded Serial

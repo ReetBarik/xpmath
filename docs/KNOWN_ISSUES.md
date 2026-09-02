@@ -1443,3 +1443,265 @@ The sweep reproduces the per-backend tables above cell for cell — for instance
 `asinh` at `−1e2`, `−1e4`, `−1e8` and `−1e12` reads 29.41 / 24.49 / 17.62 / 9.28
 for DD in both, which is the cross-check that the two measurements are of the
 same thing.
+
+---
+
+# Findings from the zero-scoring sweep triage (2026-09-02)
+
+KI-6 through KI-11 all came out of one exercise: classifying every point in
+`validation/sweep/sweep_baseline.csv` that scores below **50 % of its backend's
+cap** (44,911 of 428,592 points) into a range limit, a conditioning limit, or
+neither. The classifier is `scripts/sweep_accuracy --classify`; its output,
+`validation/sweep/sweep_classified.csv`, carries one row per triaged point with
+the inputs, the binary128 reference, what the backend returned, and the three
+measured ceilings that justify the verdict. Re-run it to reproduce any number
+quoted below.
+
+**None of these were found by eyeballing.** Each is what remained after range
+and conditioning were subtracted, and each is a case where the true result is
+comfortably inside the backend's representable range and the operation is
+well-conditioned there — so the loss is the algorithm's, not the format's.
+
+**None of them are fixed.** This session measured and documented only.
+`docs/DOMAINS.md` records the resulting usable ranges per backend per op, and
+is generated from the same data.
+
+---
+
+## KI-6 — `exp` flushes to ZERO outside a hard ±300 argument guard, discarding ~170 representable decades
+
+**Severity: high (silently returns 0 for a large, ordinary result), all backends,
+worst on DD.**
+
+### What
+
+`exp` (and, through it, `exp2`, `exp10`, `sinh`, `cosh`) appears to carry a hard
+argument guard near |x| = 300 and returns exactly `0` beyond it — regardless of
+whether the true result is representable. For DD it plainly is: DD reaches
+1.8e308, so every result from exp(300) up to exp(709) is thrown away.
+
+```
+backend op     point  input                 true result            returned
+DD      exp    130    316.22776601683796    2.1675733645732e+137   0
+DD      exp    131   -316.22776601683796    4.6134539958093e-138   0
+DD      exp10  998    131.94689145077126    8.8489440828519e+131   0
+DD      exp10  999    131.94689145077129    8.8489440828525e+131   0
+```
+
+Note `exp10`: the guard is applied to the *internal* `x·ln10`, so `exp10` loses
+everything above |x| ≈ 130.3 even though DD holds 10^308. That is 565 DD grid
+points — the single largest unexplained family on DD.
+
+### Extent (points classified UNEXPLAINED / returned-zero)
+
+```
+DD exp10 565   DD exp 52   DD exp2 2
+FF exp 36      FF sinh 36  FF cosh 36
+```
+
+The FF/QF/TF counts are small only because their own range limit (3.4e38) bites
+first and those points are correctly classified OVERFLOW instead.
+
+### Why it is not a range limit
+
+The classifier tests the true result against the backend's word range before
+anything else. These points passed that test: `range` = 31.00 in every row
+above, i.e. the result's magnitude leaves room for the full 31 digits. The
+`ach` column is 29.4, so the point is well-conditioned too.
+
+### Closing it
+
+Replace the guard with one derived from the *word* range (overflow at
+x > 709.78 for a double-word backend, x > 88.7 for a float-word one) and return
+±inf / 0 only past the real boundary. Check `exp2`, `exp10`, `sinh` and `cosh`
+apply the guard to their own argument, not to the reduced one.
+
+---
+
+## KI-7 — `tanh` returns the WRONG SIGN for |x| past the `exp` guard, in all four backends
+
+**Severity: high (wrong sign is worse than no answer), all backends.**
+
+### What
+
+Downstream of KI-6, but a strictly worse symptom and worth its own entry: for
+|x| beyond the guard, `tanh` returns **−1 where the answer is +1** and vice
+versa.
+
+```
+backend op    point  input                 true result   returned
+DD      tanh  130    316.22776601683796     1            -1
+DD      tanh  131   -316.22776601683796    -1             1
+```
+
+The mechanism is visible in the numbers: with `exp(2x)` flushed to 0, a
+`(e−1)/(e+1)` form evaluates to `(0−1)/(0+1) = −1` for every large positive x.
+TF instead returns NaN (452 points), which is the same defect through a
+different form.
+
+### Extent
+
+2,590 real points return the wrong sign; 452 more return NaN; complex `tanh`
+adds 562 points with no correct digits. Per backend, unexplained `tanh` points:
+**DD 804, QF 1206, FF 1180, TF 601.**
+
+### Closing it
+
+Fixing KI-6 fixes most of this, but `tanh` should also short-circuit to
+±1 once |x| exceeds the point where the type cannot resolve 1 − tanh(x)
+(|x| > 36 for FF, > 19 for a 48-bit type, > 358 for DD), which is both correct
+and much faster than evaluating the exponential at all.
+
+---
+
+## KI-8 — `hypot` and complex `abs` have NO scaling, so they overflow and underflow far inside the representable range
+
+**Severity: high, FP32-word backends (FF, QF, TF); DD unaffected.**
+
+### What
+
+`hypot(a,b)` and complex `abs(z)` appear to evaluate `sqrt(a²+b²)` directly.
+The intermediate square overflows the FP32 word above ≈1.8e19 and underflows it
+below ≈1.2e-23, in both cases while the *answer* is perfectly representable.
+
+```
+backend op      point  inputs                          true result    returned
+FF      hypot   4      9.9999999999999994e-30,
+                       1.5772958167803594e+21          1.5772958e+21  nan
+FF      c abs   752    0 + 1e-23i                      1e-23          0
+```
+
+Both directions are the same missing scaling: `hypot` should divide through by
+max(|a|,|b|) before squaring.
+
+### Extent
+
+```
+op          FF    QF    TF    DD
+hypot      309   315   312     0
+complex abs 66    84    78     0
+```
+
+DD is clean because a double word squares safely across the whole grid; the
+same defect is latent there and would appear beyond ±1e154.
+
+### Closing it
+
+Scale by the larger operand: `m = max(|a|,|b|); r = m·sqrt(1 + (n/m)²)`.
+One extra division, and it removes both the overflow and the underflow limb.
+
+---
+
+## KI-9 — QF/TF division returns NaN when the QUOTIENT exceeds the Dekker splitter's headroom
+
+**Severity: medium, QF and TF only.**
+
+### What
+
+Real `div` returns NaN when the quotient exceeds ≈8.3e34 — which is `FLT_MAX /
+4097`, the point at which the Dekker splitting constant used inside the FP32
+`two_prod` overflows. The quotient itself is representable (FP32 reaches
+3.4e38); it is the splitter that cannot hold it.
+
+```
+backend op   point  input                  true result             returned
+QF      div  238    3.1622776601683791e+29 3.9467330694268561e+36  nan
+TF      div  241   -1e+30                  5.2975997860710159e+35  nan
+```
+
+Complex `div` shows the same boundary: QF 43 NaN + 35 inf, TF 43 NaN + 35 inf.
+This is the splitter-overflow hazard already recorded for QF multiply, reaching
+division through its Newton/long-division refinement step.
+
+### Closing it
+
+Guard the splitter the way the QF multiply path was guarded: scale the operand
+down by a power of two before splitting and scale the product back afterwards.
+
+---
+
+## KI-10 — `fmod` and `remainder` lose half their digits when the operands are many decades apart
+
+**Severity: medium, all backends.**
+
+### What
+
+For `|a/b|` large, both ops drift from the exact answer — which is always
+exactly representable, since `a − n·b` is an exact operation for an integral n.
+
+```
+backend op        point  inputs                            true result       returned
+DD      fmod      94     3.1622776601683792e-07,
+                         -2.8336394835590658e-27           4.1487575672e-28  4.1487575672e-28  (12.03 digits)
+DD      remainder 67     -3.1622776601683796e-14,
+                         2.0698650412754168e-30            5.3277127301e-31 -5.0216124763e-31  (0.00 digits)
+```
+
+239 real `remainder` points come back with the *wrong sign*, which for
+`remainder` means the wrong multiple `n` was chosen — an off-by-one in the
+round-to-nearest of the quotient, not a rounding error.
+
+### Extent
+
+Unexplained `fmod` + `remainder` points: **DD 673, QF 713, TF 838, FF 61.**
+
+### Why it is not conditioning
+
+`fmod` and `remainder` are classified ALGEBRAIC by the triage, meaning the
+conditioning probe charges them only the operands' *actual* storage error. For
+DD that error is zero — a double input is held exactly — so a correct DD
+implementation has nothing to lose here. The 673 DD points are pure algorithm.
+
+### Closing it
+
+Compute the quotient in the extended type, take `n` with the already-fixed
+`nint` (see KI-2), and form `a − n·b` with a fused/compensated product so the
+subtraction is exact.
+
+---
+
+## KI-11 — The complex inverse family loses most of its digits when one component is far smaller than the other
+
+**Severity: medium, all backends, 4,759 points.**
+
+### What
+
+`atan`, `atanh`, `asin`, `acos`, `acosh`, `asinh` and `sqrt` on complex
+arguments degrade — often to zero digits — when |Im z| ≪ |Re z| or vice versa,
+approaching but not on a branch cut. The small component is the one that is
+lost.
+
+```
+backend op      point  input          true result                 returned
+DD      c atan  444    -100 + 1e-29i  -1.56079666 + 9.9990001e-34i
+                                      -1.56079666 - 1.62349876e-33i
+DD      c atan  446    -100 + 1e-30i  -1.56079666 + 9.9990001e-35i
+                                      -1.56079666 - 1.62349876e-33i
+```
+
+The returned imaginary part is **identical for both inputs** and has the wrong
+sign: the implementation has hit a noise floor near 1.6e-33 and is no longer a
+function of its input at all. This is the `log`-form's cancellation — the term
+carrying the small component is a difference of two quantities of size |z|²,
+and nothing rescues it.
+
+### Extent
+
+4,759 unexplained points across the seven ops, spread over all four backends;
+the largest single cell is complex `atan` (817 partial-digit-loss + 476
+no-correct-digits).
+
+### Why it is not conditioning
+
+The probe perturbs each input component independently by the backend's own eps
+and re-evaluates the binary128 oracle. For these points the true result barely
+moves (`ach` = cap = 31.00 on the rows above), so the mathematics permits a full
+31-digit answer here and the implementation is not delivering it.
+
+### Closing it
+
+The standard remedy is Kahan's formulation of the complex inverse functions,
+which computes the small component from `log1p`/`atan2` of a rearranged
+argument rather than from a cancelling difference. This overlaps the work
+already done for KI-5; the cases here are the ones the KI-5 fixes did not cover
+because they sit *off* the cut rather than on it.

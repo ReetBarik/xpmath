@@ -242,6 +242,9 @@ namespace {
 
 const char* const kFormatVersion = "xp-sweep-1";
 const char* const kDefaultOut    = "validation/sweep/sweep_baseline.csv";
+// Triage threshold: a point scoring below this fraction of its backend's cap is
+// classified. 0.50 is a judgment call — see the CLASSIFICATION section.
+const double      kDefaultClassifyFrac = 0.50;
 const uint64_t    kDefaultSeed   = 12345ull;   // same default as gen_corpus and the demos
 
 // ---------------------------------------------------------------------------
@@ -595,8 +598,10 @@ void fill_complex_operands(int id, size_t i, const std::vector<GridPoint>& grid,
 // reference_complex, including its use of powq for exp2/exp10 (exp10q does not
 // exist and exp2q is absent from older libquadmath).
 // ---------------------------------------------------------------------------
-__float128 reference_real(int id, double da, double db, double dc) {
-  const __float128 a = (__float128)da, b = (__float128)db, c = (__float128)dc;
+// The quad-argument form. --classify needs to evaluate the oracle at PERTURBED
+// inputs, which are quad and not exactly representable as double, so the body
+// lives here and the double entry point below just widens and forwards.
+__float128 reference_real_q(int id, __float128 a, __float128 b, __float128 c) {
   switch (id) {
     case R_Add:       return a + b;
     case R_Sub:       return a - b;
@@ -641,10 +646,15 @@ __float128 reference_real(int id, double da, double db, double dc) {
   return (__float128)0.0;
 }
 
-void reference_complex(int id, double are, double aim, double bre, double bim,
-                       __float128& out_re, __float128& out_im) {
-  __complex128 za; __real__ za = (__float128)are; __imag__ za = (__float128)aim;
-  __complex128 zb; __real__ zb = (__float128)bre; __imag__ zb = (__float128)bim;
+__float128 reference_real(int id, double da, double db, double dc) {
+  return reference_real_q(id, (__float128)da, (__float128)db, (__float128)dc);
+}
+
+void reference_complex_q(int id, __float128 are, __float128 aim,
+                         __float128 bre, __float128 bim,
+                         __float128& out_re, __float128& out_im) {
+  __complex128 za; __real__ za = are; __imag__ za = aim;
+  __complex128 zb; __real__ zb = bre; __imag__ zb = bim;
   __complex128 r;
   switch (id) {
     case C_Add:   r = za + zb;       break;
@@ -671,7 +681,7 @@ void reference_complex(int id, double are, double aim, double bre, double bim,
     case C_Atanh: r = catanhq(za);   break;
     case C_Pow:   r = cpowq(za, zb); break;
     case C_Polar: {
-      const __float128 rad = (__float128)are, th = (__float128)aim;
+      const __float128 rad = are, th = aim;
       out_re = rad * cosq(th);
       out_im = rad * sinq(th);
       return;
@@ -680,6 +690,12 @@ void reference_complex(int id, double are, double aim, double bre, double bim,
   }
   out_re = crealq(r);
   out_im = cimagq(r);
+}
+
+void reference_complex(int id, double are, double aim, double bre, double bim,
+                       __float128& out_re, __float128& out_im) {
+  reference_complex_q(id, (__float128)are, (__float128)aim,
+                      (__float128)bre, (__float128)bim, out_re, out_im);
 }
 
 // ---------------------------------------------------------------------------
@@ -733,14 +749,74 @@ double score_component(__float128 got, __float128 ref, __float128 other, double 
 // Backend bindings. Every math entry point is spelled the same way in all four
 // headers, so one template body serves all of them.
 // ---------------------------------------------------------------------------
+// `range` carries what --classify needs to decide whether a point was OUTSIDE
+// the backend's reach before the algorithm ever ran. Every field is a property
+// of the WORD type and the limb count, not of any implementation:
+//
+//   min_sub    smallest nonzero magnitude the leading word can hold at all
+//   min_norm   smallest normal magnitude of the leading word
+//   max_val    largest finite magnitude of the leading word
+//   full_prec  min_norm * 2^((limbs-1) * limb_bits) — the magnitude below which
+//              the TRAILING limbs go subnormal, so the pair/triple/quad stops
+//              carrying its nominal digit count. This is the number quoted as
+//              "~1e-292" for DD and "~2e-31" for FF.
+//   eps        2^-(limbs * limb_bits), the type's own unit roundoff, used as the
+//              perturbation size for the conditioning probe.
+struct Range {
+  double min_sub, min_norm, max_val, full_prec, eps;
+  int    limbs, limb_bits;
+  // log10 of the three bounds. Every magnitude test in the classifier is done
+  // in log space: a binary128 reference like exp(-1000) = 5e-435 is a perfectly
+  // ordinary number to the oracle but collapses to 0.0 the moment it is cast to
+  // double, which would silently misfile every underflow as UNEXPLAINED.
+  double l10_min_sub, l10_full_prec, l10_max;
+};
+
+void fill_log_bounds(Range& r) {
+  r.l10_min_sub   = std::log10(r.min_sub);
+  r.l10_full_prec = std::log10(r.full_prec);
+  r.l10_max       = std::log10(r.max_val);
+}
+
+// double words: 53-bit significand, min normal 2^-1022, min subnormal 2^-1074.
+// float  words: 24-bit significand, min normal 2^-126,  min subnormal 2^-149.
+Range range_double(int limbs) {
+  Range r;
+  r.limb_bits = 53;
+  r.limbs     = limbs;
+  r.min_sub   = std::ldexp(1.0, -1074);
+  r.min_norm  = std::ldexp(1.0, -1022);
+  r.max_val   = 1.7976931348623157e308;
+  r.full_prec = std::ldexp(r.min_norm, (limbs - 1) * r.limb_bits);
+  r.eps       = std::ldexp(1.0, -limbs * r.limb_bits);
+  fill_log_bounds(r);
+  return r;
+}
+Range range_float(int limbs) {
+  Range r;
+  r.limb_bits = 24;
+  r.limbs     = limbs;
+  r.min_sub   = std::ldexp(1.0, -149);
+  r.min_norm  = std::ldexp(1.0, -126);
+  r.max_val   = 3.4028234663852886e38;
+  r.full_prec = std::ldexp(r.min_norm, (limbs - 1) * r.limb_bits);
+  r.eps       = std::ldexp(1.0, -limbs * r.limb_bits);
+  fill_log_bounds(r);
+  return r;
+}
+
 struct BackendDD { using S = xp::DoubleDouble; using Z = xp::DoubleDoubleComplex;
-                   static const char* name() { return "DD"; } static double cap() { return 31.0; } };
+                   static const char* name() { return "DD"; } static double cap() { return 31.0; }
+                   static Range range() { return range_double(2); } };
 struct BackendFF { using S = xp::FloatFloat;   using Z = xp::FloatFloatComplex;
-                   static const char* name() { return "FF"; } static double cap() { return 14.0; } };
+                   static const char* name() { return "FF"; } static double cap() { return 14.0; }
+                   static Range range() { return range_float(2); } };
 struct BackendQF { using S = xp::QuadFloat;    using Z = xp::QuadFloatComplex;
-                   static const char* name() { return "QF"; } static double cap() { return 29.0; } };
+                   static const char* name() { return "QF"; } static double cap() { return 29.0; }
+                   static Range range() { return range_float(4); } };
 struct BackendTF { using S = xp::TripleFloat;  using Z = xp::TripleFloatComplex;
-                   static const char* name() { return "TF"; } static double cap() { return 21.7; } };
+                   static const char* name() { return "TF"; } static double cap() { return 21.7; }
+                   static Range range() { return range_float(3); } };
 
 template <class S>
 S eval_real(int id, const S& a, const S& b, const S& c) {
@@ -825,6 +901,403 @@ Z eval_complex(int id, const Z& a, const Z& b, bool& is_real) {
   return a;
 }
 
+// ===========================================================================
+// CLASSIFICATION (--classify)  — why is this point scoring badly?
+// ===========================================================================
+// Every point whose score falls below --classify-frac of its backend's cap is
+// assigned exactly one class. The classes and the ORDER they are tested in:
+//
+//   C  ARGUMENT RANGE  the INPUT is outside what the backend's words can hold,
+//                      so the op never had a chance. Tested first: if the
+//                      operand was already destroyed on the way in, what the
+//                      algorithm then did with it is not the interesting fact.
+//   B  OVERFLOW        the true result exceeds the backend's largest finite
+//                      magnitude (or exceeds binary128's, i.e. the oracle
+//                      itself returned an infinity).
+//   A  UNDERFLOW       the true result is below the backend's smallest
+//                      representable magnitude, or lies in the band where the
+//                      TRAILING limbs are subnormal so the type cannot carry
+//                      its nominal digits at that magnitude.
+//   D  CONDITIONING    a MEASURED statement, not an assertion: perturbing each
+//                      operand by the error the backend actually carries moves
+//                      the true result by more than the threshold. No
+//                      implementation at this storage could have scored better.
+//   E  UNEXPLAINED     none of the above. Every E is a candidate defect.
+//
+// THE CONDITIONING PROBE, and why it is honest about EXACT ops
+//   ach ("achievable digits") is computed by evaluating the QUAD oracle at
+//   perturbed inputs and measuring how far the true result moves:
+//
+//       ach = -log10 max      |f(x .* (1 + s.*delta)) - f(x)| / |f(x)|
+//                   s in {-1,+1}^n
+//
+//   Independent signs per operand are essential. Perturbing a and b in the SAME
+//   direction scales a+b by (1+delta) and detects no amplification at all; it
+//   is the OPPOSITE-sign combination that exposes cancellation, so all 2^n sign
+//   patterns are swept (n <= 3 real, <= 4 complex components).
+//
+//   delta is chosen per op class:
+//     * ALGEBRAIC ops (add sub mul div sqrt fma hypot abs copysign fmax fmin
+//       fdim fmod remainder ceil floor round trunc, and their complex
+//       counterparts) get delta = the operand's ACTUAL storage error only, i.e.
+//       |stored - exact| / |exact|. These ops have exactly- or faithfully-
+//       rounded extended-precision algorithms: twoSum is exact, so cancellation
+//       between two EXACTLY held operands loses nothing, and floor of an
+//       exactly held input is exact. Charging them a fictional one-ulp
+//       perturbation would let a genuine defect hide behind "ill-conditioned".
+//       For DD the storage error of a double input is zero, so an algebraic DD
+//       point cannot be excused as conditioning at all — it lands in E.
+//     * TRANSCENDENTAL ops get delta = max(storage error, the type's own eps).
+//       Their algorithms round to the type at every internal step, so a
+//       relative perturbation of order eps is unavoidable and its amplification
+//       by the function is a real floor. This is what makes DD sin near k*pi
+//       come out as CONDITIONING (recovering sin(x) ~ 1e-16 there needs a pi
+//       wider than the backend's own) rather than as a defect.
+//
+// A class is a claim about the point, and every claim here is derived from the
+// oracle and from the word format. Nothing is keyed off an op name or a
+// hand-maintained exclusion list.
+// ===========================================================================
+
+const char* const kClassName[5] = {"UNDERFLOW", "OVERFLOW", "ARG_RANGE",
+                                   "CONDITIONING", "UNEXPLAINED"};
+
+double clampd(double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+// log10 of a magnitude, computed in quad so that values outside double's range
+// survive. Returns -inf for zero.
+double l10_mag(__float128 v) {
+  if (v == 0) return -HUGE_VAL;
+  return (double)log10q(fabsq(v));
+}
+
+// Digits available to a value whose log10 magnitude is l10: how far it sits
+// above the smallest representable magnitude, capped by the type's nominal
+// precision.
+double digits_at_magnitude(double l10, const Range& rg, double cap) {
+  if (l10 == -HUGE_VAL) return cap;             // exact zero is exactly held
+  if (l10 >= rg.l10_full_prec) return cap;      // all limbs normal
+  return clampd(l10 - rg.l10_min_sub, 0.0, cap);
+}
+
+// Relative error the backend's storage introduces for an input value.
+double storage_rel_err(__float128 stored, __float128 exact) {
+  if (exact == 0) return (stored == 0) ? 0.0 : 1.0;
+  if (!finiteq(exact) || !finiteq(stored)) return 0.0;
+  const __float128 e = fabsq(stored - exact) / fabsq(exact);
+  return (double)e;
+}
+
+// Order-of-magnitude estimate of log10|f(x)| for the ops that can carry a
+// result clean out of binary128's own range, so that "the oracle returned 0 /
+// inf" can be separated into a genuine zero and a true under/overflow.
+// Returns false when no estimate is available.
+bool est_log10_mag_real(int id, __float128 a, __float128 b, double& out) {
+  const double kLog10E = 0.4342944819032518;
+  const double la = (a == 0) ? 0.0 : (double)log10q(fabsq(a));
+  switch (id) {
+    case R_Exp:   out = (double)a * kLog10E;                  return true;
+    case R_Exp2:  out = (double)a * 0.30102999566398120;      return true;
+    case R_Exp10: out = (double)a;                            return true;
+    case R_Sinh:
+    case R_Cosh:  out = std::fabs((double)a) * kLog10E - 0.30102999566398120; return true;
+    case R_Pow:   if (a == 0) return false; out = (double)b * la; return true;
+    case R_Mul:   if (a == 0 || b == 0) return false;
+                  out = la + (double)log10q(fabsq(b));        return true;
+    case R_Div:   if (a == 0 || b == 0) return false;
+                  out = la - (double)log10q(fabsq(b));        return true;
+    default: return false;
+  }
+}
+
+bool est_log10_mag_complex(int id, __float128 are, __float128 aim,
+                           __float128 bre, __float128 bim, double& out) {
+  const double kLog10E = 0.4342944819032518;
+  const double ma = (double)hypotq(are, aim), mb = (double)hypotq(bre, bim);
+  switch (id) {
+    case C_Exp:  out = (double)are * kLog10E;                         return true;
+    case C_Sin: case C_Cos: case C_Sinh: case C_Cosh: case C_Tan: case C_Tanh:
+                 out = std::fabs((double)(id == C_Sin || id == C_Cos ? aim : are)) * kLog10E
+                       - 0.30102999566398120;                         return true;
+    case C_Mul:  if (ma == 0 || mb == 0) return false;
+                 out = std::log10(ma) + std::log10(mb);               return true;
+    case C_Div:  if (ma == 0 || mb == 0) return false;
+                 out = std::log10(ma) - std::log10(mb);               return true;
+    case C_Pow:  if (ma == 0) return false;
+                 out = (double)bre * std::log10(ma);                  return true;
+    default: return false;
+  }
+}
+
+// binary128's own exponent range — used only to tell a true zero from a value
+// that underflowed inside the ORACLE.
+const double kQuadLog10Min = -4965.0;
+const double kQuadLog10Max =  4932.0;
+
+bool is_algebraic_real(int id) {
+  switch (id) {
+    case R_Add: case R_Sub: case R_Mul: case R_Div: case R_Sqrt: case R_Abs:
+    case R_Hypot: case R_Fmod: case R_Remainder: case R_Copysign:
+    case R_Fmax: case R_Fmin: case R_Fdim: case R_Fma:
+    case R_Ceil: case R_Floor: case R_Round: case R_Trunc:
+      return true;
+    default: return false;
+  }
+}
+bool is_algebraic_complex(int id) {
+  switch (id) {
+    case C_Add: case C_Sub: case C_Mul: case C_Div: case C_Abs: case C_Conj:
+    case C_Sqrt:
+      return true;
+    default: return false;
+  }
+}
+
+struct ClassRow {
+  const char* backend;
+  char        kind;
+  const char* op;
+  int         point;
+  const char* family;
+  double      digits, cap, ach, repr_digits, range_digits;
+  int         cls;            // index into kClassName
+  const char* reason;
+  char        in_s[3][44];
+  char        ref_s[44], got_s[44];
+};
+
+void fmt_q(char* buf, size_t n, __float128 v) { quadmath_snprintf(buf, n, "%.17Qg", v); }
+void fmt_q2(char* buf, size_t n, __float128 re, __float128 im) {
+  char a[22], b[22];
+  quadmath_snprintf(a, sizeof(a), "%.9Qg", re);
+  quadmath_snprintf(b, sizeof(b), "%.9Qg", im);
+  std::snprintf(buf, n, "%s|%s", a, b);
+}
+
+// --- real ------------------------------------------------------------------
+void classify_real(const char* be, const Range& rg, double cap, double thresh,
+                   int id, int point, const char* family,
+                   double a, double b, double c,
+                   __float128 sa, __float128 sb, __float128 sc,
+                   __float128 ref, __float128 got, double digits,
+                   ClassRow& out) {
+  const int nops = kReal[id].nops;
+  const __float128 xq[3] = {(__float128)a, (__float128)b, (__float128)c};
+  const __float128 sq[3] = {sa, sb, sc};
+
+  out.backend = be; out.kind = 'r'; out.op = kReal[id].name; out.point = point;
+  out.family = family; out.digits = digits; out.cap = cap;
+  for (int k = 0; k < 3; ++k) {
+    if (k < nops) fmt_q(out.in_s[k], sizeof(out.in_s[k]), xq[k]);
+    else          std::snprintf(out.in_s[k], sizeof(out.in_s[k]), "-");
+  }
+  fmt_q(out.ref_s, sizeof(out.ref_s), ref);
+  fmt_q(out.got_s, sizeof(out.got_s), got);
+
+  // --- input side ---------------------------------------------------------
+  bool   arg_unrep = false;
+  double arg_digits = cap, repr = cap;
+  for (int k = 0; k < nops; ++k) {
+    const double lm = l10_mag(xq[k]);
+    if (lm != -HUGE_VAL && (lm > rg.l10_max || lm < rg.l10_min_sub)) arg_unrep = true;
+    const double ad = digits_at_magnitude(lm, rg, cap);
+    if (ad < arg_digits) arg_digits = ad;
+    const double re = storage_rel_err(sq[k], xq[k]);
+    const double rd = (re > 0.0) ? clampd(-std::log10(re), 0.0, cap) : cap;
+    if (rd < repr) repr = rd;
+  }
+  out.repr_digits = repr;
+
+  // --- result side --------------------------------------------------------
+  const bool   ref_nan = isnanq(ref) != 0;
+  const bool   ref_inf = !ref_nan && !finiteq(ref);
+  const double ref_l10 = (ref_nan || ref_inf) ? 0.0 : l10_mag(ref);
+  out.range_digits = (ref_nan || ref_inf) ? cap : digits_at_magnitude(ref_l10, rg, cap);
+
+  double est = 0.0;
+  const bool have_est = est_log10_mag_real(id, xq[0], xq[1], est);
+  const bool oracle_underflowed = (ref == 0) && have_est && est < kQuadLog10Min;
+  const bool oracle_overflowed  = ref_inf || (have_est && est > kQuadLog10Max);
+
+  // --- conditioning probe -------------------------------------------------
+  const bool algebraic = is_algebraic_real(id);
+  double delta[3] = {0.0, 0.0, 0.0};
+  bool   any_delta = false;
+  for (int k = 0; k < nops; ++k) {
+    const double re = storage_rel_err(sq[k], xq[k]);
+    delta[k] = algebraic ? re : (re > rg.eps ? re : rg.eps);
+    if (xq[k] == 0) delta[k] = 0.0;
+    if (delta[k] > 0.0) any_delta = true;
+  }
+  double ach = cap;
+  if (any_delta && !ref_nan && !ref_inf && ref != 0) {
+    double worst = 0.0;
+    const int combos = 1 << nops;
+    for (int m = 0; m < combos; ++m) {
+      __float128 p[3] = {sq[0], sq[1], sq[2]};
+      for (int k = 0; k < nops; ++k) {
+        const __float128 s = ((m >> k) & 1) ? (__float128)1.0 : (__float128)-1.0;
+        p[k] = sq[k] * ((__float128)1.0 + s * (__float128)delta[k]);
+      }
+      const __float128 rp = reference_real_q(id, p[0], p[1], p[2]);
+      if (isnanq(rp) || !finiteq(rp)) { worst = 1.0; continue; }
+      const double dev = (double)(fabsq(rp - ref) / fabsq(ref));
+      if (dev > worst) worst = dev;
+    }
+    ach = (worst > 0.0) ? clampd(-std::log10(worst), 0.0, cap) : cap;
+  }
+  out.ach = ach;
+
+  // --- verdict ------------------------------------------------------------
+  if (arg_unrep)             { out.cls = 2; out.reason = "input-outside-word-range"; return; }
+  if (arg_digits < thresh)   { out.cls = 2; out.reason = "input-in-subnormal-limb-band"; return; }
+  if (oracle_overflowed ||
+      (!ref_nan && !ref_inf && ref_l10 > rg.l10_max))
+                             { out.cls = 1; out.reason = ref_inf ? "true-result-exceeds-binary128"
+                                                                 : "true-result-exceeds-word-max"; return; }
+  if (oracle_underflowed)    { out.cls = 0; out.reason = "true-result-underflows-binary128"; return; }
+  if (!ref_nan && !ref_inf && ref != 0 && ref_l10 < rg.l10_min_sub)
+                             { out.cls = 0; out.reason = "true-result-below-word-min"; return; }
+  if (out.range_digits < thresh)
+                             { out.cls = 0; out.reason = "result-in-subnormal-limb-band"; return; }
+  // A non-finite return where the true result is finite AND inside the
+  // backend's range is never excusable by conditioning, so it is tested BEFORE
+  // the conditioning probe. Ill-conditioning can cost every digit; it cannot
+  // turn a representable number into a NaN.
+  if (!ref_nan && !ref_inf && ref != 0 && (isnanq(got) || !finiteq(got)))
+                             { out.cls = 4; out.reason = isnanq(got) ? "returned-nan"
+                                                                     : "returned-inf"; return; }
+  if (ref_nan)               { out.cls = 3; out.reason = "reference-is-nan"; return; }
+  if (ref == 0)              { out.cls = 3; out.reason = "exact-zero-of-the-function"; return; }
+  if (ach < thresh)          { out.cls = 3; out.reason = algebraic ? "input-error-amplified"
+                                                                   : "ill-conditioned-at-eps"; return; }
+  if (digits >= ach - 1.0)   { out.cls = 3; out.reason = "at-the-achievable-ceiling"; return; }
+  // Nothing explains it. Sub-classify by HOW it failed: a flushed zero, a
+  // flipped sign and a partial digit loss are three different mechanisms and
+  // lumping them together makes the population unreadable.
+  out.cls = 4;
+  if (got == 0)                                   out.reason = "returned-zero";
+  else if (signbitq(got) != signbitq(ref))        out.reason = "returned-wrong-sign";
+  else if (digits == 0.0)                         out.reason = "no-correct-digits";
+  else                                            out.reason = "partial-digit-loss";
+}
+
+// --- complex ----------------------------------------------------------------
+void classify_complex(const char* be, const Range& rg, double cap, double thresh,
+                      int id, int point, const char* family,
+                      double are, double aim, double bre, double bim,
+                      __float128 sare, __float128 saim, __float128 sbre, __float128 sbim,
+                      __float128 rre, __float128 rim, __float128 gre, __float128 gim,
+                      double digits, ClassRow& out) {
+  const int ncomp = kComplex[id].nops * 2;
+  const __float128 xq[4] = {(__float128)are, (__float128)aim,
+                            (__float128)bre, (__float128)bim};
+  const __float128 sq[4] = {sare, saim, sbre, sbim};
+
+  out.backend = be; out.kind = 'c'; out.op = kComplex[id].name; out.point = point;
+  out.family = family; out.digits = digits; out.cap = cap;
+  fmt_q2(out.in_s[0], sizeof(out.in_s[0]), xq[0], xq[1]);
+  if (ncomp > 2) fmt_q2(out.in_s[1], sizeof(out.in_s[1]), xq[2], xq[3]);
+  else           std::snprintf(out.in_s[1], sizeof(out.in_s[1]), "-");
+  std::snprintf(out.in_s[2], sizeof(out.in_s[2]), "-");
+  fmt_q2(out.ref_s, sizeof(out.ref_s), rre, rim);
+  fmt_q2(out.got_s, sizeof(out.got_s), gre, gim);
+
+  bool   arg_unrep = false;
+  double arg_digits = cap, repr = cap;
+  for (int k = 0; k < ncomp; ++k) {
+    const double lm = l10_mag(xq[k]);
+    if (lm != -HUGE_VAL && (lm > rg.l10_max || lm < rg.l10_min_sub)) arg_unrep = true;
+    if (lm != -HUGE_VAL) {                // a zero component is exact, not degraded
+      const double ad = digits_at_magnitude(lm, rg, cap);
+      if (ad < arg_digits) arg_digits = ad;
+    }
+    const double re = storage_rel_err(sq[k], xq[k]);
+    const double rd = (re > 0.0) ? clampd(-std::log10(re), 0.0, cap) : cap;
+    if (rd < repr) repr = rd;
+  }
+  out.repr_digits = repr;
+
+  const bool ref_nan = (isnanq(rre) || isnanq(rim)) != 0;
+  const bool ref_inf = !ref_nan && (!finiteq(rre) || !finiteq(rim));
+  const double ref_l10 = (ref_nan || ref_inf)
+                           ? 0.0
+                           : l10_mag(fabsq(rre) > fabsq(rim) ? rre : rim);
+  out.range_digits = (ref_nan || ref_inf) ? cap : digits_at_magnitude(ref_l10, rg, cap);
+
+  double est = 0.0;
+  const bool have_est = est_log10_mag_complex(id, xq[0], xq[1], xq[2], xq[3], est);
+  const bool oracle_underflowed =
+      (rre == 0 && rim == 0) && have_est && est < kQuadLog10Min;
+  const bool oracle_overflowed = ref_inf || (have_est && est > kQuadLog10Max);
+
+  const bool algebraic = is_algebraic_complex(id);
+  double delta[4] = {0, 0, 0, 0};
+  bool   any_delta = false;
+  for (int k = 0; k < ncomp; ++k) {
+    const double re = storage_rel_err(sq[k], xq[k]);
+    delta[k] = algebraic ? re : (re > rg.eps ? re : rg.eps);
+    if (xq[k] == 0) delta[k] = 0.0;
+    if (delta[k] > 0.0) any_delta = true;
+  }
+  double ach = cap;
+  if (any_delta && !ref_nan && !ref_inf && !(rre == 0 && rim == 0)) {
+    double worst = 0.0;
+    const int combos = 1 << ncomp;
+    for (int m = 0; m < combos; ++m) {
+      __float128 p[4] = {sq[0], sq[1], sq[2], sq[3]};
+      for (int k = 0; k < ncomp; ++k) {
+        const __float128 s = ((m >> k) & 1) ? (__float128)1.0 : (__float128)-1.0;
+        p[k] = sq[k] * ((__float128)1.0 + s * (__float128)delta[k]);
+      }
+      __float128 pr = 0, pi = 0;
+      reference_complex_q(id, p[0], p[1], p[2], p[3], pr, pi);
+      if (isnanq(pr) || isnanq(pi) || !finiteq(pr) || !finiteq(pi)) { worst = 1.0; continue; }
+      // Mirror the scorer: each component relative to itself, or to the other
+      // component when its own reference is exactly zero.
+      const __float128 dre = fabsq(pr - rre), dim = fabsq(pi - rim);
+      const __float128 nre = (rre != 0) ? fabsq(rre) : fabsq(rim);
+      const __float128 nim = (rim != 0) ? fabsq(rim) : fabsq(rre);
+      double dv = 0.0;
+      if (nre != 0) dv = (double)(dre / nre);
+      if (nim != 0) { const double t = (double)(dim / nim); if (t > dv) dv = t; }
+      if (dv > worst) worst = dv;
+    }
+    ach = (worst > 0.0) ? clampd(-std::log10(worst), 0.0, cap) : cap;
+  }
+  out.ach = ach;
+
+  if (arg_unrep)           { out.cls = 2; out.reason = "input-outside-word-range"; return; }
+  if (arg_digits < thresh) { out.cls = 2; out.reason = "input-in-subnormal-limb-band"; return; }
+  if (oracle_overflowed || (!ref_nan && !ref_inf && ref_l10 > rg.l10_max))
+                           { out.cls = 1; out.reason = ref_inf ? "true-result-exceeds-binary128"
+                                                               : "true-result-exceeds-word-max"; return; }
+  if (oracle_underflowed)  { out.cls = 0; out.reason = "true-result-underflows-binary128"; return; }
+  if (!ref_nan && !ref_inf && !(rre == 0 && rim == 0) && ref_l10 < rg.l10_min_sub)
+                           { out.cls = 0; out.reason = "true-result-below-word-min"; return; }
+  if (out.range_digits < thresh)
+                           { out.cls = 0; out.reason = "result-in-subnormal-limb-band"; return; }
+  const bool got_nonfinite = isnanq(gre) || isnanq(gim) || !finiteq(gre) || !finiteq(gim);
+  if (!ref_nan && !ref_inf && !(rre == 0 && rim == 0) && got_nonfinite)
+                           { out.cls = 4; out.reason = (isnanq(gre) || isnanq(gim))
+                                                         ? "returned-nan" : "returned-inf"; return; }
+  if (ref_nan)             { out.cls = 3; out.reason = "reference-is-nan"; return; }
+  if (rre == 0 && rim == 0){ out.cls = 3; out.reason = "exact-zero-of-the-function"; return; }
+  if (ach < thresh)        { out.cls = 3; out.reason = algebraic ? "input-error-amplified"
+                                                                 : "ill-conditioned-at-eps"; return; }
+  if (digits >= ach - 1.0) { out.cls = 3; out.reason = "at-the-achievable-ceiling"; return; }
+  out.cls = 4;
+  if (gre == 0 && gim == 0)                       out.reason = "returned-zero";
+  else if (digits == 0.0)                         out.reason = "no-correct-digits";
+  else                                            out.reason = "partial-digit-loss";
+}
+
+// Classification context threaded through the sweep. Null when --classify is off.
+struct ClassifyCtx {
+  double                 frac;
+  std::vector<ClassRow>* rows;
+};
+
 // ---------------------------------------------------------------------------
 // A scored row, in emission order.
 // ---------------------------------------------------------------------------
@@ -852,13 +1325,23 @@ template <class B>
 void sweep_real(int id, const std::vector<GridPoint>& grid,
                 const std::vector<double>& a_in, const std::vector<double>& b_in,
                 const std::vector<double>& c_in, const std::vector<__float128>& ref,
-                std::vector<Row>& rows, std::vector<Cell>& cells) {
+                std::vector<Row>& rows, std::vector<Cell>& cells,
+                const ClassifyCtx* cx) {
   typedef typename B::S S;
   Cell cell = {B::name(), 'r', kReal[id].name, B::cap(), 0.0, B::cap(), 0, 0};
+  const Range rg = B::range();
   for (size_t i = 0; i < grid.size(); ++i) {
-    const S r = eval_real<S>(id, S(a_in[i]), S(b_in[i]), S(c_in[i]));
+    const S sa(a_in[i]), sb(b_in[i]), sc(c_in[i]);
+    const S r = eval_real<S>(id, sa, sb, sc);
     const double d = score_scalar(to_q(r), ref[i], B::cap());
     rows.push_back({B::name(), 'r', kReal[id].name, int(i), d});
+    if (cx && d < cx->frac * B::cap()) {
+      ClassRow cr;
+      classify_real(B::name(), rg, B::cap(), cx->frac * B::cap(), id, int(i),
+                    grid[i].family, a_in[i], b_in[i], c_in[i],
+                    to_q(sa), to_q(sb), to_q(sc), ref[i], to_q(r), d, cr);
+      cx->rows->push_back(cr);
+    }
     cell.sum += d;
     if (d < cell.min) cell.min = d;
     if (d == 0.0) ++cell.n_zero;
@@ -871,10 +1354,12 @@ template <class B>
 void sweep_complex(int id, const std::vector<GridPoint>& grid,
                    const std::vector<double>& b_re, const std::vector<double>& b_im,
                    const std::vector<__float128>& ref_re, const std::vector<__float128>& ref_im,
-                   std::vector<Row>& rows, std::vector<Cell>& cells) {
+                   std::vector<Row>& rows, std::vector<Cell>& cells,
+                   const ClassifyCtx* cx) {
   typedef typename B::S S;
   typedef typename B::Z Z;
   Cell cell = {B::name(), 'c', kComplex[id].name, B::cap(), 0.0, B::cap(), 0, 0};
+  const Range rg = B::range();
   for (size_t i = 0; i < grid.size(); ++i) {
     const Z a{S(grid[i].re), S(grid[i].im)};
     const Z b{S(b_re[i]), S(b_im[i])};
@@ -885,6 +1370,14 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
                                : score_component(to_q(r.im), ref_im[i], ref_re[i], B::cap());
     const double d = dre < dim ? dre : dim;
     rows.push_back({B::name(), 'c', kComplex[id].name, int(i), d});
+    if (cx && d < cx->frac * B::cap()) {
+      ClassRow cr;
+      classify_complex(B::name(), rg, B::cap(), cx->frac * B::cap(), id, int(i),
+                       grid[i].family, grid[i].re, grid[i].im, b_re[i], b_im[i],
+                       to_q(a.re), to_q(a.im), to_q(b.re), to_q(b.im),
+                       ref_re[i], ref_im[i], to_q(r.re), to_q(r.im), d, cr);
+      cx->rows->push_back(cr);
+    }
     cell.sum += d;
     if (d < cell.min) cell.min = d;
     if (d == 0.0) ++cell.n_zero;
@@ -901,7 +1394,8 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
 // ---------------------------------------------------------------------------
 void run_sweep(uint64_t seed, const std::vector<GridPoint>& rgrid,
                const std::vector<GridPoint>& cgrid,
-               std::vector<Row>& rows, std::vector<Cell>& cells) {
+               std::vector<Row>& rows, std::vector<Cell>& cells,
+               const ClassifyCtx* cx) {
   const size_t nr = rgrid.size(), nc = cgrid.size();
   rows.reserve(4 * (R_COUNT * nr + C_COUNT * nc));
 
@@ -916,10 +1410,10 @@ void run_sweep(uint64_t seed, const std::vector<GridPoint>& rgrid,
       a[i] = av; b[i] = bv; c[i] = cv;
       ref[i] = reference_real(id, av, bv, cv);
     }
-    sweep_real<BackendDD>(id, rgrid, a, b, c, ref, rows, cells);
-    sweep_real<BackendFF>(id, rgrid, a, b, c, ref, rows, cells);
-    sweep_real<BackendQF>(id, rgrid, a, b, c, ref, rows, cells);
-    sweep_real<BackendTF>(id, rgrid, a, b, c, ref, rows, cells);
+    sweep_real<BackendDD>(id, rgrid, a, b, c, ref, rows, cells, cx);
+    sweep_real<BackendFF>(id, rgrid, a, b, c, ref, rows, cells, cx);
+    sweep_real<BackendQF>(id, rgrid, a, b, c, ref, rows, cells, cx);
+    sweep_real<BackendTF>(id, rgrid, a, b, c, ref, rows, cells, cx);
   }
 
   for (int id = 0; id < C_COUNT; ++id) {
@@ -930,10 +1424,10 @@ void run_sweep(uint64_t seed, const std::vector<GridPoint>& rgrid,
       fill_complex_operands(id, i, cgrid, cgrid[i].re, cgrid[i].im, rng, bre[i], bim[i]);
       reference_complex(id, cgrid[i].re, cgrid[i].im, bre[i], bim[i], rre[i], rim[i]);
     }
-    sweep_complex<BackendDD>(id, cgrid, bre, bim, rre, rim, rows, cells);
-    sweep_complex<BackendFF>(id, cgrid, bre, bim, rre, rim, rows, cells);
-    sweep_complex<BackendQF>(id, cgrid, bre, bim, rre, rim, rows, cells);
-    sweep_complex<BackendTF>(id, cgrid, bre, bim, rre, rim, rows, cells);
+    sweep_complex<BackendDD>(id, cgrid, bre, bim, rre, rim, rows, cells, cx);
+    sweep_complex<BackendFF>(id, cgrid, bre, bim, rre, rim, rows, cells, cx);
+    sweep_complex<BackendQF>(id, cgrid, bre, bim, rre, rim, rows, cells, cx);
+    sweep_complex<BackendTF>(id, cgrid, bre, bim, rre, rim, rows, cells, cx);
   }
 }
 
@@ -987,6 +1481,70 @@ bool write_grid(const std::string& path, const std::vector<GridPoint>& rg,
     std::fprintf(f, "c,%zu,%s,%.17g,%.17g\n", i, cg[i].family, cg[i].re, cg[i].im);
   if (std::fclose(f) != 0) { std::fprintf(stderr, "close failed\n"); return false; }
   return true;
+}
+
+// Classification CSV. One row per point below the threshold, carrying enough
+// evidence to re-derive the verdict by hand: the inputs the oracle saw, the
+// reference, what the backend returned, and the three measured ceilings
+// (repr = digits the input survived storage with, range = digits the RESULT's
+// magnitude leaves room for, ach = digits any implementation could achieve).
+bool write_classification(const std::string& path, const std::vector<ClassRow>& rows,
+                          double frac) {
+  std::FILE* f = std::fopen(path.c_str(), "wb");
+  if (!f) { std::fprintf(stderr, "cannot open %s for writing\n", path.c_str()); return false; }
+  std::fprintf(f, "# %s classification\n", kFormatVersion);
+  std::fprintf(f, "# every sweep point scoring below %.2f x its backend cap, with the\n", frac);
+  std::fprintf(f, "# reason it does. Generated by scripts/sweep_accuracy --classify;\n");
+  std::fprintf(f, "# see the CLASSIFICATION section of scripts/sweep_accuracy.cpp.\n");
+  std::fprintf(f, "# class: UNDERFLOW OVERFLOW ARG_RANGE CONDITIONING UNEXPLAINED\n");
+  std::fprintf(f, "# ach = digits achievable by ANY implementation at this storage,\n");
+  std::fprintf(f, "#       measured by perturbing each operand by the error the backend\n");
+  std::fprintf(f, "#       actually carries and re-evaluating the binary128 oracle.\n");
+  std::fprintf(f, "# rows: %zu\n", rows.size());
+  std::fprintf(f, "backend,kind,op,point,family,digits,cap,class,reason,"
+                  "ach,repr,range,in1,in2,in3,ref,got\n");
+  for (size_t i = 0; i < rows.size(); ++i) {
+    const ClassRow& r = rows[i];
+    std::fprintf(f, "%s,%c,%s,%d,%s,%.2f,%.2f,%s,%s,%.2f,%.2f,%.2f,%s,%s,%s,%s,%s\n",
+                 r.backend, r.kind, r.op, r.point, r.family, r.digits, r.cap,
+                 kClassName[r.cls], r.reason, r.ach, r.repr_digits, r.range_digits,
+                 r.in_s[0], r.in_s[1], r.in_s[2], r.ref_s, r.got_s);
+  }
+  if (std::fclose(f) != 0) { std::fprintf(stderr, "close failed\n"); return false; }
+  return true;
+}
+
+void print_class_summary(const std::vector<ClassRow>& rows, double frac) {
+  long by_class[5] = {0, 0, 0, 0, 0};
+  long zeros_by_class[5] = {0, 0, 0, 0, 0};
+  for (size_t i = 0; i < rows.size(); ++i) {
+    ++by_class[rows[i].cls];
+    if (rows[i].digits == 0.0) ++zeros_by_class[rows[i].cls];
+  }
+  std::printf("\n  classification (threshold: below %.0f%% of cap)\n", frac * 100.0);
+  std::printf("  %-14s %10s %10s\n", "class", "points", "of which 0.00");
+  std::printf("  -------------- ---------- ----------\n");
+  for (int k = 0; k < 5; ++k)
+    std::printf("  %-14s %10ld %10ld\n", kClassName[k], by_class[k], zeros_by_class[k]);
+  std::printf("  %-14s %10zu\n", "TOTAL", rows.size());
+
+  if (by_class[4] == 0) {
+    std::printf("\n  UNEXPLAINED is EMPTY — every low-scoring point is accounted for by a\n"
+                "  range limit or by measured conditioning.\n");
+    return;
+  }
+  std::printf("\n  UNEXPLAINED points (each one is a candidate defect):\n");
+  long shown = 0;
+  for (size_t i = 0; i < rows.size(); ++i) {
+    if (rows[i].cls != 4) continue;
+    const ClassRow& r = rows[i];
+    if (shown < 60)
+      std::printf("    %s %c %-9s pt %-5d %-7s d=%.2f ach=%.2f in=%s ref=%s got=%s\n",
+                  r.backend, r.kind, r.op, r.point, r.family, r.digits, r.ach,
+                  r.in_s[0], r.ref_s, r.got_s);
+    ++shown;
+  }
+  if (shown > 60) std::printf("    (%ld more; see the CSV)\n", shown - 60);
 }
 
 void print_summary(const std::vector<Cell>& cells) {
@@ -1136,16 +1694,22 @@ void usage(const char* argv0) {
     "  --summary         print the per-(backend, op) table (implied unless --quiet)\n"
     "  --quiet           suppress the per-(backend, op) table\n"
     "  --baseline PATH   MONOTONE GATE: re-run the sweep, diff against PATH and\n"
-    "                    exit 1 if ANY point's digits decreased. Writes nothing.\n",
-    argv0, argv0, kDefaultOut, (unsigned long long)kDefaultSeed);
+    "                    exit 1 if ANY point's digits decreased. Writes nothing.\n"
+    "  --classify PATH   TRIAGE: classify every point scoring below --classify-frac\n"
+    "                    of its backend cap and write the evidence CSV to PATH.\n"
+    "                    Writes no baseline. Exits 3 if any point is UNEXPLAINED.\n"
+    "  --classify-frac F fraction of cap below which a point is triaged "
+    "(default %.2f)\n",
+    argv0, argv0, kDefaultOut, (unsigned long long)kDefaultSeed, kDefaultClassifyFrac);
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-  std::string out = kDefaultOut, grid_out, baseline;
+  std::string out = kDefaultOut, grid_out, baseline, classify;
   uint64_t    seed = kDefaultSeed;
   bool        quiet = false, out_set = false;
+  double      classify_frac = kDefaultClassifyFrac;
 
   for (int i = 1; i < argc; ++i) {
     const std::string s = argv[i];
@@ -1157,6 +1721,8 @@ int main(int argc, char** argv) {
     else if (s == "--out")       { out = need("--out"); out_set = true; }
     else if (s == "--grid-out")  { grid_out = need("--grid-out"); }
     else if (s == "--baseline")  { baseline = need("--baseline"); }
+    else if (s == "--classify")  { classify = need("--classify"); }
+    else if (s == "--classify-frac") { classify_frac = std::atof(need("--classify-frac")); }
     else if (s == "--seed")      { seed = std::strtoull(need("--seed"), nullptr, 10); }
     else if (s == "--summary")   { quiet = false; }
     else if (s == "--quiet")     { quiet = true; }
@@ -1175,13 +1741,25 @@ int main(int argc, char** argv) {
               (unsigned long long)seed);
   std::fflush(stdout);
 
-  std::vector<Row>  rows;
-  std::vector<Cell> cells;
-  run_sweep(seed, rgrid, cgrid, rows, cells);
+  std::vector<Row>      rows;
+  std::vector<Cell>     cells;
+  std::vector<ClassRow> class_rows;
+  ClassifyCtx           cx = {classify_frac, &class_rows};
+  run_sweep(seed, rgrid, cgrid, rows, cells, classify.empty() ? nullptr : &cx);
 
   if (!quiet) print_summary(cells);
 
   if (!baseline.empty()) return compare_baseline(baseline, rows);
+
+  if (!classify.empty()) {
+    print_class_summary(class_rows, classify_frac);
+    if (!write_classification(classify, class_rows, classify_frac)) return 1;
+    std::printf("\nwrote %s  (%zu rows)\n", classify.c_str(), class_rows.size());
+    long unexplained = 0;
+    for (size_t i = 0; i < class_rows.size(); ++i)
+      if (class_rows[i].cls == 4) ++unexplained;
+    return unexplained ? 3 : 0;
+  }
 
   if (!write_baseline(out, rows, rgrid.size(), cgrid.size(), seed)) return 1;
   std::printf("\nwrote %s  (%zu rows)\n", out.c_str(), rows.size());
