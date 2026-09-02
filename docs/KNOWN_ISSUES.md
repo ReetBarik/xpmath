@@ -1468,7 +1468,7 @@ is generated from the same data.
 
 ---
 
-## KI-6 — `exp` flushes to ZERO outside a hard ±300 argument guard, discarding ~170 representable decades
+## KI-6 — `exp` flushes to ZERO outside a hard ±300 argument guard, discarding ~170 representable decades **[RESOLVED]**
 
 **Severity: high (silently returns 0 for a large, ordinary result), all backends,
 worst on DD.**
@@ -1516,9 +1516,185 @@ x > 709.78 for a double-word backend, x > 88.7 for a float-word one) and return
 ±inf / 0 only past the real boundary. Check `exp2`, `exp10`, `sinh` and `cosh`
 apply the guard to their own argument, not to the reduced one.
 
+### Resolution (2026-09-02)
+
+Fixed in **`TBD-FIX`**, all four backends (`dd_math.hpp`, `ff_math.hpp`,
+`qf_math.hpp`, `tf_math.hpp`).
+
+**Two independent bugs, not one.** The guard was only half the story.
+
+1. *The guard itself* was a shared ±300 (±80 for TF) constant with no relation to
+   any type's range. Replaced with a limit derived from the word format:
+   `> ln(DBL_MAX) = 709.78271289338397` → `+inf`, `< ln(2^-1074) ≈ -745.2` → `0`
+   for DD; `> ln(FLT_MAX) = 88.722839f` → `+inf`, `< ln(2^-149) ≈ -104f` → `0`
+   for FF/QF/TF. TF additionally returned the *sentinel* `1.0e30f` on overflow —
+   a finite wrong answer, worse than 0; that is gone.
+
+2. *The final scaling* would have overflowed anyway even with the guard widened.
+   Every backend materialised `2^nz` as a scalar and multiplied through. For
+   `nz > 1023` (DD) or `> 127` (FF/QF/TF) that scalar is `inf` before it ever
+   reaches the mantissa, and symmetrically `0` at the bottom, so exp would have
+   returned inf/0 across the last exponent decade regardless. The scaling is now
+   per word via `ldexp`, which cannot saturate:
+
+   ```cpp
+   if (nz >= -1021 && nz <= 1023) {              // 2^nz exact and normal
+       const double pow2 = detail::ldexp(1.0, nz);
+       return DoubleDouble(s3.hi * pow2, s3.lo * pow2);
+   }
+   return DoubleDouble(detail::ldexp(s3.hi, nz), detail::ldexp(s3.lo, nz));
+   ```
+
+   The banded fast path is not cosmetic: GCC 13.3.0 inlines `ldexpf(1.0f, n)` as
+   exponent construction but emits a real libm call for `ldexpf(mantissa, n)`.
+   Taking the component-wise form unconditionally cost FF exp **+49%**
+   (421 → 627 ns/call). With the band it is +1.5%. See *Cost*.
+
+   FF carried a third defect on the same path: an iteration-limit escape
+   `if (l1 == 60) return FloatFloat(0.0f);` that discarded the partial sum. It now
+   falls through with what it has.
+
+**Measured, quad oracle, digits of agreement (`-1.00` = returned inf, `-0.00` =
+returned 0, `0.00` = finite but no correct digit):**
+
+| backend | x | before | after |
+|---|---|---|---|
+| DD `exp` | 300 | −0.00 (returned 0) | **30.17** |
+| DD `exp` | 316.22777 | −0.00 | **30.24** |
+| DD `exp` | 700 | −0.00 | **30.34** |
+| DD `exp` | 709.78 | −0.00 | **30.10** |
+| DD `exp` | 710 | −0.00 | −1.00 (`+inf`, correct: > DBL_MAX) |
+| DD `exp` | −300 | −0.00 | **30.34** |
+| DD `exp` | −700 | −0.00 | **19.98** (subnormal-limited) |
+| DD `exp10` | 200 | −0.00 | **29.07** |
+| DD `exp10` | 307 | −0.00 | **29.00** |
+| DD `exp10` | −300 | −0.00 | **23.77** |
+| DD `exp2` | 1023 | −0.00 | **31.00** |
+| FF `exp` | 88 | −0.00 | **13.10** |
+| FF `exp` | 88.72 | −0.00 | **13.57** |
+| FF `exp` | −88 | −0.00 | **7.17** |
+| FF `exp10` | 38.5 | −0.00 | **13.40** |
+| QF `exp` | 88.72 | −0.00 | **27.83** |
+| QF `exp10` | 38.5 | −0.00 | **28.57** |
+| TF `exp` | 80 | 0.00 (`1e30` sentinel) | **21.00** |
+| TF `exp` | 88.72 | 0.00 (`1e30`) | **20.77** |
+| TF `exp` | −80 | −0.00 | **11.10** |
+| TF `exp10` | 38.5 | 0.00 (`1e30`) | **20.40** |
+
+Every backend now returns a correct result over its whole representable range and
+`+inf`/`0` only past the true word boundary.
+
+### Divergence from QD 2.3.24 — deliberate, recorded
+
+QD's `dd_real::exp` (`src/dd_real.cpp:217-220`) has the same *shape* of guard but
+at the right place:
+
+```cpp
+if (a.x[0] <= -709.0) return 0.0;
+if (a.x[0] >=  709.0) return dd_real::_inf;
+```
+
+and already scales with `ldexp(s, m)`. So the ±300 was **our** divergence from the
+source, not QD's. We now go slightly *wider* than QD in both directions, which is
+the second, intentional divergence:
+
+- QD returns `_inf` at exactly 709.0, but `e^709 = 8.22e307 < DBL_MAX`. We carry
+  to 709.78271289338397 and score 29.64 digits at 709.
+- QD returns 0 below −709.0, but FP64 subnormals reach `2^-1074 ≈ 4.94e-324`
+  ≈ `e^-745`. We carry to −745.2; accuracy degrades gracefully into the subnormal
+  band (19.98 digits at −700, 16.29 at −708, 2.59 at −740) rather than falling off
+  a cliff at −709.
+
+QD has no FF/QF/TF analogue to diverge from.
+
+### Downstream audit
+
+Every function that composes `exp`, with its verdict:
+
+| function | verdict |
+|---|---|
+| `exp2`, `exp10` | **sound composition, fixed for free.** They scale the argument and call `exp`; the guard was applied to the internal `x·ln10`, which is exactly why `exp10` lost everything above \|x\|≈130 on DD. Range-deriving the guard restored them with no edit. DD `exp10` now reaches 1e307, FF/QF/TF reach 3.16e38. |
+| `expm1` | **sound, no change.** Small-argument path never reaches the guard; large-argument path inherits the fix. |
+| `pow` | **sound, no change.** DD `pow(10,300)` = 1e300 at 27.34 digits, FF/QF/TF `pow(10,35)` at 13.76 / 26.33 / 19.52. |
+| `sinh`, `cosh` | **broken, fixed.** Past the guard they were **NaN**, not zero — the two-exponential form evaluated `e^x − 1/e^x` with one operand flushed. Added a saturation branch above `ln(1/u)/2` per backend (`kDDHyperbolicSaturate = 40.0`, `kFFHyperbolicSaturate = 19.0f`, `kQFHyperbolicSaturate = 36.0f`, `kTFHyperbolicSaturate = 27.0f`) where sinh and cosh agree to the last bit and both equal `e^{\|x\|}/2`. QF was NaN even *below* the old guard: `1/e^{80}` = 1.8e-35 goes through `divide()`, whose Dekker splitter overflows at FP32. |
+| `tanh` | **broken, needed its own fix — see KI-7.** |
+| `log` | **broken *by* this fix, fixed.** `exp` now returns `+inf` on genuine overflow instead of 0, and `log`'s Newton step `(a − e^x)/e^x` evaluates `(inf − inf)/inf = NaN` on an infinite argument. `atanh(±1)` reaches it through `(1+a)/(1−a)`. Added `if (detail::isinf(a.hi)) return a;` to all four `log`s. This was caught by the monotone gate — TF `atanh` at grid points 120/422/570/1650 (input exactly `1`) dropped the full cap 21.70 → 0 — not by reasoning; see *Gate*. |
+| complex `exp`, `sin`, `cos`, `tan`, `tanh` | **inherit the real fixes; not separately audited.** They call the real `exp`/`sinh`/`cosh` on `Re(z)`, so the range extension propagates. No complex-specific probe was run. KI-7's note of 562 complex `tanh` points with no correct digits should be re-checked when complex work is next opened. |
+
+### Cost
+
+Measured, not estimated: tight loop, 200,000 calls, `-O2`, GCC 13.3.0, best of 5
+reps, before/after built from the same source otherwise, interleaved rounds
+(rounds 1 and 3 agreed; round 2 showed a 2× outlier on the *same* binary — the
+machine is noisy, the per-binary numbers are reproducible).
+
+| op | before | after | Δ |
+|---|---|---|---|
+| DD `exp` | 835.8 ns | 830.3 ns | **−0.7%** |
+| FF `exp` | 603.9 ns | 613.0 ns | **+1.5%** |
+| QF `exp` | 3576.7 ns | 3599.0 ns | **+0.6%** |
+| TF `exp` | 1344.5 ns | 1328.8 ns | **−1.2%** |
+| DD `tanh` | 509.6 ns | 500.5 ns | **−1.8%** |
+| DD `cosh` | 455.8 ns | 514.2 ns | **+12.8%** |
+
+`exp` itself is free to within noise — the added work is two comparisons on a path
+that already does 9 squarings. `cosh` pays 12.8% for the saturation branch, which
+is the KI-4 bargain (Reet accepted 12.9% there to remove a sign error) applied to a
+NaN. `tanh` got *faster*: past the saturation threshold it now returns a constant
+instead of evaluating an exponential.
+
+### Gate and tests
+
+Monotone gate (`sweep_baseline.csv`, 428,592 points, 253 cells): **exit 0, zero
+decreases, 6,501 increases.** No accepted regressions. ctest **34/34**.
+
+Two gate failures happened on the way and are worth recording because both were
+real defects the probe had missed:
+
+- **894 decreases, worst 21.70** — TF `atanh(1)` → `log(+inf)` → NaN. Root cause
+  above; fixed by the `log` infinity guard.
+- **670 decreases, worst 1.25**, all on *negative* arguments — my first sinh/cosh
+  saturation branch computed `exp(\|a\| − ln2)`, and perturbing the argument turns
+  into relative output error. The baseline reached `e^{\|a\|}` via `1/exp(a)`,
+  which was luckier there. Fixed by mirroring the baseline route exactly
+  (`e = exp(a)`; `if (a < 0) e = 1/e`; then *exact* halving) and keeping the
+  shifted-argument form only as an overflow fallback.
+
+A residual class the gate could *not* catch, because it was NaN in the baseline
+too: DD sinh/cosh at −700 and QF sinh at −80/−88 still returned NaN, because
+`divide()`'s splitter overflows (DD above ~1.3e300, QF at FP32). The fallback
+condition is now `(detail::isinf(e.hi) || e.hi != e.hi)` — the self-inequality NaN
+test is used because only `isinf` and `ldexp` are confirmed present in
+`config.hpp`'s `detail::` dispatch.
+
+### Tolerance ratchet
+
+`tests/{dd,ff,qf}_accuracy_test.cpp` gate `exp`/`exp2`/`exp10`/`tanh` by a domain
+*filter* plus a sampler, not a digit tolerance, so the ratchet is a domain
+widening — the rows now cover ground the old code could not reach:
+
+| test | op | filter before → after | sampler before → after |
+|---|---|---|---|
+| dd | `exp` | `x < 300` → `x < 709` | `(-300,299)` → `(-708,709)` |
+| dd | `exp2` | `\|x\| < 400` → `\|x\| < 1022` | `(-100,100)` → `(-1021,1022)` |
+| dd | `exp10` | `\|x\| < 120` → `\|x\| < 307` | `(-80,80)` → `(-307,307)` |
+| dd | `tanh` | `\|x\| < 300` → `isfinite(x)` | `(-50,50)` → `(-1e4,1e4)` |
+| ff | `exp` | `x < 88` → `x < 88.7` | `(-88,87.5)` → `(-87,88.7)` |
+| ff | `exp10` | `\|x\| < 38` → `\|x\| < 38.5` | `(-37,37)` → `(-37.5,38.5)` |
+| ff | `tanh` | `\|x\| < 300` → `isfinite(x)` | `(-50,50)` → `(-1e4,1e4)` |
+| qf | `exp` | `x < 88` → `x < 88.7` | `(-35,80)` → `(-35,88.7)` |
+| qf | `exp10` | `x < 38` → `x < 38.5` | `(-15,30)` → `(-15,38.5)` |
+| qf | `tanh` | `\|x\| < 300` → `isfinite(x)` | `(-50,50)` → `(-1e4,1e4)` |
+
+All still pass. Two deliberate omissions: `tf_accuracy_test.cpp` uses min-drop rows
+(`{"exp", 19.0}`) rather than filters and was left alone; `sinh`/`cosh` filters were
+left alone as the riskier widening — their accuracy in the last decade is
+subnormal-limited, not algorithm-limited, and a widened row would encode a floor
+that is a property of the format.
+
 ---
 
-## KI-7 — `tanh` returns the WRONG SIGN for |x| past the `exp` guard, in all four backends
+## KI-7 — `tanh` returns the WRONG SIGN for |x| past the `exp` guard, in all four backends **[RESOLVED]**
 
 **Severity: high (wrong sign is worse than no answer), all backends.**
 
@@ -1551,6 +1727,93 @@ Fixing KI-6 fixes most of this, but `tanh` should also short-circuit to
 ±1 once |x| exceeds the point where the type cannot resolve 1 − tanh(x)
 (|x| > 36 for FF, > 19 for a 48-bit type, > 358 for DD), which is both correct
 and much faster than evaluating the exponential at all.
+
+### Resolution (2026-09-02)
+
+Fixed in **`TBD-FIX`**, same commit as [KI-6](#ki-6).
+
+**Was KI-7 downstream of KI-6? Partly — and the remainder is a separate defect.**
+This was checked, not assumed, and the entry above ("Downstream of KI-6") is
+half right:
+
+- **Downstream part.** DD `tanh(316.22777)` is fixed by the KI-6 guard alone:
+  `expm1(632.46)` is now a real number, so `expm1(2x)/(expm1(2x)+2)` evaluates
+  correctly and the sign is right.
+- **Separate part.** For DD `|x| > 354.9` the *doubled* argument `2x` exceeds
+  `ln(DBL_MAX)` legitimately. `expm1` returns `+inf`, and `inf/(inf+2)` is **NaN**
+  — a different wrong answer, reached through correct code, and unreachable by any
+  amount of guard-widening. `tanh(400)` and `tanh(1e6)` fail here. The same holds
+  in FF/QF above `|x| > 44.4`. So `tanh` needed its own saturation short-circuit
+  in every backend, exactly as *Closing it* anticipated.
+
+TF's variant is a third case: it forms `tanh = sinh/cosh` rather than from
+`expm1`, so before the fix it returned the *correct* `+1` for large positive `x`
+(numerator and denominator both hit the `1e30` sentinel and the ratio is 1) and
+**NaN** for large negative `x`. Not a sign error on TF — a NaN — which is why the
+KI-7 extent table counts TF separately at 601 points.
+
+**The fix**, after the existing odd reflection:
+
+```cpp
+if (a.hi > kDDHyperbolicSaturate) return DoubleDouble(1.0);   // DD, FF, QF
+```
+
+```cpp
+if (abs(a).f0 > kTFHyperbolicSaturate)                        // TF: no reflection
+    return TripleFloat(a.f0 < 0.0f ? -1.0f : 1.0f);
+```
+
+The thresholds are the same per-backend `ln(1/u)/2` constants KI-6 introduced for
+`sinhcosh` — 40.0 (DD), 19.0f (FF), 36.0f (QF), 27.0f (TF) — the point past which
+the type cannot resolve `1 − tanh(x)` from 1, so `±1` is not an approximation but
+the correctly rounded answer.
+
+### Sign correctness, measured against the quad oracle
+
+`sgn` is `got/ref`; a mismatch is the defect. `+0` denotes NaN (`sgn` of a NaN
+reads 0).
+
+| backend | x | before `sgn` | after `sgn` | after digits |
+|---|---|---|---|---|
+| DD | 100 | `+1/+1` ✓ | `+1/+1` ✓ | 31.00 |
+| DD | 316.22777 | **`-1/+1` ✗** | `+1/+1` ✓ | 31.00 |
+| DD | 400 | **`-1/+1` ✗** | `+1/+1` ✓ | 31.00 |
+| DD | 1000 | **`-1/+1` ✗** | `+1/+1` ✓ | 31.00 |
+| DD | 1000000 | **`-1/+1` ✗** | `+1/+1` ✓ | 31.00 |
+| DD | −316.22777 | **`+1/-1` ✗** | `-1/-1` ✓ | 31.00 |
+| DD | −400 | **`+1/-1` ✗** | `-1/-1` ✓ | 31.00 |
+| DD | −1000 | **`+1/-1` ✗** | `-1/-1` ✓ | 31.00 |
+| DD | −1000000 | **`+1/-1` ✗** | `-1/-1` ✓ | 31.00 |
+| FF | 44 | **`-1/+1` ✗** | `+1/+1` ✓ | 14.00 |
+| FF | 50 | **`-1/+1` ✗** | `+1/+1` ✓ | 14.00 |
+| FF | 100 | **`-1/+1` ✗** | `+1/+1` ✓ | 14.00 |
+| FF | 1000000 | **`-1/+1` ✗** | `+1/+1` ✓ | 14.00 |
+| FF | −44 | **`+1/-1` ✗** | `-1/-1` ✓ | 14.00 |
+| FF | −1000000 | **`+1/-1` ✗** | `-1/-1` ✓ | 14.00 |
+| QF | 44 | **`-1/+1` ✗** | `+1/+1` ✓ | 29.00 |
+| QF | 1000000 | **`-1/+1` ✗** | `+1/+1` ✓ | 29.00 |
+| QF | −44 | **`+1/-1` ✗** | `-1/-1` ✓ | 29.00 |
+| QF | −1000000 | **`+1/-1` ✗** | `-1/-1` ✓ | 29.00 |
+| TF | 100 | `+1/+1` ✓ | `+1/+1` ✓ | 21.00 |
+| TF | −100 | **`+0/-1` (NaN) ✗** | `-1/-1` ✓ | 21.00 |
+| TF | −1000 | **`+0/-1` (NaN) ✗** | `-1/-1` ✓ | 21.00 |
+| TF | −1000000 | **`+0/-1` (NaN) ✗** | `-1/-1` ✓ | 21.00 |
+
+Every probed point out to ±1e6 has the correct sign in all four backends, and
+scores at or near the type's cap.
+
+### Cost
+
+DD `tanh` **509.6 → 500.5 ns/call, −1.8%** (same harness as KI-6). The
+short-circuit replaces an exponential with a constant, so the correct answer is
+also the cheaper one — the opposite of the KI-4 trade.
+
+### Gate and tests
+
+Covered by the KI-6 run: monotone gate **exit 0**, zero decreases, 6,501
+increases; ctest **34/34**. `tanh` rows in the DD/FF/QF accuracy tests were
+ratcheted from `|x| < 300` / `uniform(-50,50)` to `isfinite(x)` /
+`uniform(-1e4,1e4)`, so the suite now samples the region that was wrong.
 
 ---
 

@@ -389,18 +389,18 @@ int main(int argc, char** argv) {
       // exp-family. exp: Bound: observed ~a few u²; conditioning-limited into the
       // output-denormal band (PORT_NOTES §5 -> registry "exp"). Corpus =
       // exp_overflow (79.5..88.72) per PORT_NOTES §4a.
-      {"exp",  [](double x){ return std::isfinite(x) && x < 300.0; },
-       uniform(-300.0, 299.0),
+      {"exp",  [](double x){ return std::isfinite(x) && x < 709.0; },
+       uniform(-708.0, 709.0),
        [](dd::DoubleDouble x){ return dd::exp(x); },
        [](float128 x){ return Kokkos::exp(x); },
        corpus::exp_overflow<double>()},
-      {"exp2", [](double x){ return std::isfinite(x) && std::fabs(x) < 400.0; },
-       uniform(-100.0, 100.0),
+      {"exp2", [](double x){ return std::isfinite(x) && std::fabs(x) < 1022.0; },
+       uniform(-1021.0, 1022.0),
        [](dd::DoubleDouble x){ return dd::exp2(x); },
        [](float128 x){ return Kokkos::exp2(x); }, corpus_unary_all},
       // exp10: NO __float128 overload -> oracle is pow(10,x) (as src/demo_real.cpp).
-      {"exp10", [](double x){ return std::isfinite(x) && std::fabs(x) < 120.0; },
-       uniform(-80.0, 80.0),
+      {"exp10", [](double x){ return std::isfinite(x) && std::fabs(x) < 307.0; },
+       uniform(-307.0, 307.0),
        [](dd::DoubleDouble x){ return dd::exp10(x); },
        [](float128 x){ return Kokkos::pow((float128)10.0, x); }, corpus_unary_all},
       {"expm1", [](double x){ return std::isfinite(x) && x < 300.0; },
@@ -469,8 +469,8 @@ int main(int argc, char** argv) {
        [](dd::DoubleDouble x){ return dd::cosh(x); },
        [](float128 x){ return Kokkos::cosh(x); },
        corpus::sinh_cosh_small<double>()},
-      {"tanh", [](double x){ return std::isfinite(x) && std::fabs(x) < 300.0; },
-       uniform(-50.0, 50.0),
+      {"tanh", [](double x){ return std::isfinite(x); },
+       uniform(-1.0e4, 1.0e4),
        [](dd::DoubleDouble x){ return dd::tanh(x); },
        [](float128 x){ return Kokkos::tanh(x); }, corpus_unary_all},
 

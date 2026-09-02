@@ -374,11 +374,18 @@ XPMATH_INLINE_FUNCTION DoubleDouble exp(DoubleDouble a) {
     const int nq = 6;
     const double eps = 1.0e-32;
     DoubleDouble al2 = DoubleDouble_log2();
-    if (a.hi >= 300.0) {
-        XPMATH_PRINTF("DDEXP: argument too large\n");
-        return DoubleDouble(0.0);
+    // KI-6: the guard is derived from the WORD range, not from a shared ±300
+    // constant. e^x exceeds DBL_MAX (1.7977e308) above ln(DBL_MAX) =
+    // 709.78271289338397, and falls below the smallest FP64 subnormal
+    // (4.94e-324) below ln(2^-1074) = -745.13. Between those the result is
+    // representable and must be returned, not flushed to zero — the old ±300
+    // guard threw away ~170 decades that DD holds perfectly well. The guards
+    // that remain exist only to bound `nz` before the (int) cast below.
+    if (a.hi > 709.78271289338397) {
+        XPMATH_PRINTF("DDEXP: overflow\n");
+        return DoubleDouble(HUGE_VAL);          // e^x > DBL_MAX: +inf is the answer
     }
-    if (a.hi <= -300.0) return DoubleDouble(0.0);
+    if (a.hi < -745.2) return DoubleDouble(0.0); // e^x < 2^-1074: 0 is the answer
 
     DoubleDouble s0 = divide(a, al2);
     DoubleDouble s1 = round_to_nearest_int(s0);
@@ -402,10 +409,32 @@ XPMATH_INLINE_FUNCTION DoubleDouble exp(DoubleDouble a) {
     }
     for (int i = 0; i < nq; ++i) s3 = multiply(s3, s3);
 
-    return multiply_scalar(s3, detail::ldexp(1.0, nz)); // multiply by 2^nz
+    // KI-6: scale by 2^nz through the EXPONENT, component-wise, not by forming
+    // the factor 2^nz as a double and multiplying. ldexp(1.0, nz) is +inf for
+    // nz >= 1024 and 0 for nz <= -1075, so the old multiply_scalar form could
+    // not reach either end of the range even with the guard widened; and
+    // multiply_scalar runs a Dekker split, which itself overflows above
+    // ~1.3e300. Scaling each word by a power of two is exact (bar gradual
+    // underflow at the very bottom, where the lo word is unrepresentable
+    // anyway) and spans the full FP64 exponent range.
+    // Inside the normal FP64 exponent band the factor 2^nz is itself exact and
+    // representable, so a plain multiply is equivalent AND cheaper — the
+    // compiler builds `ldexp(1.0, nz)` inline, whereas ldexp() on a general
+    // mantissa is a libm call. Outside the band (only reachable at the extreme
+    // ends of the newly-opened range) take the two calls.
+    if (nz >= -1021 && nz <= 1023) {
+        const double pow2 = detail::ldexp(1.0, nz);
+        return DoubleDouble(s3.hi * pow2, s3.lo * pow2);
+    }
+    return DoubleDouble(detail::ldexp(s3.hi, nz), detail::ldexp(s3.lo, nz));
 }
 
 XPMATH_INLINE_FUNCTION DoubleDouble log(DoubleDouble a) {
+    // KI-6: log(+inf) = +inf, returned directly. Since exp() now returns +inf
+    // on genuine overflow instead of 0, the Newton step below would evaluate
+    // (a - e^x)/e^x = (inf - inf)/inf = NaN on an infinite argument. atanh(±1)
+    // reaches here through (1+a)/(1-a).
+    if (detail::isinf(a.hi)) return a;
     if (a.hi <= 0.0) {
         XPMATH_PRINTF("DDLOG: non-positive argument\n");
         return DoubleDouble(0.0);
@@ -631,8 +660,38 @@ XPMATH_INLINE_FUNCTION DoubleDouble atan2(DoubleDouble y, DoubleDouble x) {
 // Hyperbolic — internal combined cosh+sinh, then derived
 // ============================================================
 
+// KI-6/KI-7: past this |a| the smaller exponential e^{-2|a|} is below DD's
+// resolution u = 2^-106, so cosh(a) == sinh(a) == e^{|a|}/2 to the last bit and
+// tanh(a) == ±1 exactly. Derived as ln(1/u)/2 = 36.7, rounded up for margin.
+// Short-circuiting there is not just a guard: it is the only way to reach the
+// top of the range, because e^{|a|} itself overflows FP64 above 709.78 while
+// cosh/sinh do not overflow until 710.48, and tanh never does.
+constexpr double kDDHyperbolicSaturate = 40.0;
+
 // x = cosh(a), y = sinh(a)
 XPMATH_INLINE_FUNCTION void sinhcosh(DoubleDouble a, DoubleDouble& x, DoubleDouble& y) {
+    if (detail::fabs(a.hi) > kDDHyperbolicSaturate) {
+        // e^{|a|}/2, reached by the SAME route the two-exponential form took, so
+        // that this branch is bit-identical to it wherever it worked: for a > 0
+        // that is exp(a) itself, for a < 0 the reciprocal 1/exp(a). Halving is
+        // exact (power of two), and the dropped term is below the last bit here
+        // by construction. Only when that route runs out of exponent — e^{|a|}
+        // overflowing FP64 for a > 709.78, or 1/e^{a} doing so for a < -709.78,
+        // in both cases while cosh is still finite up to |a| = 710.48 — is the
+        // argument shifted instead — as it is when the reciprocal NaNs out
+        // instead, which it does above ~1.3e300 where divide()'s Dekker
+        // splitter overflows. That form costs up to ~1 digit (subtracting
+        // ln2 perturbs the argument, and exp turns an absolute argument error
+        // into a relative output error), which is why it is the fallback.
+        DoubleDouble aa = (a.hi < 0.0) ? negate(a) : a;
+        DoubleDouble e  = exp(a);
+        if (a.hi < 0.0) e = divide(DoubleDouble(1.0), e);
+        DoubleDouble h = (detail::isinf(e.hi) || e.hi != e.hi) ? exp(subtract(aa, DoubleDouble_log2()))
+                                             : DoubleDouble(e.hi * 0.5, e.lo * 0.5);
+        x = h;
+        y = (a.hi < 0.0) ? negate(h) : h;
+        return;
+    }
     DoubleDouble s0 = exp(a);
     DoubleDouble s1 = divide(DoubleDouble(1.0), s0);
     x = multiply_scalar(add(s0, s1), 0.5);
@@ -649,6 +708,14 @@ XPMATH_INLINE_FUNCTION DoubleDouble tanh(DoubleDouble a) {
     // tanh(x) = expm1(2x) / (expm1(2x) + 2), reflected for negative x
     // Avoids dividing two nearly-equal large numbers from sinhcosh
     if (a.hi < 0.0) return negate(tanh(negate(a)));
+    // KI-7: saturate before evaluating anything. 1 - tanh(x) = 2e^{-2x} is below
+    // DD's half-ulp at 1 (2^-107) for x > 37.4, so ±1 is the correctly rounded
+    // answer here; and it is the only correct answer, because 2x overflows the
+    // exp argument range above x = 354.9, where expm1 returns +inf and
+    // inf/(inf+2) is NaN. Before this short-circuit the ±300 exp guard made
+    // expm1(2x) = 0-1 = -1 and the expression collapsed to (-1)/(1) = -1 for
+    // every large POSITIVE x — the wrong sign, KI-7's reported symptom.
+    if (a.hi > kDDHyperbolicSaturate) return DoubleDouble(1.0);
     DoubleDouble e = expm1(multiply_scalar(a, 2.0));
     return divide(e, add(e, DoubleDouble(2.0)));
 }

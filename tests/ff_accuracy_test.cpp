@@ -422,8 +422,8 @@ int main(int argc, char** argv) {
       // (PORT_NOTES §5 -> registry "exp"). ff_math.hpp exp guards at a.hi>=88.0f
       // (FP32 ln-range), NOT DD's 300. Corpus = exp_overflow (79.5..88.72) per
       // PORT_NOTES §4a. Bound: observed ~a few u².
-      {"exp",  [](double x){ return std::isfinite(x) && x < 88.0; },
-       uniform(-88.0, 87.5),
+      {"exp",  [](double x){ return std::isfinite(x) && x < 88.7; },
+       uniform(-87.0, 88.7),
        [](ff::FloatFloat x){ return ff::exp(x); },
        [](float128 x){ return Kokkos::exp(x); },
        corpus::exp_overflow<float>()},
@@ -434,8 +434,8 @@ int main(int argc, char** argv) {
        [](float128 x){ return Kokkos::exp2(x); }, corpus_unary_all},
       // exp10: NO __float128 overload -> oracle is pow(10,x) (as src/demo_ff_real.cpp).
       // a*ln10 < 88 -> |a| < ~38. T2.2 caps |a|<38.
-      {"exp10", [](double x){ return std::isfinite(x) && std::fabs(x) < 38.0; },
-       uniform(-37.0, 37.0),
+      {"exp10", [](double x){ return std::isfinite(x) && std::fabs(x) < 38.5; },
+       uniform(-37.5, 38.5),
        [](ff::FloatFloat x){ return ff::exp10(x); },
        [](float128 x){ return Kokkos::pow((float128)10.0, x); }, corpus_unary_all},
       {"expm1", [](double x){ return std::isfinite(x) && x < 88.0; },
@@ -514,8 +514,8 @@ int main(int argc, char** argv) {
        corpus::sinh_cosh_small<float>()},
       // tanh(x)=expm1(2x)/(expm1(2x)+2): expm1 intermediate overflows FP32 well
       // before the 88 guard; T2.2 caps |x|<20.
-      {"tanh", [](double x){ return std::isfinite(x) && std::fabs(x) < 20.0; },
-       uniform(-19.0, 19.0),
+      {"tanh", [](double x){ return std::isfinite(x); },
+       uniform(-1.0e4, 1.0e4),
        [](ff::FloatFloat x){ return ff::tanh(x); },
        [](float128 x){ return Kokkos::tanh(x); }, corpus_unary_all},
 

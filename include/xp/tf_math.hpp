@@ -777,13 +777,21 @@ XPMATH_INLINE_FUNCTION TripleFloat exp(TripleFloat a) {
     const float k_inv_log2 = 1.44269504088896341f;  // 1/ln(2)
     const TripleFloat k_log2 = TripleFloat_log2();
 
-    if (a.f0 <= -80.0f) return TripleFloat(0.0f);
-    if (a.f0 >=  80.0f) return TripleFloat(1.0e30f);
+    // KI-6: word-range-derived guard. The previous pair was ±80 and, worse than
+    // flushing, the upper branch returned the sentinel 1.0e30f — a plausible-
+    // looking number that is not an approximation of anything. e^a exceeds
+    // FLT_MAX above ln(FLT_MAX) = 88.722839 and drops below the smallest FP32
+    // subnormal below -103.28; between those the answer is representable.
+    if (a.f0 < -104.0f) return TripleFloat(0.0f);   // e^a < 2^-149
+    if (a.f0 >  88.722839f) {
+        XPMATH_PRINTF("TFEXP: overflow\n");
+        return TripleFloat(HUGE_VALF);              // e^a > FLT_MAX
+    }
 
     // KI-2 audit (2026-09-02): this is the ONE surviving `floor(x + 0.5f)` in
     // the library, and it is deliberately not converted to tf_nint. Both KI-2
     // failure modes are unreachable here. The guards above bound a.f0 to
-    // (-80, 80), so the argument is under 116 in magnitude — nowhere near the
+    // (-104, 88.73), so the argument is under 150 in magnitude — nowhere near the
     // [2^23, 2^24) band where the odd-integer tie bites. And the near-tie case
     // (0.49999997f-class) is harmless for a range reduction rather than wrong:
     // an off-by-one m shifts r by ln2, which then gets divided by 2^nq and
@@ -813,17 +821,21 @@ XPMATH_INLINE_FUNCTION TripleFloat exp(TripleFloat a) {
         s = multiply(s, s);
     }
 
-    // Final scaling by 2^m (component-wise, PORT_NOTES_QF.md §10)
-    float pow2m = ldexpf(1.0f, (int)m);
-    s = mul_pwr2(s, pow2m);
-
-    return s;
+    // Final scaling by 2^m through the EXPONENT, component-wise
+    // (PORT_NOTES_QF.md §10). KI-6: materialising `2^m` as a float first is
+    // +inf for m >= 128 and 0 for m <= -150, which put both ends of the FP32
+    // range out of reach regardless of the guard.
+    const int mi = (int)m;
+    if (mi >= -125 && mi <= 127)            // 2^mi exact and normal: cheap path
+        return mul_pwr2(s, ldexpf(1.0f, mi));
+    return TripleFloat(ldexpf(s.f0, mi), ldexpf(s.f1, mi), ldexpf(s.f2, mi));
 }
 
 // log: Newton iteration x ← x + (a - e^x)/e^x. Port of qd_real::log
 // (qd_real.cpp:998-1041), specialized to k=3. Initial estimate from
 // FP32 log(a.f0). Three iterations double precision 24→48→72 bits.
 XPMATH_INLINE_FUNCTION TripleFloat log(TripleFloat a) {
+    if (detail::isinf(a.f0)) return a;   // KI-6, see dd_math.hpp
     if (a.f0 <= 0.0f) {
         XPMATH_PRINTF("TFLOG: non-positive argument\n");
         return TripleFloat(0.0f);
@@ -915,7 +927,25 @@ XPMATH_INLINE_FUNCTION TripleFloat tan(TripleFloat a) {
 
 // sinh/cosh: for small |a|, Taylor; otherwise (e^a ± e^-a)/2.
 // Taylor threshold 0.5 per PORT_NOTES_QF.md §8 rationale (applies to TF).
+// KI-6/KI-7: past this |a| the smaller exponential e^{-2|a|} is below TF's
+// resolution u = 2^-72, so cosh == sinh == e^{|a|}/2 and tanh == ±1 exactly.
+// ln(1/u)/2 = 25.0, rounded up; must stay under 44.36, where a doubled argument
+// would leave FP32's exp range.
+constexpr float kTFHyperbolicSaturate = 27.0f;
+
 XPMATH_INLINE_FUNCTION void sinhcosh(TripleFloat a, TripleFloat& sinh_a, TripleFloat& cosh_a) {
+    if (abs(a).f0 > kTFHyperbolicSaturate) {
+        // See dd_math.hpp. Also removes the reciprocal 1/e^{|a|}, which
+        // underflowed FP32 and produced NaN for |a| >= 80.
+        TripleFloat aa = (a.f0 < 0.0f) ? negate(a) : a;
+        TripleFloat e  = exp(a);
+        if (a.f0 < 0.0f) e = divide(TripleFloat(1.0f), e);
+        TripleFloat h  = (detail::isinf(e.f0) || e.f0 != e.f0) ? exp(subtract(aa, TripleFloat_log2()))
+                                             : mul_pwr2(e, 0.5f);
+        cosh_a = h;
+        sinh_a = (a.f0 < 0.0f) ? negate(h) : h;
+        return;
+    }
     if (abs(a).f0 < 0.5f) {
         // Taylor for sinh: a + a^3/3! + a^5/5! + ...
         TripleFloat a2 = sqr(a);
@@ -957,6 +987,12 @@ XPMATH_INLINE_FUNCTION TripleFloat cosh(TripleFloat a) {
 }
 
 XPMATH_INLINE_FUNCTION TripleFloat tanh(TripleFloat a) {
+    // KI-7: saturate first. Past kTFHyperbolicSaturate the sinh/cosh branch
+    // returns the SAME TripleFloat for both (they agree to the last bit there),
+    // and dividing +inf by +inf at the top of the range gave NaN — TF's variant
+    // of the wrong-sign defect the other three backends showed.
+    if (abs(a).f0 > kTFHyperbolicSaturate)
+        return TripleFloat(a.f0 < 0.0f ? -1.0f : 1.0f);
     TripleFloat s, c;
     sinhcosh(a, s, c);
     return divide(s, c);

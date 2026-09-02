@@ -606,12 +606,16 @@ XPMATH_INLINE_FUNCTION FloatFloat exp(FloatFloat a) {
     const int nq = 4;
     const float eps = 1.0e-15f;
     FloatFloat al2 = FloatFloat_log2();
-    // FP32 finite range: |x| < ln(3.4e38) ~= 88.7
-    if (a.hi >= 88.0f) {
-        XPMATH_PRINTF("FFEXP: argument too large\n");
-        return FloatFloat(0.0f);
+    // KI-6: word-range-derived guard. e^x exceeds FLT_MAX (3.4028235e38) above
+    // ln(FLT_MAX) = 88.722839, and falls below the smallest FP32 subnormal
+    // (1.401e-45) below ln(2^-149) = -103.28. The old ±88 guard flushed the top
+    // 0.72 and the whole subnormal tail to zero although both are representable.
+    // What remains bounds `nz` before the (int) cast below.
+    if (a.hi > 88.722839f) {
+        XPMATH_PRINTF("FFEXP: overflow\n");
+        return FloatFloat(HUGE_VALF);           // e^x > FLT_MAX: +inf is the answer
     }
-    if (a.hi <= -88.0f) return FloatFloat(0.0f);
+    if (a.hi < -104.0f) return FloatFloat(0.0f); // e^x < 2^-149: 0 is the answer
 
     FloatFloat s0 = divide(a, al2);
     FloatFloat s1 = round_to_nearest_int(s0);
@@ -631,19 +635,28 @@ XPMATH_INLINE_FUNCTION FloatFloat exp(FloatFloat a) {
         s0 = add(s3, s2);
         s3 = s0;
         if (detail::fabs(s2.hi) <= eps * detail::fabs(s3.hi)) break;
-        if (l1 == 60) { XPMATH_PRINTF("FFEXP: iteration limit\n"); return FloatFloat(0.0f); }
+        // KI-6: no return-0 on the iteration limit. Falling through with the
+        // partial sum is a precision shortfall; returning 0 is a wrong answer.
+        // (Matches qf_math.hpp, which dropped the same return when eps was
+        // retuned there.)
     }
     for (int i = 0; i < nq; ++i) s3 = multiply(s3, s3);
 
-    // Final scaling by 2^nz is exact in FP32 (power-of-2 multiplication does
-    // not round). Going through multiply_scalar would compute b*8193 inside Dekker
-    // splitting, which overflows for nz >= 115 (i.e. a > ~79) — the cause of
-    // the previous NaN outputs at the high end of the input range.
-    float pow2 = ldexpf(1.0f, nz);
-    return FloatFloat(s3.hi * pow2, s3.lo * pow2);
+    // KI-6: scale by 2^nz through the EXPONENT, component-wise. Forming the
+    // factor as `ldexpf(1.0f, nz)` first is +inf for nz >= 128 and 0 for
+    // nz <= -150, so the top and bottom of the FP32 range were unreachable
+    // whatever the guard said. (Going through multiply_scalar is worse still:
+    // it computes b*8193 inside Dekker splitting, which overflows for
+    // nz >= 115 — the cause of the older NaN outputs at the high end.)
+    if (nz >= -125 && nz <= 127) {          // 2^nz exact and normal: cheap path
+        const float pow2 = ldexpf(1.0f, nz);
+        return FloatFloat(s3.hi * pow2, s3.lo * pow2);
+    }
+    return FloatFloat(ldexpf(s3.hi, nz), ldexpf(s3.lo, nz));
 }
 
 XPMATH_INLINE_FUNCTION FloatFloat log(FloatFloat a) {
+    if (detail::isinf(a.hi)) return a;   // KI-6, see dd_math.hpp
     if (a.hi <= 0.0f) {
         XPMATH_PRINTF("FFLOG: non-positive argument\n");
         return FloatFloat(0.0f);
@@ -822,6 +835,12 @@ XPMATH_INLINE_FUNCTION FloatFloat atan2(FloatFloat y, FloatFloat x) {
 // Hyperbolic
 // ============================================================
 
+// KI-6/KI-7: past this |a| the smaller exponential e^{-2|a|} is below FF's
+// resolution u = 2^-48, so cosh == sinh == e^{|a|}/2 and tanh == ±1 exactly.
+// ln(1/u)/2 = 16.6, rounded up for margin; must stay well under 44.36, where
+// tanh's 2a argument would leave FP32's exp range.
+constexpr float kFFHyperbolicSaturate = 19.0f;
+
 XPMATH_INLINE_FUNCTION void sinhcosh(FloatFloat a, FloatFloat& x, FloatFloat& y) {
     // Taylor series for |a| < 0.5 — avoids the (e^a - e^-a)/2 cancellation
     // when a is small (both exponentials approach 1, leading bits cancel).
@@ -840,6 +859,19 @@ XPMATH_INLINE_FUNCTION void sinhcosh(FloatFloat a, FloatFloat& x, FloatFloat& y)
         x = cosh_sum; y = sinh_sum;
         return;
     }
+    if (detail::fabs(a.hi) > kFFHyperbolicSaturate) {
+        // See dd_math.hpp: e^{-2|a|} is below FF's resolution here, so
+        // cosh == sinh == e^{|a|}/2. Halving is exact; the shifted-argument
+        // form is used only when e^{|a|} overflows FP32 while cosh does not.
+        FloatFloat aa = (a.hi < 0.0f) ? negate(a) : a;
+        FloatFloat e  = exp(a);
+        if (a.hi < 0.0f) e = divide(FloatFloat(1.0f), e);
+        FloatFloat h  = (detail::isinf(e.hi) || e.hi != e.hi) ? exp(subtract(aa, FloatFloat_log2()))
+                                            : FloatFloat(e.hi * 0.5f, e.lo * 0.5f);
+        x = h;
+        y = (a.hi < 0.0f) ? negate(h) : h;
+        return;
+    }
     FloatFloat s0 = exp(a);
     FloatFloat s1 = divide(FloatFloat(1.0f), s0);
     x = multiply_scalar(add(s0, s1), 0.5f);
@@ -854,6 +886,7 @@ XPMATH_INLINE_FUNCTION FloatFloat cosh(FloatFloat a) {
 }
 XPMATH_INLINE_FUNCTION FloatFloat tanh(FloatFloat a) {
     if (a.hi < 0.0f) return negate(tanh(negate(a)));
+    if (a.hi > kFFHyperbolicSaturate) return FloatFloat(1.0f);  // KI-7, see dd_math.hpp
     FloatFloat e = expm1(multiply_scalar(a, 2.0f));
     return divide(e, add(e, FloatFloat(2.0f)));
 }

@@ -655,8 +655,8 @@ int main(int argc, char** argv) {
       // FP32 normal range (see header EXP-FAMILY note); exp/exp2/exp10 gated at
       // 30 ulp (§10, registry "exp"), corpus = exp_overflow (high edge, filtered by
       // the guard). expm1 (result >= -1) at 10 ulp.
-      {"exp",  [](double x){ return std::isfinite(x) && x < 88.0; },
-       uniform(-35.0, 80.0),
+      {"exp",  [](double x){ return std::isfinite(x) && x < 88.7; },
+       uniform(-35.0, 88.7),
        [](qf::QuadFloat x){ return qf::exp(x); },
        [](float128 x){ return Kokkos::exp(x); },
        corpus::exp_overflow<float>(), kTolSection10},
@@ -665,8 +665,8 @@ int main(int argc, char** argv) {
        [](qf::QuadFloat x){ return qf::exp2(x); },
        [](float128 x){ return Kokkos::exp2(x); }, corpus_unary_all, kTolSection10},
       // exp10 oracle: pow(10,x) (no __float128 exp10; matches demo_qf_real.cpp).
-      {"exp10", [](double x){ return std::isfinite(x) && x < 38.0; },
-       uniform(-15.0, 30.0),
+      {"exp10", [](double x){ return std::isfinite(x) && x < 38.5; },
+       uniform(-15.0, 38.5),
        [](qf::QuadFloat x){ return qf::exp10(x); },
        [](float128 x){ return Kokkos::pow((float128)10.0, x); },
        corpus_unary_all, kTolSection10},
@@ -734,8 +734,8 @@ int main(int argc, char** argv) {
        uniform(-20.0, 20.0),
        [](qf::QuadFloat x){ return qf::cosh(x); },
        [](float128 x){ return Kokkos::cosh(x); }, corpus::sinh_cosh_small<float>()},
-      {"tanh", [](double x){ return std::isfinite(x) && std::fabs(x) < 20.0; },
-       uniform(-5.0, 5.0),
+      {"tanh", [](double x){ return std::isfinite(x); },
+       uniform(-1.0e4, 1.0e4),
        [](qf::QuadFloat x){ return qf::tanh(x); },
        [](float128 x){ return Kokkos::tanh(x); }, corpus_unary_all},
 

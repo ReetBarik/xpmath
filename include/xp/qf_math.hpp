@@ -869,13 +869,15 @@ XPMATH_INLINE_FUNCTION QuadFloat exp(QuadFloat a) {
     // (the FF exp-eps bug). 1e-28f > u keeps convergence reachable at QF width.
     const float eps = 1.0e-28f;
     QuadFloat al2 = QuadFloat_log2();
-    // FP32 finite range: e^a overflows FP32 (~3.4e38) at a ~= 88.7; underflows
-    // to 0 below a ~= -88.  Mirror ff_math.hpp:352 guards (QD uses +-709 for FP64).
-    if (a.f0 >= 88.0f) {
-        XPMATH_PRINTF("QFEXP: argument too large\n");
-        return QuadFloat(0.0f);
+    // KI-6: word-range-derived guard, mirroring ff_math.hpp. e^a exceeds FLT_MAX
+    // above ln(FLT_MAX) = 88.722839 and drops below the smallest FP32 subnormal
+    // below -103.28; in between the answer is representable and is returned.
+    // The old symmetric ±88 pair flushed both tails to zero.
+    if (a.f0 > 88.722839f) {
+        XPMATH_PRINTF("QFEXP: overflow\n");
+        return QuadFloat(HUGE_VALF);            // e^a > FLT_MAX: +inf is the answer
     }
-    if (a.f0 <= -88.0f) return QuadFloat(0.0f);
+    if (a.f0 < -104.0f) return QuadFloat(0.0f); // e^a < 2^-149: 0 is the answer
 
     QuadFloat s0 = divide(a, al2);
     QuadFloat s1 = round_to_nearest_int(s0);
@@ -903,9 +905,16 @@ XPMATH_INLINE_FUNCTION QuadFloat exp(QuadFloat a) {
     // in FP32 and must NOT go through multiply_scalar (which would compute
     // 8193*2^nz inside Dekker splitting and overflow FP32 for nz >= 116).  Scale
     // each component directly.  This is also QD's approach (ldexp(s, m),
-    // qd_real.cpp:982, which is component-wise std::ldexp).
-    float pow2 = ldexpf(1.0f, nz);
-    return QuadFloat(s3.f0 * pow2, s3.f1 * pow2, s3.f2 * pow2, s3.f3 * pow2);
+    // qd_real.cpp:982, which is component-wise std::ldexp) — and KI-6 is why the
+    // component-wise form matters rather than materialising `2^nz` as a float
+    // first: that factor is +inf for nz >= 128 and 0 for nz <= -150, which put
+    // both ends of the FP32 range out of reach.
+    if (nz >= -125 && nz <= 127) {          // 2^nz exact and normal: cheap path
+        const float pow2 = ldexpf(1.0f, nz);
+        return QuadFloat(s3.f0 * pow2, s3.f1 * pow2, s3.f2 * pow2, s3.f3 * pow2);
+    }
+    return QuadFloat(ldexpf(s3.f0, nz), ldexpf(s3.f1, nz),
+                     ldexpf(s3.f2, nz), ldexpf(s3.f3, nz));
 }
 
 // log(a) via Newton's iteration on f(x) = exp(x) - a.  Faithful port of
@@ -914,6 +923,7 @@ XPMATH_INLINE_FUNCTION QuadFloat exp(QuadFloat a) {
 // FP32 seed ~24 bits -> 48 -> 96, saturating at QF width on the 3rd).  Same
 // three-step structure as dd_math.hpp:380.
 XPMATH_INLINE_FUNCTION QuadFloat log(QuadFloat a) {
+    if (detail::isinf(a.f0)) return a;   // KI-6, see dd_math.hpp
     if (a.f0 <= 0.0f) {
         XPMATH_PRINTF("QFLOG: non-positive argument\n");
         return QuadFloat(0.0f);
@@ -1120,6 +1130,12 @@ XPMATH_INLINE_FUNCTION QuadFloat atan2(QuadFloat y, QuadFloat x) {
 // is ~0.3 digits at |a|=0.5 and ~1.3 digits at QD's 0.05.  At QF's 29-digit
 // budget the larger 0.5 threshold (wider Taylor coverage) is the safer choice;
 // see docs/PORT_NOTES_QF.md §"sinh/cosh threshold".
+// KI-6/KI-7: past this |a| the smaller exponential e^{-2|a|} is below QF's
+// resolution u = 2^-96, so cosh == sinh == e^{|a|}/2 and tanh == ±1 exactly.
+// ln(1/u)/2 = 33.3, rounded up; must stay under 44.36, where tanh's 2a argument
+// would leave FP32's exp range.
+constexpr float kQFHyperbolicSaturate = 36.0f;
+
 XPMATH_INLINE_FUNCTION void sinhcosh(QuadFloat a, QuadFloat& sinh_a, QuadFloat& cosh_a) {
     const float eps = 1.0e-28f;
     if (detail::fabs(a.f0) < 0.5f) {
@@ -1135,6 +1151,18 @@ XPMATH_INLINE_FUNCTION void sinhcosh(QuadFloat a, QuadFloat& sinh_a, QuadFloat& 
                 detail::fabs(cosh_term.f0) < eps) break;
         }
         sinh_a = sinh_sum; cosh_a = cosh_sum;
+        return;
+    }
+    if (detail::fabs(a.f0) > kQFHyperbolicSaturate) {
+        // See dd_math.hpp. Also removes the reciprocal, which for |a| ~ 80 built
+        // 1/e^{80} ~ 1.8e-35 through QF's divide and returned NaN.
+        QuadFloat aa = (a.f0 < 0.0f) ? negate(a) : a;
+        QuadFloat e  = exp(a);
+        if (a.f0 < 0.0f) e = divide(QuadFloat(1.0f), e);
+        QuadFloat h  = (detail::isinf(e.f0) || e.f0 != e.f0) ? exp(subtract(aa, QuadFloat_log2()))
+                                           : mul_pwr2(e, 0.5f);
+        cosh_a = h;
+        sinh_a = (a.f0 < 0.0f) ? negate(h) : h;
         return;
     }
     QuadFloat s0 = exp(a);
@@ -1154,6 +1182,7 @@ XPMATH_INLINE_FUNCTION QuadFloat cosh(QuadFloat a) {
 // the exponentials directly; the expm1 form is better-conditioned near 0).
 XPMATH_INLINE_FUNCTION QuadFloat tanh(QuadFloat a) {
     if (a.f0 < 0.0f) return negate(tanh(negate(a)));
+    if (a.f0 > kQFHyperbolicSaturate) return QuadFloat(1.0f);  // KI-7, see dd_math.hpp
     QuadFloat e = expm1(mul_pwr2(a, 2.0f));
     return divide(e, add(e, QuadFloat(2.0f)));
 }
