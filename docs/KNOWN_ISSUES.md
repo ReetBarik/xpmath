@@ -397,7 +397,7 @@ rather than a precision shortfall.
 Probes used: `/tmp/rb_sinpi.cpp`, `/tmp/rb_dds.cpp`, `/tmp/rb_dds2.cpp` (throwaway,
 not committed).
 
-### Resolution (2026-09-02, commit `TBD-FIX`)
+### Resolution (2026-09-02, commit `8135332`)
 
 **First, the scope as filed was too small.** KI-2 (`nint` mis-rounding, commit
 `650aa16`) was the proximate trigger, and the entry above was written before that
