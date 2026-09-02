@@ -663,7 +663,7 @@ flags but which buries the real diff in reference noise. Build the sweep with
 ## KI-5 — Four more defects in the complex inverse-function family, in ALL FOUR backends **[RESOLVED]**
 
 > **All four are RESOLVED.** (a) and (d) 2026-09-02 commit `f421a0e`;
-> (b) and (c) 2026-09-02, commit `TBD-FIX-BC` — see the two resolution blocks below.
+> (b) and (c) 2026-09-02, commit `3968a9f` — see the two resolution blocks below.
 > (c) is resolved with a **documented accepted regression**; read that block before
 > trusting `acos` at `|z| ~ 1e8` with `Im(z) < 0`.
 
@@ -902,7 +902,7 @@ means adding it. That is the largest piece of work in KI-5.
 
 ---
 
-### (b) Resolution (2026-09-02, commit `TBD-FIX-BC`)
+### (b) Resolution (2026-09-02, commit `3968a9f`)
 
 Closed in all four `*_complex.hpp`, and it took a new **real** `log1p` as well as
 the new complex one. Three pieces.
@@ -1056,7 +1056,7 @@ one-liner, and it must not regress the well-conditioned interior.
 
 ---
 
-### (c) Resolution (2026-09-02, commit `TBD-FIX-BC`) — **with an accepted regression**
+### (c) Resolution (2026-09-02, commit `3968a9f`) — **with an accepted regression**
 
 Closed in all four `*_complex.hpp`. `π/2 − asin` is gone.
 
