@@ -1465,7 +1465,7 @@ well-conditioned there — so the loss is the algorithm's, not the format's.
 **None of them were fixed when this block was written** — that session measured
 and documented only. **KI-6 and KI-7 have since been resolved** (2026-09-02,
 commit `ad82f4f`) and **KI-8** has since been resolved (2026-09-02, commit
-`d02a3bb`); KI-9 through KI-11 remain open. `docs/DOMAINS.md` records the
+`4cd7dcb`); KI-9 through KI-11 remain open. `docs/DOMAINS.md` records the
 resulting usable ranges per backend per op, and is generated from the same data —
 it was regenerated after each fix, so the counts quoted in the KI-6, KI-7 and
 KI-8 *Extent* sections above are the pre-fix numbers and no longer match the
@@ -1860,7 +1860,7 @@ One extra division, and it removes both the overflow and the underflow limb.
 
 ### Resolution (2026-09-02)
 
-Fixed in **`d02a3bb`**, all four backends (`dd_math.hpp`, `ff_math.hpp`,
+Fixed in **`4cd7dcb`**, all four backends (`dd_math.hpp`, `ff_math.hpp`,
 `qf_math.hpp`, `tf_math.hpp`, and the four `*_complex.hpp`).
 
 **Is it a porting defect?** No. QD 2.3.24 has no `hypot` anywhere in

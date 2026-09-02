@@ -129,9 +129,9 @@ comparing FF against DD to page between two distant sections.
 | `fdim` | TF | 21.70 | 21.70 | 0 .. 1e+30 | 100% | -- | 0 | -- |
 | `fdim` | FF | 14.00 | 13.69 | 0.9999 .. 2.65 | 96% | below 3e-18: 0.00; above 3.6: 0.76 | 35 | CONDITIONING |
 | `hypot` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | -- |
-| `hypot` | QF | 29.00 | 23.37 | 28.27 .. 34.56 | 80% | below 25.13: 0.00; above 34.56: 0.00 | 318 | UNEXPLAINED (**315 unexplained**) |
-| `hypot` | TF | 21.70 | 17.55 | 28.27 .. 34.56 | 80% | below 25.13: 0.00; above 34.56: 0.00 | 315 | UNEXPLAINED (**312 unexplained**) |
-| `hypot` | FF | 14.00 | 11.36 | 28.27 .. 34.56 | 81% | below 25.13: 0.00; above 34.56: 0.00 | 312 | UNEXPLAINED (**309 unexplained**) |
+| `hypot` | QF | 29.00 | 28.82 | 3e-10 .. 1e+30 | 98% | below 1e-16: 13.71 | 4 | UNEXPLAINED (**4 unexplained**) |
+| `hypot` | TF | 21.70 | 21.64 | 1e-13 .. 1e+30 | 99% | below 3e-18: 10.54 | 1 | UNEXPLAINED (**1 unexplained**) |
+| `hypot` | FF | 14.00 | 14.00 | 1e-17 .. 1e+30 | 100% | -- | 0 | -- |
 
 **Where the failures sit.** The grid family carrying the most failures
 for each cell that has any:
@@ -146,7 +146,7 @@ for each cell that has any:
 - `fmax` — QF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
 - `fmin` — QF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
 - `fdim` — FF 35 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `hypot` — QF 318 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 315 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 312 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `hypot` — QF 4 pts (log sweep, |x| = 10^e); TF 1 pts (log sweep, |x| = 10^e)
 
 ---
 
@@ -350,13 +350,13 @@ for each cell that has any:
 | `mul` | TF | 21.70 | 20.83 | 100 .. 1e+08 | 92% | below 10: 10.62; above 1e+08: 7.52 | 63 | UNEXPLAINED (**41 unexplained**) |
 | `mul` | FF | 14.00 | 13.63 | 10 .. 1e+08 | 96% | below 10: 0.36; above 1e+08: 0.00 | 45 | UNEXPLAINED (**24 unexplained**) |
 | `div` | DD | 31.00 | 29.59 | 0 .. 1e-09 | 89% | above 0.99: 13.14 | 7 | UNEXPLAINED (**5 unexplained**) |
-| `div` | QF | 29.00 | 24.33 | 1e+04 .. 1e+08 | 70% | below 1e+04: 13.22; above 1e+08: 13.51 | 252 | UNEXPLAINED (**234 unexplained**) |
-| `div` | TF | 21.70 | 18.76 | 1e+04 .. 1e+08 | 78% | below 1e+04: 6.82; above 1e+08: 7.42 | 242 | UNEXPLAINED (**232 unexplained**) |
-| `div` | FF | 14.00 | 11.84 | 0.99 .. 1 | 83% | below 0.99: 0.00; above 1: 0.00 | 264 | CONDITIONING (**84 unexplained**) |
+| `div` | QF | 29.00 | 25.38 | 1e+04 .. 1e+08 | 73% | below 1e+04: 13.22; above 1e+08: 13.51 | 184 | UNEXPLAINED (**166 unexplained**) |
+| `div` | TF | 21.70 | 19.58 | 1e-22 .. 1e-20 | 82% | below 1e-23: 5.88; above 1e-19: 10.49 | 174 | UNEXPLAINED (**164 unexplained**) |
+| `div` | FF | 14.00 | 12.38 | 0.99 .. 1 | 87% | below 0.99: 0.00; above 1: 0.00 | 197 | CONDITIONING (**17 unexplained**) |
 | `abs` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | -- |
-| `abs` | QF | 29.00 | 27.56 | 1e-09 .. 1e+15 | 93% | below 1e-17: 11.79 | 84 | UNEXPLAINED (**84 unexplained**) |
-| `abs` | TF | 21.70 | 20.75 | 1e-12 .. 1e+15 | 94% | below 1e-18: 9.88 | 78 | UNEXPLAINED (**78 unexplained**) |
-| `abs` | FF | 14.00 | 13.47 | 1e-16 .. 1e+15 | 95% | below 1e-20: 5.57 | 66 | UNEXPLAINED (**66 unexplained**) |
+| `abs` | QF | 29.00 | 28.67 | 1e-09 .. 1e+15 | 97% | below 1e-17: 11.79 | 12 | UNEXPLAINED (**12 unexplained**) |
+| `abs` | TF | 21.70 | 21.57 | 1e-12 .. 1e+15 | 98% | below 1e-18: 9.88 | 6 | UNEXPLAINED (**6 unexplained**) |
+| `abs` | FF | 14.00 | 13.97 | 1e-16 .. 1e+15 | 99% | -- | 0 | -- |
 | `conj` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | -- |
 | `conj` | QF | 29.00 | 29.00 | 0 .. 1e+15 | 100% | -- | 0 | -- |
 | `conj` | TF | 21.70 | 21.70 | 0 .. 1e+15 | 100% | -- | 0 | -- |
@@ -372,8 +372,8 @@ for each cell that has any:
 - `add` — QF 6 pts (perpendicular approach to the real axis); TF 4 pts (perpendicular approach to the real axis); FF 84 pts (perpendicular approach to the real axis)
 - `sub` — QF 6 pts (perpendicular approach to the real axis); TF 6 pts (perpendicular approach to the real axis); FF 96 pts (perpendicular approach to the real axis)
 - `mul` — QF 76 pts (perpendicular approach to the real axis); TF 63 pts (perpendicular approach to the real axis); FF 45 pts (perpendicular approach to the real axis)
-- `div` — DD 7 pts (polar shells); QF 252 pts (perpendicular approach to the real axis); TF 242 pts (perpendicular approach to the real axis); FF 264 pts (perpendicular approach to the real axis)
-- `abs` — QF 84 pts (the real axis on a geometric ladder); TF 78 pts (the real axis on a geometric ladder); FF 66 pts (the real axis on a geometric ladder)
+- `div` — DD 7 pts (polar shells); QF 184 pts (perpendicular approach to the real axis); TF 174 pts (perpendicular approach to the real axis); FF 197 pts (perpendicular approach to the real axis)
+- `abs` — QF 12 pts (the real axis on a geometric ladder); TF 6 pts (the real axis on a geometric ladder)
 - `polar` — QF 21 pts (perpendicular approach to the real axis); FF 52 pts (perpendicular approach to the real axis)
 
 ---
@@ -387,30 +387,30 @@ for each cell that has any:
 | `exp` | TF | 21.70 | 18.66 | 1e-27 .. 0.1 | 84% | above 100: 1.77 | 193 | OVERFLOW |
 | `exp` | FF | 14.00 | 11.86 | 1e-28 .. 0.1 | 86% | below 1e-29: 0.00; above 0.5: 0.00 | 243 | OVERFLOW (**36 unexplained**) |
 | `log` | DD | 31.00 | 26.77 | 2 .. 2.236 | 76% | below 2: 0.00; above 10: 0.00 | 84 | CONDITIONING |
-| `log` | QF | 29.00 | 23.07 | 2 .. 2.236 | 67% | below 2: 0.00; above 10: 0.00 | 319 | CONDITIONING (**84 unexplained**) |
-| `log` | TF | 21.70 | 17.36 | 2 .. 2.236 | 67% | below 2: 0.00; above 10: 0.00 | 286 | CONDITIONING (**66 unexplained**) |
-| `log` | FF | 14.00 | 11.05 | 2 .. 2.236 | 65% | below 2: 0.00; above 10: 0.00 | 278 | CONDITIONING (**74 unexplained**) |
+| `log` | QF | 29.00 | 23.97 | 2 .. 2.236 | 71% | below 2: 0.00; above 10: 0.00 | 259 | CONDITIONING (**24 unexplained**) |
+| `log` | TF | 21.70 | 17.99 | 2 .. 2.236 | 69% | below 2: 0.00; above 10: 0.00 | 226 | CONDITIONING (**6 unexplained**) |
+| `log` | FF | 14.00 | 11.45 | 2 .. 2.236 | 68% | below 2: 0.00; above 10: 0.00 | 228 | CONDITIONING (**24 unexplained**) |
 | `log10` | DD | 31.00 | 26.77 | 2 .. 2.236 | 76% | below 2: 0.00; above 10: 0.00 | 84 | CONDITIONING |
-| `log10` | QF | 29.00 | 22.86 | 2 .. 2.236 | 65% | below 2: 0.00; above 10: 0.00 | 319 | CONDITIONING (**84 unexplained**) |
-| `log10` | TF | 21.70 | 17.32 | 2 .. 2.236 | 66% | below 2: 0.00; above 10: 0.00 | 286 | CONDITIONING (**66 unexplained**) |
-| `log10` | FF | 14.00 | 11.05 | 2 .. 2.236 | 65% | below 2: 0.00; above 10: 0.00 | 278 | CONDITIONING (**74 unexplained**) |
+| `log10` | QF | 29.00 | 23.77 | 2 .. 2.236 | 68% | below 2: 0.00; above 10: 0.00 | 259 | CONDITIONING (**24 unexplained**) |
+| `log10` | TF | 21.70 | 17.95 | 2 .. 2.236 | 69% | below 2: 0.00; above 10: 0.00 | 226 | CONDITIONING (**6 unexplained**) |
+| `log10` | FF | 14.00 | 11.45 | 2 .. 2.236 | 68% | below 2: 0.00; above 10: 0.00 | 228 | CONDITIONING (**24 unexplained**) |
 | `pow` | DD | 31.00 | 28.21 | 2 .. 2.236 | 90% | below 2: 0.00; above 10: 0.00 | 83 | CONDITIONING |
-| `pow` | QF | 29.00 | 24.21 | 2 .. 2.002 | 79% | below 2: 14.11; above 2.236: 8.92 | 213 | UNEXPLAINED (**91 unexplained**) |
-| `pow` | TF | 21.70 | 18.23 | 2 .. 2.002 | 77% | below 2: 0.00; above 2.236: 8.92 | 202 | UNEXPLAINED (**93 unexplained**) |
-| `pow` | FF | 14.00 | 11.75 | 0.5 .. 0.5 | 68% | below 0.5: 0.08; above 0.9: 0.00 | 172 | CONDITIONING (**82 unexplained**) |
+| `pow` | QF | 29.00 | 24.94 | 2 .. 2.002 | 81% | below 2: 14.11; above 2.236: 8.92 | 163 | CONDITIONING (**42 unexplained**) |
+| `pow` | TF | 21.70 | 18.76 | 2 .. 2.002 | 79% | below 2: 0.00; above 2.236: 8.92 | 151 | CONDITIONING (**43 unexplained**) |
+| `pow` | FF | 14.00 | 12.13 | 0.5 .. 0.5 | 70% | below 0.5: 0.08; above 0.9: 0.00 | 114 | CONDITIONING (**24 unexplained**) |
 | `sqrt` | DD | 31.00 | 29.57 | 2 .. 2.236 | 95% | below 2: 0.00; above 10: 0.00 | 82 | UNEXPLAINED (**82 unexplained**) |
-| `sqrt` | QF | 29.00 | 25.58 | 2 .. 2.236 | 79% | below 2: 0.00; above 10: 0.00 | 152 | UNEXPLAINED (**152 unexplained**) |
-| `sqrt` | TF | 21.70 | 19.70 | 2 .. 2.236 | 86% | below 2: 0.00; above 10: 0.00 | 147 | UNEXPLAINED (**147 unexplained**) |
-| `sqrt` | FF | 14.00 | 12.93 | 2 .. 2.236 | 91% | below 2: 0.00; above 10: 0.00 | 137 | UNEXPLAINED (**98 unexplained**) |
+| `sqrt` | QF | 29.00 | 26.21 | 2 .. 2.236 | 80% | below 2: 0.00; above 10: 0.00 | 92 | UNEXPLAINED (**92 unexplained**) |
+| `sqrt` | TF | 21.70 | 20.30 | 2 .. 2.236 | 88% | below 2: 0.00; above 10: 0.00 | 87 | UNEXPLAINED (**87 unexplained**) |
+| `sqrt` | FF | 14.00 | 13.34 | 2 .. 2.236 | 95% | below 2: 0.00; above 10: 0.00 | 82 | UNEXPLAINED (**43 unexplained**) |
 
 **Where the failures sit.** The grid family carrying the most failures
 for each cell that has any:
 
 - `exp` — DD 75 pts (polar shells); QF 219 pts (perpendicular approach to the real axis); TF 193 pts (perpendicular approach to the real axis); FF 243 pts (perpendicular approach to the real axis)
-- `log` — DD 84 pts (the real axis on a geometric ladder); QF 319 pts (the real axis on a geometric ladder); TF 286 pts (the real axis on a geometric ladder); FF 278 pts (the real axis on a geometric ladder)
-- `log10` — DD 84 pts (the real axis on a geometric ladder); QF 319 pts (the real axis on a geometric ladder); TF 286 pts (the real axis on a geometric ladder); FF 278 pts (the real axis on a geometric ladder)
-- `pow` — DD 83 pts (the real axis on a geometric ladder); QF 213 pts (the real axis on a geometric ladder); TF 202 pts (the real axis on a geometric ladder); FF 172 pts (the real axis on a geometric ladder)
-- `sqrt` — DD 82 pts (the real axis on a geometric ladder); QF 152 pts (the real axis on a geometric ladder); TF 147 pts (the real axis on a geometric ladder); FF 137 pts (the real axis on a geometric ladder)
+- `log` — DD 84 pts (the real axis on a geometric ladder); QF 259 pts (perpendicular approach to the real axis); TF 226 pts (the real axis on a geometric ladder); FF 228 pts (the real axis on a geometric ladder)
+- `log10` — DD 84 pts (the real axis on a geometric ladder); QF 259 pts (perpendicular approach to the real axis); TF 226 pts (the real axis on a geometric ladder); FF 228 pts (the real axis on a geometric ladder)
+- `pow` — DD 83 pts (the real axis on a geometric ladder); QF 163 pts (the real axis on a geometric ladder); TF 151 pts (the real axis on a geometric ladder); FF 114 pts (the real axis on a geometric ladder)
+- `sqrt` — DD 82 pts (the real axis on a geometric ladder); QF 92 pts (the real axis on a geometric ladder); TF 87 pts (the real axis on a geometric ladder); FF 82 pts (the real axis on a geometric ladder)
 
 ---
 
@@ -460,39 +460,39 @@ for each cell that has any:
 | op | backend | cap | mean | trusted \|z\| | at cap | boundary (digits) | fails | dominant class |
 |---|---|---:|---:|---|---:|---|---:|---|
 | `asin` | DD | 31.00 | 27.96 | 1 .. 100 | 76% | below 0.5: 15.23; above 1e+09: 14.98 | 77 | UNEXPLAINED (**77 unexplained**) |
-| `asin` | QF | 29.00 | 24.14 | 10 .. 100 | 65% | below 10: 13.77; above 1e+08: 13.68 | 194 | UNEXPLAINED (**162 unexplained**) |
-| `asin` | TF | 21.70 | 18.02 | 1.005 .. 2 | 65% | below 1: 0.00; above 1e+07: 10.18 | 194 | UNEXPLAINED (**162 unexplained**) |
-| `asin` | FF | 14.00 | 11.00 | 2 .. 2.236 | 59% | below 2: 0.00; above 10: 0.00 | 251 | UNEXPLAINED (**219 unexplained**) |
+| `asin` | QF | 29.00 | 24.92 | 10 .. 100 | 65% | below 10: 13.77; above 1e+08: 13.68 | 128 | UNEXPLAINED (**112 unexplained**) |
+| `asin` | TF | 21.70 | 18.51 | 1.005 .. 2 | 65% | below 1: 0.00; above 1e+07: 10.18 | 132 | UNEXPLAINED (**116 unexplained**) |
+| `asin` | FF | 14.00 | 11.27 | 2 .. 2.236 | 59% | below 2: 0.00; above 10: 0.00 | 195 | UNEXPLAINED (**175 unexplained**) |
 | `acos` | DD | 31.00 | 27.98 | 1 .. 100 | 77% | below 0.5: 15.23; above 1e+09: 14.98 | 77 | UNEXPLAINED (**77 unexplained**) |
-| `acos` | QF | 29.00 | 24.53 | 1 .. 2 | 69% | below 1: 0.00; above 2: 14.12 | 176 | UNEXPLAINED (**140 unexplained**) |
-| `acos` | TF | 21.70 | 18.10 | 1.005 .. 2 | 67% | below 1: 0.00; above 1e+07: 10.18 | 193 | UNEXPLAINED (**161 unexplained**) |
-| `acos` | FF | 14.00 | 11.05 | 2 .. 2.236 | 59% | below 2: 0.00; above 10: 0.00 | 233 | UNEXPLAINED (**201 unexplained**) |
+| `acos` | QF | 29.00 | 25.31 | 1 .. 2 | 69% | below 1: 0.00; above 2: 14.12 | 112 | UNEXPLAINED (**90 unexplained**) |
+| `acos` | TF | 21.70 | 18.61 | 1.005 .. 2 | 67% | below 1: 0.00; above 1e+07: 10.18 | 131 | UNEXPLAINED (**115 unexplained**) |
+| `acos` | FF | 14.00 | 11.32 | 2 .. 2.236 | 59% | below 2: 0.00; above 10: 0.00 | 177 | UNEXPLAINED (**157 unexplained**) |
 | `atan` | DD | 31.00 | 25.19 | 0 .. 1e-17 | 60% | above 1e-08: 8.13 | 256 | UNEXPLAINED (**250 unexplained**) |
-| `atan` | QF | 29.00 | 21.99 | 0.99 .. 1 | 52% | below 0.99: 13.73; above 1: 14.48 | 356 | UNEXPLAINED (**316 unexplained**) |
-| `atan` | TF | 21.70 | 15.56 | 0.99 .. 1 | 51% | below 0.99: 7.26; above 1: 10.81 | 391 | UNEXPLAINED (**359 unexplained**) |
-| `atan` | FF | 14.00 | 9.34 | 0.99 .. 1 | 50% | below 0.99: 0.00; above 1: 0.00 | 476 | UNEXPLAINED (**448 unexplained**) |
+| `atan` | QF | 29.00 | 22.32 | 0.99 .. 1 | 53% | below 0.99: 13.73; above 1: 14.48 | 330 | UNEXPLAINED (**316 unexplained**) |
+| `atan` | TF | 21.70 | 15.82 | 0.99 .. 1 | 52% | below 0.99: 7.26; above 1: 10.81 | 365 | UNEXPLAINED (**359 unexplained**) |
+| `atan` | FF | 14.00 | 9.51 | 0.99 .. 1 | 52% | below 0.99: 0.00; above 1: 0.00 | 454 | UNEXPLAINED (**448 unexplained**) |
 | `asinh` | DD | 31.00 | 29.34 | 10 .. 1e+15 | 86% | below 10: 0.00 | 10 | UNEXPLAINED (**8 unexplained**) |
-| `asinh` | QF | 29.00 | 24.97 | 100 .. 1e+09 | 69% | below 100: 14.49; above 1e+10: 0.00 | 130 | UNEXPLAINED (**103 unexplained**) |
-| `asinh` | TF | 21.70 | 19.14 | 1 .. 2 | 75% | below 1: 9.71; above 2: 0.00 | 94 | UNEXPLAINED (**72 unexplained**) |
-| `asinh` | FF | 14.00 | 11.98 | 100 .. 1e+09 | 78% | below 100: 0.00; above 1e+10: 0.00 | 140 | UNEXPLAINED (**124 unexplained**) |
+| `asinh` | QF | 29.00 | 25.86 | 100 .. 1e+15 | 70% | below 100: 14.49 | 58 | UNEXPLAINED (**47 unexplained**) |
+| `asinh` | TF | 21.70 | 19.75 | 100 .. 1e+15 | 76% | below 10: 0.00 | 22 | UNEXPLAINED (**16 unexplained**) |
+| `asinh` | FF | 14.00 | 12.33 | 100 .. 1e+15 | 79% | below 100: 0.00 | 72 | UNEXPLAINED (**68 unexplained**) |
 | `acosh` | DD | 31.00 | 25.79 | 2 .. 2.236 | 72% | below 2: 0.00; above 10: 0.00 | 223 | CONDITIONING (**94 unexplained**) |
-| `acosh` | QF | 29.00 | 22.98 | 2 .. 2.236 | 67% | below 2: 0.00; above 10: 0.00 | 297 | CONDITIONING (**139 unexplained**) |
-| `acosh` | TF | 21.70 | 17.03 | 2 .. 2.236 | 68% | below 2: 0.00; above 10: 0.00 | 303 | UNEXPLAINED (**154 unexplained**) |
-| `acosh` | FF | 14.00 | 10.59 | 2 .. 2.236 | 68% | below 2: 0.00; above 10: 0.00 | 355 | UNEXPLAINED (**214 unexplained**) |
+| `acosh` | QF | 29.00 | 23.50 | 2 .. 2.236 | 67% | below 2: 0.00; above 10: 0.00 | 247 | CONDITIONING (**107 unexplained**) |
+| `acosh` | TF | 21.70 | 17.38 | 2 .. 2.236 | 68% | below 2: 0.00; above 10: 0.00 | 251 | CONDITIONING (**122 unexplained**) |
+| `acosh` | FF | 14.00 | 10.77 | 2 .. 2.236 | 68% | below 2: 0.00; above 10: 0.00 | 311 | UNEXPLAINED (**182 unexplained**) |
 | `atanh` | DD | 31.00 | 27.35 | 0 .. 0.1 | 76% | above 1: 0.00 | 135 | UNEXPLAINED (**126 unexplained**) |
-| `atanh` | QF | 29.00 | 23.49 | 1e-28 .. 1e-08 | 64% | below 1e-30: 13.95; above 0.5: 13.10 | 263 | UNEXPLAINED (**195 unexplained**) |
-| `atanh` | TF | 21.70 | 17.14 | 1e-28 .. 0.1 | 59% | above 0.5: 7.36 | 271 | UNEXPLAINED (**212 unexplained**) |
-| `atanh` | FF | 14.00 | 10.59 | 1e-29 .. 0.1 | 58% | below 1e-30: 0.00; above 0.5: 0.00 | 327 | UNEXPLAINED (**267 unexplained**) |
+| `atanh` | QF | 29.00 | 23.82 | 1e-28 .. 1e-08 | 65% | below 1e-30: 13.95; above 0.5: 13.10 | 237 | UNEXPLAINED (**195 unexplained**) |
+| `atanh` | TF | 21.70 | 17.41 | 1e-28 .. 0.1 | 60% | above 0.5: 7.36 | 245 | UNEXPLAINED (**212 unexplained**) |
+| `atanh` | FF | 14.00 | 10.76 | 1e-29 .. 0.1 | 60% | below 1e-30: 0.00; above 0.5: 0.00 | 305 | UNEXPLAINED (**267 unexplained**) |
 
 **Where the failures sit.** The grid family carrying the most failures
 for each cell that has any:
 
-- `asin` — DD 77 pts (perpendicular approach to the real axis); QF 194 pts (perpendicular approach to the real axis); TF 194 pts (perpendicular approach to the real axis); FF 251 pts (perpendicular approach to the real axis)
-- `acos` — DD 77 pts (perpendicular approach to the real axis); QF 176 pts (perpendicular approach to the real axis); TF 193 pts (perpendicular approach to the real axis); FF 233 pts (perpendicular approach to the real axis)
-- `atan` — DD 256 pts (perpendicular approach to the real axis); QF 356 pts (perpendicular approach to the real axis); TF 391 pts (perpendicular approach to the real axis); FF 476 pts (perpendicular approach to the real axis)
-- `asinh` — DD 10 pts (polar shells); QF 130 pts (perpendicular approach to the imaginary axis); TF 94 pts (perpendicular approach to the imaginary axis); FF 140 pts (perpendicular approach to the real axis)
-- `acosh` — DD 223 pts (the real axis on a geometric ladder); QF 297 pts (perpendicular approach to the real axis); TF 303 pts (perpendicular approach to the real axis); FF 355 pts (perpendicular approach to the real axis)
-- `atanh` — DD 135 pts (perpendicular approach to the imaginary axis); QF 263 pts (perpendicular approach to the imaginary axis); TF 271 pts (perpendicular approach to the imaginary axis); FF 327 pts (perpendicular approach to the imaginary axis)
+- `asin` — DD 77 pts (perpendicular approach to the real axis); QF 128 pts (perpendicular approach to the real axis); TF 132 pts (perpendicular approach to the real axis); FF 195 pts (perpendicular approach to the real axis)
+- `acos` — DD 77 pts (perpendicular approach to the real axis); QF 112 pts (perpendicular approach to the real axis); TF 131 pts (perpendicular approach to the real axis); FF 177 pts (perpendicular approach to the real axis)
+- `atan` — DD 256 pts (perpendicular approach to the real axis); QF 330 pts (perpendicular approach to the real axis); TF 365 pts (perpendicular approach to the real axis); FF 454 pts (perpendicular approach to the real axis)
+- `asinh` — DD 10 pts (polar shells); QF 58 pts (perpendicular approach to the real axis); TF 22 pts (polar shells); FF 72 pts (perpendicular approach to the real axis)
+- `acosh` — DD 223 pts (the real axis on a geometric ladder); QF 247 pts (the real axis on a geometric ladder); TF 251 pts (the real axis on a geometric ladder); FF 311 pts (perpendicular approach to the real axis)
+- `atanh` — DD 135 pts (perpendicular approach to the imaginary axis); QF 237 pts (perpendicular approach to the imaginary axis); TF 245 pts (perpendicular approach to the imaginary axis); FF 305 pts (perpendicular approach to the imaginary axis)
 
 ---
 
@@ -502,10 +502,10 @@ for each cell that has any:
 |---|---:|
 | UNDERFLOW | 4167 |
 | OVERFLOW | 11633 |
-| ARG_RANGE | 351 |
-| CONDITIONING | 10676 |
-| UNEXPLAINED | 11907 |
-| **total triaged** | **38734** |
+| ARG_RANGE | 342 |
+| CONDITIONING | 10346 |
+| UNEXPLAINED | 9347 |
+| **total triaged** | **35835** |
 
 Out of 428,592 scored points.
 
