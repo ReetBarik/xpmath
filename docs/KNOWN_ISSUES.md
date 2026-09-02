@@ -199,7 +199,7 @@ test like this would have caught KI-1 on the day DD was written.
 Probe used to produce the table above: `/tmp/acosh_all.cpp` (throwaway, not
 committed; it links all four headers and scores each against `cacoshq`).
 
-### Resolution (2026-09-02, commit `fe42970`)
+### Resolution (2026-09-02, commit `f421a0e`)
 
 `log(z + sqrt(z*z - 1))` replaced by Kahan's form in all four `*_complex.hpp`
 headers:
@@ -1028,7 +1028,7 @@ depending on a signed zero surviving an arithmetic operation. The fix must be
 checked at `Im = -0` as well as `Im = +0`; testing only `+0` is what let this
 survive.
 
-### Resolution of (d) (2026-09-02, commit `fe42970`)
+### Resolution of (d) (2026-09-02, commit `f421a0e`)
 
 **First question answered: signed zero DOES round-trip in the expansion types.**
 This decided whether an honest fix was possible at all, so it was measured before
@@ -1161,7 +1161,7 @@ measurement and documentation only.
 1. **(a)** `asinh`: add the odd-function reflection for `Re(z) < 0`, in all four
    `*_complex.hpp` headers. Cheapest of the five.
 2. ~~**(d)** `asin`: fix the signed-zero sheet selection; `acos` is fixed for
-   free.~~ **Done 2026-09-02**, commit `fe42970` — see "Resolution of (d)"
+   free.~~ **Done 2026-09-02**, commit `f421a0e` — see "Resolution of (d)"
    above. `acos` was indeed fixed for free, confirmed by measurement.
 3. **(c)** `acos`: restructure away from `π/2 − asin`.
 4. **(b)** `atanh`: add a complex `log1p` and switch to the `log1p` form.
