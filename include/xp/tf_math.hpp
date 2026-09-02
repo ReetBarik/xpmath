@@ -125,29 +125,62 @@ XPMATH_INLINE_FUNCTION float tf_two_sum(float a, float b, float& err) {
     return s;
 }
 
-// fl(a*b) and err (Dekker TwoProduct via Veltkamp split).  QD inline.h:85-99.
+// Veltkamp split with QD's large-magnitude guard.  Port of qd::split,
+// QD 2.3.24 qd/include/qd/inline.h:66-83, at FP32.
+//
 // Splitter 8193.0f = 2^13+1 for the 24-bit FP32 mantissa — reused from
-// ff_math.hpp (ff_math.hpp:220, validated for FF at T2.1). Empirically exact
-// over |operands| <= 1e6. Large-magnitude splitter overflow (QD's
-// _QD_SPLIT_THRESH branch, inline.h:66-83) is NOT ported — see PORT_NOTES_QF.md
-// §2 for the rationale (applies identically to TF).
+// ff_math.hpp (ff_math.hpp:220, validated for FF at T2.1).
+//
+// KI-9 (fixed 2026-09-02). Identical defect and identical fix to
+// qf_math.hpp:qf_split — see the derivation there. In short: without the
+// threshold branch, `a * split` overflows for |a| > FLT_MAX / (split + 1) ≈
+// 4.15e34 and `hi = con - (con - a)` becomes inf - inf = NaN, taking multiply,
+// sqr, multiply_scalar and divide's quotient digits with it. The pre-scale by
+// 2^-14 and unscale by 2^14 are exact powers of two, so the hazard path adds no
+// rounding and the non-hazard path is bit-identical to before.
+XPMATH_INLINE_FUNCTION void tf_split(float a, float& hi, float& lo) {
+    const float split  = 8193.0f;
+    const float thresh = 4.1528233e34f;      // FLT_MAX / (split + 1)
+    float temp;
+    if (a > thresh || a < -thresh) {
+        a *= 6.103515625e-05f;               // 2^-14, exact
+        temp = split * a;
+        hi   = temp - (temp - a);
+        lo   = a - hi;
+        hi  *= 16384.0f;                     // 2^14, exact
+        lo  *= 16384.0f;
+    } else {
+        temp = split * a;
+        hi   = temp - (temp - a);
+        lo   = a - hi;
+    }
+}
+
+// fl(a*b) and err (Dekker TwoProduct via Veltkamp split).  QD inline.h:85-99.
+// Empirically exact over |operands| <= 1e6; KI-9 extends that to the full FP32
+// range.
+//
+// The non-finite early return is the genuine-overflow half of KI-9; see
+// qf_math.hpp:qf_two_prod for the rationale. Briefly: for an overflowed product
+// the residual is inf - inf = NaN, so a correctly-±inf result came back
+// NaN-tailed; the error term of an overflowed product carries no information
+// and 0 is the only defensible value.
 XPMATH_INLINE_FUNCTION float tf_two_prod(float a, float b, float& err) {
-    const float split = 8193.0f;
-    float cona = a * split, conb = b * split;
-    float a1 = cona - (cona - a), b1 = conb - (conb - b);
-    float a2 = a - a1,            b2 = b - b1;
-    float p  = a * b;
+    float p = a * b;
+    if (!detail::isfinite(p)) { err = 0.0f; return p; }
+    float a1, a2, b1, b2;
+    tf_split(a, a1, a2);
+    tf_split(b, b1, b2);
     err = ((a1 * b1 - p) + a1 * b2 + a2 * b1) + a2 * b2;
     return p;
 }
 
 // fl(a*a) and err.  QD inline.h:101-113 (two_sqr).
 XPMATH_INLINE_FUNCTION float tf_two_sqr(float a, float& err) {
-    const float split = 8193.0f;
-    float con = a * split;
-    float hi  = con - (con - a);
-    float lo  = a - hi;
-    float q   = a * a;
+    float q = a * a;
+    if (!detail::isfinite(q)) { err = 0.0f; return q; }
+    float hi, lo;
+    tf_split(a, hi, lo);
     err = ((hi * hi - q) + 2.0f * hi * lo) + lo * lo;
     return q;
 }
@@ -564,6 +597,13 @@ XPMATH_INLINE_FUNCTION TripleFloat multiply_scalar(TripleFloat a, float b) {
 // 2a1a2, and the closing renorm is renorm_3 over four words with QD's u^4 word
 // p4 folded into p3.
 XPMATH_INLINE_FUNCTION TripleFloat sqr(TripleFloat a) {
+    // KI-9 genuine-overflow guard; see qf_math.hpp:sqr for the derivation. The
+    // `2.0f * a.f0 * a.fk` products overflow at the doubling for
+    // |a.f0| > FLT_MAX/2, and inf * 0 is NaN. If those can overflow then
+    // a.f0 * a.f0 already has, so ±inf is the whole answer.
+    float leading = a.f0 * a.f0;
+    if (!detail::isfinite(leading)) return TripleFloat(leading, 0.0f, 0.0f);
+
     float p0, p1, p2, p3, p4;
     float q0, q1, q2, q3;
     float s0, s1;
@@ -938,10 +978,26 @@ XPMATH_INLINE_FUNCTION void sinhcosh(TripleFloat a, TripleFloat& sinh_a, TripleF
         // See dd_math.hpp. Also removes the reciprocal 1/e^{|a|}, which
         // underflowed FP32 and produced NaN for |a| >= 80.
         TripleFloat aa = (a.f0 < 0.0f) ? negate(a) : a;
-        TripleFloat e  = exp(a);
-        if (a.f0 < 0.0f) e = divide(TripleFloat(1.0f), e);
-        TripleFloat h  = (detail::isinf(e.f0) || e.f0 != e.f0) ? exp(subtract(aa, TripleFloat_log2()))
-                                             : mul_pwr2(e, 0.5f);
+        TripleFloat h;
+        // KI-9 crossover; see qf_math.hpp:sinhcosh. TF's last limb sits at
+        // f0 * 2^-48, so exp(a) keeps all three words while
+        // a > ln(FLT_MIN) + 48 ln2 = -54.1; -55 is that with a small margin
+        // (the sweep still favours the reciprocal at a = -53.41).
+        const float kTFReciprocalFloor = -55.0f;
+        if (a.f0 < kTFReciprocalFloor) {
+            // KI-9; see qf_math.hpp:sinhcosh for the full account. exp(a) for
+            // large negative a lands near 1e-35, where TF's trailing limbs are
+            // subnormal or zero and only ~10 digits survive; reciprocating that
+            // cannot restore them. The NaN this branch used to get from the
+            // unfixed divide() was accidentally routing it to the accurate
+            // exp(|a| - ln2) form. Do that on purpose.
+            h = exp(subtract(aa, TripleFloat_log2()));
+        } else {
+            TripleFloat e = exp(a);
+            if (a.f0 < 0.0f) e = divide(TripleFloat(1.0f), e);
+            h = (detail::isinf(e.f0) || e.f0 != e.f0) ? exp(subtract(aa, TripleFloat_log2()))
+                                                      : mul_pwr2(e, 0.5f);
+        }
         cosh_a = h;
         sinh_a = (a.f0 < 0.0f) ? negate(h) : h;
         return;

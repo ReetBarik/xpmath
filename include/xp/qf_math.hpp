@@ -136,29 +136,81 @@ XPMATH_INLINE_FUNCTION float qf_two_sum(float a, float b, float& err) {
     return s;
 }
 
-// fl(a*b) and err (Dekker TwoProduct via Veltkamp split).  QD inline.h:85-99.
+// Veltkamp split with QD's large-magnitude guard.  Port of qd::split,
+// QD 2.3.24 qd/include/qd/inline.h:66-83, at FP32.
+//
 // Splitter 8193.0f = 2^13+1 for the 24-bit FP32 mantissa — the same constant
 // used and validated for FF (ff_math.hpp:194, two_prod ff_math.hpp:266-274).
+//
+// KI-9 (fixed 2026-09-02, see docs/KNOWN_ISSUES.md). The original port
+// deliberately dropped QD's `_QD_SPLIT_THRESH` branch, recorded in
+// PORT_NOTES_QF §2 as an accepted simplification. It is not one: for
+// |a| > FLT_MAX / (split + 1) ≈ 4.15e34 the product `a * split` overflows to
+// ±inf, and then `hi = con - (con - a)` is inf - inf = NaN, which poisons every
+// consumer — multiply, sqr, multiply_scalar, and through multiply_scalar the
+// long-division quotient digits of divide(). KI-8's scaled hypot divides by
+// max(|a|,|b|), so hypot/complex-abs went NaN for any operand above 4.15e34
+// even though the answer (1.41e37 for hypot(1e37,1e37)) is comfortably inside
+// FP32's 3.4e38 range. This is a PORTING DEFECT: QD guards it, the port did
+// not; FF had already re-derived the same guard independently (B8/B9,
+// ff_math.hpp:245).
+//
+// The guard scales by an exact power of two, so it introduces no rounding:
+// pre-scale by 2^-14 (bringing FLT_MAX down to 2.08e34, inside the safe band),
+// split, then unscale hi and lo by 2^14. Both unscalings are exact — |hi| <= |a|
+// and |lo| < ulp(a), so neither can overflow or reach the subnormal range. This
+// mirrors QD's 2^-28 / 2^28 pair, which is 2^(1024-996); the FP32 analogue is
+// 2^(128-114).
+//
+// Unlike FF's B8/B9 guard, which scales the whole operand and unscales the
+// RESULT, scaling only inside the split leaves `p = a * b` untouched, so the
+// non-hazard path is bit-identical and the hazard path costs no extra rounding.
+XPMATH_INLINE_FUNCTION void qf_split(float a, float& hi, float& lo) {
+    const float split  = 8193.0f;
+    const float thresh = 4.1528233e34f;      // FLT_MAX / (split + 1)
+    float temp;
+    if (a > thresh || a < -thresh) {
+        a *= 6.103515625e-05f;               // 2^-14, exact
+        temp = split * a;
+        hi   = temp - (temp - a);
+        lo   = a - hi;
+        hi  *= 16384.0f;                     // 2^14, exact
+        lo  *= 16384.0f;
+    } else {
+        temp = split * a;
+        hi   = temp - (temp - a);
+        lo   = a - hi;
+    }
+}
+
+// fl(a*b) and err (Dekker TwoProduct via Veltkamp split).  QD inline.h:85-99.
 // Empirically exact over |operands| <= 1e6 (scripts/gen_qf_constants harness /
-// scripts/test_qfmul.cpp). Large-magnitude splitter overflow (QD's
-// _QD_SPLIT_THRESH branch, inline.h:66-83) is NOT ported — see PORT_NOTES_QF.
+// scripts/test_qfmul.cpp); KI-9 extends that to the full FP32 range.
+//
+// KI-9 also fixes the GENUINE-overflow tail. When the true product exceeds
+// FLT_MAX, p is ±inf and the residual expression evaluates inf - inf = NaN, so
+// an overflow that IEEE 754 defines as ±inf came back as a NaN-tailed
+// expansion — hypot(3e38, 3e38) returned NaN where 4.24e38 correctly overflows
+// to +inf. The error term of an overflowed product carries no information, so
+// the only defensible value is 0. The early return also skips two splits on
+// that path. Non-finite operands (±inf, NaN) take the same branch and
+// propagate whatever `a * b` gives, which is already the IEEE answer.
 XPMATH_INLINE_FUNCTION float qf_two_prod(float a, float b, float& err) {
-    const float split = 8193.0f;
-    float cona = a * split, conb = b * split;
-    float a1 = cona - (cona - a), b1 = conb - (conb - b);
-    float a2 = a - a1,            b2 = b - b1;
-    float p  = a * b;
+    float p = a * b;
+    if (!detail::isfinite(p)) { err = 0.0f; return p; }
+    float a1, a2, b1, b2;
+    qf_split(a, a1, a2);
+    qf_split(b, b1, b2);
     err = ((a1 * b1 - p) + a1 * b2 + a2 * b1) + a2 * b2;
     return p;
 }
 
 // fl(a*a) and err.  QD inline.h:101-113 (two_sqr).
 XPMATH_INLINE_FUNCTION float qf_two_sqr(float a, float& err) {
-    const float split = 8193.0f;
-    float con = a * split;
-    float hi  = con - (con - a);
-    float lo  = a - hi;
-    float q   = a * a;
+    float q = a * a;
+    if (!detail::isfinite(q)) { err = 0.0f; return q; }
+    float hi, lo;
+    qf_split(a, hi, lo);
     err = ((hi * hi - q) + 2.0f * hi * lo) + lo * lo;
     return q;
 }
@@ -558,6 +610,16 @@ XPMATH_INLINE_FUNCTION QuadFloat multiply(QuadFloat a, QuadFloat b) {
 
 // quad-float ^ 2.  Port of sqr(qd_real), QD 2.3.24 qd_inline.h:674-715.
 XPMATH_INLINE_FUNCTION QuadFloat sqr(QuadFloat a) {
+    // KI-9 genuine-overflow guard. The body forms `2.0f * a.f0 * a.f1` and
+    // `2.0f * a.f0 * a.f3` left-to-right, so the DOUBLING overflows on its own
+    // for |a.f0| > FLT_MAX/2 = 1.7e38, and inf * 0 (the usual value of a trailing
+    // limb) is NaN — sqr(3e38) came back (inf, NaN, NaN, NaN). Whenever those
+    // doublings can overflow, a.f0 * a.f0 has already overflowed, so the whole
+    // square is out of range and ±inf is the complete answer. One test covers
+    // every internal overflow site; NaN input propagates through it unchanged.
+    float leading = a.f0 * a.f0;
+    if (!detail::isfinite(leading)) return QuadFloat(leading, 0.0f, 0.0f, 0.0f);
+
     float p0, p1, p2, p3, p4, p5;
     float q0, q1, q2, q3;
     float s0, s1;
@@ -1157,10 +1219,41 @@ XPMATH_INLINE_FUNCTION void sinhcosh(QuadFloat a, QuadFloat& sinh_a, QuadFloat& 
         // See dd_math.hpp. Also removes the reciprocal, which for |a| ~ 80 built
         // 1/e^{80} ~ 1.8e-35 through QF's divide and returned NaN.
         QuadFloat aa = (a.f0 < 0.0f) ? negate(a) : a;
-        QuadFloat e  = exp(a);
-        if (a.f0 < 0.0f) e = divide(QuadFloat(1.0f), e);
-        QuadFloat h  = (detail::isinf(e.f0) || e.f0 != e.f0) ? exp(subtract(aa, QuadFloat_log2()))
-                                           : mul_pwr2(e, 0.5f);
+        QuadFloat h;
+        // KI-9. Crossover between the two ways of forming e^{|a|}/2 for a < 0.
+        // The reciprocal route (exp(a), then 1/e) is the more accurate of the
+        // two while exp(a) still occupies all four words: the last limb sits at
+        // f0 * 2^-72, so it stays normal for f0 > FLT_MIN * 2^72, i.e.
+        // a > ln(FLT_MIN) + 72 ln2 = -37.4. Below that the trailing limbs go
+        // subnormal and then zero, exp(a) carries only a fraction of its
+        // nominal width, and no reciprocal can put the digits back — at
+        // a = -81.7 it holds barely 10 of 29. The direct route,
+        // exp(|a| - ln2), forms the large magnitude at full width and wins by
+        // up to 21.9 digits there, but costs up to 1.0 digit above the
+        // crossover. -40 is the derived -37.4 with a margin: the limbs are not
+        // exactly 24 bits apart, and the sweep still shows the reciprocal ahead
+        // at a = -37.70 (points 703/705/706).
+        const float kQFReciprocalFloor = -40.0f;
+        if (a.f0 < kQFReciprocalFloor) {
+            // KI-9. This used to compute e = exp(a) — a value near 1e-35, whose
+            // f1 limb is already subnormal and whose f2/f3 flush to zero, so it
+            // holds barely 10 of QF's 29 digits — and then reciprocate it. The
+            // reciprocal cannot recover what the tiny operand never had.
+            //
+            // It scored 28 digits anyway because divide() overflowed the Dekker
+            // splitter for quotients above 4.15e34 and returned NaN, so the
+            // `e.f0 != e.f0` test below fired and routed the point to
+            // exp(|a| - ln2), which forms the large magnitude directly at full
+            // precision. Fixing the splitter removed the NaN, the fallback
+            // stopped firing, and 60 sweep points lost up to 21.9 digits.
+            // Take the accurate route deliberately instead of by accident.
+            h = exp(subtract(aa, QuadFloat_log2()));
+        } else {
+            QuadFloat e = exp(a);
+            if (a.f0 < 0.0f) e = divide(QuadFloat(1.0f), e);
+            h = (detail::isinf(e.f0) || e.f0 != e.f0) ? exp(subtract(aa, QuadFloat_log2()))
+                                                      : mul_pwr2(e, 0.5f);
+        }
         cosh_a = h;
         sinh_a = (a.f0 < 0.0f) ? negate(h) : h;
         return;

@@ -1464,12 +1464,12 @@ well-conditioned there — so the loss is the algorithm's, not the format's.
 
 **None of them were fixed when this block was written** — that session measured
 and documented only. **KI-6 and KI-7 have since been resolved** (2026-09-02,
-commit `ad82f4f`) and **KI-8** has since been resolved (2026-09-02, commit
-`4cd7dcb`); KI-9 through KI-11 remain open. `docs/DOMAINS.md` records the
-resulting usable ranges per backend per op, and is generated from the same data —
-it was regenerated after each fix, so the counts quoted in the KI-6, KI-7 and
-KI-8 *Extent* sections above are the pre-fix numbers and no longer match the
-current CSVs.
+commit `ad82f4f`), **KI-8** (2026-09-02, commit `4cd7dcb`) and **KI-9**
+(2026-09-02, commit `KI9FIXSHA`); KI-10 and KI-11 remain open. `docs/DOMAINS.md`
+records the resulting usable ranges per backend per op, and is generated from the
+same data — it was regenerated after each fix, so the counts quoted in the KI-6,
+KI-7, KI-8 and KI-9 *Extent* sections above are the pre-fix numbers and no longer
+match the current CSVs.
 
 ---
 
@@ -1926,6 +1926,23 @@ escapes; tightening NaN to +inf there would need an overflow probe in the QF/TF
 renormalizers and is not worth a divide on every call. Recorded here rather than
 opened as a new KI.
 
+> **Addendum (KI-9, `KI9FIXSHA`).** That residual wrinkle is now closed, and it
+> was worse than "one edge point": KI-8's scaled path divides by `max(|a|,|b|)`,
+> and QF/TF `divide` was returning NaN for any operand past 4.15e34 (KI-9). So
+> `QF/TF hypot` was NaN from 1e35 *upward* — not only at the genuine-overflow
+> edge — while FF, whose splitter guard was already in place, was correct there.
+> The KI-8 design was sound; it was sitting on a broken primitive. With KI-9
+> fixed, QF/TF now match FF at 1e35/1e36/1e37/1e38, and `hypot(3e38, 3e38)`
+> returns `+inf` rather than NaN. It took no overflow probe in the
+> renormalizers: setting the error term of an overflowed product to 0 in
+> `two_prod`/`two_sqr` was enough.
+>
+> **The gate thresholds stay as they are.** They were not chosen to dodge the
+> division defect, and now that it is fixed the scaled path is correct wherever
+> it is taken — so widening is safe but not useful. The 3.04-digit / 115-point
+> cost measured above comes from `sqr()` vs `multiply(a,a)`, which KI-9 does not
+> touch. Full reasoning in KI-9's resolution.
+
 **Sweep effect.** Monotone gate exit **0**: 3,003 points increased, **0**
 decreased, 425,589 unchanged. Every returned-zero point in the two named cells
 is gone:
@@ -1984,9 +2001,10 @@ standard 0.30 headroom and did not move.
 
 ---
 
-## KI-9 — QF/TF division returns NaN when the QUOTIENT exceeds the Dekker splitter's headroom
+## KI-9 — QF/TF division returns NaN when the QUOTIENT exceeds the Dekker splitter's headroom **[RESOLVED]**
 
-**Severity: medium, QF and TF only.**
+**Severity: medium, QF and TF only.** *(Re-rated to blocking once KI-8's scaled
+`hypot` was built on top of it — see the Resolution.)*
 
 ### What
 
@@ -2009,6 +2027,108 @@ division through its Newton/long-division refinement step.
 
 Guard the splitter the way the QF multiply path was guarded: scale the operand
 down by a power of two before splitting and scale the product back afterwards.
+
+### Resolution (2026-09-02)
+
+Fixed in **`KI9FIXSHA`** (`qf_math.hpp`, `tf_math.hpp`). DD and FF were already
+clean — FF had re-derived the same guard independently at B8/B9
+(`ff_math.hpp:245`), and DD's FP64 words put the threshold at 6.7e299.
+
+**It is a PORTING DEFECT.** QD 2.3.24 *does* guard its splitter:
+`qd/include/qd/inline.h:66-83` branches on `_QD_SPLIT_THRESH` (6.69692879491417e+299
+= 2^996), pre-scales by 2^-28, splits, and unscales `hi`/`lo` by 2^28. The QF and
+TF ports dropped that branch deliberately and recorded the omission in
+PORT_NOTES_QF §2 as an accepted simplification ("Large-magnitude splitter
+overflow is NOT ported"). It is not an acceptable one, and this fix restores the
+upstream behaviour at FP32: threshold `FLT_MAX / (split + 1)` = 4.1528233e34,
+pre-scale 2^-14, unscale 2^14 — the FP32 analogue of QD's 2^(1024-996), which is
+2^(128-114). Both scalings are exact powers of two, so the hazard path adds no
+rounding and the non-hazard path is bit-identical to before.
+
+**The break point is 4.15e34, not the 8.3e34 the entry above predicted.** The
+splitter is 8193 = 2^13+1, not 4097 = 2^12+1, so the ceiling is FLT_MAX/8193.
+
+**Multiplication shared the exposure; `sqrt` did not.** Fixing the split inside
+`qf_two_prod`/`qf_two_sqr` (and the TF pair) covers `multiply`, `sqr`,
+`multiply_scalar`, `divide`, `divide_scalar` and everything composed from them in
+one place. `sqrt` (Heron) is only exposed transitively: it splits the iterate and
+the quotient digit, both ≈ sqrt(a) ≈ 1e19 at the top of the range, so it needed
+a > 1.7e69 to break and was never reachable. Measured, before and after —
+`divide(x,x)`, `multiply(x,1/x)`, `a*a` and `sqrt(x)` swept over 10^0..10^38 in
+quarter-decade steps, "first failing x" = first point off the exact answer:
+
+```
+                     divide(x,x)   multiply(x,1/x)   a*a        sqrt(x)
+FF  before / after   none / none   none / none       none/none  none / none
+QF  before           5.62e+34      5.62e+34          none       none
+QF  after            none          none              none       none
+TF  before           5.62e+34      5.62e+34          none       none
+TF  after            none          none              none       none
+```
+
+(5.62e34 is the first sampled point past the true 4.153e34 boundary.)
+
+**Genuine overflow now reports ±inf, not NaN.** Two further sites, both fixed in
+the same commit:
+
+- `two_prod`/`two_sqr` evaluated their residual as `inf - inf = NaN` whenever the
+  product itself overflowed, so a correctly-infinite answer came back NaN-tailed.
+  The error term of an overflowed product carries no information; it is now 0,
+  via an early return that also skips two splits on that path.
+- `sqr()` forms `2.0f * a.f0 * a.fk` left to right, so the *doubling* overflows on
+  its own for `|a.f0| > FLT_MAX/2 = 1.7e38`, and `inf * 0` (the usual value of a
+  trailing limb) is NaN. Whenever those doublings can overflow, `a.f0 * a.f0`
+  already has, so one leading-limb test at the top returns ±inf and covers every
+  internal site.
+
+This closes the "residual wrinkle" recorded under KI-8: `QF/TF hypot(3e38, 3e38)`
+(true 4.24e38, past the FP32 word range) now returns `+inf`, matching FF.
+
+**KI-8 re-verified.** `hypot(a, a)`, the case that made this blocking:
+
+```
+a       true          FF (was OK)   QF before  QF after      TF before  TF after
+1e+30   1.414214e+30  1.414214e+30  1.414e+30  1.414214e+30  1.414e+30  1.414214e+30
+1e+35   1.414214e+35  1.414214e+35  nan        1.414214e+35  nan        1.414214e+35
+1e+36   1.414214e+36  1.414214e+36  nan        1.414214e+36  nan        1.414214e+36
+1e+37   1.414214e+37  1.414214e+37  nan        1.414214e+37  nan        1.414214e+37
+1e+38   1.414214e+38  1.414214e+38  nan        1.414214e+38  nan        1.414214e+38
+3e+38   inf (4.24e38) inf           nan        inf           nan        inf
+```
+
+**KI-8's gate thresholds are KEPT as they are.** Decision and reason: the gate
+(`m` outside `[1e-18, 1e18]` for the FP32-word backends) is no longer standing in
+for a broken primitive — the scaled path is now correct everywhere it is taken,
+so widening it is *safe*. It is still not *better*. KI-8 measured that routing
+the whole range through the scaled path costs up to **3.04 digits** on 115 points,
+because `hypot` squares with `sqr()` while complex `abs` squares with
+`multiply(a,a)` and the two are not interchangeable; KI-9 does nothing to change
+that, since it fixed the splitter, not the choice of squaring primitive. The gate
+is now a pure accuracy-and-cost choice rather than a defect workaround, which is
+the right reason to keep it. Widening it would trade a measured 3.04-digit loss
+for no gain, since the direct form inside the gate is already exact there.
+
+**One regression found and fixed on the way — an accidental fallback.** The
+KI-7 saturate branch in `sinhcosh` (both backends) computed `e = exp(a)`,
+reciprocated it for `a < 0`, and fell back to the accurate `exp(|a| - ln2)` form
+only when the result came back inf or NaN. The unfixed `divide()` was *supplying*
+that NaN for `|a| ≳ 80`, so the accurate route was being taken by accident.
+Repairing division removed the accident and 60 sweep points lost up to **21.9
+digits**. The mechanism underneath is real and independent of KI-9: for large
+negative `a`, `exp(a)` lands near 1e-35 where the trailing limbs are subnormal or
+zero, so it holds barely 10 of QF's 29 digits, and no reciprocal can put them
+back. The two routes now switch on where that happens rather than on a NaN:
+the last limb of a k-word FP32 expansion sits at `f0 · 2^-24(k-1)`, so it stays
+normal while `a > ln(FLT_MIN) + 24(k-1)·ln2` — **-37.4 for QF (k=4), -54.1 for TF
+(k=3)**. The thresholds ship at **-40.0f** and **-55.0f**, the derived values with
+a margin, because the limbs are not exactly 24 bits apart and the sweep still
+favours the reciprocal at a = -37.70 (QF points 703/705/706) and a = -53.41 (TF
+point 757). Above the floor the reciprocal is used and is up to 1.0 digit better;
+below it the direct form is used and is up to 21.9 digits better.
+
+**Sweep effect.** Monotone gate exit **0** against
+`validation/sweep/sweep_baseline.csv` (428,592 points): **0 decreased**, 304
+increased, 428,288 unchanged. No accepted decreases. `ctest` 34/34.
 
 ---
 
