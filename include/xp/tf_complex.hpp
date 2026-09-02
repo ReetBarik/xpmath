@@ -118,6 +118,32 @@ struct TripleFloatComplex {
             XPMATH_PRINTF("TFCOMPLEX: division by zero\n");
             return TripleFloatComplex();
         }
+        // KI-8.  The |denominator|^2 formulation squares b's components, so it
+        // overflows and underflows for denominators whose quotient is perfectly
+        // representable -- the same exposure as the unscaled hypot.  Past the
+        // gate, use Smith's algorithm (1962), which divides through by the
+        // larger component first so no intermediate exceeds the operands.
+        // Inside the gate the original expression is kept bit-for-bit: Smith
+        // costs two divides instead of one reciprocal and is slightly less
+        // accurate, and there is nothing to win where the direct form works.
+        {
+            float mre = detail::fabs(b.re.f0);
+            float mim = detail::fabs(b.im.f0);
+            float mb  = (mre > mim) ? mre : mim;
+            if (!(mb <= 1.0e18f && mb >= 1.0e-18f)) {
+                if (mre >= mim) {
+                    TripleFloat rr = divide(b.im, b.re);
+                    TripleFloat dd = add(b.re, multiply(b.im, rr));
+                    return TripleFloatComplex(divide(add(re, multiply(im, rr)), dd),
+                               divide(subtract(im, multiply(re, rr)), dd));
+                } else {
+                    TripleFloat rr = divide(b.re, b.im);
+                    TripleFloat dd = add(multiply(b.re, rr), b.im);
+                    return TripleFloatComplex(divide(add(multiply(re, rr), im), dd),
+                               divide(subtract(multiply(im, rr), re), dd));
+                }
+            }
+        }
         TripleFloat denom = add(multiply(b.re, b.re), multiply(b.im, b.im));
         TripleFloat inv   = divide(TripleFloat(1.0f), denom);
         return TripleFloatComplex(multiply(add(multiply(re, b.re), multiply(im, b.im)), inv),
@@ -175,7 +201,23 @@ XPMATH_INLINE_FUNCTION TripleFloatComplex operator/(float b, TripleFloatComplex 
 // ============================================================
 
 // abs(z) = |z| = sqrt(re²+im²).  qf_complex.hpp:196-198 / ff_complex.hpp:151-153 / dd_complex.hpp:145-147.
+// KI-8.  abs(z) is a magnitude and the unscaled sqrt(re^2 + im^2) below returns
+// nan above |z| ~ 1.8e19 and 0 below |z| ~ 1.1e-19 on the FP32-word backends, in
+// both cases while the answer is representable.  Past that range, defer to the
+// scaled hypot.
+//
+// Inside the range the ORIGINAL expression is kept verbatim rather than routed
+// through hypot as well.  That is not conservatism for its own sake: hypot's
+// own fast path is written with the primitive each backend's hypot already
+// used, and on TF that is sqr() where this one is multiply().  Swapping them
+// costs up to 3.04 digits at four grid points (measured on the 428,592-point
+// sweep, TF c abs points 736/737/1528..1531), so the two call sites keep their
+// own primitives and share only the scaled tail.
 XPMATH_INLINE_FUNCTION TripleFloat abs(TripleFloatComplex z) {
+    float mr = detail::fabs(z.re.f0);
+    float mi = detail::fabs(z.im.f0);
+    float m  = (mr > mi) ? mr : mi;
+    if (!(m <= 1.0e18f && m >= 1.0e-18f)) return hypot(z.re, z.im);
     return sqrt(add(multiply(z.re, z.re), multiply(z.im, z.im)));
 }
 // norm(z) = |z|² = re²+im² (std::norm convention; the squared magnitude, no
@@ -201,7 +243,7 @@ XPMATH_INLINE_FUNCTION TripleFloatComplex conj(TripleFloatComplex z) {
 // (PORT_NOTES_TF §3), matching qf_complex.hpp:226-228.
 XPMATH_INLINE_FUNCTION TripleFloatComplex sqrt(TripleFloatComplex z) {
     if (z.re.f0 == 0.0f && z.im.f0 == 0.0f) return TripleFloatComplex();
-    TripleFloat r  = sqrt(add(multiply(z.re, z.re), multiply(z.im, z.im)));
+    TripleFloat r  = abs(z);   // KI-8: scaled magnitude, was sqrt(re^2+im^2) inline
     TripleFloat a1 = abs(z.re);
     TripleFloat s2 = multiply_scalar(add(r, a1), 0.5f);
     TripleFloat s0 = sqrt(s2);

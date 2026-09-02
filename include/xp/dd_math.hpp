@@ -751,8 +751,48 @@ XPMATH_INLINE_FUNCTION DoubleDouble pow(DoubleDouble a, DoubleDouble b) {
     return exp(multiply(log(a), b));
 }
 
+// hypot(a, b) = sqrt(a^2 + b^2), SCALED.  KI-8.
+//
+// QD 2.3.24 has no hypot (and no complex header at all), so this composition is
+// original to this port: there is no upstream scaling that was dropped, and
+// nothing to diverge from.
+//
+// The direct form squares its operands, so the intermediate a^2 leaves the
+// FP64 word range at |a| ~ 1.3e154 and flushes to zero at |a| ~ 1.5e-154 -- in both
+// cases while the ANSWER is perfectly representable.  hypot is precisely the
+// call a caller reaches for BECAUSE it wants an overflow-safe magnitude, so it
+// failing exactly there is worse than an ordinary accuracy defect.
+//
+// Remedy: factor the larger operand out.  t = min/max lies in [0,1], so t*t
+// cannot overflow whatever the operands are, and the only scaling is the final
+// multiply by m -- which overflows if and only if the true result does, so a
+// genuinely unrepresentable answer still reports inf rather than a wrong finite
+// value.
+//
+// The scaled form is NOT used unconditionally.  It costs a divide and is a
+// touch less accurate than the direct one (divide + square + sqrt + multiply
+// versus square + add + sqrt), so it is gated to the range where the direct
+// form actually breaks: for m inside [1.0e-150, 1.0e150] the old expression is
+// evaluated exactly as before and the added cost is two compares, not a divide.
+// Same reasoning as the atanh threshold in dd_complex.hpp -- fix the interval
+// that is broken, do not churn the one that is not.
+//
+// inf/nan convention (C99 F.9.4.3): hypot(+-inf, y) is +inf for ANY y, NaN
+// included, so the inf test comes first.  Otherwise a NaN operand propagates to
+// NaN through the arithmetic.  Both operands are taken through abs() first, so
+// the returned infinity is always +inf.
 XPMATH_INLINE_FUNCTION DoubleDouble hypot(DoubleDouble a, DoubleDouble b) {
-    return sqrt(add(multiply(a, a), multiply(b, b)));
+    DoubleDouble x = abs(a);
+    DoubleDouble y = abs(b);
+    if (detail::isinf(x.hi)) return x;
+    if (detail::isinf(y.hi)) return y;
+    DoubleDouble m = (x.hi < y.hi) ? y : x;
+    DoubleDouble n = (x.hi < y.hi) ? x : y;
+    if (m.hi == 0.0) return DoubleDouble(0.0);
+    if (m.hi <= 1.0e150 && m.hi >= 1.0e-150)
+        return sqrt(add(multiply(a, a), multiply(b, b)));
+    DoubleDouble t = divide(n, m);
+    return multiply(m, sqrt(add(DoubleDouble(1.0), multiply(t, t))));
 }
 
 XPMATH_INLINE_FUNCTION DoubleDouble ceil(DoubleDouble a);

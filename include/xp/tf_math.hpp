@@ -1276,9 +1276,48 @@ XPMATH_INLINE_FUNCTION TripleFloat fma(TripleFloat a, TripleFloat b, TripleFloat
     return add(multiply(a, b), c);
 }
 
-// hypot(a, b) = sqrt(a^2 + b^2).  QD has no hypot; composition (cf. qf:1160).
+// hypot(a, b) = sqrt(a^2 + b^2), SCALED.  KI-8.
+//
+// QD 2.3.24 has no hypot (and no complex header at all), so this composition is
+// original to this port: there is no upstream scaling that was dropped, and
+// nothing to diverge from.
+//
+// The direct form squares its operands, so the intermediate a^2 leaves the
+// FP32 word range at |a| ~ 1.8e19 and flushes to zero at |a| ~ 1.1e-19 -- in both
+// cases while the ANSWER is perfectly representable.  hypot is precisely the
+// call a caller reaches for BECAUSE it wants an overflow-safe magnitude, so it
+// failing exactly there is worse than an ordinary accuracy defect.
+//
+// Remedy: factor the larger operand out.  t = min/max lies in [0,1], so t*t
+// cannot overflow whatever the operands are, and the only scaling is the final
+// multiply by m -- which overflows if and only if the true result does, so a
+// genuinely unrepresentable answer still reports inf rather than a wrong finite
+// value.
+//
+// The scaled form is NOT used unconditionally.  It costs a divide and is a
+// touch less accurate than the direct one (divide + square + sqrt + multiply
+// versus square + add + sqrt), so it is gated to the range where the direct
+// form actually breaks: for m inside [1.0e-18f, 1.0e18f] the old expression is
+// evaluated exactly as before and the added cost is two compares, not a divide.
+// Same reasoning as the atanh threshold in tf_complex.hpp -- fix the interval
+// that is broken, do not churn the one that is not.
+//
+// inf/nan convention (C99 F.9.4.3): hypot(+-inf, y) is +inf for ANY y, NaN
+// included, so the inf test comes first.  Otherwise a NaN operand propagates to
+// NaN through the arithmetic.  Both operands are taken through abs() first, so
+// the returned infinity is always +inf.
 XPMATH_INLINE_FUNCTION TripleFloat hypot(TripleFloat a, TripleFloat b) {
-    return sqrt(add(sqr(a), sqr(b)));
+    TripleFloat x = abs(a);
+    TripleFloat y = abs(b);
+    if (detail::isinf(x.f0)) return x;
+    if (detail::isinf(y.f0)) return y;
+    TripleFloat m = (x.f0 < y.f0) ? y : x;
+    TripleFloat n = (x.f0 < y.f0) ? x : y;
+    if (m.f0 == 0.0f) return TripleFloat(0.0f);
+    if (m.f0 <= 1.0e18f && m.f0 >= 1.0e-18f)
+        return sqrt(add(sqr(a), sqr(b)));
+    TripleFloat t = divide(n, m);
+    return multiply(m, sqrt(add(TripleFloat(1.0f), multiply(t, t))));
 }
 
 // copysign(a, b) = magnitude of a, sign of b. Exact sign manipulation; no QD

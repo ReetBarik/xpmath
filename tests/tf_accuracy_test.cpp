@@ -201,7 +201,10 @@ static const OpTolerance kOpTols[] = {
   {"angle", 20.5},
   {"pow", 19.0},         // exp-family, ~21.0-21.4 measured
   {"pow_int", 20.0},     // repeated multiply
-  {"hypot", 20.0},       // sqrt-based
+  {"hypot", 20.88},      // KI-8: ratcheted from 20.00. Measured mean 21.18 on
+                         //       [-100,100]^2 -- inside the scaling gate, so the
+                         //       KI-8 fix leaves this domain bit-identical and
+                         //       the old 1.18-digit slack was never earned.
 
   // Binary ops
   {"fmod", 20.0},        // unchanged; 21.70 once fmod is QD's aint form (P3.5)

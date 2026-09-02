@@ -95,6 +95,32 @@ struct DoubleDoubleComplex {
             return DoubleDoubleComplex();
         }
         // (a+bi)/(c+di) = [(ac+bd) + (bc-ad)i] / (c²+d²)
+        // KI-8.  The |denominator|^2 formulation squares b's components, so it
+        // overflows and underflows for denominators whose quotient is perfectly
+        // representable -- the same exposure as the unscaled hypot.  Past the
+        // gate, use Smith's algorithm (1962), which divides through by the
+        // larger component first so no intermediate exceeds the operands.
+        // Inside the gate the original expression is kept bit-for-bit: Smith
+        // costs two divides instead of one reciprocal and is slightly less
+        // accurate, and there is nothing to win where the direct form works.
+        {
+            double mre = detail::fabs(b.re.hi);
+            double mim = detail::fabs(b.im.hi);
+            double mb  = (mre > mim) ? mre : mim;
+            if (!(mb <= 1.0e150 && mb >= 1.0e-150)) {
+                if (mre >= mim) {
+                    DoubleDouble rr = divide(b.im, b.re);
+                    DoubleDouble dd = add(b.re, multiply(b.im, rr));
+                    return DoubleDoubleComplex(divide(add(re, multiply(im, rr)), dd),
+                               divide(subtract(im, multiply(re, rr)), dd));
+                } else {
+                    DoubleDouble rr = divide(b.re, b.im);
+                    DoubleDouble dd = add(multiply(b.re, rr), b.im);
+                    return DoubleDoubleComplex(divide(add(multiply(re, rr), im), dd),
+                               divide(subtract(multiply(im, rr), re), dd));
+                }
+            }
+        }
         DoubleDouble denom = add(multiply(b.re, b.re), multiply(b.im, b.im));
         DoubleDouble inv   = divide(DoubleDouble(1.0), denom);
         return DoubleDoubleComplex(multiply(add(multiply(re, b.re), multiply(im, b.im)), inv),
@@ -151,7 +177,23 @@ XPMATH_INLINE_FUNCTION DoubleDoubleComplex operator/(double b, DoubleDoubleCompl
 // Basic complex operations
 // ============================================================
 
+// KI-8.  abs(z) is a magnitude and the unscaled sqrt(re^2 + im^2) below returns
+// nan above |z| ~ 1.3e154 and 0 below |z| ~ 1.5e-154 on the FP64-word backends, in
+// both cases while the answer is representable.  Past that range, defer to the
+// scaled hypot.
+//
+// Inside the range the ORIGINAL expression is kept verbatim rather than routed
+// through hypot as well.  That is not conservatism for its own sake: hypot's
+// own fast path is written with the primitive each backend's hypot already
+// used, and on TF that is sqr() where this one is multiply().  Swapping them
+// costs up to 3.04 digits at four grid points (measured on the 428,592-point
+// sweep, TF c abs points 736/737/1528..1531), so the two call sites keep their
+// own primitives and share only the scaled tail.
 XPMATH_INLINE_FUNCTION DoubleDouble abs(DoubleDoubleComplex z) {
+    double mr = detail::fabs(z.re.hi);
+    double mi = detail::fabs(z.im.hi);
+    double m  = (mr > mi) ? mr : mi;
+    if (!(m <= 1.0e150 && m >= 1.0e-150)) return hypot(z.re, z.im);
     return sqrt(add(multiply(z.re, z.re), multiply(z.im, z.im)));
 }
 XPMATH_INLINE_FUNCTION DoubleDoubleComplex conj(DoubleDoubleComplex z) {
@@ -164,7 +206,7 @@ XPMATH_INLINE_FUNCTION DoubleDoubleComplex conj(DoubleDoubleComplex z) {
 XPMATH_INLINE_FUNCTION DoubleDoubleComplex sqrt(DoubleDoubleComplex z) {
     if (z.re.hi == 0.0 && z.im.hi == 0.0) return DoubleDoubleComplex();
     // B = sqrt((R+A1)/2) + i*sign(A2)*sqrt((R-A1)/2)  where R = |z|
-    DoubleDouble r  = sqrt(add(multiply(z.re, z.re), multiply(z.im, z.im)));
+    DoubleDouble r  = abs(z);   // KI-8: scaled magnitude, was sqrt(re^2+im^2) inline
     DoubleDouble a1 = abs(z.re);
     DoubleDouble s2 = multiply_scalar(add(r, a1), 0.5);
     DoubleDouble s0 = sqrt(s2);

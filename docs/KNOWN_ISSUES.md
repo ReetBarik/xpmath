@@ -1464,10 +1464,11 @@ well-conditioned there — so the loss is the algorithm's, not the format's.
 
 **None of them were fixed when this block was written** — that session measured
 and documented only. **KI-6 and KI-7 have since been resolved** (2026-09-02,
-commit `ad82f4f`); KI-8 through KI-11 remain open. `docs/DOMAINS.md` records the
+commit `ad82f4f`) and **KI-8** has since been resolved (2026-09-02, commit
+`d02a3bb`); KI-9 through KI-11 remain open. `docs/DOMAINS.md` records the
 resulting usable ranges per backend per op, and is generated from the same data —
-it was regenerated after the KI-6/KI-7 fix, so the counts quoted in the KI-6 and
-KI-7 *Extent* sections above are the pre-fix numbers and no longer match the
+it was regenerated after each fix, so the counts quoted in the KI-6, KI-7 and
+KI-8 *Extent* sections above are the pre-fix numbers and no longer match the
 current CSVs.
 
 ---
@@ -1821,7 +1822,7 @@ ratcheted from `|x| < 300` / `uniform(-50,50)` to `isfinite(x)` /
 
 ---
 
-## KI-8 — `hypot` and complex `abs` have NO scaling, so they overflow and underflow far inside the representable range
+## KI-8 — `hypot` and complex `abs` have NO scaling, so they overflow and underflow far inside the representable range **[RESOLVED]**
 
 **Severity: high, FP32-word backends (FF, QF, TF); DD unaffected.**
 
@@ -1856,6 +1857,130 @@ same defect is latent there and would appear beyond ±1e154.
 
 Scale by the larger operand: `m = max(|a|,|b|); r = m·sqrt(1 + (n/m)²)`.
 One extra division, and it removes both the overflow and the underflow limb.
+
+### Resolution (2026-09-02)
+
+Fixed in **`d02a3bb`**, all four backends (`dd_math.hpp`, `ff_math.hpp`,
+`qf_math.hpp`, `tf_math.hpp`, and the four `*_complex.hpp`).
+
+**Is it a porting defect?** No. QD 2.3.24 has no `hypot` anywhere in
+`include/qd/` or `src/`, and no complex header at all — the sole complex support
+is the C bindings `c_dd.h`/`c_qd.h`, which expose real arithmetic only. There is
+therefore no upstream scaling that this port dropped, and nothing to diverge
+from: `hypot` and the whole `*_complex.hpp` family are original compositions and
+this is an original defect in them.
+
+**What was done.** `hypot(a,b)` now takes `x=|a|`, `y=|b|`, `m=max`, `n=min` and
+returns `m·sqrt(1 + (n/m)²)`, which cannot overflow in the intermediate because
+`n/m ∈ [0,1]`. Complex `abs` and complex `/` got the same treatment (the latter
+via Smith's algorithm, 1962, for the `|denominator|²` formulation).
+
+**The scaled form is gated, not unconditional.** It is used only for
+`m` outside `[1e-18, 1e18]` on the FP32-word backends and `[1e-150, 1e150]` on
+DD — i.e. only where the direct form actually breaks. Inside the gate the
+original expression is evaluated bit-for-bit and the cost is two compares. Two
+reasons, both measured on the 428,592-point sweep:
+
+1. The scaled form is a touch less accurate (divide + square + sqrt + multiply
+   versus square + add + sqrt), and there is nothing to win where the direct
+   form works.
+2. The backends do not agree on the squaring primitive. TF's `hypot` used
+   `sqr()` where TF's complex `abs` used `multiply(a,a)`, and they are not
+   interchangeable: routing complex `abs` through `hypot`'s `sqr()` cost up to
+   **3.04 digits** at TF `c abs` points 736/737/1528–1531 (and propagated to
+   `c sqrt`, `c log`, `c log10` — 115 decreases in all). Each call site
+   therefore keeps its own primitive inside the gate and they share only the
+   scaled tail. This is the same "fix the interval that is broken, do not churn
+   the one that is not" reasoning as the `atanh` threshold in `*_complex.hpp`.
+
+**inf/nan convention (C99 F.9.4.3).** `hypot(±inf, y)` is `+inf` for *any* `y`,
+NaN included, so the infinity test comes first; both operands go through `abs()`
+first so the returned infinity is always `+inf`. Otherwise a NaN operand
+propagates to NaN through the arithmetic. `hypot(0,0) = 0`.
+
+**Measured before/after.** Operand pairs spanning the format, scored against a
+`__float128` oracle:
+
+```
+                                        BEFORE            AFTER        true
+FF hypot(1e-30, 1.5772958e+21)          nan            1.577296e+21  1.577296e+21
+FF hypot(0, 1e-23)                      0              1.000000e-23  1.000000e-23
+FF hypot(1e-25, 1e-25)                  0              1.414214e-25  1.414214e-25
+FF hypot(1e+30, 1e+30)                  inf            1.414214e+30  1.414214e+30
+FF hypot(1e-38, 1e-38)                  0              1.414214e-38  1.414214e-38
+QF/TF: identical to FF at all five points (same FP32 word range).
+DD hypot(1e+200, 1e+200)                1.414214e+200  1.414214e+200 (unchanged)
+DD hypot(1e-320, 1e-320)                1.414016e-320  1.414016e-320 (unchanged)
+FF c abs(0 + 1e-23i)                    0              1.000000e-23  1.000000e-23
+FF c abs(1e30 + 1e30i)                  inf            1.414214e+30  1.414214e+30
+FF c div (1+i)/(1e30+1e30i)             nan            1.000000e-30  1.000000e-30
+```
+
+Answers that genuinely do overflow still report non-finite, never a wrong finite
+value: `FF/QF/TF hypot(1e300, 1e300)` → `inf` (true 1.41e300, far past the FP32
+word's 3.4e38). One residual wrinkle at the very edge: `QF/TF hypot(3e38, 3e38)`
+(true 4.24e38, just past 3.4e38) returns **NaN** rather than `+inf`, because the
+final `multiply(m, ·)` overflows inside renormalization and produces `inf-inf`.
+FF returns `inf` correctly. Both are non-finite, so no wrong finite value
+escapes; tightening NaN to +inf there would need an overflow probe in the QF/TF
+renormalizers and is not worth a divide on every call. Recorded here rather than
+opened as a new KI.
+
+**Sweep effect.** Monotone gate exit **0**: 3,003 points increased, **0**
+decreased, 425,589 unchanged. Every returned-zero point in the two named cells
+is gone:
+
+```
+zero-scoring points   BEFORE   AFTER
+FF  hypot               309       0
+QF  hypot               315       0
+TF  hypot               312       0
+DD  hypot                 0       0
+FF  c abs                66       0
+QF  c abs                84       0
+TF  c abs                78       0
+DD  c abs                 0       0
+```
+
+**DD was genuinely unaffected — verified, not assumed.** DD scored 31.00 mean
+with zero 0.00 points on both `hypot` and `c abs` before the fix and after it,
+and the direct-form probes above at 1e±200/1e±320 return the right answer
+unscaled. The defect is latent there, not absent: a `double` word squares safely
+only to ≈1.3e154, so DD received the same gated scaling with its own thresholds.
+The sweep grid simply never reaches past 1e154.
+
+**Family audit.** Everything that forms a sum of squares, a norm or a magnitude,
+across all four `*_complex.hpp`:
+
+| member | verdict |
+|---|---|
+| `hypot` (real) | **exposed — fixed**, scaled with gate |
+| complex `abs` | **exposed — fixed**, own fast path + scaled tail |
+| complex `operator/` | **exposed — fixed**, Smith's algorithm past the gate |
+| complex `sqrt` | **exposed — fixed**; it recomputed `sqrt(re²+im²)` inline, now calls the fixed `abs(z)` |
+| complex `log`, `log10` | sound *by inheritance* — they call `abs(z)`, and improved with it |
+| complex `norm` (QF, TF only) | **sound — no fix possible.** `norm = \|z\|²` overflows exactly when its own answer does, and underflows exactly when its answer is unrepresentable. There is no scaling that preserves the result. |
+| complex `arg` | sound — `atan2(im, re)`, forms no magnitude |
+| `polar` | sound — `r·(cos θ + i sin θ)`, no squaring |
+| complex `pow` | sound by inheritance — `exp(w·log z)` |
+| complex `tan`/`tanh` (`denom = cb² + T2·sb²`) | sound — `cb`, `sb` are sine/cosine and `T2` a squared tanh, all bounded by 1; the sum cannot leave the range |
+| complex `atanh` small branch (`den = (1-x)² + y²`) | sound — already gated to \|z\| < 0.0625 by KI-5(b), with a comment naming this exact overflow as the reason for the gate |
+| complex `asinh`/`acosh`/`asin`/`acos` | sound — they route through the fixed `sqrt`/`log`/`abs`, and form no bare sum of squares of their own |
+
+**Cost.** Not measured. A cheap measurement was not available: the cost
+benchmark is a demo target and demos were out of scope for this session, and a
+microbenchmark of an inlined header function under `-O2` would mostly measure
+the harness. What can be stated from the code: inside the gate the fix adds two
+floating-point compares on the leading words and nothing else — no divide, no
+branch misprediction hazard for the common case — and the gate covers 36 decades
+on the FP32-word backends and 300 on DD. The divide is paid only outside it.
+
+**Ratchet.** `tests/tf_accuracy_test.cpp` `{"hypot", 20.0}` → `20.88`
+(measured mean 21.18 on [-100,100]², a domain wholly inside the gate and so
+bit-identical before and after; the 1.18-digit slack was never earned). The
+`dd`/`ff`/`qf` hypot rows sit under shared family-class tolerances, not per-op
+rows, and were left alone. The complex `abs`/`sqrt` rows already carry the
+standard 0.30 headroom and did not move.
 
 ---
 
