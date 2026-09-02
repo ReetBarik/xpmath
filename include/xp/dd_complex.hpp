@@ -288,8 +288,59 @@ XPMATH_INLINE_FUNCTION DoubleDoubleComplex tanh(DoubleDoubleComplex z) {
 // ============================================================
 // Complex inverse hyperbolic
 // ============================================================
+// asinh(z) = log(z + sqrt(z^2 + 1)), reflected into the right half-plane when
+// the direct form would cancel.
+//
+// KI-5(a) (fixed 2026-09-02, see docs/KNOWN_ISSUES.md). For Re(z) < 0 the
+// identity is ill-conditioned: sqrt(z^2 + 1) -> -z, so the sum is a difference
+// of near-equal quantities. sqrt carries absolute error ~eps*|z|, which the sum
+// (magnitude ~1/(2|z|)) inflates to a RELATIVE error of ~2|z|^2 * eps — two
+// digits lost per decade of |z|, reaching total loss once the cancellation
+// consumes the whole word. asinh is an ODD function, so -asinh(-z) moves the
+// evaluation into the well-conditioned half-plane at the cost of two sign
+// flips, which are exact. No new series and no new constants.
+//
+// THRESHOLD (kXpAsinhReflect = 4). The reflection is gated on magnitude as well
+// as sign, which is a deliberate departure from the plain `Re(z) < 0` rule.
+// The loss the reflection removes is log10(2|z|^2) digits; the reflection
+// substitutes a different rounding path, worth a few tenths of a digit in
+// either direction. Below |z| ~ 4 the loss it removes is smaller than the churn
+// it introduces, so applying it there is a net harm — measured, not assumed. On
+// the 1780-point complex sweep grid, reflecting unconditionally moved 535
+// points DOWN and 396 up in the |z| <= 1 bin (worst -6.77 digits, QF at
+// z = -1e-16, where asinh(z) ~ z and there was never any cancellation to fix),
+// while |z| > 4 was 859 up against 25 down (best +28.22, DD at z = -1e15).
+// Gating at 4 keeps every one of those 859 improvements and removes 944 of the
+// 969 regressions. 4 also sits comfortably inside the region where the
+// asymptotic argument holds (log10(2*16) = 1.5 digits already at stake) and is
+// exactly representable, so the comparison itself is exact.
+//
+// The test is L-infinity on the LEADING limbs — max(-Re, |Im|) > 4 — not
+// hypot(). That is deliberate: it cannot overflow for any finite z (hypot on
+// z ~ 1e200 would), it costs two compares instead of two multiplies and a
+// sqrt, and the leading limb settles the comparison outright unless |z| is
+// within one ulp of the threshold, where either branch is equally good. It
+// selects the L-inf ball of radius 4 rather than the L2 ball, i.e. it also
+// reflects part of the annulus 4 < |z| <= 4*sqrt(2); the binning above shows
+// that band behaves like the |z| > 4 side.
+//
+// BOUNDARY: the sign predicate is `Re(z) < 0`, so Re(z) == +0 AND Re(z) == -0
+// both take the direct branch, exactly as before this change. Two reasons.
+// (1) There is no cancellation to avoid on the imaginary axis — for z = iy the
+// sum is i*(y + sqrt(y^2 - 1)), like signs — so the reflection would buy
+// nothing. (2) asinh's branch cuts LIVE on the imaginary axis (|Im| > 1), where
+// the sign of a zero real part selects the sheet; routing -0 through a negation
+// would rewrite that selection. Leaving Re == -0 on the direct branch keeps the
+// on-cut behaviour bit-for-bit what it was. (The headers' on-cut handling for
+// Re(z) == -0 is separately wrong — it is the asinh analogue of KI-5(d) and is
+// NOT addressed here.) All four complex headers use this same predicate and the
+// same threshold.
 XPMATH_INLINE_FUNCTION DoubleDoubleComplex asinh(DoubleDoubleComplex z) {
-    // asinh(z) = log(z + sqrt(z^2 + 1))
+    const double t = 4.0;   // kXpAsinhReflect
+    if (z.re.hi < 0.0 && (-z.re.hi > t || detail::fabs(z.im.hi) > t)) {
+        DoubleDoubleComplex w = -z;
+        return -log(w + sqrt(w*w + DoubleDoubleComplex(DoubleDouble(1.0))));
+    }
     return log(z + sqrt(z*z + DoubleDoubleComplex(DoubleDouble(1.0))));
 }
 XPMATH_INLINE_FUNCTION DoubleDoubleComplex acosh(DoubleDoubleComplex z) {

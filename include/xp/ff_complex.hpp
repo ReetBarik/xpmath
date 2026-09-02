@@ -284,8 +284,17 @@ XPMATH_INLINE_FUNCTION FloatFloatComplex tanh(FloatFloatComplex z) {
 // ============================================================
 // Complex inverse hyperbolic
 // ============================================================
+// asinh(z) = log(z + sqrt(z^2 + 1)), reflected into the right half-plane via the
+// oddness identity -asinh(-z) when the direct form would cancel. KI-5(a); see
+// dd_complex.hpp's asinh for the full rationale, the magnitude threshold and its
+// measured justification, and the Re(z) == +-0 boundary decision — all identical
+// here.
 XPMATH_INLINE_FUNCTION FloatFloatComplex asinh(FloatFloatComplex z) {
-    // asinh(z) = log(z + sqrt(z^2 + 1))
+    const float t = 4.0f;   // kXpAsinhReflect
+    if (z.re.hi < 0.0f && (-z.re.hi > t || detail::fabs(z.im.hi) > t)) {
+        FloatFloatComplex w = -z;
+        return -log(w + sqrt(w*w + FloatFloatComplex(FloatFloat(1.0f))));
+    }
     return log(z + sqrt(z*z + FloatFloatComplex(FloatFloat(1.0f))));
 }
 XPMATH_INLINE_FUNCTION FloatFloatComplex acosh(FloatFloatComplex z) {

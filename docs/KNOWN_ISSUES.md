@@ -201,9 +201,10 @@ committed; it links all four headers and scores each against `cacoshq`).
 
 ---
 
-## KI-2 — `nint` is wrong for the one-ulp-below-a-tie class
+## KI-2 — `nint` is wrong for the one-ulp-below-a-tie class **[RESOLVED]**
 
-**Severity: low, scope: inherited from QD.**
+**Severity: low as filed — actually MEDIUM in TF, see the resolution. Scope:
+inherited from QD.**
 
 `0.49999997f + 0.5f` rounds to exactly `1.0f`, so TF's `nint`, formulated as
 `floor(x + 0.5)` per QD, returns 1 where the nearest integer is 0. A genuine wrong
@@ -212,6 +213,84 @@ answer, not a precision shortfall. FP64 QD has the same defect.
 Found in S10 phase 3.5 and excluded by domain predicate rather than absorbed into a
 tolerance — see `docs/PORT_NOTES_TF.md` §12f. Closing it means diverging from QD's
 `nint` formulation, which the source-fidelity rule discourages without cause.
+
+### Resolution (2026-09-02, commit `TBD-FIX`)
+
+`floor(d + 0.5)` replaced by `detail::rint(d)` plus a tie-direction restore, in
+`qf_math.hpp` (`qf_nint`) and `tf_math.hpp` (`tf_nint`, new). `rint` does the same
+rounding in one instruction with no intermediate to double-round, so the hazard
+cannot arise; it is one hardware instruction on every target (`roundss`, `frintn`,
+`cvt.rni`, `v_rndne`), and it stays correct under a non-default rounding mode,
+where `floor(x + 0.5)` silently does not. `detail::rint` was added to
+`config.hpp`'s dispatch.
+
+`rint` is ties-to-EVEN and QD's form is ties-toward-+INFINITY (toward +inf, not
+away from zero: `floor(-2.5 + 0.5) = -2`). The tie DIRECTION is deliberately
+preserved by the `d - r == 0.5f` line — it is user-visible through `round`, and
+the multi-word tie corrections assume the leading word rounded up. KI-2 is the
+near-tie *wrong answer*; the tie direction is a convention and changing it is not
+part of closing KI-2. A zero-sign line likewise restores `+0.0` on `(-0.5, 0)`,
+so the change is provably minimal.
+
+**DD and FF were audited and are NOT affected.** Both use magic-constant forms
+(`2^105 + 2^52` at DD, `2^52` in FP64 at FF), never `floor(x + 0.5)`, and both are
+exact and ties-to-even over their whole supported range. FF's was nevertheless
+swapped to `rint` to drop the magic constant and gain rounding-mode correctness;
+that swap is bit-identical to the old form, *including* the zero-sign line, which
+the audit below showed is load-bearing. (DD and FF are ties-to-even; QF and TF are
+ties-toward-+infinity. The two families have always disagreed on ties.)
+
+**TF's exposure was far wider than the filed one-input description — this is the
+substantive finding.** `qf_nint` short-circuited integers (`if (d == floor(d))
+return d;`) before reaching the floor form, so QF's only wrong input really was
+`0.49999997f`. TF's `round_to_nearest_int` called `floor(a.fN + 0.5f)` **bare**,
+with no such guard. For an odd integer `d` in `[2^23, 2^24)`, where ulp is exactly
+1, `d + 0.5f` is a perfect tie that round-half-to-even resolves *upward* to
+`d + 1`, so `floor` returned `d + 1` as the nearest integer **of an integer**.
+That is 2^22 wrong inputs per limb, on every limb of every TF reduction — not one
+input. The fix repairs all of them.
+
+**Surviving `floor(x + 0.5f)`: exactly one, `tf_math.hpp`'s `exp` range
+reduction, deliberately not converted.** Its guards bound the argument to
+magnitude < 116, nowhere near the `[2^23, 2^24)` band, and a near-tie off-by-one
+in a reduction quotient is harmless rather than wrong — `r` shifts by `ln2`, gets
+divided by `2^nq`, stays inside the convergence radius, and the same `m` scales
+back. Converting it would perturb a large input set to buy nothing.
+
+**Accepted regressions.** The monotone gate records six points that decreased.
+All are collateral of the *correct* new rounding and all are documented trades,
+not silent losses:
+
+| point | op | coordinates | before → after |
+|---|---|---|---|
+| `r/893`  | TF `remainder` | `-97.389372261283611` (−31π − 2 ulp) | 0.33 → 0.00 |
+| `c/374`  | TF `polar`     | `-3.8268e7 - 9.2388e7i` | 14.83 → 14.57 |
+| `c/375`  | TF `polar`     | `-1.9509e7 - 9.8079e7i` | 14.72 → 14.53 |
+| `c/377`  | TF `polar`     | `+1.9509e7 - 9.8079e7i` | 14.72 → 14.53 |
+| `c/378`  | TF `polar`     | `+3.8268e7 - 9.2388e7i` | 14.83 → 14.57 |
+| `c/396`  | QF `pow`       | `-100 + 1e-5i` | 28.42 → 27.77 |
+
+`r/893` is `a = -97.389372261283611` (−31π − 2 ulp), `b = 3.5976482930064347e-21`.
+It is the point that *found* the odd-integer class: the third limb of the TF
+quotient is `15430381`, an odd integer in `[2^23, 2^24)`, so the old code returned
+`15430382` and the new one correctly returns `15430381`. The score dropped anyway
+because **`remainder` is meaningless at this operand pair**: `|a/b| = 2.7e22`,
+where TF's ulp is `11.46`, so `nint(a/b)` is undetermined by ~11 integer units and
+the answer carries an uncertainty of `11·b ≈ 4e-20` against a true remainder of
+`1.16e-21` — 34× the answer itself. Both 0.33 and 0.00 are noise; the old value
+merely landed closer by luck. Verified directly by evaluating both formulations
+side by side at that point.
+
+The four `polar` points are large arguments (|z| ~ 1e8) whose `sincos` reduction
+quotient reaches the same limb band; `c/396` is complex `pow`, which is
+`exp(b·log(a))` and so goes through the same reduction. Note `c/377` has
+**positive** real part and `pow`/`polar` never call `asinh` — that is what rules
+out any KI-5(a) involvement and pins these five on the rounding change.
+Sub-0.7-digit motion well inside the digit budget, on the correct-rounding side.
+**Accepted.**
+
+Net across the whole sweep: 884 points up, 31 down (the 6 here plus the 25 under
+KI-5(a)), 427,677 unchanged.
 
 ---
 
@@ -415,10 +494,90 @@ and the result is `-inf`.
 The last row of the backend table matters: `-1e2 + 1i` is off the real axis and
 degrades identically, so this is a half-plane property, not a cut property.
 
-**Remedy — exact, free, and one line.** `asinh` is an ODD function, so for
-`Re(z) < 0` compute `-asinh(-z)`, which moves the evaluation into the
-well-conditioned right half-plane. No new series, no new constants, no accuracy
-cost anywhere else.
+**Remedy — exact, and one line.** `asinh` is an ODD function, so for `Re(z) < 0`
+compute `-asinh(-z)`, which moves the evaluation into the well-conditioned right
+half-plane. No new series and no new constants. *(This paragraph originally read
+"free … no accuracy cost anywhere else". That was wrong, and the monotone gate
+caught it — see the accepted regressions in the resolution below.)*
+
+### (a) Resolution (2026-09-02, commit `TBD-FIX`)
+
+Implemented in all four `*_complex.hpp` headers. The predicate is **not** the
+plain `Re(z) < 0` the remedy proposed; it is gated on magnitude as well as sign:
+
+```cpp
+if (z.re.hi < 0 && (-z.re.hi > 4 || fabs(z.im.hi) > 4))   // kXpAsinhReflect = 4
+    return -asinh(-z);
+```
+
+The loss the reflection removes is `log10(2|z|²)` digits; the reflection also
+substitutes a different rounding path, worth a few tenths either way. Below
+`|z| ~ 4` the loss removed is smaller than the churn introduced. Measured on the
+1780-point complex grid: reflecting **unconditionally** moved 535 points down and
+396 up in the `|z| <= 1` bin (worst `-6.77`, QF at `z = -1e-16`, where
+`asinh(z) ≈ z` and there was never any cancellation to fix), while `|z| > 4` was
+859 up against 25 down (best `+28.22`, DD at `z = -1e15`). Gating at 4 keeps all
+859 improvements and removes 944 of the 969 regressions.
+
+The test is L-infinity on the leading limbs — `max(-Re, |Im|) > 4` — not
+`hypot()`: it cannot overflow at `z ~ 1e200`, costs two compares, and 4 is exactly
+representable so the comparison is exact. The sign predicate is `Re(z) < 0`, so
+`Re(z) == ±0` both keep the direct branch: there is no cancellation on the
+imaginary axis, and `asinh`'s cuts live there, where the sign of a zero real part
+selects the sheet — routing `-0` through a negation would rewrite that selection.
+(The on-cut handling for `Re(z) == -0` is separately wrong; that is the `asinh`
+analogue of KI-5 (d) and is **not** addressed here.)
+
+**Effect — the defect is closed.** Digits against `__complex128`, after:
+
+```
+z         DD(31)   FF(14)   QF(29)   TF(21.7)     (before, double proxy)
+-1e2       31.00    14.00    28.40     21.47          13.40
+-1e4       31.00    14.00    29.00     21.50           8.86
+-1e6       31.00    14.00    28.95     21.70           6.28
+-1e8       31.00    14.00    29.00     21.70           0.00   <-- was total loss
++1e6       31.00    14.00    28.95     21.70          17.00   <-- control, unchanged
+```
+
+Every backend at or near cap, including the points that previously returned
+`-inf`.
+
+**Accepted regressions — 25 points, and they were NOT placeable away.** The
+working hypothesis was that they sit near the `Re(z) = 0` branch boundary and
+that moving the boundary would shed them. The grid coordinates refute it: every
+one is far inside the reflected region, and they cluster on the structural
+families the grid samples deliberately.
+
+| backend | points | coordinates | worst |
+|---|---|---|---|
+| DD | `c/448,449,1594,1595` | `-10 ± 0i` (`cut-re`, `axis`) | 31.00 → 30.53 |
+| DD | `c/299,309` | `-5.5557 ± 8.3147i` (`polar`, \|z\| = 10) | 30.62 → 30.17 |
+| DD | `c/368` | `-1e8 + 1.2246e-8i` | 17.09 → 16.45 |
+| DD | `c/1091,1121,1411,1441` | `-1, -1e-15 ± 10i` (`cut-im`) | 30.39 → 30.23 |
+| QF | `c/384,385,1598,1599` | `-100 ± 0i` | 28.71 → 28.40 |
+| QF | `c/492,493,504,505` | `-10 ± 1e-21i, -10 ± 1e-27i` | 22.24 → 21.77 |
+| QF | `c/1093,1097,1413,1417` | `-0.1, -0.001 ± 10i` (`cut-im`) | 28.63 → 28.46 |
+| TF | `c/446,447` | `-100 ± 1e-30i` | 13.00 → 12.34 |
+
+Worst drop across all 25: **0.66 digits**. Three observations settle the
+placement question:
+
+1. **They are not boundary artifacts.** `|z|` ranges from 10 to 1e8 — one to seven
+   decades past `kXpAsinhReflect`. Moving the threshold cannot reach them without
+   also un-reflecting the region where the fix delivers +14 to +28 digits.
+2. **They come in exact ± pairs** (`448/449`, `384/385`, `446/447`, `1594/1595`)
+   straddling `Im = ±0`. That is the signature of an extra exact negation
+   changing which side of a rounding boundary the `log` argument lands on — a
+   half-ulp coin flip, not a conditioning failure. It is intrinsic to evaluating
+   `-asinh(-z)` instead of `asinh(z)`: the two expressions are mathematically
+   identical and cannot be made bit-identical.
+3. **The trade is not close.** 0.66 digits lost at 25 points, against 859 points
+   improved by up to +28.22 and four previously-dead points restored from 0.00 to
+   cap. Losing half a digit at 30 costs nothing anyone can use; recovering a
+   result that was `-inf` is the whole point of the fix.
+
+**Decision: accepted, not placed away.** Recorded here rather than absorbed by
+regenerating the baseline, so the trade stays visible in the sweep diff.
 
 ---
 

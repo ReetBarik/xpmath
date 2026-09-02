@@ -166,6 +166,14 @@ namespace detail {
 // some entries are unused by any single header — that is deliberate: this is
 // the one place the policy is stated, and S5 must not have to reopen it.
 // dd_math.hpp additionally needs atan2 and ldexp; both are included below.
+//
+// `rint` (KI-2, 2026-09-02) is the round-to-nearest-integer primitive used by
+// qf_math.hpp's and tf_math.hpp's `*_nint`. It is one hardware instruction on
+// every target this library compiles for — x86 `roundsd`/`roundss`, ARM
+// `frintn`, PTX `cvt.rni`, AMD `v_rndne` — and unlike `floor(x + 0.5)` it never
+// double-rounds, which is the whole of KI-2. It honours the CURRENT rounding
+// mode rather than hard-coding nearest; that is a feature, not a hazard,
+// because under a directed mode `floor(x + 0.5)` is simply wrong.
 #if defined(XPMATH_ON_DEVICE_CUDA_OR_HIP)
 using ::atan;
 using ::atan2;
@@ -178,6 +186,7 @@ using ::isfinite;
 using ::isinf;
 using ::ldexp;
 using ::log;
+using ::rint;
 using ::sqrt;
 #else
 using std::atan;
@@ -191,6 +200,7 @@ using std::isfinite;
 using std::isinf;
 using std::ldexp;
 using std::log;
+using std::rint;
 using std::sqrt;
 #endif
 

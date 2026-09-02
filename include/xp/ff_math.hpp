@@ -514,12 +514,30 @@ XPMATH_INLINE_FUNCTION FloatFloat abs(FloatFloat a) {
     return (a.hi >= 0.0f) ? a : FloatFloat(-a.hi, -a.lo);
 }
 
-// Nearest integer. The DD-style magic-constant trick (using a 2^47 FF constant)
-// is fragile in FP32: ULP at 2^47 is 2^24, much larger than typical integer
-// inputs, so the FF lo component must rescue the precision and ties land on
-// the wrong side. Instead, do the rounding in FP64 — FF values are bounded by
-// 2^48 and fit exactly in FP64's 53-bit mantissa, where the magic-constant
-// trick is well-conditioned.
+// Nearest integer, TIES TO EVEN. The DD-style magic-constant trick (using a
+// 2^47 FF constant) is fragile in FP32: ULP at 2^47 is 2^24, much larger than
+// typical integer inputs, so the FF lo component must rescue the precision and
+// ties land on the wrong side. Instead, do the rounding in FP64 — FF values are
+// bounded by 2^48 and fit exactly in FP64's 53-bit mantissa. `(double)a.hi +
+// (double)a.lo` is exact for a NORMALIZED pair, where lo sits just under
+// ulp(hi)/2 — 24 + 24 adjacent significant bits against FP64's 53. It is NOT
+// exact for a pair whose limbs are far apart (lo below 2^-53*|hi|, which the
+// non-overlap invariant permits); that case is KI-6, filed, not fixed here.
+//
+// KI-2 (2026-09-02): FF is NOT one of the two backends KI-2 affects. That defect
+// is QD's `floor(d + 0.5)` double-rounding, and this routine never had that
+// formulation. It previously used the FP64 magic constant
+// `(total + 2^52) - 2^52`, which for |total| < 2^47 is exact and ties-to-even —
+// i.e. already right. `detail::rint` is the same function in one instruction,
+// with two advantages worth the swap: it needs no magic constant, and it stays
+// correct under a non-default rounding mode, where the magic-constant trick
+// silently is not. Verified bit-identical to the old form over the whole
+// half-integer and near-half-integer class; see docs/KNOWN_ISSUES.md, KI-2 resolution.
+//
+// Ties-to-even is the SHIPPED semantics of ff::round and is what
+// ff_accuracy_test.cpp's `nearbyintq` oracle expects. It is deliberately
+// unchanged. (QF and TF are ties-toward-+infinity and are likewise unchanged;
+// the two backend families disagree on ties and always have.)
 XPMATH_INLINE_FUNCTION FloatFloat round_to_nearest_int(FloatFloat a) {
     if (a.hi == 0.0f) return FloatFloat(0.0f);
     double total = (double)a.hi + (double)a.lo;
@@ -527,8 +545,15 @@ XPMATH_INLINE_FUNCTION FloatFloat round_to_nearest_int(FloatFloat a) {
         XPMATH_PRINTF("FFNINT: argument too large\n");
         return FloatFloat(0.0f);
     }
-    const double T52 = 4.503599627370496e15; // 2^52
-    double rounded = (total > 0.0) ? (total + T52) - T52 : (total - T52) + T52;
+    double rounded = detail::rint(total);
+    // Zero-sign restore, exactly as qf_nint/tf_nint do. rint(total) is -0.0 for
+    // every total in (-0.5, 0), where the magic-constant form returned +0.0
+    // ((total - 2^52) + 2^52 is a cancellation, and x + (-x) is +0 under
+    // round-to-nearest). Without this line the swap is NOT bit-identical to the
+    // old form and the sign of a zero reduction quotient flips — observable,
+    // because sincos multiplies that quotient back in. With it, the swap is
+    // provably a no-op on every input.
+    if (rounded == 0.0) rounded = 0.0;
     float hi = (float)rounded;
     float lo = (float)(rounded - (double)hi);
     return FloatFloat(hi, lo);

@@ -678,21 +678,45 @@ XPMATH_INLINE_FUNCTION TripleFloat sqrt(TripleFloat a) {
     return r;
 }
 
+// Nearest FP32-int of a single float, ties toward +infinity. Mirrors
+// qf_math.hpp's qf_nint exactly, including the KI-2 fix — see the long comment
+// there for why this is `rint` plus a tie-direction restore and not QD's
+// literal `floor(d + 0.5)`. In one line: 0.49999997f + 0.5f rounds up to 1.0f
+// in FP32, so the floor form returns 1 where the nearest integer is 0. TF is
+// where KI-2 was originally found (S10 Phase 3.5, PORT_NOTES_TF.md §12f).
+//
+// TF's exposure was MUCH wider than QF's, and the two are worth separating
+// because only the new code is common. qf_nint short-circuited integers
+// (`if (d == floor(d)) return d;`) before reaching the floor form, so QF's only
+// wrong input was 0.49999997f. round_to_nearest_int below called
+// `floor(a.fN + 0.5f)` bare, with no such guard — and for an ODD integer d in
+// [2^23, 2^24), where ulp is exactly 1, `d + 0.5f` is a perfect tie that
+// round-half-to-EVEN resolves UPWARD to d + 1, so floor returned d + 1 as the
+// "nearest integer" of an integer. That is 2^22 wrong inputs per limb, not one,
+// and it reached every limb of every reduction TF performs. The monotone gate
+// caught it at the third limb of a `remainder` quotient (grid point r/893); see
+// docs/KNOWN_ISSUES.md, KI-2 resolution.
+XPMATH_INLINE_FUNCTION float tf_nint(float d) {
+    float r = detail::rint(d);
+    if (d - r == 0.5f) r += 1.0f;
+    if (r == 0.0f && d != 0.0f) r = 0.0f;   // (-0.5, 0) -> +0, as QD gave
+    return r;
+}
+
 // Round to nearest integer. Port of qd_real::nint (qd_real.cpp:48-86, the k=4
-// floor(d+0.5) form), specialized to k=3. QD's nint is floor-based and does
-// NOT use the magic-constant trick (so the FF ffnint magic-constant bug
-// PORT_NOTES.md §4b does not recur here). Half-integer tie corrections are
-// keyed on the sign of the next component.
+// floor(d+0.5) form), specialized to k=3, with tf_nint standing in for the
+// floor form (KI-2). Half-integer tie corrections are keyed on the sign of the
+// next component, and remain valid because tf_nint keeps QD's tie direction.
 XPMATH_INLINE_FUNCTION TripleFloat round_to_nearest_int(TripleFloat a) {
     float f0, f1, f2;
-    f0 = detail::floor(a.f0 + 0.5f);
+    f0 = tf_nint(a.f0);
     f1 = 0.0f;
     f2 = 0.0f;
 
     if (f0 == a.f0) {
-        f1 = detail::floor(a.f1 + 0.5f);
+        f1 = tf_nint(a.f1);
         if (f1 == a.f1) {
-            f2 = detail::floor(a.f2 + 0.5f);
+            f2 = tf_nint(a.f2);
         } else {
             if (detail::fabs(f1 - a.f1) == 0.5f && a.f2 < 0.0f)
                 f1 -= 1.0f;
@@ -756,6 +780,16 @@ XPMATH_INLINE_FUNCTION TripleFloat exp(TripleFloat a) {
     if (a.f0 <= -80.0f) return TripleFloat(0.0f);
     if (a.f0 >=  80.0f) return TripleFloat(1.0e30f);
 
+    // KI-2 audit (2026-09-02): this is the ONE surviving `floor(x + 0.5f)` in
+    // the library, and it is deliberately not converted to tf_nint. Both KI-2
+    // failure modes are unreachable here. The guards above bound a.f0 to
+    // (-80, 80), so the argument is under 116 in magnitude — nowhere near the
+    // [2^23, 2^24) band where the odd-integer tie bites. And the near-tie case
+    // (0.49999997f-class) is harmless for a range reduction rather than wrong:
+    // an off-by-one m shifts r by ln2, which then gets divided by 2^nq and
+    // stays deep inside the series' convergence radius, and the same m is used
+    // for the scale-back, so the result is unchanged. Converting it would
+    // perturb the reduction on a large set of inputs to buy nothing.
     float m = detail::floor(a.f0 * k_inv_log2 + 0.5f);
     TripleFloat r = subtract(a, multiply_scalar(k_log2, m));
 

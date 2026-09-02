@@ -300,7 +300,20 @@ XPMATH_INLINE_FUNCTION DoubleDouble abs(DoubleDouble a) {
     return (a.hi >= 0.0) ? a : DoubleDouble(-a.hi, -a.lo);
 }
 
-// Nearest integer
+// Nearest integer, TIES TO EVEN (DDFUN's dnint: a DD-level magic constant,
+// 2^105 + 2^52, added and subtracted so the DD add's own rounding does the
+// work).
+//
+// KI-2 (2026-09-02): DD is NOT one of the two backends KI-2 affects, and this
+// routine is deliberately left alone. KI-2 is QD's `floor(d + 0.5)`
+// double-rounding, which QF and TF inherited and DD never used. Measured, not
+// assumed: nint(0.49999999999999994) = 0 here, where the floor form gives 1.
+// The magic-constant form is exact for every |a| < 2^105 — the fraction is
+// rounded once, in the low word, ties to even — so there is nothing for `rint`
+// to improve, and no scalar `rint` formulation reaches 106 bits anyway.
+// Ties-to-even is also the shipped semantics of dd::round and what
+// dd_accuracy_test.cpp's `nearbyintq` oracle expects.
+// See docs/KNOWN_ISSUES.md, KI-2 resolution.
 XPMATH_INLINE_FUNCTION DoubleDouble round_to_nearest_int(DoubleDouble a) {
     if (a.hi == 0.0) return DoubleDouble(0.0);
     const double T105 = detail::ldexp(1.0, 105); // 2^105

@@ -346,7 +346,7 @@ static const OpTol kOpTols[kOpCount] = {
     {"sinh",    20.38},  //  20.68    6.34  1539   zeros of sin/cos near k*pi
     {"cosh",    20.32},  //  20.63    6.34  1279   zeros of sin/cos near k*pi
     {"tanh",    20.30},  //  20.61    0.00  1472   zeros of sin/cos near k*pi
-    {"asinh",   17.89},  //  18.20    0.00  1580   cancellation for Re(z) << 0
+    {"asinh",   18.68},  //  18.98    0.00  1580   KI-5(a) fixed: reflected for Re(z) << 0
     {"acosh",   17.87},  //  18.17    0.00   957   KI-1, Re(z) >= 0 only
     {"atanh",   17.89},  //  18.19    7.38  1538   conditioning-limited
     {"pow",     20.14},  //  20.44    5.55  1256   conditioning-limited

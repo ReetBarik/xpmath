@@ -361,8 +361,17 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex tanh(QuadFloatComplex z) {
 // ============================================================
 // Complex inverse hyperbolic
 // ============================================================
-// asinh(z) = log(z + sqrt(z² + 1)).  ff_complex.hpp:256-258 / dd_complex.hpp:282-285.
+// asinh(z) = log(z + sqrt(z² + 1)), reflected into the right half-plane via the
+// oddness identity -asinh(-z) when the direct form would cancel. KI-5(a); see
+// dd_complex.hpp's asinh for the full rationale, the magnitude threshold and its
+// measured justification, and the Re(z) == ±0 boundary decision — all identical
+// here.
 XPMATH_INLINE_FUNCTION QuadFloatComplex asinh(QuadFloatComplex z) {
+    const float t = 4.0f;   // kXpAsinhReflect
+    if (z.re.f0 < 0.0f && (-z.re.f0 > t || detail::fabs(z.im.f0) > t)) {
+        QuadFloatComplex w = -z;
+        return -log(w + sqrt(w*w + QuadFloatComplex(QuadFloat(1.0f))));
+    }
     return log(z + sqrt(z*z + QuadFloatComplex(QuadFloat(1.0f))));
 }
 // acosh(z) = log(z + sqrt(z² - 1)).  ff_complex.hpp:259-261 / dd_complex.hpp:286-289.

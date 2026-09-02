@@ -726,15 +726,46 @@ XPMATH_INLINE_FUNCTION QuadFloat sqrt(QuadFloat a) {
 // Nearest integer
 // ============================================================
 
-// Nearest FP32-int of a single float (round-half-away-from-zero via floor).
+// Nearest FP32-int of a single float, ties toward +infinity.
 // QD 2.3.24 qd/include/qd/inline.h:116-120 (nint(double)), at FP32.
 // NOTE (PORT_NOTES_QF): QD's nint does NOT use the 2^(2p-1) magic-constant
-// trick that broke FF's ffnint at FP32 (PORT_NOTES §4b); it uses floor(d+0.5),
-// which is well-conditioned at every FP32 magnitude, so the FF bug does not
-// recur here.
+// trick that broke FF's ffnint at FP32 (PORT_NOTES §4b).
+//
+// KI-2 (fixed 2026-09-02, see docs/KNOWN_ISSUES.md). QD's literal formulation is
+// `floor(d + 0.5)`, and the ADD is not exact: for d = 0.49999997f the FP32 sum
+// d + 0.5f rounds up to exactly 1.0f, so floor returns 1 where the nearest
+// integer is 0. A wrong answer, not a precision shortfall, and FP64 QD has it
+// too. `rint` performs the same rounding in one instruction with no intermediate
+// to double-round, so the hazard cannot arise.
+//
+// The `d - r == 0.5f` line restores QD's TIE DIRECTION. rint is ties-to-EVEN;
+// QD's floor(d + 0.5) is ties-toward-+INFINITY (note: toward +inf, not away from
+// zero — floor(-2.5 + 0.5) = -2). The tie rule is deliberately left alone: it is
+// user-visible through `qf::round`, whose oracle in qf_accuracy_test.cpp is
+// `roundq` with exact ties excluded from the corpus, and the multi-word tie
+// correction below (`x0 - a.f0 == 0.5f && a.f1 < 0`) assumes the leading word
+// rounded UP. KI-2 is the near-tie wrong answer; the tie direction is a
+// convention, and changing it is not part of closing KI-2.
+//
+// Exactness of `d - r`: r is an integer and |d - r| <= 0.5, so for |d| < 2^23
+// the difference is exact (both operands are multiples of ulp(d) <= 0.5), and
+// for |d| >= 2^23 there are no non-integers at all, so r == d and the test is
+// false. No spurious tie is possible.
+//
+// The zero-sign line keeps the change MINIMAL. rint(d) for d in (-0.5, 0)
+// returns -0.0f, where floor(d + 0.5f) returned +0.0f; that is 2^30 floats
+// whose sign bit would flip, and the sign of a zero reduction quotient is
+// observable downstream (the sincos argument reduction feeds it back through a
+// multiply). Restoring +0.0 there — while leaving nint(-0.0) = -0.0, which QD's
+// `d == floor(d)` short-circuit also gave — makes this fix provably minimal:
+// verified exhaustively over all 2^32 floats, qf_nint differs from QD's
+// floor(d + 0.5f) on EXACTLY ONE input, 0.49999997f, where the old value was
+// wrong and the new one is right, and on no input is the new value wrong.
 XPMATH_INLINE_FUNCTION float qf_nint(float d) {
-    if (d == detail::floor(d)) return d;
-    return detail::floor(d + 0.5f);
+    float r = detail::rint(d);
+    if (d - r == 0.5f) r += 1.0f;
+    if (r == 0.0f && d != 0.0f) r = 0.0f;   // (-0.5, 0) -> +0, as QD gave
+    return r;
 }
 
 // Nearest integer of a QuadFloat, component-wise with half-integer tie
