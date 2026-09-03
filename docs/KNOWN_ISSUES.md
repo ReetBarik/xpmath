@@ -1465,7 +1465,10 @@ well-conditioned there — so the loss is the algorithm's, not the format's.
 **None of them were fixed when this block was written** — that session measured
 and documented only. **KI-6 and KI-7 have since been resolved** (2026-09-02,
 commit `ad82f4f`), **KI-8** (2026-09-02, commit `4cd7dcb`) and **KI-9**
-(2026-09-02, commit `82427f6`); KI-10 and KI-11 remain open. `docs/DOMAINS.md`
+(2026-09-02, commit `82427f6`) — but see **KI-19**, which shows the KI-9 fix
+moved the ceiling rather than removing it. KI-10 and KI-11 remain open, and
+KI-12…KI-20 were added on 2026-09-03 by the session that diagnosed the 9,238
+UNEXPLAINED sweep points. `docs/DOMAINS.md`
 records the resulting usable ranges per backend per op, and is generated from the
 same data — it was regenerated after each fix, so the counts quoted in the KI-6,
 KI-7, KI-8 and KI-9 *Extent* sections above are the pre-fix numbers and no longer
@@ -2182,6 +2185,13 @@ Compute the quotient in the extended type, take `n` with the already-fixed
 `nint` (see KI-2), and form `a − n·b` with a fused/compensated product so the
 subtraction is exact.
 
+**Superseded in part by KI-15.** The 2026-09-03 hard-failure triage found that
+these ops also return the wrong *sign*, exact zero, and infinity — 605 further
+points — and that there are three distinct mechanisms, not one. KI-15 has the
+traced reproducers; close the two together. The remedy above is not sufficient
+on its own: no quotient held in the extended type is wide enough, so the fix
+has to be an iterative scale-and-subtract reduction.
+
 ---
 
 ## KI-11 — The complex inverse family loses most of its digits when one component is far smaller than the other
@@ -2229,3 +2239,561 @@ which computes the small component from `log1p`/`atan2` of a rearranged
 argument rather than from a cancelling difference. This overlaps the work
 already done for KI-5; the cases here are the ones the KI-5 fixes did not cover
 because they sit *off* the cut rather than on it.
+
+---
+
+## KI-12 — FF `sincos` never converges below |x| ≈ 1e-20, and its bail-out returns WITHOUT writing its out-params
+
+**Severity: high (silent 0 and silent NaN from ordinary in-range inputs), FF
+only, 1,020 points — the single largest hard-failure root cause in the sweep.**
+
+### What
+
+`sincos` (`include/xp/ff_math.hpp:734`) runs a Taylor loop with a fixed
+convergence test
+
+```cpp
+const float eps = 1.0e-15f;                                  // ff_math.hpp:736
+...
+if (detail::fabs(sterm.hi) < eps * detail::fabs(sin_r.hi) &&
+    detail::fabs(cterm.hi) < eps) break;                     // ff_math.hpp:759
+if (k == itrmx) { XPMATH_PRINTF("FFCSSNR: iteration limit\n"); return; }  // :761
+```
+
+Two independent faults compound:
+
+1. **`eps = 1e-15f` is finer than FloatFloat's own resolution** (u = 2^-48 =
+   3.55e-15). This is the same DD→FF port artefact already recorded for `exp`
+   in the T2.3/B3 work — it was never swept out of `sincos`.
+2. **The iteration-limit bail is a bare `return`.** `x` and `y` are never
+   assigned, so the caller sees its default-constructed `FloatFloat(0,0)`.
+
+For |a| ≲ 1e-20 the second Taylor term underflows FP32 to exactly 0, and the
+right-hand side `eps * |sin_r.hi|` underflows to 0 as well, so `0 < 0` is false
+forever: the loop always runs to `itrmx` and always bails. `sin` and `cos` then
+return 0, and everything that divides by them returns NaN.
+
+### Reproducer
+
+```
+$ g++ -std=c++17 -O2 -Iinclude repro.cpp && ./a.out
+FFCSSNR: iteration limit
+FF sin(1e-30)   = 0                    true 1.0000000000000001e-30
+FFCSSNR: iteration limit
+FF cos(1e-30)   = 0                    true 1
+FFCSSNR: iteration limit
+FF tan(1e-30)   = -nan                 true 1.0000000000000001e-30
+FFCSSNR: iteration limit
+FF atan(1e-30)  = -nan                 true 1.0000000000000001e-30
+FF sin(1e-19)   = 1.0000000000000005e-19   (converges — above the cliff)
+```
+
+`atan` is collateral: `atan(a) = angle(FloatFloat(1), a)`
+(`ff_math.hpp:827`), and `angle` (`ff_math.hpp`, the `sincos`-Newton loop)
+divides by `cos_a`, which is the 0 that `sincos` just handed back —
+`corr = divide(subtract(target, sin_a), cos_a)` → 0/0 → NaN.
+
+### Extent
+
+1,020 UNEXPLAINED FF points returning 0 or NaN. Direct: `sin` 6, `cos` 6,
+`tan` 68+32, `atan` 50. Propagated through `angle`/`sincos` into the complex
+layer: `polar` 40, `exp`/`sinh`/`cosh` 36 each, `sin`/`cos`/`tan` 32 each,
+`asinh` 56, `asin` 36+9, `atanh` 30, `atan` 28, `pow` 24, `log` 24, `log10` 24,
+`acos` 18+5, `acosh` 18. Every one of these has `repr` = `range` = 14.00 and
+most have `ach` = 14.00 — the point is fully representable and fully
+well-conditioned.
+
+### Why it is not an inherent limit
+
+1e-30 is an ordinary normal FP32 value (FLT_MIN = 1.18e-38) and sin(x) = x to
+within FF's resolution there. There is nothing to compute; the routine simply
+fails to notice it has already converged.
+
+### Closing it
+
+Three changes, any one of which removes most of the population: set `eps` to
+the type's own resolution (2^-48) rather than a hard-coded 1e-15f; make the
+bail-out assign `x` and `y` before returning; and short-circuit `|a| < sqrt(u)`
+to `(cos, sin) = (1, a)`. Audit `qf_math.hpp`, `tf_math.hpp` and `dd_math.hpp`
+for the bare-`return` bail — only the FF `eps` is mis-scaled, but the
+uninitialised-out-param pattern should be checked in all four.
+
+---
+
+## KI-13 — `angle`, `asinh` and `acosh` still form an UNSCALED sum of squares, so they NaN at |x| ≳ 1.8e19
+
+**Severity: high, FF/QF/TF (the float-word backends), 402 real points.**
+
+### What
+
+KI-8 added scaling to `hypot` and complex `abs`. Three other call sites that
+form `x² + y²` or `a² ± 1` were not touched:
+
+```cpp
+FloatFloat r = sqrt(add(multiply(x,x), multiply(y,y)));   // angle(), ff_math.hpp
+return log(add(a, sqrt(add(multiply(a, a), FloatFloat(1.0f)))));   // asinh, :894
+FloatFloat t1 = subtract(multiply(a, a), FloatFloat(1.0f));        // acosh, :898
+```
+
+`a²` overflows the FP32 word at |a| = sqrt(FLT_MAX) = 1.844e19, five decades
+short of the 3.4e38 the format actually reaches. `sqrt(inf)` and `log(inf)`
+then produce NaN.
+
+### Reproducer
+
+```
+FF atan (3.1622776601683796e19) = -nan   true 1.5707963267948966
+QF atan (3.1622776601683796e19) = -nan   true 1.5707963267948966
+TF atan (3.1622776601683796e19) = -nan   true 1.5707963267948966
+DD atan (1e19)                  = 1.5707963267948966        (DD's limit is 1.3e154 — off-grid)
+FF asinh(3.1622776601683796e19) = -nan   true 45.593556493943836
+FF acosh(3.1622776601683796e19) = -nan   true 45.593556493943836
+QF asinh(1e20)                  = -nan   true 46.744849040440859
+TF asinh(1e20)                  = -nan   true 46.744849040440859
+```
+
+`atan` reaches `angle` via `atan(a) = angle(FloatFloat(1), a)`, so `atan2`,
+`acos`, `asin` and complex `arg` inherit the same ceiling.
+
+### Extent
+
+402 UNEXPLAINED real points returning NaN: FF/QF/TF × {`atan`, `asinh`,
+`acosh`} at 44 points each, plus 6 stragglers. DD is clean here only because
+its own overflow point is outside the sweep grid — the defect is in the shared
+algorithm, not in the FF words.
+
+### Why it is not a range limit
+
+`range` = `repr` = `ach` = cap on every one of these rows. atan(3.16e19) is
+π/2; asinh(1e20) is 46.74. Both results are tiny and exactly the kind of value
+the backend is for. The classifier tested the input against the word range
+first and it passed.
+
+### Closing it
+
+The same remedy KI-8 used: for `asinh`/`acosh`, switch to
+`log(2a) + 1/(4a²) − …` above a threshold, or scale by `a` before squaring; for
+`angle`, divide both components by `max(|x|,|y|)` before forming the sum of
+squares, exactly as the fixed `hypot` now does.
+
+---
+
+## KI-14 — FF `floor`, `ceil`, `trunc` and `round` return ZERO for every |x| ≥ 2^47
+
+**Severity: high (returns 0 for an input that is already an exact integer),
+FF only, 194 points.**
+
+### What
+
+`round_to_nearest_int` guards its double-precision reduction with a magnitude
+cap and returns **zero** past it:
+
+```cpp
+if (detail::fabs(total) >= 1.40737488355328e14 /* 2^47 */) {
+    XPMATH_PRINTF("FFNINT: argument too large\n");
+    return FloatFloat(0.0f);                            // ff_math.hpp:544-547
+}
+```
+
+`floor`, `ceil`, `trunc` and `round` (`ff_math.hpp:1021`, `:1026`, `:1031`,
+`:1034`) are all thin wrappers over it, so all four inherit the cap.
+
+The guard itself is defensible — the reduction is done in a `double` and 2^47
+is where that stops being exact. The bug is the *return value*: every
+FloatFloat with |x| ≥ 2^47 is already an exact integer, so the correct answer
+is `a` itself, unchanged.
+
+### Reproducer
+
+```
+FFNINT: argument too large
+FF floor(1e15) = 0     true 1000000000000000
+FFNINT: argument too large
+FF trunc(1e15) = 0     true 1000000000000000
+FF round_to_nearest_int(3.1622776601683794e14) = 0   true 316227766016838
+QF floor(1e30) = 1e+30      TF floor(1e30) = 1e+30      DD floor(1e30) = 1e+30
+```
+
+The three other backends are correct at the same magnitudes, which isolates
+this to the FF guard.
+
+### Extent
+
+194 UNEXPLAINED FF points returning 0: `round` 66, `trunc` 64, `floor` 32,
+`ceil` 32. All at |x| ≥ 3.16e14, `ach` = `repr` = `range` = 14.00.
+
+### Closing it
+
+Change the four bail-outs to `return a;`. Note that this guard is *also* the
+mechanism behind part of KI-15 — `fmod` calls `trunc(q)` and `remainder` calls
+`round_to_nearest_int(q)` on a quotient that routinely exceeds 2^47.
+
+---
+
+## KI-15 — `fmod`/`remainder` do not merely lose digits: they return the WRONG SIGN, ZERO, or INFINITY
+
+**Severity: high, all backends, 605 hard-failure points on top of the 2,285
+soft ones already recorded as KI-10.**
+
+### What
+
+KI-10 records these two ops as "losing half their digits". The sweep's
+hard-failure triage shows the failure is worse than that, and that it has three
+distinct mechanisms, not one. Both ops are two lines
+(`ff_math.hpp:986`/`:992`, and the same shape in `dd_`/`qf_`/`tf_math.hpp`):
+
+```cpp
+FloatFloat q = divide(a, b);
+FloatFloat qt = trunc(q);                 // or round_to_nearest_int(q)
+return subtract(a, multiply(b, qt));
+```
+
+**(a) The reducer's magnitude cap fires.** On FF, `trunc(q)` for |q| ≥ 2^47
+returns 0 (KI-14), so the result is `a − b·0 = a` — the input, unreduced.
+
+**(b) The quotient does not fit the type.** `a/b` is held to the backend's
+nominal digits, but `fmod` needs the *integral part* of it exactly. When
+|a/b| exceeds what the type can hold as an integer, `trunc(q)` is not the true
+floor and `a − b·trunc(q)` is not the remainder:
+
+```
+TF fmod(316227.76601683797, 1.3460648851493211e-20)
+  q          = 2.3492758001911501e+25
+  trunc(q)   = 2.3492758001911501e+25       (already integral — nothing to truncate)
+  b*trunc(q) = 316227.76601683797           (== a exactly)
+  fmod       = 0                             true 3.4955874873628251e-21
+```
+
+```
+DD fmod(1e19, -5.583642853032536e-30)
+  trunc(a/b) = -1.7909454926131054e+48       (49 digits; DD holds 31)
+  fmod       = -2.8421709430404007e-14       true 4.5351364837126992e-30
+```
+
+**(c) `divide` itself returns NaN** on QF/TF when the quotient is large — see
+KI-19. `fmod` then propagates the NaN.
+
+### Reproducer / extent
+
+605 UNEXPLAINED `fmod`+`remainder` points that are not digit loss:
+wrong-sign 317, zero ~200, inf 54, plus NaN. Split by backend:
+DD 137+11+2, TF 78+61+81+77+15+12, QF 14+11+29+27+15+12, FF 14+6.
+Every one of the 317 wrong-sign points is `fmod` or `remainder`; no other op in
+the sweep produces a wrong sign at all.
+
+### Why it is not conditioning
+
+`fmod` and `remainder` are ALGEBRAIC in the triage, so the probe charges them
+only the operands' real storage error — zero for a DD point built from a
+double. `a − n·b` is exactly representable for integral n. The DD points are
+pure algorithm.
+
+### Closing it
+
+Do not form the quotient in one shot. Reduce iteratively: scale `b` up by
+2^k until it straddles `a`, subtract, and repeat — the textbook exact-fmod
+loop, which never needs a quotient wider than the type. This subsumes KI-10;
+KI-10 and this entry should be closed together.
+
+---
+
+## KI-16 — `atanh`'s domain guard tests only the LEADING word, so it rejects arguments that are strictly inside (−1, 1)
+
+**Severity: medium, FF and QF, 46 points.**
+
+### What
+
+```cpp
+if (detail::fabs(a.f0) >= 1.0f) { XPMATH_PRINTF("QFATANH: |argument| >= 1\n");
+                                  return QuadFloat(0.0f); }   // qf_math.hpp:1298
+if (detail::fabs(a.hi) >= 1.0f) { ... return FloatFloat(0.0f); }  // ff_math.hpp:904
+```
+
+The guard reads `a.f0` / `a.hi` — the *leading float word* — not the value the
+multi-word type represents. For `a = 0.99999999999999978` the leading FP32 word
+rounds to exactly `1.0f`, the guard trips, and the function returns 0 even
+though the represented value is comfortably inside the domain and the answer is
+18.37.
+
+### Reproducer
+
+```
+QFATANH: |argument| >= 1
+QF atanh(0.99999999999999978) = 0     true 18.368400284838551
+FFATANH: |argument| >= 1
+FF atanh(0.99999999999999978) = 0     true 18.368400284838551
+```
+
+### Extent
+
+46 UNEXPLAINED points returning 0: QF `atanh` 42, FF `atanh` 4, all in the
+`ulp` family within an ulp of ±1. `ach` = 14.5–14.8 against a QF cap of 29 —
+the point is genuinely ill-conditioned to about half the type's digits, but 14
+digits is not 0.
+
+### Closing it
+
+Compare against the reconstructed value (`a.f0 + a.f1 + …`, or the type's own
+`>=` operator against `QuadFloat(1.0f)`) rather than the leading word. The same
+leading-word pattern appears in `acos`/`asin`'s range check
+(`ff_math.hpp:820`) and in `acosh`'s `a.hi < 1.0f` (`ff_math.hpp:899`) and
+should be audited with it.
+
+---
+
+## KI-17 — TF `asinh` has no odd-symmetry branch, so negative arguments cancel to a non-positive log
+
+**Severity: medium, TF only, 9 hard points plus the negative half of TF's soft
+`asinh` population.**
+
+### What
+
+DD, FF and QF all open `asinh` with `if (a.hi < 0) return negate(asinh(negate(a)));`.
+TF does not:
+
+```cpp
+XPMATH_INLINE_FUNCTION TripleFloat asinh(TripleFloat a) {
+    return log(add(a, sqrt(add(sqr(a), TripleFloat(1.0f)))));   // tf_math.hpp:1188-1190
+}
+```
+
+For a ≪ 0, `sqrt(a²+1) ≈ |a|` and `a + |a|` is a catastrophic cancellation that
+lands on or below zero, so `log` sees a non-positive argument and bails.
+
+### Reproducer
+
+```
+TFLOG: non-positive argument
+TF asinh(-1e12) = 0                    true -28.324168296488494
+TF asinh( 1e12) = 28.324168296488494   (correct — positive side is fine)
+```
+
+The asymmetry between the two lines is the whole diagnosis.
+
+### Extent
+
+9 UNEXPLAINED TF `asinh` points returning 0, at a = −1e12, −3.16e12, −3.16e14
+and below; plus the negative-argument share of TF's soft `asinh` loss. FF/QF/DD
+`asinh` do not fail this way at any magnitude.
+
+### Closing it
+
+Add the same odd-symmetry guard the other three backends already have. One
+line.
+
+---
+
+## KI-18 — Complex `tan`/`tanh` and complex `atan`/`atanh` have no asymptotic branch, so they NaN where the true result is bounded
+
+**Severity: medium, all backends, 172 + 96 points.**
+
+### What
+
+**tan / tanh.** For large |Im z| (tan) or large |Re z| (tanh) the true result
+converges to ±i or ±1 and is perfectly bounded, but the implementations form
+`sinh`/`cosh` of the large component directly and overflow inside the
+intermediate:
+
+```
+DD c tan(9807.8528 + 1950.90322i) = -nan-nani   true -2.27682598e-1695 + 1i
+FF c tanh(-100 + 1e-29i)          = -inf-nani   true -1 + 5.53558611e-116i
+```
+
+The DD row's real part is below binary128's own floor, so the only recoverable
+answer is `(±0, ±1)` — and that is exactly what a saturating branch would
+return. Note `kFFHyperbolicSaturate = 19.0f` (`ff_math.hpp:822`) already does
+this for *real* `tanh` (the KI-7 fix); the complex path never got it.
+
+**atan / atanh at the cut endpoints.** `atan(z) = (i/2)·log((i+z)/(i−z))`
+divides by a quantity that goes to zero as z → ±i, so the whole result NaNs
+rather than just the component that is genuinely ill-determined:
+
+```
+QF c atan(1e-19 + 1i)   = nan + 22.221132i     true 0.785398163 + 22.221132i
+TF c atanh(1 + 1e-19i)  = 22.221132 + nani     true 22.221132 + 0.785398163i
+```
+
+The *other* component comes back correct, which shows the routine got that far
+and then divided by a computed zero.
+
+### Extent
+
+172 UNEXPLAINED complex `tan`/`tanh` NaN points (DD/FF/QF/TF `tan` 32 each,
+FF `tanh` 44); 96 complex `atan`/`atanh` NaN points (FF 28+30, QF 24+24,
+TF 24+24). The atan/atanh cases sit adjacent to KI-11's population but are a
+different failure — KI-11 loses the small component, this loses everything.
+
+### Closing it
+
+For `tan`/`tanh`, saturate on the large component the way real `tanh` already
+does. For `atan`/`atanh`, use Kahan's formulation (already the stated remedy
+for KI-11), which computes the divergent component from `log1p` of a
+rearranged argument instead of from a vanishing denominator.
+
+---
+
+## KI-19 — KI-9 is NOT fully closed: QF `divide` still returns NaN once the quotient reaches ~1e41
+
+**Severity: high (contradicts a RESOLVED entry), QF, surfaced through `fmod`.**
+
+### What
+
+KI-9 records QF/TF division returning NaN when the quotient outruns the Dekker
+splitter, and is marked RESOLVED at `82427f6`. It is better, but not closed —
+the ceiling moved, it did not disappear:
+
+```
+QF divide(1e30,  1e-11) = -nan      quotient 1e41
+QF divide(1e20,  1e-21) = -nan      quotient 1e41
+QF divide(1.0,   1e-41) = -nan      quotient 1e41
+QF divide(-1e13, 1.4568618853408916e-28) = -nan
+```
+
+Three different operand pairs with three different operand magnitudes and the
+same quotient all fail, which isolates the trigger to the quotient rather than
+to either operand. QF's own range reaches 3.4e38 per word and the type is
+routinely used well past 1e41 in the accumulated form.
+
+### Extent
+
+Reached in the sweep through `fmod`/`remainder` (see KI-15c) rather than through
+`div` directly — the sweep's `div` grid does not place a point at a quotient of
+1e41. That is itself worth noting: **the sweep grid does not currently probe
+this region for `div`**, so the residual escaped the KI-9 re-baseline.
+
+### Closing it
+
+Re-open KI-9. Establish the exact quotient at which the fixed path still
+saturates, then extend the sweep's `div` grid to cover it so the next
+re-baseline cannot miss it again.
+
+---
+
+## KI-20 — `round` is half-to-even, not half-away-from-zero
+
+**Severity: low, DD/QF/TF, 4 points.**
+
+### What
+
+`round(x)` is specified by C99 as round-half-*away-from-zero*. All four
+backends implement it as `round_to_nearest_int`, which on DD is the
+magic-constant form
+
+```cpp
+if (a.hi > 0.0) return subtract(add(a, CON), CON);   // dd_math.hpp, round_to_nearest_int
+```
+
+— i.e. round-half-to-**even**, inherited from the hardware rounding mode.
+
+```
+DD round( 0.5) = 0    true  1
+DD round(-0.5) = 0    true -1
+```
+
+### Extent
+
+4 UNEXPLAINED points: DD 2, QF 1, TF 1, all at exactly ±0.5. The population is
+tiny only because ±0.5 is the sole tie the sweep grid happens to land on; every
+half-integer tie behaves the same way.
+
+### Closing it
+
+Give `round` its own implementation — `trunc(x) + copysign(1, x)` when the
+fractional part is exactly ±0.5 — and leave `round_to_nearest_int` (which is
+correctly half-to-even, and is what the argument reductions want) alone. This
+is deliberately *not* KI-2, which was about `nint` one ulp below a tie.
+
+---
+
+## Classifier verdict (2026-09-03) — `--classify` was audited and left UNCHANGED
+
+The 2026-09-03 triage was asked to fix `scripts/sweep_accuracy.cpp --classify`
+if it was found to be misclassifying. It was audited and found **not** to be.
+Recording the audit so the next session does not repeat it.
+
+**The one rule that was challenged.** `classify_real` /`classify_complex` test
+"the true result is finite and in range but the backend returned NaN/inf"
+*before* the conditioning probe, on the stated grounds that "ill-conditioning
+can cost every digit; it cannot turn a representable number into a NaN".
+
+For **268 of the 2,187 hard-failure points** the probe would have said
+CONDITIONING had it run first — `ach` is 0.00 (or near it) against caps of
+14.00/21.70, i.e. the stored input does not determine a single digit of the
+answer. The affected cells:
+
+```
+FF r tan  58 nan + 4 inf      FF c atanh 24    FF c atan 24
+TF c atanh 24 (ach 0.14-2.87) TF c atan  14    TF r sin  14
+TF r cos  14                  TF r tan   12    FF c pow/log/log10 4 each
+```
+
+**Judgement: leave the rule as it is.** A NaN and a wrong-but-finite number are
+different behaviours with different consequences for a caller, and the
+`returned-nan`/`returned-inf` buckets are exactly where you want that to be
+visible. Reclassifying these 268 as CONDITIONING would hide FF `tan`'s
+π/2 inf and TF's huge-argument NaNs inside a bucket labelled "inherent, no
+implementation does better", which is not true of a NaN. The honest statement
+is the one made here: 268 of the 2,187 are hard failures *at points that are
+also ill-conditioned to zero digits*, and a fix session should weight them
+accordingly.
+
+To list them:
+
+```bash
+awk -F, '$8=="UNEXPLAINED" && ($9=="returned-nan"||$9=="returned-inf") \
+         && ($10+0) < 0.5*($7+0)' validation/sweep/sweep_classified.csv
+```
+
+Because nothing was reclassified, `validation/sweep/*.csv` and
+`docs/DOMAINS.md` are byte-identical to `fecfc23`.
+
+---
+
+## Soft-failure map (2026-09-03) — where the other 7,051 UNEXPLAINED points go
+
+The 9,238 UNEXPLAINED points split 2,187 hard (KI-12…KI-20 above) and 7,051
+soft (`partial-digit-loss` 4,816, `no-correct-digits` 2,235). The soft
+population was characterised by cause, not point by point. It is 73% complex
+(5,165 vs 1,886 real) and it is **not** a long tail — five causes cover 96% of
+it.
+
+| cause | points | share | KI |
+|---|---:|---:|---|
+| complex inverse family loses the small component | 3,733 | 53% | KI-11 |
+| `fmod`/`remainder` at extreme operand ratios | 1,680 | 24% | KI-10 / KI-15 |
+| complex `tanh`/`tan` with no asymptotic branch | 794 | 11% | KI-18 |
+| complex `mul`/`div` cancellation | 460 | 7% | *new — see below* |
+| tails of the hard-failure defects | 169 | 2% | KI-14, KI-17, KI-20 |
+| everything else (`fma`, `log*` near 1, `hypot`, …) | 215 | 3% | — |
+
+**The three headline ops named in the brief resolve as follows.**
+
+*atan (1,511 total, 1,297 soft).* Essentially all complex, essentially all in
+the `cut-re` family: 1,210 of the 1,297 are `c atan cut-re`, plus 63 `polar`.
+This is **KI-11**, not a separate defect — the real `atan` soft population is
+negligible once KI-13's NaNs are removed.
+
+*fmod (1,085) and remainder (1,200).* **Yes, these are KI-10.** 1,680 of the
+2,285 are soft and sit in the `ulp`/`linear`/`log` families at large |a/b|,
+which is precisely KI-10's shape; the other 605 are the hard failures now filed
+as KI-15. No reclassification is warranted — they are already correctly
+UNEXPLAINED, because KI-10 is an open algorithmic defect and not an inherent
+limit. What *is* warranted is closing KI-10 and KI-15 together, at which point
+2,285 points (25% of the whole UNEXPLAINED population) disappear at once. This
+is the highest-yield single fix in the backlog.
+
+**The one cause with no KI: complex `mul` and `div`, 460 points**
+(`c div` 346, `c mul` 114; families `cut-re` 133+46, `polar` 103, `cut-im` 73).
+These are classified ALGEBRAIC, so the conditioning probe charges them only the
+operands' real storage error — for DD that is zero. The shape is the textbook
+one: `(a+bi)(c+di) = (ac−bd) + (ad+bc)i` cancels in each component when the two
+products are close, and the naive division formula compounds it. Deliberately
+not filed as a KI here because this session's remit was the hard failures and
+this cause was not traced to a reproducer; a fix session should confirm it
+against `dd_complex.hpp:multiply`/`divide` first. It is the obvious candidate
+for a Kahan/Smith-style compensated complex multiply and division.
+
+**Method note.** These are attributions by (kind, op, family) cell against the
+mechanisms traced above, not per-point diagnoses. The cell boundaries are
+clean — no cell splits across two causes — but the ±2% "everything else" row
+has not been looked at.
