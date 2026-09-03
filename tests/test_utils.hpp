@@ -97,6 +97,10 @@ struct BackendTraits<DD> {
   // src/demo_real.cpp.
   static constexpr int max_digits = 31;
 
+  // p in ulp(true) = |true| * 2^-p. 2 x FP64 significand (53 bits each,
+  // hidden bit included). See the ULP ERROR section below.
+  static constexpr int sig_bits = 106;
+
   static const char* name() { return "DD"; }
 
 #ifdef KOKKOS_EP_HAVE_QUADMATH
@@ -134,6 +138,9 @@ struct BackendTraits<FF> {
   // decimal digits. Cap digit counts at 14 to avoid reporting oracle noise as
   // accuracy. Matches kMaxDigits (14.0) in src/demo_ff_real.cpp.
   static constexpr int max_digits = 14;
+
+  // p in ulp(true) = |true| * 2^-p. 2 x FP32 significand (24 bits each).
+  static constexpr int sig_bits = 48;
 
   static const char* name() { return "FF"; }
 
@@ -215,6 +222,47 @@ inline double digits_of_accuracy(float128 dut_quad, float128 ref) {
   return d < 0.0 ? 0.0 : (d > max_digits ? max_digits : d);
 }
 
+// ============================================================================
+// ULP ERROR — the second metric (see docs/ULP_METRIC.md)
+// ============================================================================
+// digits_of_accuracy above is a RELATIVE error, and a relative error goes
+// vacuous exactly where the bugs are: near a zero of the function. DD sin(3*pi)
+// scores 15.90 digits — a 21-digit gate passes it — while sitting 1.0e16 ulps
+// from the true value. KI-4 (DD sin returning the wrong SIGN near odd multiples
+// of pi) lived in that blind spot and these tests never saw it.
+//
+// So every scored element ALSO gets an ulp error:
+//
+//     ulp(true) = |true| * 2^-p       p = the expansion's significand bits
+//     ulps      = |got - true| / ulp(true)
+//
+// BOTH metrics are reported. The digit score is NOT retired: docs/DOMAINS.md and
+// the entire KI history are written in digits, and discarding it orphans all of
+// that.
+//
+// p = limbs x word significand (FP64 53, FP32 24, hidden bit included):
+//     DD 106 (2xFP64)   QF 96 (4xFP32)   TF 72 (3xFP32)   FF 48 (2xFP32)
+// which is the same arithmetic that makes widening to binary128 exact.
+//
+// ZERO / NON-FINITE REFERENCE. ulp(0) is not defined, so the element is marked
+// UNSCORABLE and excluded from the ulp statistic rather than being scored
+// against a zero ulp (which would make every miss infinite and every op with a
+// zero in its range unreportable). The digit score already handles those cells.
+// A non-finite `got` against a finite `ref` is a real, reportable +inf.
+constexpr double kUlpUnscorable = -1.0;   // sentinel
+
+template <typename Backend>
+inline double ulp_error(float128 dut_quad, float128 ref) {
+  const int p = BackendTraits<Backend>::sig_bits;
+  if (Kokkos::isnan(ref) || Kokkos::isinf(ref)) return kUlpUnscorable;
+  if (ref == (float128)0.0) return (dut_quad == (float128)0.0) ? 0.0 : kUlpUnscorable;
+  if (Kokkos::isnan(dut_quad) || Kokkos::isinf(dut_quad)) return HUGE_VAL;
+  if (dut_quad == ref) return 0.0;
+  // (|got-ref|/|ref|) * 2^p, scaled last so the ratio cannot overflow binary128.
+  const float128 rel = Kokkos::abs((dut_quad - ref) / ref);
+  return (double)ldexpq(rel, p);
+}
+
 #endif  // KOKKOS_EP_HAVE_QUADMATH
 
 // ============================================================================
@@ -224,7 +272,29 @@ inline double digits_of_accuracy(float128 dut_quad, float128 ref) {
 struct AccStats {
   double min = 0, max = 0, mean = 0, median = 0;
   int    n   = 0;
+  // Second metric, carried alongside. ulp_max is the WORST point, never a mean:
+  // an op that is exact at 1600 points and wrong at 52 still averages clean.
+  double ulp_max        = 0.0;
+  int    n_ulp_scored   = 0;
+  int    n_ulp_unscored = 0;   // ref was zero / non-finite; see ulp_error()
 };
+
+// Reduce a parallel array of per-element ulp errors into an AccStats. Split out
+// so the bespoke runners in the QF/TF/complex tests can call it directly.
+inline void accumulate_ulps(AccStats& s, const double* ulps, int n) {
+  for (int i = 0; i < n; ++i) {
+    if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+    ++s.n_ulp_scored;
+    if (ulps[i] > s.ulp_max) s.ulp_max = ulps[i];
+  }
+}
+
+// Worst-point union of two ulp summaries (random pass + corpus pass).
+inline void merge_ulps(AccStats& into, const AccStats& from) {
+  if (from.ulp_max > into.ulp_max) into.ulp_max = from.ulp_max;
+  into.n_ulp_scored   += from.n_ulp_scored;
+  into.n_ulp_unscored += from.n_ulp_unscored;
+}
 
 // Compute min/max/mean/median over a digit array. Sorts a local copy.
 inline AccStats compute_stats(const double* digits, int n) {
@@ -241,9 +311,18 @@ inline AccStats compute_stats(const double* digits, int n) {
   return s;
 }
 
+// Overload that also folds in the ulp array. Same digit stats, byte for byte.
+inline AccStats compute_stats(const double* digits, const double* ulps, int n) {
+  AccStats s = compute_stats(digits, n);
+  if (n > 0) accumulate_ulps(s, ulps, n);
+  return s;
+}
+
 inline void print_stats(const char* label, const AccStats& s) {
-  std::printf("  %-24s  n=%d  min=%.3f  mean=%.3f  median=%.3f  max=%.3f  (digits)\n",
-              label, s.n, s.min, s.mean, s.median, s.max);
+  std::printf("  %-24s  n=%d  min=%.3f  mean=%.3f  median=%.3f  max=%.3f  (digits)"
+              "  worst=%.4g ulp (n=%d, unscorable=%d)\n",
+              label, s.n, s.min, s.mean, s.median, s.max,
+              s.ulp_max, s.n_ulp_scored, s.n_ulp_unscored);
 }
 
 // ============================================================================
@@ -355,15 +434,16 @@ AccStats run_unary_op(int n, uint64_t seed,
   auto rmir = Kokkos::create_mirror_view(dout);
   Kokkos::deep_copy(rmir, dout);
 
-  // 5. per-element accuracy
-  std::vector<double> digs(n);
+  // 5. per-element accuracy — BOTH metrics, from the same widened result.
+  std::vector<double> digs(n), ulps(n);
   for (int i = 0; i < n; ++i) {
     float128 got = BackendTraits<Backend>::to_quad(rmir(i));
     digs[i] = digits_of_accuracy<Backend>(got, href[i]);
+    ulps[i] = ulp_error<Backend>(got, href[i]);
   }
 
   // 6. stats
-  return compute_stats(digs.data(), n);
+  return compute_stats(digs.data(), ulps.data(), n);
 }
 
 template <typename Backend, typename DeviceOp>
@@ -403,15 +483,16 @@ AccStats run_binary_op(int n, uint64_t seed,
   auto rmir = Kokkos::create_mirror_view(dout);
   Kokkos::deep_copy(rmir, dout);
 
-  // 5. per-element accuracy
-  std::vector<double> digs(n);
+  // 5. per-element accuracy — BOTH metrics, from the same widened result.
+  std::vector<double> digs(n), ulps(n);
   for (int i = 0; i < n; ++i) {
     float128 got = BackendTraits<Backend>::to_quad(rmir(i));
     digs[i] = digits_of_accuracy<Backend>(got, href[i]);
+    ulps[i] = ulp_error<Backend>(got, href[i]);
   }
 
   // 6. stats
-  return compute_stats(digs.data(), n);
+  return compute_stats(digs.data(), ulps.data(), n);
 }
 
 // --- Corpus-pass runners ---------------------------------------------------
@@ -451,15 +532,16 @@ AccStats run_unary_op_on_corpus(
   auto rmir = Kokkos::create_mirror_view(dout);
   Kokkos::deep_copy(rmir, dout);
 
-  // 5. per-element accuracy
-  std::vector<double> digs(n);
+  // 5. per-element accuracy — BOTH metrics, from the same widened result.
+  std::vector<double> digs(n), ulps(n);
   for (int i = 0; i < n; ++i) {
     float128 got = BackendTraits<Backend>::to_quad(rmir(i));
     digs[i] = digits_of_accuracy<Backend>(got, href[i]);
+    ulps[i] = ulp_error<Backend>(got, href[i]);
   }
 
   // 6. stats
-  return compute_stats(digs.data(), n);
+  return compute_stats(digs.data(), ulps.data(), n);
 }
 
 template <typename Backend, typename DeviceOp>
@@ -496,15 +578,16 @@ AccStats run_binary_op_on_corpus(
   auto rmir = Kokkos::create_mirror_view(dout);
   Kokkos::deep_copy(rmir, dout);
 
-  // 5. per-element accuracy
-  std::vector<double> digs(n);
+  // 5. per-element accuracy — BOTH metrics, from the same widened result.
+  std::vector<double> digs(n), ulps(n);
   for (int i = 0; i < n; ++i) {
     float128 got = BackendTraits<Backend>::to_quad(rmir(i));
     digs[i] = digits_of_accuracy<Backend>(got, href[i]);
+    ulps[i] = ulp_error<Backend>(got, href[i]);
   }
 
   // 6. stats
-  return compute_stats(digs.data(), n);
+  return compute_stats(digs.data(), ulps.data(), n);
 }
 
 #endif  // KOKKOS_EP_HAVE_QUADMATH

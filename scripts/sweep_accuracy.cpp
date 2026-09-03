@@ -745,6 +745,195 @@ double score_component(__float128 got, __float128 ref, __float128 other, double 
   return score_scalar(got, ref, cap);
 }
 
+// ===========================================================================
+// ULP SCORING (see docs/ULP_METRIC.md)
+// ===========================================================================
+// The digit score above is a RELATIVE error, and a relative error goes vacuous
+// exactly where the bugs are: near a zero of the function. DD sin(3*pi) scores
+// 16.04 digits — a 21-digit gate passes it — while being wrong by 7.4e15 ulps.
+// KI-4 (DD sin returning the wrong SIGN near odd multiples of pi) lived in that
+// blind spot and the accuracy tests never saw it.
+//
+// So every point is ALSO scored in ulps of the true value:
+//
+//     ulp(true) = |true| * 2^-p        p = the expansion's significand bits
+//     ulps      = |got - true| / ulp(true)
+//
+//   p:  DD 106 (2xFP64)   QF 96 (4xFP32)   TF 72 (3xFP32)   FF 48 (2xFP32)
+//
+// Those are the limb counts times the word significand (53 and 24 bits
+// including the hidden bit), which is the same arithmetic the SCORING section
+// above already relies on to argue that widening to binary128 is exact.
+//
+// ZERO / NON-FINITE REFERENCE. ulp(0) is not defined, so:
+//   ref == 0    -> 0 ulps if got == 0, otherwise UNSCORABLE (not gated).
+//                  Scoring |got| against ulp(0) = 0 would make every miss
+//                  infinite and every op with a zero in its range ungateable;
+//                  the digit score already handles this cell exactly.
+//   ref inf/nan -> UNSCORABLE. Same reasoning; the digit score covers it.
+//   got inf/nan while ref is finite -> +inf ulps (a real, gateable failure).
+double kUnscorableUlps() { return -1.0; }   // sentinel: not measurable here
+
+double ulps_scalar(__float128 got, __float128 ref, int sig_bits) {
+  if (isnanq(ref) || !finiteq(ref)) return kUnscorableUlps();
+  if (ref == 0) return (got == 0) ? 0.0 : kUnscorableUlps();
+  if (isnanq(got) || !finiteq(got)) return HUGE_VAL;
+  if (got == ref) return 0.0;
+  // |got - ref| / (|ref| * 2^-p), formed as (|got-ref|/|ref|) * 2^p so that the
+  // scaling cannot overflow or underflow binary128 for any in-range ref.
+  const __float128 rel = fabsq(got - ref) / fabsq(ref);
+  return (double)ldexpq(rel, sig_bits);
+}
+
+// ===========================================================================
+// CONDITION-AWARE ULP BOUNDS
+// ===========================================================================
+// A FLAT ulp gate is wrong, and wrong by orders of magnitude. Take DD sin at
+// x = 3*pi (rounded to double, then held exactly by DD):
+//
+//     kappa = |x * cot(x)| = 9.4248 / 3.673940e-16  ~  2.57e16
+//
+// DD carries pi to ~106 bits; resolving sin(x) there would need ~47 decimal
+// digits of pi. The argument reduction therefore perturbs x by ~1 ulp, and that
+// perturbation is amplified by kappa. ~2.6e16 ulps of error is INHERENT. The
+// measured 7.4e15 is four times BETTER than the limit. A flat gate fails that
+// point; a condition-aware gate passes it, correctly.
+//
+// So the bound at every point is
+//
+//     expected_ulps = 1 + kappa(f, x)
+//
+// the 1 being the final rounding and kappa the amplification of the one-ulp
+// perturbation the backend cannot avoid carrying (in the argument, in its stored
+// constants, or in both). The gate is
+//
+//     measured <= kUlpAllowance * expected
+//
+// kUlpAllowance is a small documented slack for the implementation's own
+// internal roundoff — a polynomial evaluation is not a single correctly-rounded
+// operation. See the ALLOWANCE note below for what the data actually needed.
+//
+// kappa is DERIVED ANALYTICALLY per op, never fitted to a measurement. For a
+// unary f, kappa = |x f'(x) / f(x)|. For a multi-argument f the partial
+// condition numbers add: kappa = sum_i |x_i (df/dx_i) / f|, which is the
+// standard first-order bound on the relative output perturbation induced by
+// independent one-ulp relative perturbations of the inputs.
+//
+// EVERY real op in the inventory has an elementary kappa and all 39 are
+// implemented below. Two carry a stated caveat:
+//
+//   fmod / remainder   f = a - b*n with n integral. n is LOCALLY constant, so
+//                      kappa = (|a| + |b n|) / |f| holds away from the jump in
+//                      n; at the jump the function is discontinuous and no
+//                      first-order bound applies. Points that land on the jump
+//                      surface as failures, which is the honest outcome.
+//   ceil/floor/round/trunc   f' = 0 almost everywhere, so kappa = 0 and the
+//                      bound is 1 ulp — i.e. "exact", which is what these ops
+//                      are required to be. At the integers they jump; same
+//                      caveat, same honest outcome.
+//
+// COMPLEX OPS ARE NOT GATED ON ULPS. They are MEASURED in ulps (of the complex
+// modulus) and reported, but they stay on the digit gate. Deriving kappa for a
+// complex op is elementary in the same way, but the complex scorer's
+// zero-component rule (score a zero component absolutely against the other
+// component) has no ulp analogue that is not invented, and the whole point of
+// this change is to stop inventing tolerances. An honest partial conversion
+// beats a fabricated one.
+//
+// ALLOWANCE — WHAT THE DATA NEEDED. Started at 8x per the brief. See
+// docs/ULP_METRIC.md for the measured distribution and the final value.
+const double kUlpAllowance = 8.0;
+
+const __float128 kQLn2  = 0.693147180559945309417232121458176568Q;
+const __float128 kQLn10 = 2.30258509299404568401799145468436421Q;
+
+// kappa for a real op at (a, b, c). Returns false when no analytic kappa is
+// available for this op — no such op exists today; the hook stays so that
+// adding an op cannot silently acquire a fabricated bound.
+bool kappa_real(int id, __float128 a, __float128 b, __float128 c, double& kappa) {
+  const __float128 aa = fabsq(a), ab = fabsq(b);
+  __float128 k;
+  switch (id) {
+    // --- algebraic ---------------------------------------------------------
+    case R_Add:   k = (a + b == 0) ? HUGE_VALQ : (aa + ab) / fabsq(a + b);      break;
+    case R_Sub:   k = (a - b == 0) ? HUGE_VALQ : (aa + ab) / fabsq(a - b);      break;
+    case R_Mul:   k = 2;                                                        break;  // |a f_a/f| + |b f_b/f|
+    case R_Div:   k = 2;                                                        break;
+    case R_Sqrt:  k = 0.5Q;                                                     break;  // x*(1/2 x^-1/2)/x^1/2
+    case R_Abs:   k = 1;                                                        break;
+    case R_Hypot: k = 1;                                                        break;  // (a^2+b^2)/h^2
+    case R_Fma: { const __float128 p = a * b, f = p + c;
+                  k = (f == 0) ? HUGE_VALQ : (2 * fabsq(p) + fabsq(c)) / fabsq(f); } break;
+    case R_Fdim: { if (!(a > b)) { k = 0; break; }
+                   k = (a - b == 0) ? HUGE_VALQ : (aa + ab) / fabsq(a - b); }    break;
+    case R_Copysign: case R_Fmax: case R_Fmin: k = 1;                            break;
+    case R_Ceil: case R_Floor: case R_Round: case R_Trunc: k = 0;                break;
+    case R_Fmod: case R_Remainder: {
+      if (b == 0) { k = HUGE_VALQ; break; }
+      const __float128 n = (id == R_Fmod) ? truncq(a / b) : nearbyintq(a / b);
+      const __float128 f = a - b * n;
+      k = (f == 0) ? HUGE_VALQ : (aa + fabsq(b * n)) / fabsq(f);
+    } break;
+
+    // --- exponentials: f = base^x, x f'/f = x ln(base) ----------------------
+    case R_Exp:   k = aa;                                                        break;
+    case R_Exp2:  k = aa * kQLn2;                                                break;
+    case R_Exp10: k = aa * kQLn10;                                               break;
+    case R_Expm1: { const __float128 f = expm1q(a);
+                    k = (f == 0) ? HUGE_VALQ : fabsq(a * expq(a) / f); }         break;
+
+    // --- logarithms: f = log_base(x), x f'/f = 1/ln(x) ----------------------
+    case R_Log: case R_Log2: case R_Log10: {
+      const __float128 l = logq(a);
+      k = (l == 0) ? HUGE_VALQ : 1 / fabsq(l);
+    } break;
+    case R_Log1p: { const __float128 f = log1pq(a);
+                    k = (f == 0 || a == -1) ? HUGE_VALQ
+                                            : fabsq(a / ((1 + a) * f)); }        break;
+
+    // --- circular -----------------------------------------------------------
+    case R_Sin:  { const __float128 s = sinq(a);
+                   k = (s == 0) ? HUGE_VALQ : fabsq(a * cosq(a) / s); }          break;
+    case R_Cos:  { const __float128 co = cosq(a);
+                   k = (co == 0) ? HUGE_VALQ : fabsq(a * sinq(a) / co); }        break;
+    case R_Tan:  { const __float128 d = sinq(a) * cosq(a);
+                   k = (d == 0) ? HUGE_VALQ : fabsq(a / d); }                    break;
+    case R_Asin: { const __float128 f = asinq(a), r = 1 - a * a;
+                   k = (f == 0 || r <= 0) ? HUGE_VALQ : fabsq(a / (sqrtq(r) * f)); } break;
+    case R_Acos: { const __float128 f = acosq(a), r = 1 - a * a;
+                   k = (f == 0 || r <= 0) ? HUGE_VALQ : fabsq(a / (sqrtq(r) * f)); } break;
+    case R_Atan: { const __float128 f = atanq(a);
+                   k = (f == 0) ? HUGE_VALQ : fabsq(a / ((1 + a * a) * f)); }    break;
+
+    // --- hyperbolic ---------------------------------------------------------
+    case R_Sinh: { const __float128 s = sinhq(a);
+                   k = (s == 0) ? HUGE_VALQ : fabsq(a * coshq(a) / s); }         break;
+    case R_Cosh: { const __float128 co = coshq(a);
+                   k = (co == 0) ? HUGE_VALQ : fabsq(a * sinhq(a) / co); }       break;
+    case R_Tanh: { const __float128 d = sinhq(a) * coshq(a);
+                   k = (d == 0) ? HUGE_VALQ : fabsq(a / d); }                    break;
+    case R_Asinh:{ const __float128 f = asinhq(a);
+                   k = (f == 0) ? HUGE_VALQ : fabsq(a / (sqrtq(1 + a * a) * f)); } break;
+    case R_Acosh:{ const __float128 f = acoshq(a), r = a * a - 1;
+                   k = (f == 0 || r <= 0) ? HUGE_VALQ : fabsq(a / (sqrtq(r) * f)); } break;
+    case R_Atanh:{ const __float128 f = atanhq(a), r = 1 - a * a;
+                   k = (f == 0 || r == 0) ? HUGE_VALQ : fabsq(a / (r * f)); }    break;
+
+    // --- pow: a df/da / f = b;  b df/db / f = b ln a ------------------------
+    case R_Pow:  { if (a <= 0) { k = fabsq(b); break; }      // ln a undefined; a-partial only
+                   k = fabsq(b) + fabsq(b * logq(a)); }                          break;
+
+    default: return false;
+  }
+  (void)c;
+  if (isnanq(k)) return false;
+  kappa = (double)k;
+  return true;
+}
+
+// The bound a point is judged against, in ulps.
+double expected_ulps(double kappa) { return 1.0 + kappa; }
+
 // ---------------------------------------------------------------------------
 // Backend bindings. Every math entry point is spelled the same way in all four
 // headers, so one template body serves all of them.
@@ -805,17 +994,24 @@ Range range_float(int limbs) {
   return r;
 }
 
+// sig_bits() is limbs x word-significand (FP64 53, FP32 24, hidden bit
+// included) — the p in ulp(true) = |true| * 2^-p. Same arithmetic the SCORING
+// section uses to argue that widening to binary128 is exact.
 struct BackendDD { using S = xp::DoubleDouble; using Z = xp::DoubleDoubleComplex;
                    static const char* name() { return "DD"; } static double cap() { return 31.0; }
+                   static int sig_bits() { return 106; }   // 2 x 53
                    static Range range() { return range_double(2); } };
 struct BackendFF { using S = xp::FloatFloat;   using Z = xp::FloatFloatComplex;
                    static const char* name() { return "FF"; } static double cap() { return 14.0; }
+                   static int sig_bits() { return 48; }    // 2 x 24
                    static Range range() { return range_float(2); } };
 struct BackendQF { using S = xp::QuadFloat;    using Z = xp::QuadFloatComplex;
                    static const char* name() { return "QF"; } static double cap() { return 29.0; }
+                   static int sig_bits() { return 96; }    // 4 x 24
                    static Range range() { return range_float(4); } };
 struct BackendTF { using S = xp::TripleFloat;  using Z = xp::TripleFloatComplex;
                    static const char* name() { return "TF"; } static double cap() { return 21.7; }
+                   static int sig_bits() { return 72; }    // 3 x 24
                    static Range range() { return range_float(3); } };
 
 template <class S>
@@ -1321,15 +1517,89 @@ struct Cell {
   long        n_zero;      // points scoring exactly 0.00 — total loss
 };
 
+// ---------------------------------------------------------------------------
+// ULP GATE (--ulp). Bookkeeping for the condition-aware ulp verdict.
+//
+// MINIMUM, NOT MEAN. Every aggregate below is a WORST-POINT reduction. The old
+// tolerance tables gate on the mean over a cell, which cannot see an op that is
+// exact at 1600 points and returns nothing at 52 — that still averages ~30 and
+// passes. Here a single bad point fails its region.
+//
+// REGIONS. A failing point is run through the existing --classify machinery and
+// filed under its class. UNDERFLOW and OVERFLOW are REPORTED BUT NOT GATED: in
+// those bands |true| * 2^-p is not the backend's actual resolution (the trailing
+// limbs are subnormal, or the value is outside the leading word's range), so the
+// metric's own premise has failed and a verdict there would be noise. The other
+// classes — ARG_RANGE, CONDITIONING, UNEXPLAINED, and OK (the point was never
+// bad enough to classify) — are gated. Filing per region is what stops one
+// legitimate conditioning loss from forcing the whole op's bound open.
+// ---------------------------------------------------------------------------
+const char* const kRegionOK = "OK";
+
+struct UlpFail {
+  const char* backend; char kind; const char* op; int point;
+  const char* region;
+  double ulps, kappa, expected, ratio, digits;
+};
+
+struct UlpCell {
+  const char* backend; char kind; const char* op;
+  long   n_scored, n_unscorable, n_ungated, n_fail;
+  double worst_ratio;  int worst_point;
+  double worst_ulps, worst_expected, worst_kappa, worst_digits;
+  double max_ulps;     int max_ulps_point;   // biggest raw ulp error, gated or not
+};
+
+struct UlpCtx {
+  double                allowance;
+  std::vector<UlpCell>* cells;
+  std::vector<UlpFail>* fails;
+  // --ulp-explain OP:POINT — record the full breakdown for one grid point on
+  // every backend, pass or fail. This is the microscope the metric is argued
+  // with; without it a claim about a single point cannot be reproduced.
+  const char*           explain_op;
+  int                   explain_point;
+  std::vector<UlpFail>* explains;
+};
+
+UlpCell make_ulp_cell(const char* be, char kind, const char* op) {
+  UlpCell u;
+  u.backend = be; u.kind = kind; u.op = op;
+  u.n_scored = u.n_unscorable = u.n_ungated = u.n_fail = 0;
+  u.worst_ratio = 0.0; u.worst_point = -1;
+  u.worst_ulps = u.worst_expected = u.worst_kappa = u.worst_digits = 0.0;
+  u.max_ulps = 0.0; u.max_ulps_point = -1;
+  return u;
+}
+
+// Input perturbation the backend cannot avoid, expressed in ulps of the input.
+// Normally 1 (the stored value is the input, rounded). But a double input does
+// NOT fit FF's 48 bits, so for FF the stored operand is already off by more than
+// one ulp of the FF format before the algorithm runs; charge that honestly
+// instead of pretending the argument was exact.
+double input_delta_ulps(const __float128* stored, const __float128* exact,
+                        int nops, int sig_bits) {
+  double worst = 1.0;
+  for (int i = 0; i < nops; ++i) {
+    const double e = storage_rel_err(stored[i], exact[i]);
+    const double in_ulps = std::ldexp(e, sig_bits);
+    if (in_ulps > worst) worst = in_ulps;
+  }
+  return worst;
+}
+
 template <class B>
 void sweep_real(int id, const std::vector<GridPoint>& grid,
                 const std::vector<double>& a_in, const std::vector<double>& b_in,
                 const std::vector<double>& c_in, const std::vector<__float128>& ref,
                 std::vector<Row>& rows, std::vector<Cell>& cells,
-                const ClassifyCtx* cx) {
+                const ClassifyCtx* cx, const UlpCtx* ux) {
   typedef typename B::S S;
   Cell cell = {B::name(), 'r', kReal[id].name, B::cap(), 0.0, B::cap(), 0, 0};
+  UlpCell ucell = make_ulp_cell(B::name(), 'r', kReal[id].name);
   const Range rg = B::range();
+  const int   sb_bits = B::sig_bits();
+  const int   nops    = kReal[id].nops;
   for (size_t i = 0; i < grid.size(); ++i) {
     const S sa(a_in[i]), sb(b_in[i]), sc(c_in[i]);
     const S r = eval_real<S>(id, sa, sb, sc);
@@ -1342,12 +1612,58 @@ void sweep_real(int id, const std::vector<GridPoint>& grid,
                     to_q(sa), to_q(sb), to_q(sc), ref[i], to_q(r), d, cr);
       cx->rows->push_back(cr);
     }
+    // --- condition-aware ulp verdict -------------------------------------
+    if (ux) {
+      const double m = ulps_scalar(to_q(r), ref[i], sb_bits);
+      double kappa = 0.0;
+      if (m == kUnscorableUlps()) {
+        ++ucell.n_unscorable;
+      } else if (!kappa_real(id, (__float128)a_in[i], (__float128)b_in[i],
+                             (__float128)c_in[i], kappa)) {
+        ++ucell.n_ungated;                      // no analytic bound -> digit gate
+      } else {
+        const __float128 stored[3] = {to_q(sa), to_q(sb), to_q(sc)};
+        const __float128 exact[3]  = {(__float128)a_in[i], (__float128)b_in[i],
+                                      (__float128)c_in[i]};
+        const double exp_u = expected_ulps(kappa * input_delta_ulps(stored, exact,
+                                                                    nops, sb_bits));
+        const double ratio = (exp_u > 0.0) ? m / exp_u : HUGE_VAL;
+        ++ucell.n_scored;
+        if (m > ucell.max_ulps) { ucell.max_ulps = m; ucell.max_ulps_point = int(i); }
+        if (ratio > ucell.worst_ratio) {
+          ucell.worst_ratio = ratio;    ucell.worst_point    = int(i);
+          ucell.worst_ulps  = m;        ucell.worst_expected = exp_u;
+          ucell.worst_kappa = kappa;    ucell.worst_digits   = d;
+        }
+        if (ux->explains && ux->explain_point == int(i) &&
+            std::strcmp(ux->explain_op, kReal[id].name) == 0)
+          ux->explains->push_back({B::name(), 'r', kReal[id].name, int(i), kRegionOK,
+                                   m, kappa, exp_u, ratio, d});
+        if (ratio > ux->allowance) {
+          // Only now is a region label worth its cost: classify the point and
+          // file the failure under the class it lands in.
+          ClassRow cr;
+          classify_real(B::name(), rg, B::cap(), 0.5 * B::cap(), id, int(i),
+                        grid[i].family, a_in[i], b_in[i], c_in[i],
+                        stored[0], stored[1], stored[2], ref[i], to_q(r), d, cr);
+          // Always take the classifier's verdict, even when the DIGIT score was
+          // healthy enough that --classify would never have looked at this point.
+          // That is the whole premise: a point can read 16 digits and still be
+          // 7e15 ulps out because an intermediate went subnormal.
+          const char* region = kClassName[cr.cls];
+          ++ucell.n_fail;
+          ux->fails->push_back({B::name(), 'r', kReal[id].name, int(i), region,
+                                m, kappa, exp_u, ratio, d});
+        }
+      }
+    }
     cell.sum += d;
     if (d < cell.min) cell.min = d;
     if (d == 0.0) ++cell.n_zero;
     ++cell.n;
   }
   cells.push_back(cell);
+  if (ux) ux->cells->push_back(ucell);
 }
 
 template <class B>
@@ -1355,10 +1671,11 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
                    const std::vector<double>& b_re, const std::vector<double>& b_im,
                    const std::vector<__float128>& ref_re, const std::vector<__float128>& ref_im,
                    std::vector<Row>& rows, std::vector<Cell>& cells,
-                   const ClassifyCtx* cx) {
+                   const ClassifyCtx* cx, const UlpCtx* ux) {
   typedef typename B::S S;
   typedef typename B::Z Z;
   Cell cell = {B::name(), 'c', kComplex[id].name, B::cap(), 0.0, B::cap(), 0, 0};
+  UlpCell ucell = make_ulp_cell(B::name(), 'c', kComplex[id].name);
   const Range rg = B::range();
   for (size_t i = 0; i < grid.size(); ++i) {
     const Z a{S(grid[i].re), S(grid[i].im)};
@@ -1378,12 +1695,30 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
                        ref_re[i], ref_im[i], to_q(r.re), to_q(r.im), d, cr);
       cx->rows->push_back(cr);
     }
+    // --- ulp MEASUREMENT for complex: reported, never gated ---------------
+    // Modulus form: |got - ref| / (|ref| * 2^-p). No kappa is derived here and
+    // no verdict is issued — see the COMPLEX OPS note in the ULP section.
+    if (ux) {
+      const __float128 dre = to_q(r.re) - ref_re[i], dim_ = to_q(r.im) - ref_im[i];
+      const bool bad = isnanq(dre) || isnanq(dim_) ||
+                       isnanq(ref_re[i]) || isnanq(ref_im[i]) ||
+                       !finiteq(ref_re[i]) || !finiteq(ref_im[i]);
+      const __float128 mref = hypotq(ref_re[i], ref_im[i]);
+      if (bad || mref == 0) {
+        ++ucell.n_unscorable;
+      } else {
+        const double m = (double)ldexpq(hypotq(dre, dim_) / mref, B::sig_bits());
+        ++ucell.n_ungated;
+        if (m > ucell.max_ulps) { ucell.max_ulps = m; ucell.max_ulps_point = int(i); }
+      }
+    }
     cell.sum += d;
     if (d < cell.min) cell.min = d;
     if (d == 0.0) ++cell.n_zero;
     ++cell.n;
   }
   cells.push_back(cell);
+  if (ux) ux->cells->push_back(ucell);
 }
 
 // ---------------------------------------------------------------------------
@@ -1395,7 +1730,7 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
 void run_sweep(uint64_t seed, const std::vector<GridPoint>& rgrid,
                const std::vector<GridPoint>& cgrid,
                std::vector<Row>& rows, std::vector<Cell>& cells,
-               const ClassifyCtx* cx) {
+               const ClassifyCtx* cx, const UlpCtx* ux) {
   const size_t nr = rgrid.size(), nc = cgrid.size();
   rows.reserve(4 * (R_COUNT * nr + C_COUNT * nc));
 
@@ -1410,10 +1745,10 @@ void run_sweep(uint64_t seed, const std::vector<GridPoint>& rgrid,
       a[i] = av; b[i] = bv; c[i] = cv;
       ref[i] = reference_real(id, av, bv, cv);
     }
-    sweep_real<BackendDD>(id, rgrid, a, b, c, ref, rows, cells, cx);
-    sweep_real<BackendFF>(id, rgrid, a, b, c, ref, rows, cells, cx);
-    sweep_real<BackendQF>(id, rgrid, a, b, c, ref, rows, cells, cx);
-    sweep_real<BackendTF>(id, rgrid, a, b, c, ref, rows, cells, cx);
+    sweep_real<BackendDD>(id, rgrid, a, b, c, ref, rows, cells, cx, ux);
+    sweep_real<BackendFF>(id, rgrid, a, b, c, ref, rows, cells, cx, ux);
+    sweep_real<BackendQF>(id, rgrid, a, b, c, ref, rows, cells, cx, ux);
+    sweep_real<BackendTF>(id, rgrid, a, b, c, ref, rows, cells, cx, ux);
   }
 
   for (int id = 0; id < C_COUNT; ++id) {
@@ -1424,10 +1759,10 @@ void run_sweep(uint64_t seed, const std::vector<GridPoint>& rgrid,
       fill_complex_operands(id, i, cgrid, cgrid[i].re, cgrid[i].im, rng, bre[i], bim[i]);
       reference_complex(id, cgrid[i].re, cgrid[i].im, bre[i], bim[i], rre[i], rim[i]);
     }
-    sweep_complex<BackendDD>(id, cgrid, bre, bim, rre, rim, rows, cells, cx);
-    sweep_complex<BackendFF>(id, cgrid, bre, bim, rre, rim, rows, cells, cx);
-    sweep_complex<BackendQF>(id, cgrid, bre, bim, rre, rim, rows, cells, cx);
-    sweep_complex<BackendTF>(id, cgrid, bre, bim, rre, rim, rows, cells, cx);
+    sweep_complex<BackendDD>(id, cgrid, bre, bim, rre, rim, rows, cells, cx, ux);
+    sweep_complex<BackendFF>(id, cgrid, bre, bim, rre, rim, rows, cells, cx, ux);
+    sweep_complex<BackendQF>(id, cgrid, bre, bim, rre, rim, rows, cells, cx, ux);
+    sweep_complex<BackendTF>(id, cgrid, bre, bim, rre, rim, rows, cells, cx, ux);
   }
 }
 
@@ -1683,6 +2018,90 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
 }
 
 // ---------------------------------------------------------------------------
+// --ulp report. Worst point per (backend, op), then the failures grouped by
+// (backend, op, region). Returns the gated-failure count.
+// ---------------------------------------------------------------------------
+bool region_is_gated(const char* r) {
+  return std::strcmp(r, "UNDERFLOW") != 0 && std::strcmp(r, "OVERFLOW") != 0;
+}
+
+long print_ulp_report(const std::vector<UlpCell>& cells,
+                      const std::vector<UlpFail>& fails,
+                      const std::vector<UlpFail>& explains,
+                      double allowance) {
+  if (!explains.empty()) {
+    std::printf("\n--- --ulp-explain: %s point %d, both metrics -------------------\n",
+                explains[0].op, explains[0].point);
+    std::printf("  %-4s %8s  %12s  %12s  %12s  %9s  %s\n",
+                "be", "digits", "kappa", "measured u", "expected u", "ratio", "verdict");
+    for (size_t i = 0; i < explains.size(); ++i) {
+      const UlpFail& e = explains[i];
+      std::printf("  %-4s %8.2f  %12.4g  %12.4g  %12.4g  %9.4g  %s\n",
+                  e.backend, e.digits, e.kappa, e.ulps, e.expected, e.ratio,
+                  e.ratio <= allowance ? "PASS" : "FAIL");
+    }
+  }
+
+  std::printf("\n=== ULP GATE  (measured <= %.1f x (1 + kappa), worst point per region) ===\n",
+              allowance);
+  std::printf("%-4s %-2s %-11s %9s %9s %10s %12s %12s %9s\n",
+              "be", "k", "op", "scored", "ungated", "unscorable", "worst ulps",
+              "expected", "ratio");
+  long gated_fail_cells = 0;
+  for (size_t i = 0; i < cells.size(); ++i) {
+    const UlpCell& u = cells[i];
+    if (u.n_scored == 0) {
+      std::printf("%-4s %-2c %-11s %9ld %9ld %10ld %12.4g %12s %9s   (digit gate)\n",
+                  u.backend, u.kind, u.op, u.n_scored, u.n_ungated, u.n_unscorable,
+                  u.max_ulps, "-", "-");
+      continue;
+    }
+    std::printf("%-4s %-2c %-11s %9ld %9ld %10ld %12.4g %12.4g %9.3g%s\n",
+                u.backend, u.kind, u.op, u.n_scored, u.n_ungated, u.n_unscorable,
+                u.worst_ulps, u.worst_expected, u.worst_ratio,
+                u.worst_ratio > allowance ? "  <-- over" : "");
+  }
+
+  // Failures grouped by (backend, op, region); worst point in each region wins.
+  std::printf("\n--- failures by region (worst point in each) ---------------------\n");
+  std::vector<size_t> seen;
+  long gated = 0, exempt = 0;
+  for (size_t i = 0; i < fails.size(); ++i) {
+    bool dup = false;
+    for (size_t j = 0; j < seen.size(); ++j) {
+      const UlpFail& s = fails[seen[j]];
+      if (s.backend == fails[i].backend && s.kind == fails[i].kind &&
+          std::strcmp(s.op, fails[i].op) == 0 &&
+          std::strcmp(s.region, fails[i].region) == 0) {
+        dup = true;
+        if (fails[i].ratio > s.ratio) seen[j] = i;
+        break;
+      }
+    }
+    if (!dup) seen.push_back(i);
+    if (region_is_gated(fails[i].region)) ++gated; else ++exempt;
+  }
+  if (seen.empty()) std::printf("  none\n");
+  std::printf("  %-4s %-2s %-11s %-13s %7s %12s %12s %12s %9s %s\n",
+              "be", "k", "op", "region", "point", "digits", "measured u",
+              "expected u", "ratio", "verdict");
+  for (size_t j = 0; j < seen.size(); ++j) {
+    const UlpFail& f = fails[seen[j]];
+    const bool g = region_is_gated(f.region);
+    if (g) ++gated_fail_cells;
+    std::printf("  %-4s %-2c %-11s %-13s %7d %12.2f %12.4g %12.4g %9.4g %s\n",
+                f.backend, f.kind, f.op, f.region, f.point, f.digits, f.ulps,
+                f.expected, f.ratio, g ? "GATED-FAIL" : "exempt (metric n/a)");
+  }
+  std::printf("\n  failing points: %ld gated, %ld exempt (UNDERFLOW/OVERFLOW)\n",
+              gated, exempt);
+  std::printf("  failing (backend,op,region) cells, gated: %ld\n", gated_fail_cells);
+  std::printf("\nRESULT: %s\n",
+              gated_fail_cells ? "FAIL — condition-aware ulp gate" : "PASS");
+  return gated_fail_cells;
+}
+
+// ---------------------------------------------------------------------------
 void usage(const char* argv0) {
   std::fprintf(stderr,
     "Usage: %s [--out PATH] [--grid-out PATH] [--seed N] [--summary]\n"
@@ -1699,17 +2118,27 @@ void usage(const char* argv0) {
     "                    of its backend cap and write the evidence CSV to PATH.\n"
     "                    Writes no baseline. Exits 3 if any point is UNEXPLAINED.\n"
     "  --classify-frac F fraction of cap below which a point is triaged "
-    "(default %.2f)\n",
-    argv0, argv0, kDefaultOut, (unsigned long long)kDefaultSeed, kDefaultClassifyFrac);
+    "(default %.2f)\n"
+    "  --ulp             ULP GATE: score every point in ulps of the true value and\n"
+    "                    judge it against 1 + kappa(f,x), the condition-aware bound.\n"
+    "                    Worst point per (backend, op, region), never a mean.\n"
+    "                    Writes nothing. Exits 4 if any GATED region fails.\n"
+    "  --ulp-allowance A slack multiplier on the bound (default %.1f)\n"
+    "  --ulp-explain O:P print the full both-metric breakdown for real op O at grid\n"
+    "                    point P on all four backends (implies --ulp)\n",
+    argv0, argv0, kDefaultOut, (unsigned long long)kDefaultSeed, kDefaultClassifyFrac,
+    kUlpAllowance);
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-  std::string out = kDefaultOut, grid_out, baseline, classify;
+  std::string out = kDefaultOut, grid_out, baseline, classify, explain_op;
   uint64_t    seed = kDefaultSeed;
-  bool        quiet = false, out_set = false;
+  bool        quiet = false, out_set = false, ulp_gate = false;
   double      classify_frac = kDefaultClassifyFrac;
+  double      ulp_allowance = kUlpAllowance;
+  int         explain_point = -1;
 
   for (int i = 1; i < argc; ++i) {
     const std::string s = argv[i];
@@ -1723,6 +2152,18 @@ int main(int argc, char** argv) {
     else if (s == "--baseline")  { baseline = need("--baseline"); }
     else if (s == "--classify")  { classify = need("--classify"); }
     else if (s == "--classify-frac") { classify_frac = std::atof(need("--classify-frac")); }
+    else if (s == "--ulp")       { ulp_gate = true; }
+    else if (s == "--ulp-allowance") { ulp_allowance = std::atof(need("--ulp-allowance")); }
+    else if (s == "--ulp-explain") {
+      const std::string v = need("--ulp-explain");
+      const size_t colon = v.rfind(':');
+      if (colon == std::string::npos) {
+        std::fprintf(stderr, "--ulp-explain wants OP:POINT\n"); return 2;
+      }
+      explain_op = v.substr(0, colon);
+      explain_point = std::atoi(v.c_str() + colon + 1);
+      ulp_gate = true;
+    }
     else if (s == "--seed")      { seed = std::strtoull(need("--seed"), nullptr, 10); }
     else if (s == "--summary")   { quiet = false; }
     else if (s == "--quiet")     { quiet = true; }
@@ -1745,9 +2186,20 @@ int main(int argc, char** argv) {
   std::vector<Cell>     cells;
   std::vector<ClassRow> class_rows;
   ClassifyCtx           cx = {classify_frac, &class_rows};
-  run_sweep(seed, rgrid, cgrid, rows, cells, classify.empty() ? nullptr : &cx);
+  std::vector<UlpCell>  ulp_cells;
+  std::vector<UlpFail>  ulp_fails, ulp_explains;
+  UlpCtx                ux = {ulp_allowance, &ulp_cells, &ulp_fails,
+                              explain_op.c_str(), explain_point,
+                              explain_point >= 0 ? &ulp_explains : nullptr};
+  run_sweep(seed, rgrid, cgrid, rows, cells, classify.empty() ? nullptr : &cx,
+            ulp_gate ? &ux : nullptr);
 
   if (!quiet) print_summary(cells);
+
+  if (ulp_gate) {
+    const long bad = print_ulp_report(ulp_cells, ulp_fails, ulp_explains, ulp_allowance);
+    return bad ? 4 : 0;
+  }
 
   if (!baseline.empty()) return compare_baseline(baseline, rows);
 

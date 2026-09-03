@@ -180,8 +180,44 @@ static float128 qf_to_q(const qf::QuadFloat& x) {
 
 // Digits of accuracy of a QF result (already widened) against the oracle, capped
 // at QF's 29-digit ceiling. NaN/inf/zero handling included (mirrors
+// ULP error, the second metric (see docs/ULP_METRIC.md). QF is 4 x FP32, so
+// p = 96 significand bits and ulp(true) = |true| * 2^-96. A relative-error score
+// goes vacuous near a zero of the function; this one does not. Reported, not
+// gated — the condition-aware verdict needs kappa and a region label, and both
+// live in scripts/sweep_accuracy --ulp.
+//
+// PLUMBING. qf_digits() is called once per scored element from seven different
+// runners, each of which appends to its own `digs` vector and hands it to
+// compute_stats(). Rather than thread a parallel vector through all seven,
+// qf_digits() appends the matching ulp error to g_qf_ulps and qf_finish()
+// drains it. The two arrays are therefore built in lockstep by construction;
+// qf_finish() asserts that by checking the sizes and falls back to digits-only
+// if they ever diverge.
+static const int kQfSigBits = 96;                 // 4 x 24
+static const double kUlpUnscorableQf = -1.0;      // ref zero / non-finite
+static std::vector<double> g_qf_ulps;
+
+static double qf_ulps_of(float128 computed, float128 ref) {
+  if (Kokkos::isnan(ref) || Kokkos::isinf(ref)) return kUlpUnscorableQf;
+  if (ref == (float128)0.0)
+    return (computed == (float128)0.0) ? 0.0 : kUlpUnscorableQf;
+  if (Kokkos::isnan(computed) || Kokkos::isinf(computed)) return HUGE_VAL;
+  if (computed == ref) return 0.0;
+  return (double)ldexpq(Kokkos::abs((computed - ref) / ref), kQfSigBits);
+}
+
+// Drain g_qf_ulps into the AccStats for one op. Digit stats are unchanged.
+static AccStats qf_finish(const std::vector<double>& digs) {
+  AccStats s = (g_qf_ulps.size() == digs.size())
+                 ? compute_stats(digs.data(), g_qf_ulps.data(), (int)digs.size())
+                 : compute_stats(digs.data(), (int)digs.size());
+  g_qf_ulps.clear();
+  return s;
+}
+
 // digits_of_accuracy in test_utils.hpp and element_digits in the demo).
 static double qf_digits(float128 computed, float128 ref) {
+  g_qf_ulps.push_back(qf_ulps_of(computed, ref));   // second metric, in lockstep
   if (Kokkos::isnan(computed) || Kokkos::isnan(ref)) return 0.0;
   if (Kokkos::isinf(ref))
     return (Kokkos::isinf(computed) && (computed > 0) == (ref > 0)) ? kMaxDig : 0.0;
@@ -235,7 +271,23 @@ struct OpResult {
   bool        pass       = false;   // mean >= tol (and, for a registry op, min >= floor)
   const ExpectedMinDropAnnotation* ann = nullptr;  // registry entry, or null
   bool        min_ok_for_registry = true;          // min >= ann->min_digits_allowed
+  // Second metric. WORST point over all passes, never a mean. Reported, not
+  // gated — see docs/ULP_METRIC.md.
+  double      worst_ulp      = 0.0;
+  long        n_ulp_scored   = 0;
+  long        n_ulp_unscored = 0;
 };
+
+// Worst-point union of the ulp summaries from the three passes.
+static void combine3_ulps(const AccStats& a, const AccStats& b, const AccStats& c,
+                          OpResult& r) {
+  const AccStats* v[3] = {&a, &b, &c};
+  for (int i = 0; i < 3; ++i) {
+    if (v[i]->ulp_max > r.worst_ulp) r.worst_ulp = v[i]->ulp_max;
+    r.n_ulp_scored   += v[i]->n_ulp_scored;
+    r.n_ulp_unscored += v[i]->n_ulp_unscored;
+  }
+}
 
 // Combine the three passes' (min, mean, n) into one: min over all, mean weighted
 // by count. Any pass whose n<=0 (e.g. all corpus inputs out of domain) drops out.
@@ -291,6 +343,10 @@ static void report_op(const OpResult& r) {
               "tolerance_digits=%6.2f status=%s",
               r.name.c_str(), r.n_scored, r.n_skipped, r.min_digits, r.mean_digits,
               r.tol_digits, status);
+  // Both metrics on one line: the digit score the KI history is written in, and
+  // the worst-point ulp error the digit score cannot see near a zero of f.
+  std::printf(" worst_ulp=%-11.4g ulp_n=%-9ld ulp_unscorable=%-7ld",
+              r.worst_ulp, r.n_ulp_scored, r.n_ulp_unscored);
   if (r.ann && r.pass && r.min_digits < kMaxDig) std::printf("  (%s)", r.ann->reason);
   std::printf("\n");
 }
@@ -401,7 +457,7 @@ static AccStats qf_run_unary(int n, uint64_t seed, const InputDist& gen,
     float128 got   = (float128)ho0(i) + (float128)ho1(i) + (float128)ho2(i) + (float128)ho3(i);
     digs.push_back(qf_digits(got, oracle(refin)));
   }
-  return compute_stats(digs.data(), (int)digs.size());
+  return qf_finish(digs);
 }
 
 template <typename DeviceOp>
@@ -440,7 +496,7 @@ static AccStats qf_run_unary_corpus(const std::vector<float>& inputs,
     float128 got   = (float128)ho0(i) + (float128)ho1(i) + (float128)ho2(i) + (float128)ho3(i);
     digs.push_back(qf_digits(got, oracle(refin)));
   }
-  return compute_stats(digs.data(), (int)digs.size());
+  return qf_finish(digs);
 }
 
 template <typename DeviceOp>
@@ -489,7 +545,7 @@ static AccStats qf_run_binary(int n, uint64_t seed, const InputDist& ga, const I
     float128 got = (float128)ho0(i) + (float128)ho1(i) + (float128)ho2(i) + (float128)ho3(i);
     digs.push_back(qf_digits(got, oracle(ra, rb)));
   }
-  return compute_stats(digs.data(), (int)digs.size());
+  return qf_finish(digs);
 }
 
 template <typename DeviceOp>
@@ -536,7 +592,7 @@ static AccStats qf_run_binary_corpus(const std::vector<std::pair<float, float>>&
     float128 got = (float128)ho0(i) + (float128)ho1(i) + (float128)ho2(i) + (float128)ho3(i);
     digs.push_back(qf_digits(got, oracle(ra, rb)));
   }
-  return compute_stats(digs.data(), (int)digs.size());
+  return qf_finish(digs);
 }
 
 // Run all three passes for one op and finalize.
@@ -550,7 +606,9 @@ static OpResult score_unary(const UnaryOp& op, uint64_t seed) {
                                      op.in_domain, skipped);
   double min_d, mean_d; long n_total;
   combine3(nar, brd, cor, min_d, mean_d, n_total);
-  return finalize(op.name, min_d, mean_d, n_total, skipped, op.tol);
+  OpResult r = finalize(op.name, min_d, mean_d, n_total, skipped, op.tol);
+  combine3_ulps(nar, brd, cor, r);
+  return r;
 }
 
 static OpResult score_binary(const BinaryOp& op, uint64_t seed) {
@@ -563,7 +621,9 @@ static OpResult score_binary(const BinaryOp& op, uint64_t seed) {
                                       op.in_domain, skipped);
   double min_d, mean_d; long n_total;
   combine3(nar, brd, cor, min_d, mean_d, n_total);
-  return finalize(op.name, min_d, mean_d, n_total, skipped, op.tol);
+  OpResult r = finalize(op.name, min_d, mean_d, n_total, skipped, op.tol);
+  combine3_ulps(nar, brd, cor, r);
+  return r;
 }
 
 // Log-uniform generator: 10^u, u ~ Uniform[explo, exphi].
@@ -913,7 +973,7 @@ int main(int argc, char** argv) {
         float128 got= (float128)ho0(i)+(float128)ho1(i)+(float128)ho2(i)+(float128)ho3(i);
         digs[i] = qf_digits(got, ra * (float128)hb[i]);
       }
-      AccStats s = compute_stats(digs.data(), n);
+      AccStats s = qf_finish(digs);
       OpResult r = finalize("multiply_scalar", s.min, s.mean, s.n, 0, kTolDefault);
       results.push_back(r); report_op(r);
     }
@@ -963,7 +1023,7 @@ int main(int argc, char** argv) {
         float128 got=(float128)ho0(i)+(float128)ho1(i)+(float128)ho2(i)+(float128)ho3(i);
         digs[i]=qf_digits(got, Kokkos::fma(ra, rb, rc));
       }
-      AccStats s = compute_stats(digs.data(), n);
+      AccStats s = qf_finish(digs);
       OpResult r = finalize("fma", s.min, s.mean, s.n, 0, kTolDefault);
       results.push_back(r); report_op(r);
     }
@@ -1006,7 +1066,7 @@ int main(int argc, char** argv) {
         float128 got=(float128)ho0(i)+(float128)ho1(i)+(float128)ho2(i)+(float128)ho3(i);
         digs.push_back(qf_digits(got, Kokkos::pow(ra, (float128)hnv[i])));
       }
-      AccStats s = compute_stats(digs.data(), (int)digs.size());
+      AccStats s = qf_finish(digs);
       OpResult r = finalize("pow_int", s.min, s.mean, s.n, skipped, kTolDefault);
       results.push_back(r); report_op(r);
     }

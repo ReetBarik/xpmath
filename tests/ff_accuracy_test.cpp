@@ -144,6 +144,13 @@ struct OpResult {
   bool        pass       = false;   // mean >= tol
   const ExpectedMinDropAnnotation* ann = nullptr;  // registry entry, or null
   bool        min_ok_for_registry = true;          // min >= ann->min_digits_allowed
+  // Second metric (test_utils.hpp ULP ERROR). WORST point over both passes,
+  // never a mean. REPORTED, NOT GATED here — the condition-aware verdict needs
+  // kappa and a region label, and both live in scripts/sweep_accuracy --ulp.
+  // See docs/ULP_METRIC.md for why the gate sits there and not in this file.
+  double      worst_ulp      = 0.0;
+  long        n_ulp_scored   = 0;
+  long        n_ulp_unscored = 0;   // ref zero/non-finite: ulp(true) undefined
 };
 
 // Combine an AccStats from the random pass with one from the corpus pass into a
@@ -176,13 +183,18 @@ static const char* registry_key(const std::string& op_name) {
 // mean < tol -> fail; else if registry op, min must clear the sanctioned floor;
 // else pass.
 static OpResult finalize(const std::string& name, double min_d, double mean_d,
-                         long n_scored, long n_skipped) {
+                         long n_scored, long n_skipped,
+                         double worst_ulp = 0.0, long n_ulp_scored = 0,
+                         long n_ulp_unscored = 0) {
   OpResult r;
   r.name = name;
   r.n_scored = n_scored;
   r.n_skipped = n_skipped;
   r.min_digits = min_d;
   r.mean_digits = mean_d;
+  r.worst_ulp = worst_ulp;
+  r.n_ulp_scored = n_ulp_scored;
+  r.n_ulp_unscored = n_ulp_unscored;
   r.tol_digits = tolerance_digits(n_scored > 0 ? n_scored : 1);
   r.ann = lookup_expected_min_drop(registry_key(name));
   const bool mean_ok = mean_d >= r.tol_digits;
@@ -216,6 +228,10 @@ static void report_op(const OpResult& r) {
               "tolerance_digits=%6.2f status=%s",
               r.name.c_str(), r.n_scored, r.n_skipped, r.min_digits, r.mean_digits,
               r.tol_digits, status);
+  // Both metrics on one line: the digit score the KI history is written in, and
+  // the worst-point ulp error the digit score cannot see near a zero of f.
+  std::printf(" worst_ulp=%-11.4g ulp_n=%-9ld ulp_unscorable=%-7ld",
+              r.worst_ulp, r.n_ulp_scored, r.n_ulp_unscored);
   if (r.ann && r.pass && r.min_digits < BackendTraits<FF>::max_digits) {
     std::printf("  (%s)", r.ann->reason);
   }
@@ -324,7 +340,9 @@ static OpResult score_unary(const UnaryOp& op, uint64_t seed) {
 
   double min_d, mean_d; long n_total;
   combine(rnd, cor, min_d, mean_d, n_total);
-  return finalize(op.name, min_d, mean_d, n_total, skipped);
+  AccStats u = rnd; merge_ulps(u, cor);   // worst point across both passes
+  return finalize(op.name, min_d, mean_d, n_total, skipped,
+                  u.ulp_max, u.n_ulp_scored, u.n_ulp_unscored);
 }
 
 static OpResult score_binary(const BinaryOp& op, uint64_t seed) {
@@ -337,7 +355,9 @@ static OpResult score_binary(const BinaryOp& op, uint64_t seed) {
 
   double min_d, mean_d; long n_total;
   combine(rnd, cor, min_d, mean_d, n_total);
-  return finalize(op.name, min_d, mean_d, n_total, skipped);
+  AccStats u = rnd; merge_ulps(u, cor);   // worst point across both passes
+  return finalize(op.name, min_d, mean_d, n_total, skipped,
+                  u.ulp_max, u.n_ulp_scored, u.n_ulp_unscored);
 }
 
 #endif  // KOKKOS_EP_HAVE_QUADMATH
@@ -705,7 +725,8 @@ int main(int argc, char** argv) {
         digs[i] = digits_of_accuracy<FF>(BackendTraits<FF>::to_quad(rmir(i)), ref);
       }
       AccStats s = compute_stats(digs.data(), kRandomN);
-      OpResult r = finalize("fma", s.min, s.mean, s.n, 0);
+      OpResult r = finalize("fma", s.min, s.mean, s.n, 0,
+                               s.ulp_max, s.n_ulp_scored, s.n_ulp_unscored);
       results.push_back(r);
       report_op(r);
     }
@@ -741,7 +762,8 @@ int main(int argc, char** argv) {
         digs.push_back(digits_of_accuracy<FF>(BackendTraits<FF>::to_quad(rmir(i)), ref));
       }
       AccStats s = compute_stats(digs.data(), (int)digs.size());
-      OpResult r = finalize("pow_int", s.min, s.mean, s.n, skipped);
+      OpResult r = finalize("pow_int", s.min, s.mean, s.n, skipped,
+                               s.ulp_max, s.n_ulp_scored, s.n_ulp_unscored);
       results.push_back(r);
       report_op(r);
     }

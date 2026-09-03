@@ -106,6 +106,23 @@ static double tf_digits(const tf::TripleFloat& got, const float128& truth) {
   return d;
 }
 
+// ULP error, the second metric (see docs/ULP_METRIC.md). TF is 3 x FP32, so
+// p = 72 significand bits and ulp(true) = |true| * 2^-72. A relative-error score
+// goes vacuous near a zero of the function; this one does not. Reported, not
+// gated — the condition-aware verdict needs kappa and a region label, and both
+// live in scripts/sweep_accuracy --ulp.
+static const int kTfSigBits = 72;                 // 3 x 24
+static const double kUlpUnscorableTf = -1.0;      // ref zero / non-finite
+
+static double tf_ulps(const tf::TripleFloat& got, const float128& truth) {
+  if (isnanq(truth) || !finiteq(truth)) return kUlpUnscorableTf;
+  const float128 g = tf_to_q(got);
+  if (truth == 0.0Q) return (g == 0.0Q) ? 0.0 : kUlpUnscorableTf;
+  if (isnanq(g) || !finiteq(g)) return HUGE_VAL;
+  if (g == truth) return 0.0;
+  return (double)ldexpq(fabsq(g - truth) / fabsq(truth), kTfSigBits);
+}
+
 // ----------------------------------------------------------------------------
 // Wide input construction (reused from qf tests)
 // ----------------------------------------------------------------------------
@@ -246,7 +263,21 @@ struct OpResult {
   double min_dig = kMaxDig;
   int n = 0;
   int skip = 0;
+  // Second metric. WORST point over all three passes, never a mean.
+  double worst_ulp = 0.0;
+  int n_ulp_scored = 0;
+  int n_ulp_unscored = 0;
 };
+
+// Fold one element's ulp error into an OpResult. Called next to every
+// tf_digits() so the two metrics always cover the same element set.
+static void tf_note_ulp(OpResult& R, const tf::TripleFloat& got,
+                        const float128& truth) {
+  const double u = tf_ulps(got, truth);
+  if (u == kUlpUnscorableTf) { ++R.n_ulp_unscored; return; }
+  ++R.n_ulp_scored;
+  if (u > R.worst_ulp) R.worst_ulp = u;
+}
 
 // ----------------------------------------------------------------------------
 // Unary op runner (three passes: narrow, broad, corpus)
@@ -266,6 +297,7 @@ static OpResult test_unary(const char* name, UnaryOp op,
     auto got = op(tf_x);
     float128 truth = oracle(tf_to_q(tf_x));
     double dig = tf_digits(got, truth);
+    tf_note_ulp(R, got, truth);
     R.sum += dig; ++R.n;
     if (dig < R.min_dig) R.min_dig = dig;
   }
@@ -278,6 +310,7 @@ static OpResult test_unary(const char* name, UnaryOp op,
     auto got = op(tf_x);
     float128 truth = oracle(tf_to_q(tf_x));
     double dig = tf_digits(got, truth);
+    tf_note_ulp(R, got, truth);
     R.sum += dig; ++R.n;
     if (dig < R.min_dig) R.min_dig = dig;
   }
@@ -292,6 +325,7 @@ static OpResult test_unary(const char* name, UnaryOp op,
     auto got = op(tf_x);
     float128 truth = oracle(tf_to_q(tf_x));
     double dig = tf_digits(got, truth);
+    tf_note_ulp(R, got, truth);
     R.sum += dig; ++R.n;
     if (dig < R.min_dig) R.min_dig = dig;
   }
@@ -316,6 +350,7 @@ static OpResult test_binary(const char* name, BinaryOp op,
     auto got = op(tfa, tfb);
     float128 truth = oracle(tf_to_q(tfa), tf_to_q(tfb));
     double dig = tf_digits(got, truth);
+    tf_note_ulp(R, got, truth);
     R.sum += dig; ++R.n;
     if (dig < R.min_dig) R.min_dig = dig;
   }
@@ -328,6 +363,7 @@ static OpResult test_binary(const char* name, BinaryOp op,
     auto got = op(tfa, tfb);
     float128 truth = oracle(tf_to_q(tfa), tf_to_q(tfb));
     double dig = tf_digits(got, truth);
+    tf_note_ulp(R, got, truth);
     R.sum += dig; ++R.n;
     if (dig < R.min_dig) R.min_dig = dig;
   }
@@ -342,6 +378,7 @@ static OpResult test_binary(const char* name, BinaryOp op,
     auto got = op(tfa, tfb);
     float128 truth = oracle(tf_to_q(tfa), tf_to_q(tfb));
     double dig = tf_digits(got, truth);
+    tf_note_ulp(R, got, truth);
     R.sum += dig; ++R.n;
     if (dig < R.min_dig) R.min_dig = dig;
   }
@@ -510,8 +547,12 @@ int main(int argc, char** argv) {
       if (ok) ++passed;
       ++total_ops;
       results.push_back({name, mean});
-      std::printf("  %-20s: mean %6.2f, min %6.2f, n=%5d, skip=%4d [tol %.2f] %s\n",
-                  name, mean, R.min_dig, R.n, R.skip, tol, ok ? "PASS" : "FAIL");
+      // Both metrics: the digit score the KI history is written in, and the
+      // worst-point ulp error the digit score cannot see near a zero of f.
+      std::printf("  %-20s: mean %6.2f, min %6.2f, n=%5d, skip=%4d [tol %.2f] %s"
+                  "  worst_ulp=%-11.4g ulp_n=%-5d ulp_unscorable=%d\n",
+                  name, mean, R.min_dig, R.n, R.skip, tol, ok ? "PASS" : "FAIL",
+                  R.worst_ulp, R.n_ulp_scored, R.n_ulp_unscored);
       return ok;
     };
 
