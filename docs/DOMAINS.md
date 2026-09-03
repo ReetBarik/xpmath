@@ -170,14 +170,14 @@ for each cell that has any:
 | `trunc` | QF | 29.00 | 29.00 | 0 .. 1e+30 | 100% | -- | 0 | -- |
 | `trunc` | TF | 21.70 | 21.70 | 0 .. 1e+30 | 100% | -- | 0 | -- |
 | `trunc` | FF | 14.00 | 13.46 | 0 .. 1e+14 | 96% | above 3e+14: 0.00 | 64 | UNEXPLAINED (**64 unexplained**) |
-| `fmod` | DD | 31.00 | 26.20 | 0 .. 1e-07 | 81% | above 3e-07: 12.03 | 317 | UNEXPLAINED (**317 unexplained**) |
-| `fmod` | QF | 29.00 | 24.00 | 3e-30 .. 1e-15 | 78% | below 1e-30: 8.23; above 3e-15: 0.55 | 353 | UNEXPLAINED (**341 unexplained**) |
-| `fmod` | TF | 21.70 | 16.43 | 3e-30 .. 3e-17 | 68% | below 1e-30: 8.23; above 3e-16: 8.07 | 412 | UNEXPLAINED (**401 unexplained**) |
-| `fmod` | FF | 14.00 | 9.07 | 3e-30 .. 1e-25 | 55% | below 1e-323: 0.00; above 3e-16: 0.00 | 586 | CONDITIONING (**26 unexplained**) |
-| `remainder` | DD | 31.00 | 25.27 | 0 .. 1e-14 | 78% | above 3e-14: 0.00 | 356 | UNEXPLAINED (**356 unexplained**) |
-| `remainder` | QF | 29.00 | 23.43 | 1e-28 .. 1e-14 | 76% | below 3e-29: 13.84; above 3e-14: 0.18 | 393 | UNEXPLAINED (**372 unexplained**) |
-| `remainder` | TF | 21.70 | 16.07 | 1e-28 .. 1e-17 | 67% | below 1e-30: 2.81; above 3e-14: 0.18 | 451 | UNEXPLAINED (**437 unexplained**) |
-| `remainder` | FF | 14.00 | 8.54 | 3e-30 .. 1e-27 | 49% | below 1e-30: 2.81; above 3e-25: 1.69 | 634 | CONDITIONING (**35 unexplained**) |
+| `fmod` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | -- |
+| `fmod` | QF | 29.00 | 28.80 | 40.84 .. 219.9 | 99% | below 40.84: 0.36; above 219.9: 0.15 | 12 | UNDERFLOW |
+| `fmod` | TF | 21.70 | 21.55 | 40.84 .. 219.9 | 99% | below 40.84: 0.36; above 219.9: 0.15 | 12 | CONDITIONING |
+| `fmod` | FF | 14.00 | 9.42 | 3e-30 .. 1e-25 | 58% | below 1e-323: 0.00; above 3e-16: 0.00 | 550 | CONDITIONING |
+| `remainder` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | -- |
+| `remainder` | QF | 29.00 | 28.75 | 6.283 .. 78.54 | 99% | below 6.283: 0.00; above 78.54: 0.76 | 15 | CONDITIONING |
+| `remainder` | TF | 21.70 | 21.51 | 6.283 .. 78.54 | 99% | below 6.283: 0.00; above 78.54: 0.76 | 14 | CONDITIONING |
+| `remainder` | FF | 14.00 | 8.92 | 3e-30 .. 1e-27 | 52% | below 1e-30: 2.81; above 3e-25: 1.69 | 596 | CONDITIONING |
 
 **Where the failures sit.** The grid family carrying the most failures
 for each cell that has any:
@@ -186,8 +186,8 @@ for each cell that has any:
 - `floor` — QF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 66 pts (log sweep, |x| = 10^e)
 - `round` — DD 8 pts (linear sweep over [-8, 8]); QF 8 pts (linear sweep over [-8, 8]); TF 8 pts (linear sweep over [-8, 8]); FF 72 pts (log sweep, |x| = 10^e)
 - `trunc` — FF 64 pts (log sweep, |x| = 10^e)
-- `fmod` — DD 317 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); QF 353 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 412 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 586 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `remainder` — DD 356 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); QF 393 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 451 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 634 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `fmod` — QF 12 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 12 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 550 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `remainder` — QF 15 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 14 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 596 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
 
 ---
 
@@ -500,12 +500,12 @@ for each cell that has any:
 
 | classification | points below 50% of cap |
 |---|---:|
-| UNDERFLOW | 4167 |
+| UNDERFLOW | 4159 |
 | OVERFLOW | 11633 |
 | ARG_RANGE | 342 |
-| CONDITIONING | 10360 |
-| UNEXPLAINED | 9238 |
-| **total triaged** | **35740** |
+| CONDITIONING | 10349 |
+| UNEXPLAINED | 6953 |
+| **total triaged** | **33436** |
 
 Out of 428,592 scored points.
 
