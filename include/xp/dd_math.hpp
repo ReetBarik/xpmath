@@ -800,16 +800,136 @@ XPMATH_INLINE_FUNCTION DoubleDouble floor(DoubleDouble a);
 XPMATH_INLINE_FUNCTION DoubleDouble trunc(DoubleDouble a);
 XPMATH_INLINE_FUNCTION DoubleDouble round(DoubleDouble a);
 
+// ============================================================
+// fmod / remainder — exact iterative scale-and-subtract (KI-10, KI-15)
+// ============================================================
+// The former bodies were `a - b*trunc(a/b)` / `a - b*nint(a/b)`, the QD 2.3.24
+// shape (qd_real.cpp:2597 `fmod`, :2462 `drem`). That shape cannot work at
+// large |a/b| in ANY extended type, and QD has the same defect — diverging
+// from the source here is deliberate:
+//
+//   * The integral quotient n = trunc(a/b) needs log2|a/b| + 1 bits EXACTLY.
+//     At |a/b| ~ 1e22 that is 74 bits on top of whatever b's mantissa needs;
+//     the product n*b then needs ~180 bits and DD holds 106. So `b*trunc(a/b)`
+//     is wrong in its low bits by ~|a|*2^-106, and the answer is of size |b|,
+//     giving 106 - log2|a/b| bits of the answer — "half the digits" (KI-10).
+//   * Past the reducer's own magnitude cap, trunc(q) returns q unchanged (it
+//     is already integral) or 0 (KI-14 on FF), so a - b*trunc(q) collapses to
+//     exactly 0, or to a, or picks the wrong multiple and flips sign (KI-15).
+//
+// The replacement never forms a quotient at all. Writing A = |a|, B = |b|:
+//
+//     find the unique k >= 0 with B*2^k <= A < B*2^(k+1)      (ladder, exact)
+//     r := A
+//     for i = k down to 0:
+//         if r >= B*2^i:  r := r - B*2^i        <- EXACT, see below
+//     return r                                   (0 <= r < B)
+//
+// TERMINATION. i decreases by one per iteration from a finite k and the loop
+// ends at i = 0, so the bound is exactly k+1 iterations, k = ilogb(A)-ilogb(B)
+// (+/-1). For FP64 words that is at most 2098 (DBL_MAX_EXP - DBL_MIN_EXP -
+// mantissa), for FP32 words at most 302. No convergence test, no early exit,
+// no way to loop forever. The ladder that establishes k costs O(k/2^30 + 30)
+// steps because it climbs in 2^30 rungs before refining by 2.
+//
+// EXACTNESS. Every scaling is by a power of two applied componentwise, which
+// is exact (the climb never overflows because B*2^k <= A is finite, and the
+// descent revisits values that were exactly representable on the way up). The
+// loop invariant is r < 2*B*2^i on entry to step i: it holds at i = k by the
+// ladder, and each step leaves r < B*2^i = 2*B*2^(i-1). So a subtraction only
+// ever happens with B*2^i <= r < 2*B*2^i, which is Sterbenz's condition — the
+// exact difference is representable in the same format, and the two-sum-based
+// `subtract` returns it with no error. The remainder is therefore built from a
+// chain of exact steps, and the final r is the exact mathematical a mod b
+// rounded once into the type. No intermediate ever needs more precision than
+// the type carries, which is what the one-shot form could not arrange.
+//
+// CONVENTIONS (C99 7.12.10.1 / 7.12.10.2, IEEE 754-2019 5.3.1):
+//   fmod(a,b)      sign of a, |result| < |b|; the implied quotient truncates.
+//   remainder(a,b) a - n*b with n = round-half-to-EVEN of a/b, |result| <=
+//                  |b|/2; sign NOT tied to a. Half-even is required by IEEE
+//                  754 and is NOT the QD `nint` (half-away) behaviour — see
+//                  KI-20. The parity needed to break a tie is carried out of
+//                  the loop as `q_odd` rather than recovered from a quotient.
+//   fmod(a,0), remainder(a,0), fmod(+-inf,b), remainder(+-inf,b) -> NaN.
+//   fmod(a,+-inf) = remainder(a,+-inf) = a for finite a.
+//   fmod(+-0,b) = remainder(+-0,b) = +-0 for b != 0.  NaN operand -> NaN.
+namespace detail {
+
+// Exact componentwise scaling by a power of two.
+XPMATH_INLINE_FUNCTION DoubleDouble dd_scale2(DoubleDouble a, double s) {
+    return DoubleDouble(a.hi * s, a.lo * s);
+}
+
+// |A| mod |B| exactly, plus the parity of the integral quotient.
+// Precondition: A >= 0, B > 0, both finite.
+XPMATH_INLINE_FUNCTION DoubleDouble dd_fmod_abs(DoubleDouble A, DoubleDouble B,
+                                                bool& q_odd) {
+    q_odd = false;
+    if (A < B) return A;
+
+    // Ladder: smallest k with B*2^k <= A < B*2^(k+1). Coarse 2^30 rungs first
+    // so a 1000-decade gap does not cost 3300 doublings; an overflowed rung
+    // compares greater than A and simply is not taken.
+    DoubleDouble Bs = B;
+    int k = 0;
+    for (;;) {
+        DoubleDouble t = dd_scale2(Bs, 1073741824.0);  // 2^30
+        if (t > A) break;
+        Bs = t; k += 30;
+    }
+    for (;;) {
+        DoubleDouble t = dd_scale2(Bs, 2.0);
+        if (t > A) break;
+        Bs = t; ++k;
+    }
+
+    DoubleDouble r = A;
+    for (int i = k; i >= 0; --i) {
+        if (r >= Bs) {
+            r = subtract(r, Bs);          // Sterbenz-exact
+            if (i == 0) q_odd = true;
+        }
+        Bs = dd_scale2(Bs, 0.5);
+    }
+    return r;
+}
+
+}  // namespace detail
+
 XPMATH_INLINE_FUNCTION DoubleDouble fmod(DoubleDouble a, DoubleDouble b) {
-    DoubleDouble q = divide(a, b);
-    DoubleDouble qt = trunc(q);
-    return subtract(a, multiply(b, qt));
+    const double nan_hi = a.hi - a.hi + (b.hi - b.hi);  // NaN iff either is
+    if (a.hi != a.hi || b.hi != b.hi) return DoubleDouble(nan_hi);
+    if (b.hi == 0.0) { XPMATH_PRINTF("DDFMOD: zero modulus\n");
+                       return DoubleDouble(0.0 / 0.0); }
+    if (!detail::isfinite(a.hi)) { XPMATH_PRINTF("DDFMOD: infinite dividend\n");
+                                   return DoubleDouble(0.0 / 0.0); }
+    if (!detail::isfinite(b.hi)) return a;
+    if (a.hi == 0.0) return a;
+
+    bool q_odd = false;
+    DoubleDouble r = detail::dd_fmod_abs(abs(a), abs(b), q_odd);
+    return (a.hi < 0.0) ? negate(r) : r;
 }
 
 XPMATH_INLINE_FUNCTION DoubleDouble remainder(DoubleDouble a, DoubleDouble b) {
-    DoubleDouble q = divide(a, b);
-    DoubleDouble qn = round_to_nearest_int(q);
-    return subtract(a, multiply(b, qn));
+    const double nan_hi = a.hi - a.hi + (b.hi - b.hi);
+    if (a.hi != a.hi || b.hi != b.hi) return DoubleDouble(nan_hi);
+    if (b.hi == 0.0) { XPMATH_PRINTF("DDREMAINDER: zero modulus\n");
+                       return DoubleDouble(0.0 / 0.0); }
+    if (!detail::isfinite(a.hi)) { XPMATH_PRINTF("DDREMAINDER: infinite dividend\n");
+                                   return DoubleDouble(0.0 / 0.0); }
+    if (!detail::isfinite(b.hi)) return a;
+    if (a.hi == 0.0) return a;
+
+    bool q_odd = false;
+    DoubleDouble B = abs(b);
+    DoubleDouble r = detail::dd_fmod_abs(abs(a), B, q_odd);
+    // Round half to even: r is in [0,B); step to r-B (quotient n+1) when that
+    // is strictly closer, and on the exact tie 2r == B when n is odd.
+    DoubleDouble two_r = detail::dd_scale2(r, 2.0);
+    if (two_r > B || (two_r == B && q_odd)) r = subtract(r, B);  // Sterbenz-exact
+    return (a.hi < 0.0) ? negate(r) : r;
 }
 
 XPMATH_INLINE_FUNCTION DoubleDouble copysign(DoubleDouble a, DoubleDouble b) {

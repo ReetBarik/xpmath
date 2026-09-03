@@ -207,8 +207,12 @@ static const OpTolerance kOpTols[] = {
                          //       the old 1.18-digit slack was never earned.
 
   // Binary ops
-  {"fmod", 20.0},        // unchanged; 21.70 once fmod is QD's aint form (P3.5)
-  {"remainder", 19.0},
+  {"fmod", 21.5},        // KI-10/KI-15: ratcheted from 20.00. The exact
+                         //       iterative reduction returns the correctly
+                         //       rounded remainder, so this domain measures
+                         //       21.70 = cap; the old 1.70-digit slack was
+                         //       slack for a defect, not for conditioning.
+  {"remainder", 21.5},   // KI-10/KI-15: ratcheted from 19.00, same reason.
   {"fdim", 20.0},
   {"fmax", 21.5},        // P3.5: was 22.00 (> cap). Exact selection, measured
                          //       21.70 = cap on all 201 samples.

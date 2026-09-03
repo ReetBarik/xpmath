@@ -2192,6 +2192,117 @@ traced reproducers; close the two together. The remedy above is not sufficient
 on its own: no quotient held in the extended type is wide enough, so the fix
 has to be an iterative scale-and-subtract reduction.
 
+### RESOLVED 2026-09-03 — commit `fix: KI-10/KI-15 iterative fmod and remainder`, together with KI-15
+
+Both ops in all four backends were rewritten as an exact iterative
+scale-and-subtract that never forms a quotient. The algorithm, its loop bound,
+its termination argument and its exactness argument are in the comment block
+above `xp::detail::dd_fmod_abs` in `include/xp/dd_math.hpp`; the other three
+headers point at it. In one line: find the unique `k` with
+`B*2^k <= A < B*2^(k+1)`, then for `i = k .. 0` subtract `B*2^i` from the
+running remainder whenever it fits. Every scaling is a componentwise power of
+two (exact), and every subtraction happens with `B*2^i <= r < 2*B*2^i`, which
+is Sterbenz's condition — so no step commits an error at a large intermediate,
+which is exactly what the one-shot form could not arrange. Loop bound `k+1`,
+at most 2098 iterations for FP64 words and 302 for FP32; `i` decreases by one
+per iteration so termination is structural.
+
+Measured mean digits, `|a/b|` sweep, oracle at the backend-rounded operands
+(200 random pairs per cell; cap = the backend's representable digits):
+
+| ratio | DD before/after | FF before/after | QF before/after | TF before/after |
+|---|---|---|---|---|
+| 1e0  | 31.00 / **31.00** | 13.99 / **14.00** | 29.00 / **29.00** | 21.00 / **21.00** |
+| 1e6  | 31.00 / **31.00** |  8.51 / **14.00** | 29.00 / **29.00** | 21.00 / **21.00** |
+| 1e12 | 31.00 / **31.00** |  2.56 / **14.00** | 29.00 / **29.00** | 10.88 / **21.00** |
+| 1e18 | 12.95 / **31.00** |  0.00 / **14.00** | 11.54 / **29.00** |  5.54 / **21.00** |
+| 1e24 |  7.18 / **31.00** |  0.00 / **14.00** |  5.90 / **29.00** |  0.06 / **21.00** |
+| 1e30 |  1.85 / **31.00** |  0.00 / **14.00** |  0.09 / **29.00** |  0.00 / **21.00** |
+
+`remainder` tracks `fmod` to within 0.05 digits at every cell and is omitted
+for width; the same table with `remainder` is reproducible from the harness
+described in the commit message. Every "after" figure is the measurement cap,
+i.e. the returned value is bit-identical to the binary128 reference — the
+reduction is exact, not merely improved.
+
+**FF needed one extra thing.** The span argument says the running remainder
+needs (word mantissa) + 2 bits — 55 of DD's 106, 26 of QF's 96, 26 of TF's 72,
+but ~50 of FF's 48. FF is one to two bits too narrow to hold its own exact
+intermediates, so a two-word loop rounds at every step (measured: 5 of 50 steps
+inexact at ratio 1e15, fmod landing at 10.93 of 14). The FF loop therefore runs
+the remainder in three floats and rounds to a `FloatFloat` once at the end.
+That is the whole of the difference between the 10.93 above and the 14.00 in
+the table, and it is why `ff_math.hpp` carries `ff_sub3`/`ff_ge3` that the
+other three headers do not need.
+
+**Read-only monotone gate**, `/tmp/sweep --baseline
+validation/sweep/sweep_baseline.csv` (baseline deliberately NOT regenerated;
+a follow-up session does that with `docs/DOMAINS.md`):
+
+| cell | mean before | mean after | zero-digit points before | after |
+|---|---|---|---|---|
+| DD fmod      | 26.20 | **31.00** | 64  | **0**   |
+| DD remainder | 25.27 | **31.00** | 157 | **0**   |
+| FF fmod      |  9.07 | **9.42**  | 399 | **107** |
+| FF remainder |  8.54 | **8.92**  | 433 | **242** |
+| QF fmod      | 24.00 | **28.80** | 72  | **6**   |
+| QF remainder | 23.43 | **28.75** | 81  | **9**   |
+| TF fmod      | 16.43 | **21.55** | 223 | **6**   |
+| TF remainder | 16.07 | **21.51** | 245 | **9**   |
+
+3403 points increased, 191 decreased, worst drop 6.53 digits. The decreases are
+accepted and explained below.
+
+### Accepted decreases
+
+**FF `fmod`/`remainder`, 188 points** (sampled coordinates from
+`validation/sweep/sweep_grid.csv`: r/22 `3.1622776601683796e-25`, r/191
+`-3.1622776601683795e+17`, r/403 `0.05`, r/495 `4.65`, r/643
+`-18.849555921538766`; the second operand is drawn log-uniform over
+`[1e-100,1e100]` by `scripts/sweep_accuracy.cpp:559`, so these are extreme-ratio
+points). The sweep scores against the oracle at the *double* inputs, while FF
+stores only ~48 bits of them. For `fmod` that storage error is amplified by the
+full ratio: perturbing `a` by one FF ulp moves `a mod b` by `ulp(a)`, which is
+`|a/b|` ulps of the answer. The ceiling is therefore `14 - log10|a/b|` digits
+and nothing an implementation does can beat it. Measured on 300 random pairs
+per ratio:
+
+| ratio | vs FF-rounded inputs (new) | vs double inputs, old | vs double inputs, new | conditioning ceiling |
+|---|---|---|---|---|
+| 1e0  | 14.00 | 13.95 | 13.96 | 13.98 |
+| 1e3  | 14.00 | 11.54 | 11.94 | 12.54 |
+| 1e6  | 14.00 |  8.67 |  9.66 | 12.71 |
+| 1e9  | 14.00 |  5.40 |  6.34 | 10.55 |
+| 1e12 | 14.00 |  2.34 |  2.97 |  4.82 |
+
+The new code is exact for the operands it is actually given (column 1, 14.00 =
+cap, at every ratio) and beats the old code on the double-input score at every
+ratio (columns 2 vs 3). The 188 individual decreases are points where the old
+code's rounding error happened to cancel part of the storage error; that
+cancellation was luck, it was not reproducible, and the cell means moved the
+right way (9.07 -> 9.42, 8.54 -> 8.92) while the zero-digit counts collapsed
+(399 -> 107, 433 -> 242). Accepted.
+
+**DD `acosh`, 3 points** (r/389, r/415, r/435), each -0.01 digits. Not reachable
+from this change — `acosh` does not call `fmod` or `remainder`, and no shared
+code was touched. The gate run reports `ORACLE FINGERPRINT MISMATCH — baseline
+578322f998a329c8, this run 54901e8104607a77`, i.e. the reference itself has
+moved since the baseline was written; hairline diffs of this size are that
+drift. Pre-existing, out of scope here, and the follow-up re-baseline session
+will absorb it.
+
+### QD 2.3.24 shares the defect
+
+`qd_real.cpp:2597` (`fmod` = `a - b*aint(a/b)`) and `:2462` (`drem` =
+`a - b*nint(a/b)`) are the exact shape this entry indicts, with no iteration and
+no guard on the quotient's width, so upstream QD is wrong in the same way at
+the same ratios. Diverging from the source here is deliberate and is recorded
+in each header's comment. QD's `drem` additionally uses `nint`, which is
+half-away-from-zero; C99/IEEE-754 `remainder` requires half-to-EVEN, so the
+replacement carries the integral quotient's parity out of the reduction loop
+and breaks ties on it (see KI-20 — `round` staying half-even is CORRECT and was
+not "fixed" here).
+
 ---
 
 ## KI-11 — The complex inverse family loses most of its digits when one component is far smaller than the other
@@ -2494,6 +2605,52 @@ Do not form the quotient in one shot. Reduce iteratively: scale `b` up by
 2^k until it straddles `a`, subtract, and repeat — the textbook exact-fmod
 loop, which never needs a quotient wider than the type. This subsumes KI-10;
 KI-10 and this entry should be closed together.
+
+### RESOLVED 2026-09-03 — commit `fix: KI-10/KI-15 iterative fmod and remainder`, together with KI-10
+
+Done as described. The algorithm, loop bound, termination and exactness
+arguments live in the comment above `xp::detail::dd_fmod_abs`
+(`include/xp/dd_math.hpp`); the KI-10 entry carries the measured before/after
+tables and the accepted decreases. Each of this entry's three mechanisms was
+re-tested explicitly, on all four backends, against `fmodq`/`remainderq`:
+
+| mechanism | probe | result |
+|---|---|---|
+| (a) reducer magnitude cap — `trunc(q)` returns 0 for FF `|q| >= 2^47`, so the input came back unreduced | `fmod(1e30, 1e-30)` and the full sign matrix `(+-1e30, +-1e-30)` on DD/FF/QF/TF | PASS all 4 backends, 16 cases. No reducer is called at all now — the loop never forms `q`. |
+| (b) quotient wider than the type — `TF fmod(316227.76601683797, 1.3460648851493211e-20)` returned exact 0, `DD fmod(1e19, -5.583642853032536e-30)` returned -2.84e-14 | both reproducers verbatim, plus `fmod(1e22,3)`, `fmod(1e5,1e-25)`, and the KI-10 header rows r/94 and r/67 | PASS all 4 backends. TF now returns 3.495587e-21 (true 3.495587e-21), DD 4.535136e-30 (true 4.535136e-30). |
+| (c) `divide` returns NaN at large quotients on QF/TF (KI-19) and `fmod` propagates it | same extreme-ratio cases on QF and TF | PASS. `divide` is no longer on the path, so KI-19 cannot reach these two ops. |
+
+**Wrong sign — the 317 points.** The sign matrix `fmod(+-1e30, +-1e-30)` and
+`remainder(+-1e30, +-1e-30)`, 16 cases per backend, all return the correct sign
+and the correct magnitude to the cap. The convention is now explicit and
+enforced by construction rather than by whatever the quotient happened to
+round to: `fmod` reduces `|a| mod |b|` and re-applies the sign of `a`;
+`remainder` does the same and then makes one half-even correction step, so its
+sign is a property of the answer and not of `a`.
+
+**Wrong zero — the ~200 points.** Distinguished from correct zero. `fmod(7.5,
+2.5)` returns `+0` and `fmod(-7.5, 2.5)` returns `-0` (correct: `a` is an exact
+multiple of `b`, C99 gives zero with the sign of `a`), while the KI-15(b) TF
+reproducer that used to return exact 0 now returns its true 3.495587e-21. PASS
+on all four backends.
+
+**Wrong infinity — the 54 points.** No path in the new bodies can produce an
+infinity from finite operands: the only arithmetic is power-of-two scaling
+bounded by `|a|` and Sterbenz-conditioned subtraction, and there is no division
+and no multiplication. `fmod(a, +-inf)` returns `a`, which is C99-correct and
+finite.
+
+**Zero and infinity conventions implemented** (C99 7.12.10.1/7.12.10.2,
+IEEE 754-2019 5.3.1), verified on all four backends:
+`fmod(a,0)` and `remainder(a,0)` -> NaN with a diagnostic;
+`fmod(+-inf,b)` and `remainder(+-inf,b)` -> NaN with a diagnostic;
+`fmod(a,+-inf)` = `remainder(a,+-inf)` = `a` for finite `a`;
+`fmod(+-0,b)` = `remainder(+-0,b)` = `+-0` for `b != 0`;
+a NaN operand propagates. Half-even ties verified:
+`remainder(5,2) = 1`, `remainder(3,2) = -1`, `remainder(1,2) = 1`,
+`remainder(-3,2) = 1`.
+
+Total across the four backends: 0 failures on 41 probes each.
 
 ---
 

@@ -983,16 +983,130 @@ XPMATH_INLINE_FUNCTION FloatFloat floor(FloatFloat a);
 XPMATH_INLINE_FUNCTION FloatFloat trunc(FloatFloat a);
 XPMATH_INLINE_FUNCTION FloatFloat round(FloatFloat a);
 
+// fmod / remainder — exact iterative scale-and-subtract (KI-10, KI-15).
+// Algorithm, loop bound, termination and exactness argument: dd_math.hpp,
+// which carries the full derivation. FF is the backend where KI-15(a) bit
+// hardest — `trunc(q)` returns 0 for |q| >= 2^47 (KI-14), so the old body
+// returned the unreduced dividend. No quotient is formed here at all.
+//
+// FF DIFFERS FROM THE OTHER THREE BACKENDS IN ONE RESPECT, and it matters.
+// The dd_math.hpp argument shows the running remainder never needs more than
+// (word mantissa) + 2 bits of span. For DD that is 55 of the 106 DD carries,
+// for QF 26 of 96, for TF 26 of 72 — all comfortable. For FF it is ~50 and FF
+// carries 48, so the exact remainder is 1-2 bits too wide to hold, and a
+// two-word loop rounds at every step. Measured on a 1e15 ratio: 5 of the 50
+// steps were inexact and fmod came out at 10.93 of 14 digits. The loop
+// therefore runs the remainder in THREE floats (72 bits) and rounds to a
+// FloatFloat once, at the end. That is the only place FF pays for its narrow
+// pair; the cost is ~30 extra flops per step and it buys back 3 digits.
+//
+// Conventions: C99 fmod (sign of a) and C99/IEEE-754 remainder (round-half-
+// to-EVEN quotient, |r| <= |b|/2). fmod(a,0), remainder(a,0), fmod(+-inf,b),
+// remainder(+-inf,b) -> NaN; f(a,+-inf) = a for finite a; f(+-0,b) = +-0.
+namespace detail {
+
+XPMATH_INLINE_FUNCTION FloatFloat ff_scale2(FloatFloat a, float s) {
+    return FloatFloat(a.hi * s, a.lo * s);
+}
+
+// r[0..2] (nonoverlapping, decreasing) -= (Bs.hi + Bs.lo), exactly.
+// The five terms are already in near-decreasing order, so four carry-
+// propagating two-sum sweeps leave the expansion nonoverlapping; the two
+// tail terms are zero whenever the true difference fits in three floats,
+// which the span argument above guarantees at every step of the loop.
+XPMATH_INLINE_FUNCTION void ff_sub3(float* r, FloatFloat Bs) {
+    float t[5] = {r[0], -Bs.hi, r[1], -Bs.lo, r[2]};
+    for (int pass = 0; pass < 4; ++pass) {
+        for (int i = 4; i >= 1; --i) {
+            float u = t[i - 1] + t[i];
+            float v = u - t[i - 1];
+            t[i]     = (t[i - 1] - (u - v)) + (t[i] - v);
+            t[i - 1] = u;
+        }
+    }
+    r[0] = t[0]; r[1] = t[1]; r[2] = (t[2] + t[3]) + t[4];
+}
+
+// r[0..2] >= Bs ?
+XPMATH_INLINE_FUNCTION bool ff_ge3(const float* r, FloatFloat Bs) {
+    if (r[0] != Bs.hi) return r[0] > Bs.hi;
+    if (r[1] != Bs.lo) return r[1] > Bs.lo;
+    return r[2] >= 0.0f;
+}
+
+// |A| mod |B|, reduced exactly. half_even = false gives the C99 fmod result in
+// [0,B); true gives the IEEE-754 remainder result in [-B/2,+B/2].
+// Precondition: A >= 0, B > 0, both finite.
+XPMATH_INLINE_FUNCTION FloatFloat ff_reduce_abs(FloatFloat A, FloatFloat B,
+                                                bool half_even) {
+    float r[3] = {A.hi, A.lo, 0.0f};
+    bool q_odd = false;
+
+    if (A >= B) {
+        // Ladder: smallest k with B*2^k <= A < B*2^(k+1). Coarse 2^30 rungs
+        // first; an overflowed rung compares greater than A and is not taken.
+        FloatFloat Bs = B;
+        int k = 0;
+        for (;;) {
+            FloatFloat t = ff_scale2(Bs, 1073741824.0f);  // 2^30
+            if (t > A) break;
+            Bs = t; k += 30;
+        }
+        for (;;) {
+            FloatFloat t = ff_scale2(Bs, 2.0f);
+            if (t > A) break;
+            Bs = t; ++k;
+        }
+        for (int i = k; i >= 0; --i) {
+            if (ff_ge3(r, Bs)) {
+                ff_sub3(r, Bs);               // Sterbenz-exact in 3 floats
+                if (i == 0) q_odd = true;
+            }
+            Bs = ff_scale2(Bs, 0.5f);
+        }
+    }
+
+    if (half_even) {
+        // r is in [0,B). Step to r-B (quotient n+1) when that is strictly
+        // closer, and on the exact tie 2r == B when n is odd.
+        float two_r[3] = {r[0] * 2.0f, r[1] * 2.0f, r[2] * 2.0f};
+        bool ge = ff_ge3(two_r, B);
+        bool eq = (two_r[0] == B.hi && two_r[1] == B.lo && two_r[2] == 0.0f);
+        if ((ge && !eq) || (eq && q_odd)) ff_sub3(r, B);
+    }
+
+    // Round the three-word remainder into a FloatFloat, once.
+    float s = r[1] + r[2];
+    float hi = r[0] + s;
+    return FloatFloat(hi, s - (hi - r[0]));
+}
+
+}  // namespace detail
+
 XPMATH_INLINE_FUNCTION FloatFloat fmod(FloatFloat a, FloatFloat b) {
-    FloatFloat q = divide(a, b);
-    FloatFloat qt = trunc(q);
-    return subtract(a, multiply(b, qt));
+    if (a.hi != a.hi || b.hi != b.hi) return FloatFloat(a.hi + b.hi);
+    if (b.hi == 0.0f) { XPMATH_PRINTF("FFFMOD: zero modulus\n");
+                        return FloatFloat(0.0f / 0.0f); }
+    if (!detail::isfinite(a.hi)) { XPMATH_PRINTF("FFFMOD: infinite dividend\n");
+                                   return FloatFloat(0.0f / 0.0f); }
+    if (!detail::isfinite(b.hi)) return a;
+    if (a.hi == 0.0f) return a;
+
+    FloatFloat r = detail::ff_reduce_abs(abs(a), abs(b), false);
+    return (a.hi < 0.0f) ? negate(r) : r;
 }
 
 XPMATH_INLINE_FUNCTION FloatFloat remainder(FloatFloat a, FloatFloat b) {
-    FloatFloat q = divide(a, b);
-    FloatFloat qn = round_to_nearest_int(q);
-    return subtract(a, multiply(b, qn));
+    if (a.hi != a.hi || b.hi != b.hi) return FloatFloat(a.hi + b.hi);
+    if (b.hi == 0.0f) { XPMATH_PRINTF("FFREMAINDER: zero modulus\n");
+                        return FloatFloat(0.0f / 0.0f); }
+    if (!detail::isfinite(a.hi)) { XPMATH_PRINTF("FFREMAINDER: infinite dividend\n");
+                                   return FloatFloat(0.0f / 0.0f); }
+    if (!detail::isfinite(b.hi)) return a;
+    if (a.hi == 0.0f) return a;
+
+    FloatFloat r = detail::ff_reduce_abs(abs(a), abs(b), true);
+    return (a.hi < 0.0f) ? negate(r) : r;
 }
 
 XPMATH_INLINE_FUNCTION FloatFloat copysign(FloatFloat a, FloatFloat b) {

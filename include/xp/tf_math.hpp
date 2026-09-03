@@ -1302,9 +1302,61 @@ XPMATH_INLINE_FUNCTION TripleFloat round(TripleFloat a) {
 // fractional part of a/b exceeds 1/2, i.e. on about half of all inputs, so half
 // the samples scored 0 digits and the row measured 11.26 against fmodq.
 // See PORT_NOTES_TF.md §12c.
+// S10 KI-10/KI-15: the QD shape above is replaced by an exact iterative
+// scale-and-subtract that never forms a quotient. Full derivation — loop
+// bound, termination, and why every subtraction is exact by Sterbenz — is in
+// dd_math.hpp. QD 2.3.24 shares the defect; diverging from it is deliberate.
+// Conventions: C99 fmod (sign of a) and C99/IEEE-754 remainder (round-half-to-
+// EVEN quotient, |r| <= |b|/2 — NOT QD's half-away nint, see KI-20).
+// fmod(a,0), remainder(a,0), fmod(+-inf,b), remainder(+-inf,b) -> NaN;
+// f(a,+-inf) = a for finite a; f(+-0,b) = +-0.
+namespace detail {
+
+// |A| mod |B| exactly, plus the parity of the integral quotient.
+// Precondition: A >= 0, B > 0, both finite.
+XPMATH_INLINE_FUNCTION TripleFloat tf_fmod_abs(TripleFloat A, TripleFloat B,
+                                               bool& q_odd) {
+    q_odd = false;
+    if (A < B) return A;
+
+    TripleFloat Bs = B;
+    int k = 0;
+    for (;;) {
+        TripleFloat t = mul_pwr2(Bs, 1073741824.0f);  // 2^30
+        if (t > A) break;
+        Bs = t; k += 30;
+    }
+    for (;;) {
+        TripleFloat t = mul_pwr2(Bs, 2.0f);
+        if (t > A) break;
+        Bs = t; ++k;
+    }
+
+    TripleFloat r = A;
+    for (int i = k; i >= 0; --i) {
+        if (r >= Bs) {
+            r = subtract(r, Bs);          // Sterbenz-exact
+            if (i == 0) q_odd = true;
+        }
+        Bs = mul_pwr2(Bs, 0.5f);
+    }
+    return r;
+}
+
+}  // namespace detail
+
 XPMATH_INLINE_FUNCTION TripleFloat fmod(TripleFloat a, TripleFloat b) {
-    TripleFloat n = trunc(divide(a, b));
-    return subtract(a, multiply(b, n));
+    if (a.f0 != a.f0 || b.f0 != b.f0) return TripleFloat(a.f0 + b.f0);
+    if (b.f0 == 0.0f) { XPMATH_PRINTF("TFFMOD: zero modulus\n");
+                        return TripleFloat(0.0f / 0.0f); }
+    if (!detail::isfinite(a.f0)) { XPMATH_PRINTF("TFFMOD: infinite dividend\n");
+                                   return TripleFloat(0.0f / 0.0f); }
+    if (!detail::isfinite(b.f0)) return a;
+    if (a.f0 == 0.0f) return a;
+
+    bool q_odd = false;
+    TripleFloat r = detail::tf_fmod_abs(abs(a), abs(b), q_odd);
+    return (a.f0 < 0.0f) ? negate(r) : r;
 }
 
 // remainder(a, b) = a - b*nint(a/b). Port of QD's `drem`, qd_real.cpp:2462-2465.
@@ -1312,8 +1364,20 @@ XPMATH_INLINE_FUNCTION TripleFloat fmod(TripleFloat a, TripleFloat b) {
 // and scored correctly only because fmod itself carried drem's nint; each now
 // has its own QD body.
 XPMATH_INLINE_FUNCTION TripleFloat remainder(TripleFloat a, TripleFloat b) {
-    TripleFloat n = round_to_nearest_int(divide(a, b));
-    return subtract(a, multiply(b, n));
+    if (a.f0 != a.f0 || b.f0 != b.f0) return TripleFloat(a.f0 + b.f0);
+    if (b.f0 == 0.0f) { XPMATH_PRINTF("TFREMAINDER: zero modulus\n");
+                        return TripleFloat(0.0f / 0.0f); }
+    if (!detail::isfinite(a.f0)) { XPMATH_PRINTF("TFREMAINDER: infinite dividend\n");
+                                   return TripleFloat(0.0f / 0.0f); }
+    if (!detail::isfinite(b.f0)) return a;
+    if (a.f0 == 0.0f) return a;
+
+    bool q_odd = false;
+    TripleFloat B = abs(b);
+    TripleFloat r = detail::tf_fmod_abs(abs(a), B, q_odd);
+    TripleFloat two_r = mul_pwr2(r, 2.0f);
+    if (two_r > B || (two_r == B && q_odd)) r = subtract(r, B);  // Sterbenz-exact
+    return (a.f0 < 0.0f) ? negate(r) : r;
 }
 
 XPMATH_INLINE_FUNCTION TripleFloat fdim(TripleFloat a, TripleFloat b) {

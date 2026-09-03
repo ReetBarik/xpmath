@@ -1371,20 +1371,81 @@ XPMATH_INLINE_FUNCTION QuadFloat hypot(QuadFloat a, QuadFloat b) {
     return multiply(m, sqrt(add(QuadFloat(1.0f), multiply(t, t))));
 }
 
-// fmod(a, b) = a - b*trunc(a/b).  QD qd_real.cpp:2598 (fmod = a - b*aint(a/b);
-// aint = trunc, qd_inline.h:975).
-XPMATH_INLINE_FUNCTION QuadFloat fmod(QuadFloat a, QuadFloat b) {
-    QuadFloat q  = divide(a, b);
-    QuadFloat qt = trunc(q);
-    return subtract(a, multiply(b, qt));
+// fmod / remainder — exact iterative scale-and-subtract (KI-10, KI-15).
+// These no longer follow QD 2.3.24 (`fmod` qd_real.cpp:2597 = a - b*aint(a/b),
+// `drem` :2462 = a - b*nint(a/b)): QD has the same defect and diverging from it
+// is deliberate. The full derivation — loop bound, termination, and why every
+// subtraction is exact by Sterbenz — is in dd_math.hpp. On QF the one-shot form
+// additionally inherited KI-19, `divide` returning NaN at large quotients; no
+// quotient is formed here at all, so that path is gone too.
+// Conventions: C99 fmod (sign of a) and C99/IEEE-754 remainder (round-half-to-
+// EVEN quotient, |r| <= |b|/2 — NOT QD's half-away nint, see KI-20).
+// fmod(a,0), remainder(a,0), fmod(+-inf,b), remainder(+-inf,b) -> NaN;
+// f(a,+-inf) = a for finite a; f(+-0,b) = +-0.
+namespace detail {
+
+// |A| mod |B| exactly, plus the parity of the integral quotient.
+// Precondition: A >= 0, B > 0, both finite.
+XPMATH_INLINE_FUNCTION QuadFloat qf_fmod_abs(QuadFloat A, QuadFloat B,
+                                             bool& q_odd) {
+    q_odd = false;
+    if (A < B) return A;
+
+    QuadFloat Bs = B;
+    int k = 0;
+    for (;;) {
+        QuadFloat t = mul_pwr2(Bs, 1073741824.0f);  // 2^30
+        if (t > A) break;
+        Bs = t; k += 30;
+    }
+    for (;;) {
+        QuadFloat t = mul_pwr2(Bs, 2.0f);
+        if (t > A) break;
+        Bs = t; ++k;
+    }
+
+    QuadFloat r = A;
+    for (int i = k; i >= 0; --i) {
+        if (r >= Bs) {
+            r = subtract(r, Bs);          // Sterbenz-exact
+            if (i == 0) q_odd = true;
+        }
+        Bs = mul_pwr2(Bs, 0.5f);
+    }
+    return r;
 }
 
-// remainder(a, b) = a - b*nint(a/b).  QD drem, qd_real.cpp:2462
-// (n = nint(a/b); a - n*b).
+}  // namespace detail
+
+XPMATH_INLINE_FUNCTION QuadFloat fmod(QuadFloat a, QuadFloat b) {
+    if (a.f0 != a.f0 || b.f0 != b.f0) return QuadFloat(a.f0 + b.f0);
+    if (b.f0 == 0.0f) { XPMATH_PRINTF("QFFMOD: zero modulus\n");
+                        return QuadFloat(0.0f / 0.0f); }
+    if (!detail::isfinite(a.f0)) { XPMATH_PRINTF("QFFMOD: infinite dividend\n");
+                                   return QuadFloat(0.0f / 0.0f); }
+    if (!detail::isfinite(b.f0)) return a;
+    if (a.f0 == 0.0f) return a;
+
+    bool q_odd = false;
+    QuadFloat r = detail::qf_fmod_abs(abs(a), abs(b), q_odd);
+    return (a.f0 < 0.0f) ? negate(r) : r;
+}
+
 XPMATH_INLINE_FUNCTION QuadFloat remainder(QuadFloat a, QuadFloat b) {
-    QuadFloat q  = divide(a, b);
-    QuadFloat qn = round_to_nearest_int(q);
-    return subtract(a, multiply(b, qn));
+    if (a.f0 != a.f0 || b.f0 != b.f0) return QuadFloat(a.f0 + b.f0);
+    if (b.f0 == 0.0f) { XPMATH_PRINTF("QFREMAINDER: zero modulus\n");
+                        return QuadFloat(0.0f / 0.0f); }
+    if (!detail::isfinite(a.f0)) { XPMATH_PRINTF("QFREMAINDER: infinite dividend\n");
+                                   return QuadFloat(0.0f / 0.0f); }
+    if (!detail::isfinite(b.f0)) return a;
+    if (a.f0 == 0.0f) return a;
+
+    bool q_odd = false;
+    QuadFloat B = abs(b);
+    QuadFloat r = detail::qf_fmod_abs(abs(a), B, q_odd);
+    QuadFloat two_r = mul_pwr2(r, 2.0f);
+    if (two_r > B || (two_r == B && q_odd)) r = subtract(r, B);  // Sterbenz-exact
+    return (a.f0 < 0.0f) ? negate(r) : r;
 }
 
 // copysign / fmax / fmin / fdim / fma — no QD analogue; componentwise (cf. dd).
