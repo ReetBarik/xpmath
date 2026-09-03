@@ -3052,6 +3052,68 @@ is deliberately *not* KI-2, which was about `nint` one ulp below a tie.
 
 ---
 
+## KI-21 — The missing-complex-oracle path is documented as graceful degradation but is a hard build failure
+
+**Severity: medium (build/packaging, not numerics). Surfaced by S7 while
+standing up CI against a vanilla Kokkos install.**
+
+### What
+
+`CMakeLists.txt:66-71` probes the Kokkos install for the local extension header
+`impl/Kokkos_ComplexQuadPrecisionMath.hpp` (carried in `patches/`, not upstream)
+and, when it is absent, emits a `message(WARNING)` whose own text describes the
+posture as *"warn and continue — same graceful-degradation posture used above
+for LIBQUADMATH itself"*.
+
+It does not continue. The four `src/demo_*complex.cpp` files include that header
+unconditionally, so configure succeeds with a warning and then the **build
+fails**:
+
+```
+src/demo_complex.cpp:18:10:    fatal error: impl/Kokkos_ComplexQuadPrecisionMath.hpp: No such file or directory
+src/demo_ff_complex.cpp:56:10: fatal error: impl/Kokkos_ComplexQuadPrecisionMath.hpp: No such file or directory
+src/demo_qf_complex.cpp:51:10: fatal error: impl/Kokkos_ComplexQuadPrecisionMath.hpp: No such file or directory
+src/demo_tf_complex.cpp:51:10: fatal error: impl/Kokkos_ComplexQuadPrecisionMath.hpp: No such file or directory
+```
+
+The result probed the `KOKKOS_HAS_COMPLEX_QUADMATH_WRAPPER` variable is stored
+in is never consulted again — no target is guarded by it.
+
+### Extent
+
+Reproduced on `main` @ `35fd2c9` against a from-scratch Kokkos 5.1.0 built with
+`-DKokkos_ENABLE_SERIAL=ON -DKokkos_ENABLE_LIBQUADMATH=ON -DCMAKE_CXX_STANDARD=20`
+and **no patch applied**. Because `make` stops at the first failing target,
+27 of the 34 ctest targets are never linked and ctest reports them `***Not Run`
+— i.e. the visible symptom is 27 missing tests, which reads like a test-harness
+problem rather than a missing header.
+
+This is invisible in day-to-day work because
+`$HOME/kokkos-install-quadmath` has had the patch applied since T0.0. It only
+appears when someone builds against a stock Kokkos — which is precisely what a
+new contributor, a packager, or CI does first.
+
+### Why it matters beyond CI
+
+The upstream pitch is that this repo builds against an ordinary Kokkos. Today it
+does not: it builds against Reet's patched one, and the failure mode gives no
+hint that `patches/README.md` is the answer.
+
+### Closing it
+
+Either honour the documented posture — guard the four complex demo targets (and
+only those) on `KOKKOS_HAS_COMPLEX_QUADMATH_WRAPPER`, so a stock Kokkos yields a
+smaller but working build — or drop the pretence and make the missing header a
+`message(FATAL_ERROR)` that names `patches/README.md`. The present middle
+ground is the only option that is actively misleading.
+
+**Worked around, not fixed, in CI:** `.github/workflows/ci.yml` copies
+`patches/kokkos_complex_quad_math.hpp` into the Kokkos source tree before
+configuring, and then asserts the header reached the install tree. With that
+copy in place the lane is 34/34.
+
+---
+
 ## Classifier verdict (2026-09-03) — `--classify` was audited and left UNCHANGED
 
 The 2026-09-03 triage was asked to fix `scripts/sweep_accuracy.cpp --classify`

@@ -1,0 +1,472 @@
+# ============================================================================
+# xpmath CI  (sub-plan S7)
+# ============================================================================
+#
+# Six lanes, cheapest first. Each answers a different question:
+#
+#   docs-fresh      Is the generated docs/DOMAINS.md still what the CSVs imply?
+#   standalone      Does include/xp/ compile with ZERO Kokkos, on Linux AND
+#                   macOS/ARM?  (The macOS leg is the evidence for the upstream
+#                   claim that the core is not x86_64-dependent.)
+#   monotone-gate   Did any of the 428,592 scored sweep points get LESS accurate?
+#   build-and-test  Does the full Kokkos build + 34-test ctest suite pass?
+#   device-nvcc     Does each of the eight headers compile for a CUDA device?
+#   device-hip      Same for HIP/ROCm.  UNVERIFIED — see `continue-on-error`.
+#
+# TOOLCHAIN NOTES THAT MATTER (do not "simplify" these away):
+#
+#  * KI-3 / C++ STANDARD SPLIT.  Kokkos 5.1.0 REQUIRES C++20 and hard-errors on
+#    17 (cmake/kokkos_test_cxx_std.cmake:89).  THIS repo builds at C++17.  Both
+#    numbers below are deliberate and must stay different.
+#
+#  * ORACLE FINGERPRINT.  The monotone gate's reference is libquadmath, whose
+#    transcendental results are a property of the GCC version.  The committed
+#    baseline records `oracle-fingerprint: 578322f998a329c8`.  Measured locally:
+#    gcc 12.2.0, 13.1.0 and 13.3.0 all produce that value; gcc 14.1.0 produces
+#    54901e8104607a77.  So the gate pins g++-13 and REFUSES TO INTERPRET the
+#    diff if the fingerprint moves — a mismatch means the reference moved, not
+#    that the library regressed, and re-baselining under a CI toolchain must be
+#    a human decision.
+#
+#  * NO __float128 IN A DEVICE TU.  nvcc's device pass walks STL member
+#    signatures and rejects std::vector<__float128> even in host-only code.  No
+#    flag avoids it.  The device TUs below therefore contain no oracle at all.
+#
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A new push to the same branch cancels the previous run; the Kokkos build is
+# the expensive part and there is no value in racing two of them.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  KOKKOS_TAG: "5.1.0"
+
+jobs:
+
+  # ==========================================================================
+  # 1. Generated-doc freshness.  ~3 s.  Python 3 and the CSVs, nothing else.
+  # ==========================================================================
+  docs-fresh:
+    name: docs freshness (DOMAINS.md)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: validation/check_domains_fresh.sh
+        run: |
+          python3 --version
+          bash validation/check_domains_fresh.sh
+
+  # ==========================================================================
+  # 2. Standalone core: no Kokkos, two operating systems, two compiler families.
+  #
+  # macos-latest is an ARM64 runner using Apple clang (`g++` is a clang++ shim
+  # there).  That leg is the point of this job: it is what turns "the core has
+  # no Kokkos dependency" into "the core has no x86_64 dependency either".
+  #
+  # libquadmath is NOT needed here.  The script compiles with an include path of
+  # exactly `include/` and no -lquadmath / -fext-numeric-literals — the oracle
+  # lives only in the demos and the oracle-scored tests, neither of which this
+  # lane touches.  The guard step below asserts that stays true, so if someone
+  # later gives a standalone smoke test an oracle dependency the macOS leg says
+  # why it broke instead of dying in the linker.
+  # ==========================================================================
+  standalone:
+    name: standalone no-Kokkos (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show compiler
+        run: |
+          uname -sm
+          g++ --version | head -1
+
+      # `//` comments are stripped first, exactly as step 16 of
+      # check_standalone_no_kokkos.sh does for the token "Kokkos": several
+      # headers legitimately DISCUSS __float128 in comments (qf_math.hpp:418
+      # explains how a 113-bit constant was split into four FP32 words). Naming
+      # it in prose is fine; depending on it is not.
+      - name: Guard — the standalone lane must stay oracle-free
+        shell: bash
+        run: |
+          bad=0
+          for f in include/xp/*.hpp tests/standalone/*.cpp; do
+            if sed 's://.*::' "$f" | grep -nE '__float128|quadmath' ; then
+              echo "::error file=${f}::references __float128/quadmath in code"
+              bad=1
+            fi
+          done
+          if [ "$bad" -ne 0 ]; then
+            echo "::error::libquadmath is x86_64-glibc only, so this lane -- and"
+            echo "::error::the portability claim it backs -- cannot hold if the"
+            echo "::error::standalone core depends on it."
+            exit 1
+          fi
+          echo "ok - no oracle dependency in include/xp/ or tests/standalone/"
+
+      - name: scripts/check_standalone_no_kokkos.sh
+        run: bash scripts/check_standalone_no_kokkos.sh
+
+  # ==========================================================================
+  # 3. THE MONOTONE GATE.  The single most valuable regression check here.
+  #
+  # Rebuilds every one of the 428,592 scored sweep points against a libquadmath
+  # oracle and fails if ANY point's digit count DECREASED.  The per-op tolerance
+  # tables in ctest gate on a mean against a threshold, so they cannot see a fix
+  # that buys 30 digits in one op by quietly spending 2 in another.  This can.
+  #
+  # Measured on the toolchain of record (gcc 13.3.0): 7 s to compile, 4 s to run
+  # the full sweep.  It is cheap enough to run on every push.
+  # ==========================================================================
+  monotone-gate:
+    name: monotone accuracy gate (428k points)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install g++-13 (fingerprint-compatible)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-13
+          g++-13 -dumpfullversion
+
+      - name: Build scripts/sweep_accuracy
+        run: |
+          g++-13 -std=c++17 -fext-numeric-literals -O2 -Iinclude \
+                 scripts/sweep_accuracy.cpp -lquadmath -o /tmp/sweep_accuracy
+
+      # Determine the runner's oracle fingerprint BEFORE trusting any diff.  The
+      # tool stamps it into the header of whatever CSV it writes, so a throwaway
+      # --out run yields it without touching the committed baseline.
+      #
+      # DO NOT change this step to re-baseline on mismatch.  A mismatch means
+      # this runner's libquadmath disagrees with the one the baseline was
+      # recorded against; every point would then look "changed" for a reason
+      # that has nothing to do with the library.  Fail, print both values, and
+      # let a human decide.
+      - name: Oracle fingerprint must match the baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/sweep_accuracy --out /tmp/ci_fresh.csv --quiet > /dev/null
+          base_fp=$(sed -n 's/^# oracle-fingerprint: //p' validation/sweep/sweep_baseline.csv | head -1)
+          run_fp=$( sed -n 's/^# oracle-fingerprint: //p' /tmp/ci_fresh.csv                   | head -1)
+          echo "baseline oracle-fingerprint : ${base_fp}"
+          echo "runner   oracle-fingerprint : ${run_fp}"
+          echo "runner   g++                : $(g++-13 -dumpfullversion)"
+          if [ -z "${run_fp}" ]; then
+            echo "::error::sweep_accuracy emitted no oracle-fingerprint header."
+            exit 1
+          fi
+          if [ "${base_fp}" != "${run_fp}" ]; then
+            echo "::error title=Oracle fingerprint mismatch::${base_fp} (baseline) vs ${run_fp} (runner)"
+            cat <<'MSG'
+          ================================================================
+           ORACLE FINGERPRINT MISMATCH - THE MONOTONE DIFF IS MEANINGLESS
+          ================================================================
+           This runner's libquadmath does not agree with the one the
+           committed baseline was recorded against.  The REFERENCE moved.
+           Comparing digit counts across two different oracles produces a
+           scatter of hairline "regressions" that are not regressions.
+
+           Locally measured fingerprints:
+             gcc 12.2.0 / 13.1.0 / 13.3.0 -> 578322f998a329c8   (baseline)
+             gcc 14.1.0                   -> 54901e8104607a77
+
+           Do NOT re-baseline from CI.  Either pin a fingerprint-compatible
+           g++ in this job, or re-baseline deliberately on the toolchain of
+           record and commit the new CSV:
+             module use /soft/modulefiles && module load gcc/13.3.0
+             scripts/sweep_accuracy
+             scripts/sweep_accuracy --classify validation/sweep/sweep_classified.csv
+             scripts/gen_domains.py > docs/DOMAINS.md
+          ================================================================
+          MSG
+            exit 1
+          fi
+          echo "fingerprint matches - the monotone diff is trustworthy"
+
+      - name: MONOTONE GATE — no point may lose accuracy
+        shell: bash
+        run: |
+          set -o pipefail
+          /tmp/sweep_accuracy --baseline validation/sweep/sweep_baseline.csv --quiet 2>&1 | tee /tmp/gate.log
+          rc=${PIPESTATUS[0]}
+          # Belt and braces: the tool only WARNS on a fingerprint mismatch and
+          # still exits on the digit diff.  The step above should have caught
+          # it, but if it somehow did not, refuse to report the diff as truth.
+          if grep -q "oracle fingerprint mismatch" /tmp/gate.log; then
+            echo "::error::sweep_accuracy reported a fingerprint mismatch; the diff is not trustworthy."
+            exit 1
+          fi
+          exit "${rc}"
+
+  # ==========================================================================
+  # 4. Full build + ctest.  The expensive lane; Kokkos dominates the wall time,
+  #    so its INSTALL TREE is cached and rebuilt only when the key changes.
+  #
+  #    Cache key deliberately includes the CMake flags: flipping LIBQUADMATH or
+  #    the C++ standard must invalidate, or the lane silently tests the wrong
+  #    Kokkos.
+  # ==========================================================================
+  build-and-test:
+    name: Kokkos build + ctest (34 tests)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-13 cmake ninja-build
+          g++-13 -dumpfullversion
+          cmake --version | head -1
+
+      - name: Cache Kokkos install tree
+        id: kokkos-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/kokkos-install
+          # Bump the trailing integer to force a rebuild.
+          key: kokkos-${{ env.KOKKOS_TAG }}-serial-quadmath-cxx20-gcc13-ubuntu24-v1
+
+      - name: Build Kokkos ${{ env.KOKKOS_TAG }} (Serial + LIBQUADMATH)
+        if: steps.kokkos-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch "${KOKKOS_TAG}" \
+            https://github.com/kokkos/kokkos.git /tmp/kokkos-src
+
+          # Local extension, NOT upstream: the __complex128 oracle overloads
+          # that src/demo_complex.cpp needs.  See patches/README.md.  Copied
+          # into the Kokkos SOURCE tree before configure so it is installed.
+          cp patches/kokkos_complex_quad_math.hpp \
+             /tmp/kokkos-src/core/src/impl/Kokkos_ComplexQuadPrecisionMath.hpp
+
+          # KI-3: Kokkos itself REQUIRES C++20.  This is not the standard the
+          # consuming repo is built at (see the next step, which uses 17).
+          cmake -S /tmp/kokkos-src -B /tmp/kokkos-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${HOME}/kokkos-install" \
+            -DCMAKE_CXX_COMPILER=g++-13 \
+            -DCMAKE_CXX_STANDARD=20 \
+            -DKokkos_ENABLE_SERIAL=ON \
+            -DKokkos_ENABLE_LIBQUADMATH=ON
+          cmake --build /tmp/kokkos-build -j"$(nproc)" --target install
+
+      - name: Confirm the complex-quadmath wrapper reached the install tree
+        run: |
+          ls -l "${HOME}/kokkos-install/include/impl/Kokkos_ComplexQuadPrecisionMath.hpp" \
+            || { echo "::error::patches/kokkos_complex_quad_math.hpp did not install;" \
+                      "the complex __complex128 oracle will be absent."; exit 1; }
+
+      # KI-3, other half: THIS repo is C++17.  Do not unify the two numbers.
+      - name: Configure xpmath (C++17, -O3 -DNDEBUG)
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_STANDARD=17 \
+            -DCMAKE_CXX_COMPILER=g++-13 \
+            -DCMAKE_CXX_FLAGS="-O3 -DNDEBUG" \
+            -DCMAKE_PREFIX_PATH="${HOME}/kokkos-install"
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: ctest
+        run: ctest --test-dir build -j4 --timeout 1800 --output-on-failure
+
+      - name: Upload ctest log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-log
+          path: build/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+
+  # ==========================================================================
+  # 5. Device compile lanes (CUDA).  No GPU is used or needed — `nvcc -c`
+  #    produces the device code and stops.
+  #
+  #    ONE TU PER HEADER, not one TU for all eight.  Measured locally: the
+  #    combined TU had not finished after 10 minutes, while the per-header TUs
+  #    take 8 s (dd_math) to a few minutes (qf/tf).  The split also gives a
+  #    per-header verdict instead of one opaque failure.
+  #
+  #    The TUs are generated here rather than committed because they exist only
+  #    to force device instantiation; there is nothing to maintain in them.
+  # ==========================================================================
+  device-nvcc:
+    name: nvcc device compile (${{ matrix.hdr }})
+    runs-on: ubuntu-24.04
+    container: nvidia/cuda:12.9.2-devel-ubuntu24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {hdr: dd_math,    kind: real,    type: DoubleDouble,        scalar: double, lead: hi}
+          - {hdr: ff_math,    kind: real,    type: FloatFloat,          scalar: float,  lead: hi}
+          - {hdr: qf_math,    kind: real,    type: QuadFloat,           scalar: float,  lead: f0}
+          - {hdr: tf_math,    kind: real,    type: TripleFloat,         scalar: float,  lead: f0}
+          - {hdr: dd_complex, kind: complex, type: DoubleDoubleComplex, real: DoubleDouble, scalar: double, lead: hi}
+          - {hdr: ff_complex, kind: complex, type: FloatFloatComplex,   real: FloatFloat,   scalar: float,  lead: hi}
+          - {hdr: qf_complex, kind: complex, type: QuadFloatComplex,    real: QuadFloat,    scalar: float,  lead: f0}
+          - {hdr: tf_complex, kind: complex, type: TripleFloatComplex,  real: TripleFloat,  scalar: float,  lead: f0}
+    steps:
+      - name: Install git (the CUDA image is minimal)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          nvcc --version | tail -2
+          g++ -dumpfullversion
+
+      - name: Generate the device TU
+        shell: bash
+        run: |
+          set -euo pipefail
+          # NOTE: no <vector> and no __float128 anywhere below.  nvcc's device
+          # pass walks STL member signatures and rejects std::vector<__float128>
+          # even in host-only code; the host oracle stays in its own TU.
+          if [ "${{ matrix.kind }}" = "real" ]; then
+            cat > /tmp/tu.cu <<'EOF'
+          #include <xp/HEADER.hpp>
+          using T = xp::TYPE;
+          using S = SCALAR;
+          __device__ void touch(S x, S y, S* out) {
+              T a{x}, b{y};
+              T r = a + b; r = r - b; r = r * b; r = r / (b + T{S(2)});
+              r = r + xp::sqrt(xp::abs(a)) + xp::exp(b) + xp::log(xp::abs(a) + T{S(1)})
+                    + xp::exp2(b) + xp::exp10(b) + xp::expm1(b)
+                    + xp::log2(xp::abs(a) + T{S(1)}) + xp::log10(xp::abs(a) + T{S(1)})
+                    + xp::log1p(xp::abs(b))
+                    + xp::sin(a) + xp::cos(a) + xp::tan(b)
+                    + xp::asin(b) + xp::acos(b) + xp::atan(a)
+                    + xp::sinh(b) + xp::cosh(b) + xp::tanh(a)
+                    + xp::acosh(xp::abs(a) + T{S(1)}) + xp::asinh(a) + xp::atanh(b)
+                    + xp::pow(xp::abs(a) + T{S(1)}, b) + xp::hypot(a, b)
+                    + xp::fmod(a, b + T{S(1)}) + xp::remainder(a, b + T{S(1)})
+                    + xp::copysign(a, b) + xp::fmax(a, b) + xp::fmin(a, b) + xp::fdim(a, b)
+                    + xp::fma(a, b, a) + xp::ceil(a) + xp::floor(a) + xp::round(a) + xp::trunc(a)
+                    + xp::atan2(a, b) + xp::negate(a) + xp::multiply_scalar(a, S(2))
+                    + xp::divide_scalar(a, S(2)) + xp::pow_int(a, 3);
+              T s, c;   xp::sincos(a, s, c);       r = r + s + c;
+              T sh, ch; xp::sinhcosh(b, sh, ch);   r = r + sh + ch;
+              *out = r.LEAD;
+          }
+          __global__ void k(const S* in, S* o) { touch(in[0], in[1], o); }
+          EOF
+          else
+            cat > /tmp/tu.cu <<'EOF'
+          #include <xp/HEADER.hpp>
+          using C = xp::TYPE;
+          using T = xp::REALTYPE;
+          using S = SCALAR;
+          __device__ void touch(S x, S y, S* out) {
+              C z{T{x}, T{y}}, w{T{y}, T{x}};
+              C r = z + w; r = r - w; r = r * w; r = r / w;
+              r = r + xp::sqrt(z) + xp::exp(z) + xp::log(z) + xp::log10(z) + xp::log1p(z)
+                    + xp::sin(z) + xp::cos(z) + xp::tan(z)
+                    + xp::asin(z) + xp::acos(z) + xp::atan(z)
+                    + xp::sinh(z) + xp::cosh(z) + xp::tanh(z)
+                    + xp::asinh(z) + xp::acosh(z) + xp::atanh(z)
+                    + xp::pow(z, w) + xp::conj(z) + xp::polar(T{x}, T{y});
+              *out = xp::abs(r).LEAD;
+          }
+          __global__ void k(const S* in, S* o) { touch(in[0], in[1], o); }
+          EOF
+          fi
+          sed -i -e 's/HEADER/${{ matrix.hdr }}/' \
+                 -e 's/xp::TYPE/xp::${{ matrix.type }}/' \
+                 -e 's/xp::REALTYPE/xp::${{ matrix.real }}/' \
+                 -e 's/= SCALAR;/= ${{ matrix.scalar }};/' \
+                 -e 's/\.LEAD;/.${{ matrix.lead }};/' /tmp/tu.cu
+          cat /tmp/tu.cu
+
+      - name: nvcc -c (compile only, sm_80)
+        run: |
+          time nvcc -std=c++17 -c -arch=sm_80 -Iinclude /tmp/tu.cu -o /tmp/tu.o
+
+  # ==========================================================================
+  # 6. Device compile lane (HIP).  UNVERIFIED BY CONSTRUCTION.
+  #
+  #    No hipcc exists on the machine this workflow was authored on, so unlike
+  #    every other lane here nothing about this one was executed before it was
+  #    committed.  It is therefore `continue-on-error: true`: it reports, it
+  #    does not gate.  Once a run confirms the image and the flags, delete that
+  #    line and the lane becomes real.
+  # ==========================================================================
+  device-hip:
+    name: hipcc device compile (UNVERIFIED, non-gating)
+    runs-on: ubuntu-24.04
+    container: rocm/dev-ubuntu-24.04:latest
+    continue-on-error: true
+    steps:
+      - name: Install git (the ROCm image is minimal)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          export PATH=/opt/rocm/bin:$PATH
+          hipcc --version | head -5
+
+      - name: hipcc -c over all eight headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH=/opt/rocm/bin:$PATH
+          cat > /tmp/hip_tu.hip <<'EOF'
+          // Compile-only HIP smoke.  No __float128, no <vector>.
+          #include <hip/hip_runtime.h>
+          #include <xp/dd_math.hpp>
+          #include <xp/dd_complex.hpp>
+          #include <xp/ff_math.hpp>
+          #include <xp/ff_complex.hpp>
+          #include <xp/qf_math.hpp>
+          #include <xp/qf_complex.hpp>
+          #include <xp/tf_math.hpp>
+          #include <xp/tf_complex.hpp>
+          __global__ void k(const double* in, double* out) {
+              xp::DoubleDouble a{in[0]}, b{in[1]};
+              xp::FloatFloat   c{(float)in[0]};
+              xp::QuadFloat    d{(float)in[0]};
+              xp::TripleFloat  e{(float)in[0]};
+              xp::DoubleDoubleComplex z{a, b};
+              xp::FloatFloatComplex   zf{c, c};
+              xp::QuadFloatComplex    zq{d, d};
+              xp::TripleFloatComplex  zt{e, e};
+              out[0] = xp::sqrt(xp::exp(a) + b).hi
+                     + (double)xp::sqrt(xp::exp(c)).hi
+                     + (double)xp::sqrt(xp::exp(d)).f0
+                     + (double)xp::sqrt(xp::exp(e)).f0
+                     + xp::abs(xp::log(z)).hi
+                     + (double)xp::abs(xp::log(zf)).hi
+                     + (double)xp::abs(xp::log(zq)).f0
+                     + (double)xp::abs(xp::log(zt)).f0;
+          }
+          EOF
+          time hipcc -std=c++17 --offload-arch=gfx90a -c -Iinclude /tmp/hip_tu.hip -o /tmp/hip_tu.o

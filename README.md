@@ -1,5 +1,13 @@
 # xpmath — Extended-precision arithmetic library
 
+[![CI](https://github.com/ReetBarik/xpmath/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ReetBarik/xpmath/actions/workflows/ci.yml)
+
+The badge covers six lanes: generated-doc freshness, the standalone no-Kokkos
+core on Linux **and** macOS/ARM, the 428,592-point monotone accuracy gate, the
+full Kokkos build + 34-test ctest suite, and per-header `nvcc` device compiles.
+See `.github/workflows/ci.yml` and the S7 STATUS block in
+`docs/UPSTREAM_PLAN_STATUS.md`.
+
 ## Section 1 — Motivation
 
 Many scientific and engineering applications — numerical linear algebra, particle

@@ -461,3 +461,174 @@ Against a ~21.7-digit target (24-bit FP32 mantissa × 3 = 72 bits, u = 2⁻⁷²
 - **Phase 6 added `copysign` and `hypot` to TF** (S10 Phase 6), closing a gap surfaced during Phase 5. The TF real demo now has 39 operations matching QF/FF/DD. Both are exact (copysign) or composition-based (hypot = sqrt(a²+b²)), measured at 21.70 and 21.05 mean digits respectively, both PASS in tf_accuracy_test.
 
 ---
+
+---
+
+## S7 — Public CI
+
+**Done 2026-09-03, on `main` @ `35fd2c9`.** One new file,
+`.github/workflows/ci.yml`; a badge in `README.md`; `KI-21` filed. No
+`include/xp/` header, test, or validation artifact was touched.
+
+### What was built — six lanes
+
+| lane | runner | what it proves | measured cost |
+|---|---|---|---|
+| `docs-fresh` | ubuntu-24.04 | `docs/DOMAINS.md` still matches the sweep CSVs | 2.5 s |
+| `standalone` | ubuntu-24.04 **+ macos-latest** | `include/xp/` compiles, links, runs and preprocesses Kokkos-free — on x86_64 **and** ARM | 15 s |
+| `monotone-gate` | ubuntu-24.04 | no point of 428,592 lost accuracy | 7 s build + 4 s run |
+| `build-and-test` | ubuntu-24.04 | Kokkos 5.1.0 + full 34-test ctest | 166 s ctest; Kokkos cached |
+| `device-nvcc` | ubuntu-24.04, `nvidia/cuda:12.9.2-devel-ubuntu24.04` | each of the eight headers compiles for a CUDA device, 8-way matrix | 9 s – 230 s per header |
+| `device-hip` | `rocm/dev-ubuntu-24.04` | same for HIP — **non-gating, see below** | unmeasured |
+
+### Verified locally by execution, not by reading
+
+Everything below was run on this machine before the commit.
+
+- **Full `build-and-test` recipe, from scratch.** Cloned Kokkos 5.1.0, applied
+  `patches/kokkos_complex_quad_math.hpp`, configured Serial + LIBQUADMATH at
+  **C++20**, installed, then configured this repo at **C++17** with
+  `-O3 -DNDEBUG` against it. Result: **34/34 ctest in 166 s.** Both halves of
+  the KI-3 standard split were exercised for real, not copied on faith.
+- **`monotone-gate`, all four steps, executed verbatim** out of the YAML via a
+  `g++-13` shim onto the module gcc 13.3.0. Fingerprint matched; gate reported
+  `428592 compared / 0 decreased / 0 increased`, exit 0.
+- **The fingerprint-mismatch path, deliberately triggered** by re-pointing the
+  shim at gcc 14.1.0. The job failed at the fingerprint step with the loud
+  banner, exit 1, before any diff was interpreted. This path is tested, not
+  hoped for.
+- **All eight device TUs compiled with real `nvcc`** (CUDA 12.3 + gcc 12.2, and
+  again under CUDA 12.9 + gcc 13.3 to match the pinned container).
+- **The workflow's TU generator was executed** and its eight outputs diffed
+  byte-for-byte (comments stripped) against the eight TUs that nvcc actually
+  compiled. Identical. The `sed` templating is not assumed to work.
+- **`standalone` and `docs-fresh` steps executed verbatim** from the extracted
+  YAML. Both green.
+- **YAML parsed** with `yaml.safe_load`, and every one of the 21 `run:` scripts
+  extracted and `bash -n`-checked. `actionlint` is not available here.
+
+### NOT verified — unverified by construction
+
+- **The macOS leg.** No clang and no macOS on this machine. The script itself is
+  compiler-agnostic (it takes `$CXX`, defaults to `g++`, which is a clang shim
+  on macOS) and uses no libquadmath, but *Apple clang has never compiled these
+  headers*. `-Wall -Wextra` is on without `-Werror`, so warnings will not fail
+  it; a hard clang error will. **This is the lane most likely to be red on the
+  first run, and it is the one worth being red** — it is the actual test of the
+  portability claim.
+- **`device-hip`.** No hipcc, no ROCm, no container runtime here. Nothing about
+  this lane was executed. It is `continue-on-error: true` so it reports without
+  gating. Once a run confirms the image name, the `hipcc` path and
+  `--offload-arch=gfx90a`, delete that line and it becomes a real gate. Filed
+  as future work rather than fought, per the brief.
+- **Runner-image specifics**: that `ubuntu-24.04` supplies `g++-13`, that
+  `nvidia/cuda:12.9.2-devel-ubuntu24.04` and `rocm/dev-ubuntu-24.04:latest`
+  resolve, that `actions/cache@v4` keys behave. Tag existence for the CUDA image
+  was confirmed against the Docker Hub API; the rest is standard but unrun.
+- **Kokkos build wall time on a 4-vCPU runner.** Locally it is minutes at
+  `-j16`; on a runner expect appreciably longer on a cache miss. The cache
+  should make that a once-per-key cost.
+
+### The monotone gate and the oracle fingerprint — the honest answer
+
+The brief asked whether a GitHub runner can plausibly reproduce the JLSE
+gcc 13.3.0 fingerprint `578322f998a329c8`. **Measured, not guessed:**
+
+| gcc | oracle fingerprint |
+|---|---|
+| 12.2.0 | `578322f998a329c8` ✅ |
+| 13.1.0 | `578322f998a329c8` ✅ |
+| **13.3.0 (toolchain of record)** | **`578322f998a329c8`** ✅ |
+| 14.1.0 | `54901e8104607a77` ❌ |
+
+The fingerprint is **stable across the whole gcc 12–13 range and moves at 14**.
+It is therefore a property of the libquadmath source generation, not of a
+particular local build — three independently built compilers agree. Ubuntu
+24.04's `g++-13` is 13.3.0, so reproduction is **very likely**, and the job pins
+`g++-13` explicitly rather than taking the image default (which drifts).
+
+It is not certain, so the job does not assume it. Before any diff is
+interpreted, a throwaway `--out` run stamps the runner's own fingerprint into a
+temp CSV, both values are printed, and a mismatch **fails the job** with a
+banner explaining that the reference moved. `sweep_accuracy` itself only *warns*
+on mismatch and still exits on the digit diff, so a second grep on the gate log
+backstops the first check.
+
+**Nothing re-baselines automatically, by design.** Measured what a mismatch
+actually costs: running the gate under the gcc 14.1.0 oracle reports **7
+decreases and 11 increases, worst drop 0.03 digits**. So the failure mode is not
+"thousands of obvious regressions" — it is a *handful of plausible-looking
+hairline ones*, which is considerably worse. That is exactly the shape that
+burns a fix session chasing a phantom, and exactly why the gate refuses to
+report a diff it cannot trust.
+
+**Full-sweep runtime: 4.3 s** for all 428,592 points, plus 7.3 s to compile
+`scripts/sweep_accuracy.cpp`. The brief anticipated "a few minutes"; it is
+twelve seconds end to end. This lane is cheap enough to run on every push, and
+there was no reason to sample it down.
+
+### Design decisions worth recording
+
+**One TU per header for the device lanes, not one TU for all eight.** The first
+attempt put all four backends, real and complex, in a single `.cu`. It had not
+finished after **10 minutes** and was killed. Split per header, the same
+coverage costs 9 s (`dd_math`) to 230 s (`qf_complex`), runs 8-way parallel, and
+names the header that broke instead of failing opaquely.
+
+**The device TUs are generated in the workflow, not committed.** The brief
+scoped the change to `.github/workflows/*.yml`, and these files exist only to
+force device instantiation — there is nothing in them to maintain. They contain
+no `__float128` and no `<vector>`, because nvcc's device pass walks STL member
+signatures and rejects `std::vector<__float128>` even in host-only code. The
+lane is oracle-free by construction, so it cannot hit that trap.
+
+**The device TUs instantiate from `__device__` code**, not merely `#include` the
+headers. A header that parses but cannot generate device code would otherwise
+pass. Each real TU exercises ~40 operations, each complex TU ~21.
+
+**`standalone` carries an oracle-free guard.** Before running the script, the
+job strips `//` comments and greps `include/xp/*.hpp` and `tests/standalone/`
+for `__float128`/`quadmath`. Comment-stripping is not incidental: an unstripped
+grep fires today on three headers that merely *discuss* `__float128` in prose
+(`qf_math.hpp:418`, `tf_math.hpp:385/393`, `ff_math.hpp:1316`) — caught by
+executing the step rather than by reading it. The guard exists so that if
+someone later gives a standalone TU an oracle dependency, the macOS leg says why
+it broke instead of dying in the linker on a platform with no libquadmath.
+
+### KI-21 — filed, not fixed
+
+CI surfaced a real defect. Against a **vanilla** Kokkos 5.1.0, `CMakeLists.txt`
+warns that `impl/Kokkos_ComplexQuadPrecisionMath.hpp` is missing and says it
+will continue — and then the build hard-fails, because the four
+`src/demo_*complex.cpp` include it unconditionally and the probed
+`KOKKOS_HAS_COMPLEX_QUADMATH_WRAPPER` variable is never consulted. `make` stops
+at the first failure, so **27 of 34 ctest targets are never linked** and ctest
+reports them `***Not Run` — the symptom looks like a broken test harness rather
+than a missing header.
+
+This is invisible locally because `$HOME/kokkos-install-quadmath` has been
+patched since T0.0. It appears the moment anyone builds against stock Kokkos —
+a new contributor, a packager, or CI. Filed as **KI-21** with the reproducer;
+per the brief it was **not fixed here**. CI works around it by copying the patch
+header into the Kokkos source tree before configure and then asserting it
+reached the install tree.
+
+### Other observations, deliberately not acted on
+
+- `README.md` §1 still says *"three portable ... backends — DD, FF and QF"*.
+  There are four. Out of scope for a badge-only README edit; noted for whoever
+  next touches the prose.
+- `scripts/check_standalone_no_kokkos.sh` has no `tf_no_kokkos_smoke.cpp` — its
+  own header comment says TF real "is delivered in Phase 1-3", but
+  `tests/standalone/` has no such file. `tf_math.hpp` is covered transitively
+  (via `tf_complex.hpp`) and by the include-all preprocess step, so coverage
+  exists; the step labels also read `[N/15]` for 16 steps. Cosmetic, and editing
+  that script was out of scope.
+
+### Future work
+
+1. Make `device-hip` gating once one run confirms the image and flags.
+2. A SYCL/`icpx` compile lane would complete the S8 vendor set; not attempted.
+3. `actionlint` in a lint lane, once CI can run it (it is not installable here).
+4. `qf_complex` at 230 s dominates `device-nvcc`; if that becomes painful,
+   `ccache` or a coarser op selection would cut it.
