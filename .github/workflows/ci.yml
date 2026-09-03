@@ -135,87 +135,81 @@ jobs:
   # the full sweep.  It is cheap enough to run on every push.
   # ==========================================================================
   monotone-gate:
-    name: monotone accuracy gate (428k points)
+    name: monotone accuracy gate (parent vs HEAD)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2          # need HEAD^ to score the parent commit
 
-      - name: Install g++-13 (fingerprint-compatible)
+      - name: Install g++-13
         run: |
           sudo apt-get update
           sudo apt-get install -y g++-13
           g++-13 -dumpfullversion
-
-      - name: Build scripts/sweep_accuracy
-        run: |
-          g++-13 -std=c++17 -fext-numeric-literals -O2 -Iinclude \
-                 scripts/sweep_accuracy.cpp -lquadmath -o /tmp/sweep_accuracy
-
-      # Determine the runner's oracle fingerprint BEFORE trusting any diff.  The
-      # tool stamps it into the header of whatever CSV it writes, so a throwaway
-      # --out run yields it without touching the committed baseline.
+      # WHY NOT COMPARE AGAINST validation/sweep/sweep_baseline.csv?
       #
-      # DO NOT change this step to re-baseline on mismatch.  A mismatch means
-      # this runner's libquadmath disagrees with the one the baseline was
-      # recorded against; every point would then look "changed" for a reason
-      # that has nothing to do with the library.  Fail, print both values, and
-      # let a human decide.
-      - name: Oracle fingerprint must match the baseline
+      # Because the oracle is libquadmath, and its transcendental results are a
+      # property of the libquadmath BUILD -- not, as first assumed, of the gcc
+      # version. Measured in the first CI run: this runner reports g++ 13.3.0,
+      # the same version as the toolchain of record, and still produces
+      # 54901e8104607a77 against the baseline's 578322f998a329c8. JLSE is
+      # x86_64-suse-linux with glibc 2.38; the runner is Ubuntu 24.04 with
+      # glibc 2.39. No pinnable gcc version closes that gap.
+      #
+      # So compare the PARENT COMMIT against HEAD, both scored on THIS runner
+      # with THIS libquadmath. The oracle is identical on both sides and cancels
+      # exactly, and the question CI actually needs answered -- "did this commit
+      # make any of the 428,592 points worse?" -- is answered without depending
+      # on a reference recorded somewhere else.
+      #
+      # The committed baseline remains the reference for work done on the
+      # toolchain of record; it is reported below, non-gating, for continuity.
+      - name: Score the PARENT commit (same runner, same oracle)
+        id: parent
         shell: bash
         run: |
           set -euo pipefail
-          /tmp/sweep_accuracy --out /tmp/ci_fresh.csv --quiet > /dev/null
-          base_fp=$(sed -n 's/^# oracle-fingerprint: //p' validation/sweep/sweep_baseline.csv | head -1)
-          run_fp=$( sed -n 's/^# oracle-fingerprint: //p' /tmp/ci_fresh.csv                   | head -1)
-          echo "baseline oracle-fingerprint : ${base_fp}"
-          echo "runner   oracle-fingerprint : ${run_fp}"
-          echo "runner   g++                : $(g++-13 -dumpfullversion)"
-          if [ -z "${run_fp}" ]; then
-            echo "::error::sweep_accuracy emitted no oracle-fingerprint header."
-            exit 1
+          if ! git rev-parse --verify -q HEAD^ >/dev/null; then
+            echo "no parent commit (first commit or shallow history); skipping gate"
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
-          if [ "${base_fp}" != "${run_fp}" ]; then
-            echo "::error title=Oracle fingerprint mismatch::${base_fp} (baseline) vs ${run_fp} (runner)"
-            cat <<'MSG'
-          ================================================================
-           ORACLE FINGERPRINT MISMATCH - THE MONOTONE DIFF IS MEANINGLESS
-          ================================================================
-           This runner's libquadmath does not agree with the one the
-           committed baseline was recorded against.  The REFERENCE moved.
-           Comparing digit counts across two different oracles produces a
-           scatter of hairline "regressions" that are not regressions.
-
-           Locally measured fingerprints:
-             gcc 12.2.0 / 13.1.0 / 13.3.0 -> 578322f998a329c8   (baseline)
-             gcc 14.1.0                   -> 54901e8104607a77
-
-           Do NOT re-baseline from CI.  Either pin a fingerprint-compatible
-           g++ in this job, or re-baseline deliberately on the toolchain of
-           record and commit the new CSV:
-             module use /soft/modulefiles && module load gcc/13.3.0
-             scripts/sweep_accuracy
-             scripts/sweep_accuracy --classify validation/sweep/sweep_classified.csv
-             scripts/gen_domains.py > docs/DOMAINS.md
-          ================================================================
-          MSG
-            exit 1
+          git worktree add --detach /tmp/parent HEAD^
+          if [ ! -f /tmp/parent/scripts/sweep_accuracy.cpp ]; then
+            echo "parent commit predates scripts/sweep_accuracy.cpp; skipping gate"
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
-          echo "fingerprint matches - the monotone diff is trustworthy"
-
-      - name: MONOTONE GATE — no point may lose accuracy
+          g++-13 -std=c++17 -fext-numeric-literals -O2 -I/tmp/parent/include \
+                 /tmp/parent/scripts/sweep_accuracy.cpp -lquadmath -o /tmp/sweep_parent
+          /tmp/sweep_parent --out /tmp/parent_baseline.csv --quiet > /dev/null
+          echo "parent  $(git rev-parse --short HEAD^)  fingerprint: \
+            $(sed -n 's/^# oracle-fingerprint: //p' /tmp/parent_baseline.csv | head -1)"
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+      - name: MONOTONE GATE — no point may lose accuracy vs the parent commit
+        if: steps.parent.outputs.skipped != 'true'
         shell: bash
         run: |
-          set -o pipefail
-          /tmp/sweep_accuracy --baseline validation/sweep/sweep_baseline.csv --quiet 2>&1 | tee /tmp/gate.log
-          rc=${PIPESTATUS[0]}
-          # Belt and braces: the tool only WARNS on a fingerprint mismatch and
-          # still exits on the digit diff.  The step above should have caught
-          # it, but if it somehow did not, refuse to report the diff as truth.
-          if grep -q "oracle fingerprint mismatch" /tmp/gate.log; then
-            echo "::error::sweep_accuracy reported a fingerprint mismatch; the diff is not trustworthy."
-            exit 1
+          set -euo pipefail
+          g++-13 -std=c++17 -fext-numeric-literals -O2 -Iinclude \
+                 scripts/sweep_accuracy.cpp -lquadmath -o /tmp/sweep_head
+          echo "HEAD    $(git rev-parse --short HEAD)"
+          /tmp/sweep_head --baseline /tmp/parent_baseline.csv
+      # Informational only. A mismatch here is expected on any runner whose
+      # libquadmath differs from the toolchain of record, and says nothing about
+      # this commit. Never gate on it; never re-baseline from CI.
+      - name: Report against the committed baseline (non-gating)
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          base_fp=$(sed -n 's/^# oracle-fingerprint: //p' validation/sweep/sweep_baseline.csv | head -1)
+          echo "committed baseline fingerprint : ${base_fp}"
+          if [ -x /tmp/sweep_head ]; then
+            /tmp/sweep_head --baseline validation/sweep/sweep_baseline.csv || true
           fi
-          exit "${rc}"
+          echo "(informational: a differing oracle makes this diff meaningless)"
 
   # ==========================================================================
   # 4. Full build + ctest.  The expensive lane; Kokkos dominates the wall time,
@@ -404,6 +398,9 @@ jobs:
           cat /tmp/tu.cu
 
       - name: nvcc -c (compile only, sm_80)
+        # Container jobs default to `sh -e {0}`; `time` is a bash keyword and
+        # dash does not have it (first CI run: "time: not found", exit 127).
+        shell: bash
         run: |
           time nvcc -std=c++17 -c -arch=sm_80 -Iinclude /tmp/tu.cu -o /tmp/tu.o
 
