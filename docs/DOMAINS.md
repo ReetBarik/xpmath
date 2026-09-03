@@ -426,10 +426,10 @@ for each cell that has any:
 | `cos` | QF | 29.00 | 26.04 | 1 .. 2 | 76% | below 1: 13.77; above 2: 13.77 | 47 | OVERFLOW (**13 unexplained**) |
 | `cos` | TF | 21.70 | 20.30 | 1 .. 2 | 87% | above 1e+04: 0.00 | 42 | OVERFLOW |
 | `cos` | FF | 14.00 | 12.71 | 1e-28 .. 1 | 92% | below 1e-29: 0.00; above 1: 0.00 | 120 | OVERFLOW (**32 unexplained**) |
-| `tan` | DD | 31.00 | 27.16 | 0.5 .. 1 | 68% | above 1e+04: 0.00 | 60 | UNEXPLAINED (**32 unexplained**) |
-| `tan` | QF | 29.00 | 24.87 | 1 .. 2 | 66% | below 1: 13.84; above 2: 13.68 | 104 | UNEXPLAINED (**72 unexplained**) |
-| `tan` | TF | 21.70 | 19.36 | 1e-27 .. 0.1 | 77% | above 10: 10.19 | 92 | UNEXPLAINED (**48 unexplained**) |
-| `tan` | FF | 14.00 | 12.21 | 1e-28 .. 1 | 84% | below 1e-29: 0.00; above 1: 0.00 | 229 | UNEXPLAINED (**175 unexplained**) |
+| `tan` | DD | 31.00 | 28.53 | 0.5 .. 1 | 78% | above 1e+04: 0.00 | 12 | UNEXPLAINED (**12 unexplained**) |
+| `tan` | QF | 29.00 | 25.88 | 1 .. 2 | 72% | below 1: 13.84; above 10: 13.31 | 56 | UNEXPLAINED (**52 unexplained**) |
+| `tan` | TF | 21.70 | 20.35 | 1e-27 .. 0.1 | 85% | above 10: 10.52 | 48 | UNEXPLAINED (**32 unexplained**) |
+| `tan` | FF | 14.00 | 13.10 | 1e-28 .. 1 | 93% | below 1e-29: 0.00; above 1: 0.00 | 72 | UNEXPLAINED (**44 unexplained**) |
 | `sinh` | DD | 31.00 | 27.21 | 0.001 .. 0.9 | 79% | above 1000: 0.00 | 112 | OVERFLOW |
 | `sinh` | QF | 29.00 | 23.43 | 1 .. 2 | 70% | below 1: 13.80; above 2: 13.77 | 233 | OVERFLOW (**18 unexplained**) |
 | `sinh` | TF | 21.70 | 18.27 | 1e-27 .. 0.1 | 80% | above 100: 0.00 | 215 | OVERFLOW |
@@ -438,20 +438,20 @@ for each cell that has any:
 | `cosh` | QF | 29.00 | 23.48 | 1 .. 2 | 70% | below 1: 13.77; above 2: 13.77 | 232 | OVERFLOW (**17 unexplained**) |
 | `cosh` | TF | 21.70 | 18.31 | 1 .. 2 | 80% | above 100: 0.00 | 215 | OVERFLOW |
 | `cosh` | FF | 14.00 | 11.56 | 1e-28 .. 0.1 | 84% | below 1e-29: 0.00; above 0.5: 0.00 | 280 | OVERFLOW (**36 unexplained**) |
-| `tanh` | DD | 31.00 | 27.87 | 0 .. 2.236 | 84% | above 100: 0.00 | 136 | UNEXPLAINED (**136 unexplained**) |
-| `tanh` | QF | 29.00 | 24.12 | 1 .. 2 | 68% | below 1: 13.84; above 2: 13.68 | 178 | UNEXPLAINED (**178 unexplained**) |
-| `tanh` | TF | 21.70 | 18.66 | 1e-27 .. 0.1 | 77% | above 10: 10.19 | 152 | UNEXPLAINED (**152 unexplained**) |
-| `tanh` | FF | 14.00 | 11.98 | 1e-28 .. 0.1 | 82% | below 1e-29: 0.00; above 0.5: 0.00 | 172 | UNEXPLAINED (**172 unexplained**) |
+| `tanh` | DD | 31.00 | 30.43 | 0 .. 1000 | 99% | above 1e+04: 0.00 | 12 | UNEXPLAINED (**12 unexplained**) |
+| `tanh` | QF | 29.00 | 24.33 | 1 .. 2 | 72% | below 1: 13.84; above 10: 13.31 | 178 | UNEXPLAINED (**178 unexplained**) |
+| `tanh` | TF | 21.70 | 19.09 | 1e-27 .. 0.1 | 82% | above 10: 10.52 | 156 | UNEXPLAINED (**156 unexplained**) |
+| `tanh` | FF | 14.00 | 12.42 | 1e-28 .. 0.1 | 89% | below 1e-29: 0.00; above 0.5: 0.00 | 172 | UNEXPLAINED (**172 unexplained**) |
 
 **Where the failures sit.** The grid family carrying the most failures
 for each cell that has any:
 
 - `sin` — DD 60 pts (polar shells); QF 46 pts (polar shells); TF 42 pts (polar shells); FF 120 pts (polar shells)
 - `cos` — DD 60 pts (polar shells); QF 47 pts (polar shells); TF 42 pts (polar shells); FF 120 pts (polar shells)
-- `tan` — DD 60 pts (polar shells); QF 104 pts (polar shells); TF 92 pts (polar shells); FF 229 pts (perpendicular approach to the imaginary axis)
+- `tan` — DD 12 pts (polar shells); QF 56 pts (perpendicular approach to the imaginary axis); TF 48 pts (perpendicular approach to the imaginary axis); FF 72 pts (the real axis on a geometric ladder)
 - `sinh` — DD 112 pts (polar shells); QF 233 pts (perpendicular approach to the real axis); TF 215 pts (perpendicular approach to the real axis); FF 280 pts (perpendicular approach to the real axis)
 - `cosh` — DD 112 pts (polar shells); QF 232 pts (perpendicular approach to the real axis); TF 215 pts (perpendicular approach to the real axis); FF 280 pts (perpendicular approach to the real axis)
-- `tanh` — DD 136 pts (perpendicular approach to the real axis); QF 178 pts (perpendicular approach to the real axis); TF 152 pts (perpendicular approach to the real axis); FF 172 pts (perpendicular approach to the real axis)
+- `tanh` — DD 12 pts (polar shells); QF 178 pts (perpendicular approach to the real axis); TF 156 pts (perpendicular approach to the real axis); FF 172 pts (perpendicular approach to the real axis)
 
 ---
 
@@ -467,10 +467,10 @@ for each cell that has any:
 | `acos` | QF | 29.00 | 25.31 | 1 .. 2 | 69% | below 1: 0.00; above 2: 14.12 | 112 | UNEXPLAINED (**90 unexplained**) |
 | `acos` | TF | 21.70 | 18.61 | 1.005 .. 2 | 67% | below 1: 0.00; above 1e+07: 10.18 | 131 | UNEXPLAINED (**115 unexplained**) |
 | `acos` | FF | 14.00 | 11.32 | 2 .. 2.236 | 59% | below 2: 0.00; above 10: 0.00 | 177 | UNEXPLAINED (**157 unexplained**) |
-| `atan` | DD | 31.00 | 25.19 | 0 .. 1e-17 | 60% | above 1e-08: 8.13 | 256 | UNEXPLAINED (**250 unexplained**) |
-| `atan` | QF | 29.00 | 22.33 | 0.99 .. 1 | 53% | below 0.99: 13.73; above 1: 14.48 | 330 | UNEXPLAINED (**314 unexplained**) |
-| `atan` | TF | 21.70 | 15.83 | 0.99 .. 1 | 52% | below 0.99: 7.26; above 1: 10.81 | 365 | UNEXPLAINED (**357 unexplained**) |
-| `atan` | FF | 14.00 | 9.51 | 0.99 .. 1 | 52% | below 0.99: 0.00; above 1: 0.00 | 454 | UNEXPLAINED (**448 unexplained**) |
+| `atan` | DD | 31.00 | 30.84 | 0 .. 1e+15 | 100% | -- | 0 | -- |
+| `atan` | QF | 29.00 | 27.61 | 1 .. 2 | 88% | below 1e-30: 13.95; above 10: 13.51 | 20 | UNEXPLAINED (**20 unexplained**) |
+| `atan` | TF | 21.70 | 21.21 | 1e-28 .. 0.1 | 94% | -- | 0 | -- |
+| `atan` | FF | 14.00 | 13.80 | 0.99 .. 2.236 | 96% | below 1e-30: 0.00 | 4 | UNEXPLAINED (**4 unexplained**) |
 | `asinh` | DD | 31.00 | 29.34 | 10 .. 1e+15 | 86% | below 10: 0.00 | 10 | UNEXPLAINED (**8 unexplained**) |
 | `asinh` | QF | 29.00 | 25.86 | 100 .. 1e+15 | 70% | below 100: 14.49 | 58 | UNEXPLAINED (**47 unexplained**) |
 | `asinh` | TF | 21.70 | 19.75 | 100 .. 1e+15 | 76% | below 10: 0.00 | 22 | UNEXPLAINED (**16 unexplained**) |
@@ -479,20 +479,20 @@ for each cell that has any:
 | `acosh` | QF | 29.00 | 23.50 | 2 .. 2.236 | 67% | below 2: 0.00; above 10: 0.00 | 247 | CONDITIONING (**107 unexplained**) |
 | `acosh` | TF | 21.70 | 17.38 | 2 .. 2.236 | 68% | below 2: 0.00; above 10: 0.00 | 251 | CONDITIONING (**122 unexplained**) |
 | `acosh` | FF | 14.00 | 10.77 | 2 .. 2.236 | 68% | below 2: 0.00; above 10: 0.00 | 311 | UNEXPLAINED (**182 unexplained**) |
-| `atanh` | DD | 31.00 | 27.35 | 0 .. 0.1 | 76% | above 1: 0.00 | 135 | UNEXPLAINED (**126 unexplained**) |
-| `atanh` | QF | 29.00 | 23.84 | 1e-28 .. 1e-08 | 65% | below 1e-30: 13.95; above 0.5: 13.10 | 237 | UNEXPLAINED (**193 unexplained**) |
-| `atanh` | TF | 21.70 | 17.42 | 1e-28 .. 0.1 | 60% | above 0.5: 7.36 | 245 | UNEXPLAINED (**210 unexplained**) |
-| `atanh` | FF | 14.00 | 10.76 | 1e-29 .. 0.1 | 60% | below 1e-30: 0.00; above 0.5: 0.00 | 305 | UNEXPLAINED (**267 unexplained**) |
+| `atanh` | DD | 31.00 | 30.82 | 0 .. 1e+15 | 100% | -- | 0 | -- |
+| `atanh` | QF | 29.00 | 27.65 | 10 .. 1e+04 | 90% | below 10: 13.51 | 26 | CONDITIONING (**10 unexplained**) |
+| `atanh` | TF | 21.70 | 21.11 | 10 .. 1e+15 | 95% | below 1: 0.00 | 16 | CONDITIONING |
+| `atanh` | FF | 14.00 | 13.59 | 1 .. 2.236 | 94% | below 1: 0.00 | 22 | CONDITIONING (**6 unexplained**) |
 
 **Where the failures sit.** The grid family carrying the most failures
 for each cell that has any:
 
 - `asin` — DD 77 pts (perpendicular approach to the real axis); QF 128 pts (perpendicular approach to the real axis); TF 132 pts (perpendicular approach to the real axis); FF 195 pts (perpendicular approach to the real axis)
 - `acos` — DD 77 pts (perpendicular approach to the real axis); QF 112 pts (perpendicular approach to the real axis); TF 131 pts (perpendicular approach to the real axis); FF 177 pts (perpendicular approach to the real axis)
-- `atan` — DD 256 pts (perpendicular approach to the real axis); QF 330 pts (perpendicular approach to the real axis); TF 365 pts (perpendicular approach to the real axis); FF 454 pts (perpendicular approach to the real axis)
+- `atan` — QF 20 pts (perpendicular approach to the real axis); FF 4 pts (the real axis on a geometric ladder)
 - `asinh` — DD 10 pts (polar shells); QF 58 pts (perpendicular approach to the real axis); TF 22 pts (polar shells); FF 72 pts (perpendicular approach to the real axis)
 - `acosh` — DD 223 pts (the real axis on a geometric ladder); QF 247 pts (the real axis on a geometric ladder); TF 251 pts (the real axis on a geometric ladder); FF 311 pts (perpendicular approach to the real axis)
-- `atanh` — DD 135 pts (perpendicular approach to the imaginary axis); QF 237 pts (perpendicular approach to the imaginary axis); TF 245 pts (perpendicular approach to the imaginary axis); FF 305 pts (perpendicular approach to the imaginary axis)
+- `atanh` — QF 26 pts (the real axis on a geometric ladder); TF 16 pts (the real axis on a geometric ladder); FF 22 pts (the real axis on a geometric ladder)
 
 ---
 
@@ -501,11 +501,11 @@ for each cell that has any:
 | classification | points below 50% of cap |
 |---|---:|
 | UNDERFLOW | 4159 |
-| OVERFLOW | 11633 |
+| OVERFLOW | 11461 |
 | ARG_RANGE | 342 |
-| CONDITIONING | 10349 |
-| UNEXPLAINED | 6953 |
-| **total triaged** | **33436** |
+| CONDITIONING | 10295 |
+| UNEXPLAINED | 4521 |
+| **total triaged** | **30778** |
 
 Out of 428,592 scored points.
 

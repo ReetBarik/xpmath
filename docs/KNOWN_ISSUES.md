@@ -2307,9 +2307,8 @@ not "fixed" here).
 
 ## KI-11 — The complex inverse family loses most of its digits when one component is far smaller than the other
 
-**Severity: medium, all backends, 4,759 points. PARTIALLY RESOLVED by the fix
-commit `fix: KI-18 complex tan/tanh asymptotic branch; KI-11 complex inverse
-conditioning` — `atan`/`atanh` fixed and measured; `asin`/`acos`/`asinh`/`acosh`/
+**Severity: medium, all backends, 4,759 points. PARTIALLY RESOLVED by commit
+`855292d` — `atan`/`atanh` fixed and measured; `asin`/`acos`/`asinh`/`acosh`/
 `sqrt` NOT fixed and NOT inherent (see "What is left", below).**
 
 ### What
@@ -2855,9 +2854,7 @@ line.
 
 ## KI-18 — Complex `tan`/`tanh` and complex `atan`/`atanh` have no asymptotic branch, so they NaN where the true result is bounded
 
-**Severity: medium, all backends, 172 + 96 points. RESOLVED by the fix commit
-`fix: KI-18 complex tan/tanh asymptotic branch; KI-11 complex inverse
-conditioning` (SHA substituted by the follow-up re-baseline session).**
+**Severity: medium, all backends, 172 + 96 points. RESOLVED by commit `855292d`.**
 
 ### What
 
