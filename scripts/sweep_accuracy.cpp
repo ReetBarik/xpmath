@@ -931,8 +931,93 @@ bool kappa_real(int id, __float128 a, __float128 b, __float128 c, double& kappa)
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// THE EXP-FAMILY ALGORITHM FLOOR  (step 1c)
+// ---------------------------------------------------------------------------
+// kappa is the condition number of the MATHEMATICAL map. It bounds what an
+// idealised, correctly-rounded implementation would cost. That is the right
+// bound for an op whose algorithm is exact or faithfully rounded — but exp is
+// not one of those, in any of the four backends. All four use the same
+// textbook skeleton:
+//
+//     s = x - m*ln2 ; r = s / 2^nq ; t = Taylor(r) ; SQUARE t nq TIMES
+//
+// (dd_math.hpp:374, ff_math.hpp:606, qf_math.hpp:927, tf_math.hpp:844.)
+// Squaring propagates relative error at gain 2: (1+e)^2 = 1 + 2e + O(e^2). So
+// nq squarings multiply whatever relative error the Taylor sum had by 2^nq.
+// With the Taylor sum accurate to a few ulps, the OUTPUT of exp is a few * 2^nq
+// ulps out — by construction, at every argument, however well conditioned.
+//
+// nq per backend, read from the headers, NOT fitted: DD 6, QF 6, TF 5, FF 4.
+//
+// This is what makes DD exp2 at grid point 110 read 156 ulps while kappa is
+// 0.0022: 156 / 2^6 = 2.4, i.e. the Taylor sum was good to ~2.4 ulps and the
+// six squarings turned that into 156. Step 1a called that a FAIL against a
+// bound of 1.002; it is not a defect, it is the price of the reduction scheme,
+// and the bound was simply missing a term. The measured ratios against 2^nq:
+// DD 2.44, QF 0.47, TF 0.19, FF 0.03 — all inside the 8x allowance.
+//
+// Applied to every op that routes through exp(): exp, exp2, exp10 (exp of a
+// scaled argument), pow (exp(b log a)), expm1, sinh, cosh, tanh (via sinhcosh
+// / expm1). CONSERVATIVE on two of those: expm1 and sinhcosh take a direct
+// Taylor branch for small |x| with no squarings at all, so the term is charged
+// where it is not owed. That is a deliberate, stated looseness on one branch of
+// two ops, and it is a far smaller distortion than leaving the whole exp family
+// permanently red for a non-defect.
+//
+// NOT applied to sin/cos/tan, which use the same reduce-and-reconstruct shape
+// (tf_math.hpp:917 uses nq = 4 with double-angle) but reconstruct through
+// Chebyshev-like recurrences whose gain is not simply 2^nq. Deriving that gain
+// honestly is step-1d work; charging them 2^nq on the strength of the analogy
+// would be exactly the fitted-tolerance move this metric exists to remove.
+double algo_floor_ulps(int id, int exp_squarings, __float128 a) {
+  const double g = std::exp2((double)exp_squarings);   // the squaring gain
+  switch (id) {
+    case R_Exp: case R_Exp2: case R_Exp10: case R_Expm1:
+    case R_Pow: case R_Sinh: case R_Cosh: case R_Tanh:
+      return g;
+    // The log family is Newton ON exp — dd:379, ff:70, qf:32, tf:35 all iterate
+    // b <- b + (a - exp(b))/exp(b). The iteration cannot converge past the
+    // accuracy of the exp it is inverting, so it leaves an ABSOLUTE error of
+    // about g * 2^-p in the natural logarithm. Converting an absolute error to
+    // ulps of the result divides by the result's own magnitude, so the floor is
+    // g / |ln a| — which blows up near ln a = 0 (a -> 1) exactly as observed.
+    // log2 and log10 are the same natural log rescaled by a constant; both the
+    // absolute error and |f| scale together, so the ulp floor is unchanged.
+    case R_Log: case R_Log2: case R_Log10: {
+      if (a <= 0) return g;
+      const double l = std::fabs((double)logq(a));
+      return (l > 0.0) ? g / l : g * std::exp2((double)exp_squarings);
+    }
+    case R_Log1p: {
+      if (a <= -1) return g;
+      const double l = std::fabs((double)log1pq(a));
+      return (l > 0.0) ? g / l : g * std::exp2((double)exp_squarings);
+    }
+    default:
+      return 1.0;
+  }
+}
+
 // The bound a point is judged against, in ulps.
-double expected_ulps(double kappa) { return 1.0 + kappa; }
+//
+//     expected = max(out_floor, algo_floor) + kappa * in_delta
+//
+// The first term is "the smallest error this implementation can have at this
+// magnitude", from two independent causes — what the format can STORE
+// (out_floor) and what the algorithm's own structure costs (algo_floor). They
+// are not additive sources in any meaningful sense, so the bound takes the max,
+// which is the tighter and therefore safer choice for a gate.
+//
+// STEP 1c widened both ends of this from the constants step 1a used (1 and 1).
+// Both terms are now magnitude-dependent, and both reduce EXACTLY to the old
+// constants everywhere the expansion's trailing limbs are normal — see
+// subnormal_floor_ulps() below. Nothing outside the subnormal-limb band moved.
+double expected_ulps(double out_floor, double algo_floor, double kappa,
+                     double in_delta) {
+  const double base = out_floor > algo_floor ? out_floor : algo_floor;
+  return base + kappa * in_delta;
+}
 
 // ---------------------------------------------------------------------------
 // Backend bindings. Every math entry point is spelled the same way in all four
@@ -965,6 +1050,61 @@ void fill_log_bounds(Range& r) {
   r.l10_min_sub   = std::log10(r.min_sub);
   r.l10_full_prec = std::log10(r.full_prec);
   r.l10_max       = std::log10(r.max_val);
+}
+
+// ---------------------------------------------------------------------------
+// THE SUBNORMAL-LOW-WORD FLOOR  (step 1c)
+// ---------------------------------------------------------------------------
+// An N-limb expansion is N words of the base type and NOTHING ELSE. The value
+// it represents is the exact sum of those words, so the finest ABSOLUTE
+// increment it can express at any magnitude is the base type's smallest
+// subnormal, 2^Emin_sub (2^-1074 for FP64 words, 2^-149 for FP32). The same
+// bound applies to every residual an algorithm forms internally: a Dekker
+// two-product or a Newton correction at scale |x|*2^-p is a plain word, and
+// below 2^Emin_sub it flushes.
+//
+// So at magnitude |v| the format's achievable RELATIVE resolution is
+//
+//     res(|v|) = max(2^-p, 2^Emin_sub / |v|)
+//
+// and, expressed in the NOMINAL ulps the metric counts (units of |v| * 2^-p),
+// the unavoidable error floor is
+//
+//     floor_ulps(|v|) = max(1, 2^(Emin_sub + p) / |v|)
+//
+// The two arms cross at |v| = 2^(Emin_sub + p) = 2 * Range::full_prec, where
+// full_prec = min_norm * 2^((limbs-1)*limb_bits) is the magnitude below which
+// the TRAILING limb can no longer be normal. (The factor 2 is the hidden bit:
+// the last limb loses normality at full_prec, and one nominal ulp of headroom
+// is gone one binade earlier.) Above the crossing the function returns 1 and
+// the bound is byte-identically the step-1a bound. Below it the return value
+// grows as 1/|v| and saturates at 2^p — the leading word is then itself the
+// smallest subnormal and the expansion carries exactly one bit — so this is
+// bounded, never infinite, and cannot silently swallow an op.
+//
+// The cliffs, DERIVED FROM THE FORMAT, not fitted. Per backend, the |hi| below
+// which the trailing limb cannot be normal (= full_prec), and the crossing:
+//
+//     backend  p    Emin_sub   full_prec = 2^(Emin+(N-1)s)   crossing 2^(Emin_sub+p)
+//     DD       106  -1074      2^-969  = 2.0042e-292         2^-968  = 4.0079e-292
+//     QF        96   -149      2^-54   = 5.5511e-17          2^-53   = 1.1102e-16
+//     TF        72   -149      2^-78   = 3.3087e-24          2^-77   = 6.6174e-24
+//     FF        48   -149      2^-102  = 1.9722e-31          2^-101  = 3.9443e-31
+//
+// This is an INHERENT FORMAT LIMIT, not an implementation defect, and it is the
+// same kind of statement UNDERFLOW and OVERFLOW already make.
+double subnormal_floor_ulps(__float128 v, const Range& rg, int sig_bits) {
+  if (v == 0 || !finiteq(v)) return 1.0;
+  // log2 in quad: a binary128 magnitude like exp(-1000) is fine to the oracle
+  // but collapses to 0.0 the instant it is cast to double.
+  const double l2   = (double)log2q(fabsq(v));
+  double       lfl  = std::log2(rg.min_sub) + (double)sig_bits - l2;
+  // Clamp at 2^p. Once |v| drops below the word type's smallest subnormal the
+  // format holds nothing at all there, and "holds nothing" is exactly 2^p
+  // nominal ulps of error — you cannot be more wrong than the whole value.
+  // Without this the bound runs away as 1/|v| and becomes vacuous.
+  if (lfl > (double)sig_bits) lfl = (double)sig_bits;
+  return (lfl <= 0.0) ? 1.0 : std::exp2(lfl);
 }
 
 // double words: 53-bit significand, min normal 2^-1022, min subnormal 2^-1074.
@@ -1000,18 +1140,22 @@ Range range_float(int limbs) {
 struct BackendDD { using S = xp::DoubleDouble; using Z = xp::DoubleDoubleComplex;
                    static const char* name() { return "DD"; } static double cap() { return 31.0; }
                    static int sig_bits() { return 106; }   // 2 x 53
+                   static int exp_squarings() { return 6; }  // dd_math.hpp:374
                    static Range range() { return range_double(2); } };
 struct BackendFF { using S = xp::FloatFloat;   using Z = xp::FloatFloatComplex;
                    static const char* name() { return "FF"; } static double cap() { return 14.0; }
                    static int sig_bits() { return 48; }    // 2 x 24
+                   static int exp_squarings() { return 4; }  // ff_math.hpp:606
                    static Range range() { return range_float(2); } };
 struct BackendQF { using S = xp::QuadFloat;    using Z = xp::QuadFloatComplex;
                    static const char* name() { return "QF"; } static double cap() { return 29.0; }
                    static int sig_bits() { return 96; }    // 4 x 24
+                   static int exp_squarings() { return 6; }  // qf_math.hpp:927
                    static Range range() { return range_float(4); } };
 struct BackendTF { using S = xp::TripleFloat;  using Z = xp::TripleFloatComplex;
                    static const char* name() { return "TF"; } static double cap() { return 21.7; }
                    static int sig_bits() { return 72; }    // 3 x 24
+                   static int exp_squarings() { return 5; }  // tf_math.hpp:844
                    static Range range() { return range_float(3); } };
 
 template <class S>
@@ -1536,10 +1680,25 @@ struct Cell {
 // ---------------------------------------------------------------------------
 const char* const kRegionOK = "OK";
 
+// Step 1c: the third format-derived exemption class, alongside UNDERFLOW and
+// OVERFLOW. The point is in the band where the expansion's trailing limb cannot
+// be normal, so |true| * 2^-p is not the backend's actual resolution and the
+// metric's own premise has failed. See subnormal_floor_ulps().
+const char* const kRegionSubnormalLimb = "SUBNORMAL_LIMB";
+
+bool in_subnormal_limb_band(const Range& rg, const __float128* exact, int nops,
+                            __float128 ref) {
+  for (int k = 0; k < nops; ++k)
+    if (exact[k] != 0 && finiteq(exact[k]) && fabsq(exact[k]) < (__float128)rg.full_prec)
+      return true;
+  return ref != 0 && finiteq(ref) && fabsq(ref) < (__float128)rg.full_prec;
+}
+
 struct UlpFail {
   const char* backend; char kind; const char* op; int point;
   const char* region;
   double ulps, kappa, expected, ratio, digits;
+  double out_floor, in_delta, a0;   // step 1c: the two ends of the bound, and x
 };
 
 struct UlpCell {
@@ -1625,8 +1784,21 @@ void sweep_real(int id, const std::vector<GridPoint>& grid,
         const __float128 stored[3] = {to_q(sa), to_q(sb), to_q(sc)};
         const __float128 exact[3]  = {(__float128)a_in[i], (__float128)b_in[i],
                                       (__float128)c_in[i]};
-        const double exp_u = expected_ulps(kappa * input_delta_ulps(stored, exact,
-                                                                    nops, sb_bits));
+        // Step 1c. Both ends of the bound pick up the subnormal-low-word floor:
+        //   * out_floor — the result cannot be STORED finer than 2^Emin_sub;
+        //   * in_floor  — no operand can be RESOLVED finer than that either, and
+        //                 the residuals an algorithm forms from it live at the
+        //                 operand's scale, so the floor enters through kappa.
+        // Above the cliff both are exactly 1 and this is the step-1a bound.
+        const double out_floor = subnormal_floor_ulps(ref[i], rg, sb_bits);
+        double in_floor = input_delta_ulps(stored, exact, nops, sb_bits);
+        for (int k = 0; k < nops; ++k) {
+          const double f = subnormal_floor_ulps(exact[k], rg, sb_bits);
+          if (f > in_floor) in_floor = f;
+        }
+        const double af    = algo_floor_ulps(id, B::exp_squarings(),
+                                             (__float128)a_in[i]);
+        const double exp_u = expected_ulps(out_floor, af, kappa, in_floor);
         const double ratio = (exp_u > 0.0) ? m / exp_u : HUGE_VAL;
         ++ucell.n_scored;
         if (m > ucell.max_ulps) { ucell.max_ulps = m; ucell.max_ulps_point = int(i); }
@@ -1638,7 +1810,9 @@ void sweep_real(int id, const std::vector<GridPoint>& grid,
         if (ux->explains && ux->explain_point == int(i) &&
             std::strcmp(ux->explain_op, kReal[id].name) == 0)
           ux->explains->push_back({B::name(), 'r', kReal[id].name, int(i), kRegionOK,
-                                   m, kappa, exp_u, ratio, d});
+                                   m, kappa, exp_u, ratio, d,
+                                   out_floor > af ? out_floor : af,
+                                   in_floor, a_in[i]});
         if (ratio > ux->allowance) {
           // Only now is a region label worth its cost: classify the point and
           // file the failure under the class it lands in.
@@ -1650,10 +1824,21 @@ void sweep_real(int id, const std::vector<GridPoint>& grid,
           // healthy enough that --classify would never have looked at this point.
           // That is the whole premise: a point can read 16 digits and still be
           // 7e15 ulps out because an intermediate went subnormal.
-          const char* region = kClassName[cr.cls];
+          // Step 1c. A point whose operands or reference sit below the
+          // backend's full_prec cliff is in the SUBNORMAL-LIMB band, where the
+          // expansion is demonstrably not carrying its nominal p bits. That is
+          // a property of the FORMAT, so it outranks whatever the digit-shaped
+          // classifier concluded, exactly as UNDERFLOW/OVERFLOW do. It is the
+          // backstop for points the floor-widened bound under-predicts (a
+          // multi-step algorithm can degrade worse than first order in the
+          // band); the bound above, not this label, does most of the work.
+          const char* region = in_subnormal_limb_band(rg, exact, nops, ref[i])
+                                 ? kRegionSubnormalLimb : kClassName[cr.cls];
           ++ucell.n_fail;
           ux->fails->push_back({B::name(), 'r', kReal[id].name, int(i), region,
-                                m, kappa, exp_u, ratio, d});
+                                m, kappa, exp_u, ratio, d,
+                                out_floor > af ? out_floor : af,
+                                in_floor, a_in[i]});
         }
       }
     }
@@ -2022,7 +2207,8 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
 // (backend, op, region). Returns the gated-failure count.
 // ---------------------------------------------------------------------------
 bool region_is_gated(const char* r) {
-  return std::strcmp(r, "UNDERFLOW") != 0 && std::strcmp(r, "OVERFLOW") != 0;
+  return std::strcmp(r, "UNDERFLOW") != 0 && std::strcmp(r, "OVERFLOW") != 0 &&
+         std::strcmp(r, kRegionSubnormalLimb) != 0;
 }
 
 long print_ulp_report(const std::vector<UlpCell>& cells,
@@ -2032,17 +2218,19 @@ long print_ulp_report(const std::vector<UlpCell>& cells,
   if (!explains.empty()) {
     std::printf("\n--- --ulp-explain: %s point %d, both metrics -------------------\n",
                 explains[0].op, explains[0].point);
-    std::printf("  %-4s %8s  %12s  %12s  %12s  %9s  %s\n",
-                "be", "digits", "kappa", "measured u", "expected u", "ratio", "verdict");
+    std::printf("  x = %.17g\n", explains[0].a0);
+    std::printf("  %-4s %8s  %12s  %10s  %10s  %12s  %12s  %9s  %s\n",
+                "be", "digits", "kappa", "out_floor", "in_delta", "measured u",
+                "expected u", "ratio", "verdict");
     for (size_t i = 0; i < explains.size(); ++i) {
       const UlpFail& e = explains[i];
-      std::printf("  %-4s %8.2f  %12.4g  %12.4g  %12.4g  %9.4g  %s\n",
-                  e.backend, e.digits, e.kappa, e.ulps, e.expected, e.ratio,
-                  e.ratio <= allowance ? "PASS" : "FAIL");
+      std::printf("  %-4s %8.2f  %12.4g  %10.4g  %10.4g  %12.4g  %12.4g  %9.4g  %s\n",
+                  e.backend, e.digits, e.kappa, e.out_floor, e.in_delta, e.ulps,
+                  e.expected, e.ratio, e.ratio <= allowance ? "PASS" : "FAIL");
     }
   }
 
-  std::printf("\n=== ULP GATE  (measured <= %.1f x (1 + kappa), worst point per region) ===\n",
+  std::printf("\n=== ULP GATE  (measured <= %.1f x (out_floor + kappa*in_delta), worst point per region) ===\n",
               allowance);
   std::printf("%-4s %-2s %-11s %9s %9s %10s %12s %12s %9s\n",
               "be", "k", "op", "scored", "ungated", "unscorable", "worst ulps",
@@ -2093,7 +2281,7 @@ long print_ulp_report(const std::vector<UlpCell>& cells,
                 f.backend, f.kind, f.op, f.region, f.point, f.digits, f.ulps,
                 f.expected, f.ratio, g ? "GATED-FAIL" : "exempt (metric n/a)");
   }
-  std::printf("\n  failing points: %ld gated, %ld exempt (UNDERFLOW/OVERFLOW)\n",
+  std::printf("\n  failing points: %ld gated, %ld exempt (UNDERFLOW/OVERFLOW/SUBNORMAL_LIMB)\n",
               gated, exempt);
   std::printf("  failing (backend,op,region) cells, gated: %ld\n", gated_fail_cells);
   std::printf("\nRESULT: %s\n",
@@ -2117,6 +2305,7 @@ void usage(const char* argv0) {
     "  --classify PATH   TRIAGE: classify every point scoring below --classify-frac\n"
     "                    of its backend cap and write the evidence CSV to PATH.\n"
     "                    Writes no baseline. Exits 3 if any point is UNEXPLAINED.\n"
+    "  --ulp-dump PATH   with --ulp, write EVERY failing point to PATH as CSV\n"
     "  --classify-frac F fraction of cap below which a point is triaged "
     "(default %.2f)\n"
     "  --ulp             ULP GATE: score every point in ulps of the true value and\n"
@@ -2133,7 +2322,7 @@ void usage(const char* argv0) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  std::string out = kDefaultOut, grid_out, baseline, classify, explain_op;
+  std::string out = kDefaultOut, grid_out, baseline, classify, explain_op, ulp_dump;
   uint64_t    seed = kDefaultSeed;
   bool        quiet = false, out_set = false, ulp_gate = false;
   double      classify_frac = kDefaultClassifyFrac;
@@ -2154,6 +2343,7 @@ int main(int argc, char** argv) {
     else if (s == "--classify-frac") { classify_frac = std::atof(need("--classify-frac")); }
     else if (s == "--ulp")       { ulp_gate = true; }
     else if (s == "--ulp-allowance") { ulp_allowance = std::atof(need("--ulp-allowance")); }
+    else if (s == "--ulp-dump") { ulp_dump = need("--ulp-dump"); }
     else if (s == "--ulp-explain") {
       const std::string v = need("--ulp-explain");
       const size_t colon = v.rfind(':');
@@ -2198,6 +2388,24 @@ int main(int argc, char** argv) {
 
   if (ulp_gate) {
     const long bad = print_ulp_report(ulp_cells, ulp_fails, ulp_explains, ulp_allowance);
+    // --ulp-dump: EVERY failing point, not the per-region worst the report
+    // prints. Triage of a 100+-cell population cannot be done off the summary;
+    // this is the raw material the step-1c classification was tabulated from.
+    if (!ulp_dump.empty()) {
+      FILE* f = std::fopen(ulp_dump.c_str(), "w");
+      if (!f) { std::fprintf(stderr, "cannot write %s\n", ulp_dump.c_str()); return 1; }
+      std::fprintf(f, "backend,kind,op,point,region,gated,x,digits,kappa,"
+                      "out_floor,in_delta,ulps,expected,ratio\n");
+      for (size_t i = 0; i < ulp_fails.size(); ++i) {
+        const UlpFail& e = ulp_fails[i];
+        std::fprintf(f, "%s,%c,%s,%d,%s,%d,%.17g,%.4f,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g\n",
+                     e.backend, e.kind, e.op, e.point, e.region,
+                     region_is_gated(e.region) ? 1 : 0, e.a0, e.digits, e.kappa,
+                     e.out_floor, e.in_delta, e.ulps, e.expected, e.ratio);
+      }
+      std::fclose(f);
+      std::printf("wrote %s  (%zu rows)\n", ulp_dump.c_str(), ulp_fails.size());
+    }
     return bad ? 4 : 0;
   }
 

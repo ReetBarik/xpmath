@@ -1825,9 +1825,32 @@ ratcheted from `|x| < 300` / `uniform(-50,50)` to `isfinite(x)` /
 
 ---
 
-## KI-8 — `hypot` and complex `abs` have NO scaling, so they overflow and underflow far inside the representable range **[RESOLVED]**
+## KI-8 — `hypot` and complex `abs` have NO scaling, so they overflow and underflow far inside the representable range **[REOPENED 2026-09-03]**
 
 **Severity: high, FP32-word backends (FF, QF, TF); DD unaffected.**
+
+### REOPENED 2026-09-03 — the underflow half was never fixed
+
+The step-1c ULP triage (`docs/ULP_METRIC.md`, "Step 1c") re-measured this KI
+against the condition-aware ulp gate. The **overflow** half holds. The
+**underflow** half does not, on all three FP32-word backends:
+
+| backend | `hypot` worst point | measured ulps | bound | over by | digits |
+|---|---|---|---|---|---|
+| QF | x = −1e−16 | 2.62e18 | 3.6e3 | **7.26e14x** | 13.71 of 29 |
+| TF | x = −1e−16 | 6.19e12 | 90 | **6.88e10x** | 12.87 of 21.7 |
+| FF | x = −1e−16 | 1.13e5 | 19.6 | **5.76e3x** | 8.17 of 14 |
+
+QF loses 51.5 bits — two whole FP32 words. The mechanism is precisely the one
+the KI names, at the small end: `hypot` forms `x²` before it scales, and
+`x² = 1e−32` sits 51 bits below QF's subnormal-low-word cliff of 5.55e−17
+(the per-backend cliff table is in `docs/ULP_METRIC.md`). The intermediate is
+destroyed; the final result is nowhere near the band, so no format-limit
+exemption can or should cover it. Scaling by a power of two before squaring —
+which is what the KI's own fix does at the top end — would remove it.
+
+Reopened, **not fixed**: step 1c was scoped to diagnosis. The measurement above
+is the acceptance test for whoever closes it.
 
 ### What
 
@@ -2147,9 +2170,27 @@ tighten against.
 
 ---
 
-## KI-10 — `fmod` and `remainder` lose half their digits when the operands are many decades apart
+## KI-10 — `fmod` and `remainder` lose half their digits when the operands are many decades apart **[REOPENED 2026-09-03]**
 
 **Severity: medium, all backends.**
+
+### REOPENED 2026-09-03 — FF `fmod` still returns zero correct digits
+
+Re-measured under the ulp gate in step 1c. `remainder` is clean on all four
+backends and DD/QF/TF `fmod` are clean, so the iterative reduction that closed
+this KI did most of its job. **FF `fmod` did not survive it:**
+
+| backend | worst point | measured ulps | bound | digits |
+|---|---|---|---|---|
+| FF | x = 40.84 | 1.41e14 | 1.0 | **0.00 of 14** |
+
+Zero correct digits, at a well-conditioned point that is not near a subnormal
+band and carries no algorithmic floor — so none of the three exemptions in the
+new metric touch it. The brief predicted this KI would look worst under ulps;
+it does, though only on one backend of four.
+
+This is the same defect class as KI-15 (below), which shares the fix commit and
+is reopened with it. Reopened, **not fixed**.
 
 ### What
 
@@ -2653,10 +2694,21 @@ mechanism behind part of KI-15 — `fmod` calls `trunc(q)` and `remainder` calls
 
 ---
 
-## KI-15 — `fmod`/`remainder` do not merely lose digits: they return the WRONG SIGN, ZERO, or INFINITY
+## KI-15 — `fmod`/`remainder` do not merely lose digits: they return the WRONG SIGN, ZERO, or INFINITY **[REOPENED 2026-09-03]**
 
 **Severity: high, all backends, 605 hard-failure points on top of the 2,285
 soft ones already recorded as KI-10.**
+
+### REOPENED 2026-09-03 — with KI-10, same cell, same fix commit
+
+KI-10 and KI-15 were closed by one commit (`fix: KI-10/KI-15 iterative fmod and
+remainder`). The step-1c ulp re-measurement leaves FF `fmod` at 1.41e14 ulps —
+0.00 of 14 digits — at x = 40.84 (see KI-10's reopen block for the table).
+Because that is a returned value with no correct digits, it cannot be
+distinguished from this KI's wrong-value class by measurement alone, so both
+are reopened together rather than guessing which of the two the residue belongs
+to. Whoever closes them should re-run the hard-failure scan in this KI's
+original evidence section, not just the ulp gate. Reopened, **not fixed**.
 
 ### What
 
@@ -3206,3 +3258,232 @@ for a Kahan/Smith-style compensated complex multiply and division.
 mechanisms traced above, not per-point diagnoses. The cell boundaries are
 clean — no cell splits across two causes — but the ±2% "everything else" row
 has not been looked at.
+
+---
+
+## KI-22 — DD `asinh`, `atanh`, `sinh` (and TF `expm1`) collapse to the leading word at small arguments
+
+**Severity: medium. DD on three ops, TF on one. Filed 2026-09-03 by the step-1c
+ULP triage; measured, not fixed.**
+
+### What
+
+At small |x| these functions are asymptotically linear — `asinh(x) → x`,
+`atanh(x) → x`, `sinh(x) → x`, `expm1(x) → x` — so they are perfectly
+conditioned (kappa = 1) and the extended format should return essentially the
+full mantissa. Instead they return the leading word and nothing more.
+
+| backend | op | x | measured ulps | bound | over by | digits (of cap) |
+|---|---|---|---|---|---|---|
+| DD | `asinh` | 1e−15 | 9.92e15 | 2.0 | 4.96e15x | **15.91** of 31 |
+| DD | `atanh` | −3.162e−16 | 6.84e15 | 2.0 | 3.42e15x | **16.07** of 31 |
+| DD | `sinh` | −3.162e−16 | 6.23e15 | 64 | 9.73e13x | **16.11** of 31 |
+| TF | `expm1` | 1e−9 | 7.16e10 | 32 | 2.24e9x | **10.81** of 21.7 |
+
+15.91, 16.07, 16.11 of 31 digits is one FP64 word out of two. 10.81 of 21.7 is
+one FP32 word plus change out of three.
+
+### Why it is a defect and not a format or algorithm limit
+
+Three exemptions exist in the new metric and none applies:
+
+- **Not the subnormal-low-word band.** DD's cliff is 2.0042e−292; these inputs
+  are at 1e−15, 277 decades above it. The results are O(1e−15), likewise.
+- **Not conditioning.** kappa = 1 for all four. This is the *best*-conditioned
+  region these functions have.
+- **Not the exp-family squaring floor.** `sinh` and `expm1` are charged their
+  backend's full `2^nq` (64 for DD, 32 for TF) and still exceed it by 9.7e13x
+  and 2.2e9x. `asinh` and `atanh` are `log`-composed and carry no `2^nq` at all.
+
+The signature — exactly one word retained, across three different functions,
+only at small argument — is the classic cancellation of a small-|x| branch that
+is missing. `asinh(x) = log(x + sqrt(x²+1))` and `atanh(x) = ½log((1+x)/(1−x))`
+both cancel catastrophically as x → 0 and need a Taylor branch; `sinh` needs one
+below the threshold where `(e^x − e^−x)/2` cancels. DD `expm1` has such a branch
+(it is clean); TF's threshold appears set too low.
+
+### Reproducing
+
+```
+/tmp/sweep --ulp --ulp-explain asinh:0
+/tmp/sweep --ulp --ulp-explain expm1:14
+```
+
+### Closing it
+
+Add (or lower the threshold of) the small-argument Taylor branch on DD `asinh`,
+DD `atanh`, DD `sinh`, TF `expm1`. Acceptance: the four cells above drop under
+the 8x allowance without any change to the metric.
+
+---
+
+## KI-23 — QF `log`, `log2`, `log10`, `log1p` lose ~11 digits above |x| ≈ 1e29
+
+**Severity: medium, QF only. Filed 2026-09-03 by the step-1c ULP triage;
+measured, not fixed.**
+
+### What
+
+| backend | op | x | measured ulps | bound | over by | digits (of 29) |
+|---|---|---|---|---|---|---|
+| QF | `log` | 3.162e29 | 2.62e14 | 1.29e3 | 2.03e11x | **17.58** |
+| QF | `log2` | 3.162e29 | 2.62e14 | 1.29e3 | 2.03e11x | 17.58 |
+| QF | `log10` | 3.162e29 | 2.62e14 | 1.29e3 | 2.03e11x | 17.58 |
+| QF | `log1p` | 3.162e29 | 2.62e14 | 1.29e3 | 2.03e11x | 17.58 |
+
+All four are the same natural log rescaled, so one root cause. **DD, FF and TF
+are all clean at the same inputs** — this is QF-specific, which is what makes it
+a defect rather than a property of the algorithm.
+
+The bound of 1.29e3 already includes the log-family floor derived in step 1c
+(`2^nq / |ln x|` = 64 / 67.9, times the 8x allowance and the kappa term); the
+measurement exceeds it by eleven orders of magnitude, so the Newton-on-`exp`
+inheritance does not explain it.
+
+Note the interaction with **KI-19** (QF `pow` at 1e30) — same backend, same
+decade, and `pow` routes through `log`. They may share a root cause; that has
+not been established, so they are filed separately.
+
+### Reproducing
+
+```
+/tmp/sweep --ulp --ulp-explain log:59
+```
+
+### Closing it
+
+Trace QF `log`'s argument handling above 1e29 — most likely the initial estimate
+or the exponent extraction feeding Newton. Acceptance: the four cells drop under
+8x, and check whether KI-19 closes with them.
+
+---
+
+## KI-24 — FF `sinh` and `cosh` lose one full FP32 word near the `exp` range limit
+
+**Severity: low, FF only. Filed 2026-09-03 by the step-1c ULP triage;
+measured, not fixed.**
+
+### What
+
+| backend | op | x | measured ulps | bound | over by | digits (of 14) |
+|---|---|---|---|---|---|---|
+| FF | `sinh` | −87.96 | 2.94e7 | 128 | 2.30e5x | **7.07** |
+| FF | `cosh` | −87.96 | 2.94e7 | 128 | 2.30e5x | 7.07 |
+
+7.07 of 14 digits is 23.5 bits — one FP32 word of two, gone. x = −87.96 is just
+inside FP32's `exp` range limit (ln(FLT_MAX) ≈ 88.72), so `e^x` is at the very
+bottom of the normal range and `e^−x` at the very top.
+
+The bound already charges FF's full exp-family floor (2^4 = 16, times 8). The
+overshoot is 2.3e5x beyond it, so the squaring gain does not explain it.
+
+Low severity because it is confined to the last decade before the range limit,
+where a caller has already accepted that the result is near overflow. Filed
+because the loss is a clean whole word — a scaling artefact, not gradual
+degradation — and because it is FF-only: DD, QF and TF are clean at the
+corresponding point in their own ranges.
+
+### Reproducing
+
+```
+/tmp/sweep --ulp --ulp-explain sinh:0
+```
+
+---
+
+## KI-25 — QF and TF `atan` return a non-finite value at |x| ≈ 3.16e19
+
+**Severity: high (wrong value, not lost digits), QF and TF. Filed 2026-09-03 by
+the step-1c ULP triage; measured, not fixed.**
+
+### What
+
+`atan(3.162e19)` should return π/2 to full precision. It is the best-conditioned
+input the function has — kappa = 2e−20, since the derivative `1/(1+x²)` has
+annihilated any input perturbation. QF and TF instead return a **non-finite**
+value (the ulp measurement is `inf`, i.e. `got` is not finite). DD and FF are
+correct at the same input.
+
+| backend | op | x | got | expected |
+|---|---|---|---|---|
+| QF | `atan` | 3.162e19 | non-finite | 1.5707963… |
+| TF | `atan` | 3.162e19 | non-finite | 1.5707963… |
+
+### Relationship to KI-13
+
+**KI-13** records QF/TF `asinh` and `acosh` failing at the same magnitude, and
+attributes it to an unscaled `x² + 1` overflowing the FP32 word (x² at 1e39
+against FLT_MAX 3.4e38). `atan` plausibly reaches the same helper — but `atan`
+is **not** in KI-13's op list, and the shared-helper claim has not been traced.
+Filed separately rather than folded into KI-13 on the strength of an analogy; if
+tracing shows one root cause, merge them then.
+
+This is the same failure *mechanism family* as KI-8 (squaring before scaling),
+at the opposite end of the range.
+
+### Reproducing
+
+```
+/tmp/sweep --ulp --ulp-explain atan:57
+```
+
+---
+
+## KI-26 — TF `sin`/`cos`/`tan` and QF `cos`/`tan` return non-finite values at very large arguments
+
+**Severity: high (wrong value, not lost digits), QF and TF. Filed 2026-09-03 by
+the step-1c ULP triage; measured, not fixed.**
+
+### What
+
+| backend | op | x | got |
+|---|---|---|---|
+| TF | `sin` | 3.162e25 | non-finite |
+| TF | `cos` | 3.162e25 | non-finite |
+| TF | `tan` | 3.162e25 | non-finite |
+| QF | `cos` | 1e30 | non-finite |
+| QF | `tan` | 1e30 | non-finite |
+
+Losing accuracy at these arguments is expected and is **not** what is filed
+here. Argument reduction mod 2π at x = 3.16e25 needs π to roughly
+`p + log2(x)` ≈ 157 bits and TF carries 72, so the reduced argument is
+genuinely underdetermined and any *finite* answer in [−1, 1] would be within
+the (enormous) legitimate bound. Step 1c derives that bound —
+`in_delta = |x|` ulps, in `docs/ULP_METRIC.md` — and under it DD `cos(1e17)`
+passes at ratio 0.03.
+
+What is filed is that these five return **non-finite**. `sin` and `cos` are
+bounded by 1 for every finite input; returning inf or NaN is wrong under any
+error model, at any argument, and a caller cannot defend against it. The
+correct behaviour when reduction runs out of π is to return a value in range
+and, ideally, to document the accuracy loss — not to produce something outside
+the function's codomain.
+
+DD is clean at its corresponding point; FF has a separate, unrelated small
+failure at x = π that is part of the deferred trig-reconstruction group.
+
+### Reproducing
+
+```
+/tmp/sweep --ulp --ulp-explain sin:64
+/tmp/sweep --ulp --ulp-explain cos:59
+```
+
+### Closing it
+
+Clamp the reduction path so that an under-determined reduction still yields an
+in-codomain result. Acceptance: no `sin`/`cos` point on any backend returns a
+value outside [−1, 1] or non-finite. The *accuracy* at these arguments is out of
+scope for this KI and is covered by the deferred `in_delta = |x|` bound term.
+
+---
+
+## Note on resolution markers
+
+Step 1c found the `**[RESOLVED]**` heading marker applied inconsistently:
+KI-1…KI-9 carry it in the heading, while **KI-10, KI-15 and KI-18 are resolved
+in body text only** (`### RESOLVED 2026-09-03 — commit 'fix: KI-10/KI-15
+iterative fmod and remainder'` and `RESOLVED by commit 855292d`). A reader
+scanning headings would count nine resolved KIs, not twelve. KI-10 and KI-15
+are now reopened above; **KI-18 should be given a heading marker** the next time
+this file is edited for content.
