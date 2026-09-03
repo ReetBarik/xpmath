@@ -339,16 +339,16 @@ static const OpTol kOpTols[kOpCount] = {
     {"log10",   28.14},  //  28.44   21.67  1014   conditioning-limited
     {"sin",     27.56},  //  27.86   12.85  1535   zeros of sin/cos near k*pi
     {"cos",     27.47},  //  27.77   12.85  1264   zeros of sin/cos near k*pi
-    {"tan",     26.62},  //  26.92    0.00  1486   conditioning-limited
+    {"tan",    28.02},  //  28.32   13.46  1486   KI-18 asymptotic branch: ratcheted, was 26.62
     {"asin",    25.66},  //  25.96    0.00  1563   conditioning-limited; KI-5(d) fixed: on-cut sheet
     {"acos",    25.55},  //  25.87    0.00  1572   KI-5(c) fixed (Kahan Re + exact Im)
-    {"atan",    22.45},  //  22.75    0.00  1540   conditioning-limited
+    {"atan",   28.44},  //  28.74   26.71  1540   KI-11/KI-18 component form: ratcheted, was 22.45
     {"sinh",    27.57},  //  27.87   12.85  1539   zeros of sin/cos near k*pi
     {"cosh",    27.48},  //  27.78   12.85  1279   zeros of sin/cos near k*pi
-    {"tanh",    26.57},  //  26.87    0.00  1472   zeros of sin/cos near k*pi
+    {"tanh",   27.97},  //  28.27   13.46  1472   KI-18 asymptotic branch: ratcheted, was 26.57
     {"asinh",   25.64},  //  25.94    0.00  1580   KI-5(a) fixed: reflected for Re(z) << 0
     {"acosh",   26.16},  //  26.46    0.00  1571   KI-1 fixed (Kahan): whole plane, was 957 elems
-    {"atanh",   26.77},  //  27.07   14.44  1538   KI-5(b) fixed (complex log1p): ratcheted, was 25.21
+    {"atanh",  28.36},  //  28.66   15.25  1538   KI-11/KI-18 component form: ratcheted, was 26.77
     {"pow",     27.13},  //  27.43   13.48  1256   conditioning-limited
     {"polar",   27.77},  //  28.08   13.28  1338   zeros of sin/cos near k*pi
 };

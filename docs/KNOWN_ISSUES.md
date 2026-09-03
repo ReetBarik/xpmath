@@ -2307,7 +2307,10 @@ not "fixed" here).
 
 ## KI-11 — The complex inverse family loses most of its digits when one component is far smaller than the other
 
-**Severity: medium, all backends, 4,759 points.**
+**Severity: medium, all backends, 4,759 points. PARTIALLY RESOLVED by the fix
+commit `fix: KI-18 complex tan/tanh asymptotic branch; KI-11 complex inverse
+conditioning` — `atan`/`atanh` fixed and measured; `asin`/`acos`/`asinh`/`acosh`/
+`sqrt` NOT fixed and NOT inherent (see "What is left", below).**
 
 ### What
 
@@ -2350,6 +2353,116 @@ which computes the small component from `log1p`/`atan2` of a rearranged
 argument rather than from a cancelling difference. This overlaps the work
 already done for KI-5; the cases here are the ones the KI-5 fixes did not cover
 because they sit *off* the cut rather than on it.
+
+### What was fixed
+
+`atan` and `atanh` were moved off the ratio form
+`(i/2)·log((1−iz)/(1+iz))` onto Kahan's component form, in all four
+`include/xp/*_complex.hpp`:
+
+```
+Re atan(z)  = 0.5  · atan2(2x, (1−y)(1+y) − x²)
+Im atan(z)  = 0.25 · log1p( 4y / (x² + (1−y)²) )
+Re atanh(z) = 0.25 · log1p( 4x / ((1−x)² + y²) )
+Im atanh(z) = 0.5  · atan2(2y, (1−x)(1+x) − y²)
+```
+
+with three supports that the bare formulas need:
+
+* **`xp_log_hypot2(a, b)`** = `log(a² + b²)` as `2·log(s) + log1p((t/s)²)`,
+  `s = max(|a|,|b|)`. Used when the `log1p` argument leaves `log1p`'s good
+  range — when `4y/den ≥ 1e4` (the quotient then runs into the Dekker splitter
+  ceiling of KI-19) or when it approaches −1 (`log1p(−1) = −inf`, which took
+  DD `atanh(∓1 + εi)` from 31.00 to 18.89 and QF to NaN in an intermediate
+  revision of this fix). The `2·log(s)` form is required rather than
+  `log(a²+b²)` because at the branch points `a²+b²` is FP32-subnormal.
+* **`xp_atan2_safe(a, b)`** — `atan2`/`angle` forms `hypot(a,b)` internally, so
+  raw `1−x²−y²` at |z| ~ 1e10 squares to 1e40 and overflows an FP32 word. Both
+  operands are scaled down by a common exact power of two first. Without it,
+  sweep point 1628 (`axis`, 1e10 + 0i) went 14.00 → **0.00** on FF/QF/TF.
+* **`(1−y)(1+y) − x²` rather than `1 − (x² + y²)`.** The additive form rounds
+  `x² + y²` to one word *before* the cancellation, so at |y| ~ 1 — exactly the
+  atan cut — the surviving `x²` keeps only word-0 precision. Measured on DD
+  `atanh(−1 + 1e−8i)`: 24.72 digits additive, 31.00 factored.
+* **C99 Annex G poles.** `catan(±0 ± 1i)` and `catanh(±1 ± 0i)` are infinite.
+  No formulation built on the extended `log()` can produce that infinity — it
+  prints `non-positive argument` and returns 0 — so both are intercepted at the
+  top of the function. At `811e08c` these returned a finite `(0, 0)`.
+
+Measured, per point, against `catanq`/`catanhq` (min over the two components,
+capped at the backend width; **before** = `811e08c`, **after** = the fix commit):
+
+```
+                         -100      100      2.0      1e8      0.5     1e-20    1e-6
+                        1e-29    1e-20    1e-20     1e-8    1e-25       100      -2
+DD  atan   before        0.00     8.55    11.80     8.52     7.65     29.18   30.79
+           after        31.00    31.00    31.00    31.00    31.00     31.00   30.75
+DD  atanh  before       29.24    29.18    30.74    23.30    30.74      8.55   24.36
+           after        31.00    31.00    30.87    31.00    30.87     31.00   31.00
+FF  atan   before        0.00     0.00    -0.00     0.00    -0.00     12.18   14.00
+           after        12.74    14.00    13.98    14.00    13.72     14.00   13.61
+FF  atanh  before       12.32    12.18    13.61     7.02    13.61      0.00    7.74
+           after        14.00    14.00    13.32    14.00    13.32     14.00   14.00
+QF  atan   before        0.00     5.98     9.74     5.54     6.32     27.40   28.02
+           after        12.74    21.48    24.85    21.25    27.98     29.00   27.89
+QF  atanh  before       27.02    27.40    27.89    21.31    19.25      5.98   21.92
+           after        29.00    29.00    28.26    29.00    19.25     21.48   29.00
+TF  atan   before        0.00     0.08     2.39     0.00     0.00     19.11   20.77
+           after        12.74    21.48    21.70    21.25    21.41     21.70   21.33
+TF  atanh  before       18.87    19.11    21.33    14.55    19.61      0.08   15.25
+           after        21.70    21.70    21.70    21.70    19.61     21.48   21.70
+```
+
+`-0.00` and `-1.00` in the *before* rows are the probe's NaN/inf codes, i.e.
+KI-18 territory. The residual 12.74 at `(∓100, ±1e−29)` on the three FP32-word
+backends is representability, not formulation: the answer's small component is
+~1e−33 and the large one is ~1.56, so a single FP32 word cannot hold both — the
+`log1p` argument itself is 1e−31 and lands in the subnormal range.
+
+Sweep-wide effect on the affected cells (read-only monotone gate against
+`validation/sweep/sweep_baseline.csv`, oracle fingerprint `578322f998a329c8`):
+**10,915 points increased, 1,932 decreased, worst decrease −2.04 digits, none
+below 3 digits of loss and none reaching zero.**
+
+### What is left — NOT fixed, and NOT inherent
+
+`asin`, `acos`, `asinh`, `acosh` and `sqrt` were **not touched** and their rows
+are bit-identical before and after (verifiable in the table generator: every
+`asin`/`acos`/`asinh`/`acosh` row above is unchanged). Their loss is *not*
+demonstrated to be conditioning, and this entry must not be read as saying so.
+The mechanism was diagnosed and is the same disease `log1p` exists to cure:
+
+```
+DD asin(0.5 + 1e-25i)   6.48 digits
+```
+
+`asin(z) = −i·log(iz + √(1−z²))`. At this point `|iz + √(1−z²)|² = 1 − 2.3e−25`,
+so `Re log` of it is `0.5·log1p(−2.3e−25)` — a log of something within 1e−25 of
+1. Forming it as `log(w)` rounds `w` to 1 first, and the predicted loss
+`log10(1/2.3e-25) ≈ 24.6` digits off a 31-digit cap leaves ~6.4; measured 6.48.
+The complex `log1p` added by KI-5(b) is exactly the tool, and routing these five
+through it is the obvious next step. **Closing KI-11 requires doing that work
+or measuring that it does not help — it is deliberately left open here.**
+
+### Accepted decreases
+
+All are ≤ 2.04 digits and all sit on the `polar` family (|z| = 1, where
+`1 − x² − y²` is an exact cancellation of two O(1) quantities, so the atan2
+argument keeps only the rounding of the *inputs*; the ratio form kept that
+cancellation in a single subtraction instead of two). Worst cells:
+
+| cell | pt | family | z | before | after |
+|---|---|---|---|---|---|
+| QF c atanh | 150 | polar | −0.37885660 − 0.91464074i | 28.73 | 26.69 |
+| QF c atan | 158 | polar | 0.91464074 − 0.37885660i | 28.91 | 27.05 |
+| QF c atan | 219 | polar | 0.56112594 − 0.83978431i | 28.89 | 27.14 |
+| FF c atanh | 137 | polar | −0.19313942 + 0.97097743i | 14.00 | 12.51 |
+| DD c atan | 177 | polar | −0.98078528 − 0.19509032i | 31.00 | 29.66 |
+| TF c atanh | 316 | polar | 7.07106781 − 7.07106781i | 21.66 | 20.51 |
+
+Judgement: 1,932 points give up at most 2.04 digits so that 10,915 points —
+including 4,500-odd that returned zero correct digits or NaN — come back at
+full width. Recorded, not silently taken.
 
 ---
 
@@ -2742,7 +2855,9 @@ line.
 
 ## KI-18 — Complex `tan`/`tanh` and complex `atan`/`atanh` have no asymptotic branch, so they NaN where the true result is bounded
 
-**Severity: medium, all backends, 172 + 96 points.**
+**Severity: medium, all backends, 172 + 96 points. RESOLVED by the fix commit
+`fix: KI-18 complex tan/tanh asymptotic branch; KI-11 complex inverse
+conditioning` (SHA substituted by the follow-up re-baseline session).**
 
 ### What
 
@@ -2786,6 +2901,84 @@ For `tan`/`tanh`, saturate on the large component the way real `tanh` already
 does. For `atan`/`atanh`, use Kahan's formulation (already the stated remedy
 for KI-11), which computes the divergent component from `log1p` of a
 rearranged argument instead of from a vanishing denominator.
+
+### Resolution
+
+**`tan`/`tanh`: doubled-angle asymptotic branch with the exponential factored
+out.** For `tan(x + iy)` with `t = e^(−2|y|)`,
+
+```
+tan(x+iy) = [ 2t·sin2x  +  i·(1 − t²)·sgn y ] / (1 + t² + 2t·cos2x)
+```
+
+and `tanh` is the same with the roles of the two components swapped. Nothing
+ever exponentiates the large component upward, so nothing overflows; `t`
+underflowing to 0 is the *correct* limit (`±i` for `tan`, `±1` for `tanh`)
+rather than a NaN. The denominator `1 + t² + 2t·cos2x ≥ (1−t)² > 0`, which also
+removes the `(−inf, NaN)` that KI-12's zero-returning `sincos` used to produce
+through the old `sin(z)/cos(z)` quotient.
+
+**Threshold, per backend.** The branch is taken on `|Im z| ≥ kXpTanAsymptote`
+(`tan`) / `|Re z| ≥ kXpTanAsymptote` (`tanh`). This is *not* set from the
+exponent range — the asymptotic form never approaches the exponent range, and
+setting it there would leave the whole intermediate zone on the overflowing
+path. It is set at the crossover where the asymptotic form measures at least as
+accurate as the direct quotient, established by walking a ladder at
+y = 1, 1.5, 2, 2.5, 3, 4, 5 on each backend:
+
+| backend | `kXpTanAsymptote` | why not 1.0 |
+|---|---|---|
+| DD | 2.0 | at y = 1 the direct quotient still wins |
+| FF | 4.0 | at y = 1 FF `tan(1+1i)` fell 14.00 → 13.29 with a 1.0 threshold |
+| QF | 2.0 | as DD |
+| TF | 2.0 | as DD |
+
+**`atan`/`atanh`:** the KI-11 component form (see that entry) — the divergent
+component now comes from `log1p` of `4y/(x² + (1−y)²)` or from `xp_log_hypot2`,
+neither of which divides by a computed zero. The C99 Annex G poles
+`catan(±0 ± 1i)` and `catanh(±1 ± 0i)` are intercepted explicitly and return
+the correct signed infinity; at `811e08c` they returned a finite `(0, 0)`.
+
+### Re-test — every recorded NaN case, all four backends
+
+Values from `catanq`/`ctanq`/`catanhq`/`ctanhq`. No cell returns NaN.
+
+| point | DD | FF | QF | TF | true |
+|---|---|---|---|---|---|
+| `tan(9807.8528 + 1950.90322i)` | (0, 1) | (0, 1) | (0, 1) | (0, 1) | (−2.2769e−1695, 1) |
+| `tan(1 + 50i)` | (6.7653e−44, 1) | (7.0065e−44, 1) | (7.0065e−44, 1) | (7.0065e−44, 1) | (6.7653e−44, 1) |
+| `tan(2 + 1e5i)` | (0, 1) | (0, 1) | (0, 1) | (0, 1) | (−0, 1) |
+| `tanh(−100 + 1e−29i)` | (−1, 5.5356e−116) | (−1, 0) | (−1, 0) | (−1, 0) | (−1, 5.5356e−116) |
+| `tanh(1950.90322 + 9807.8528i)` | (1, 0) | (1, 0) | (1, 0) | (1, 0) | (1, −2.2769e−1695) |
+| `tanh(1e5 + 2i)` | (1, 0) | (1, 0) | (1, 0) | (1, 0) | (1, −0) |
+| `atan(1e−19 + 1i)` | FULL | FULL | FULL | FULL | (0.785398163, 22.221132) |
+| `atan(0 + 1i)` | (0, inf) | (0, inf) | (0, inf) | (0, inf) | (0, inf) |
+| `atanh(1 + 1e−19i)` | FULL | FULL | FULL | FULL | (22.221132, 0.785398163) |
+| `atanh(1 + 0i)` | (inf, 0) | (inf, 0) | (inf, 0) | (inf, 0) | (inf, 0) |
+
+The zeros that remain are the correct representable answer, not a failure:
+−2.2769e−1695 is below binary128's own floor, and 5.5356e−116 is far below the
+FP32 minimum subnormal 1.4e−45, so `0` is the only value a 2×/3×/4×FP32
+expansion can carry. `tan(1 + 50i)`'s 7.0065e−44 versus 6.7653e−44 is 1.45
+digits and is likewise the FP32 subnormal grid, not the formulation: `e^(−100)`
+is 3.7e−44, four binades above the smallest subnormal.
+
+### Accepted decreases
+
+The threshold move is not free just below the crossover. All decreases are
+≤ 1.76 digits and all sit on `cut-re`/`cut-im` at |large component| = 2…10:
+
+| cell | pt | family | z | before | after |
+|---|---|---|---|---|---|
+| QF c tan | 1436 | cut-im | 1e−13 + 10i | 25.06 | 23.30 |
+| QF c tanh | 490 | cut-re | −10 + 1e−20i | 17.95 | 16.28 |
+| TF c tan | 1214 | cut-im | 1e−30 − 2i | 14.92 | 13.41 |
+| TF c tanh | 574 | cut-re | −2 + 1e−30i | 14.92 | 13.41 |
+| DD c tan | 1350 | cut-im | 0.01 + 2i | 30.95 | 30.35 |
+| DD c tanh | 542 | cut-re | −2 + 1e−14i | 31.00 | 30.67 |
+
+Totals across all four `tan`/`tanh` cells: 448 points decreased (worst −1.76),
+1,244 increased, and 172 NaN points became finite and correct.
 
 ---
 

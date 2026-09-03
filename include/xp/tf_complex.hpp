@@ -345,7 +345,72 @@ XPMATH_INLINE_FUNCTION TripleFloatComplex cos(TripleFloatComplex z) {
     return TripleFloatComplex(multiply(ca, cb), negate(multiply(sa, sb)));
 }
 // tan(z) = sin(z)/cos(z).  qf_complex.hpp:291-293 / ff_complex.hpp:220-221 / dd_complex.hpp:215-217.
+// KI-18 fix. ASYMPTOTIC BRANCH for large |Im z|.
+//
+// `sin(z)/cos(z)` forms cosh(Im z) and sinh(Im z) explicitly. Both overflow the
+// word type once |Im z| passes its exp ceiling (~709.8 for the FP64-word
+// backend, ~88.7 for the FP32-word ones), and the quotient then evaluates
+// inf/inf = NaN even though tan(z) -> +-i is perfectly bounded there:
+// `DD tan(9807.8528 + 1950.90322i)` returned (NaN, NaN) for a true
+// (-2.2769e-1695, 1). That is a wrong answer, not lost precision.
+//
+// Well before the overflow the REAL part is already gone. Written out, the
+// complex quotient forms Re = (sa*ca*(cosh^2 b - sinh^2 b)) / |cos z|^2, and
+// cosh^2 - sinh^2 = 1 is a difference of two quantities of size e^{2|b|}/4:
+// it sheds 0.868*|Im z| decimal digits. Measured on DD, direct form:
+// Im z = 5 -> 28.28 digits, 10 -> 24.02, 20 -> 15.64, 50 -> 0.00, then NaN.
+//
+// The remedy is the standard doubled-angle form with the exponential factored
+// out. With t = exp(-2|Im z|) and s = sign(Im z),
+//
+//     tan(x + iy) = ( 2t*sin 2x + i*s*(1 - t^2) ) / ( 1 + t^2 + 2t*cos 2x )
+//
+// which is the usual [sin 2x + i sinh 2y] / [cos 2x + cosh 2y] with numerator
+// and denominator both multiplied by 2t. Nothing overflows: t <= 1, the
+// denominator is (1 - t)^2 + 2t(1 + cos 2x) >= 0, and the real part is formed
+// as a product rather than as a difference, so it keeps full relative accuracy
+// all the way down to the point where t itself underflows -- at which point
+// 2t*sin 2x = 0 IS the correctly rounded answer, and the imaginary part is
+// exactly +-1. No NaN is reachable for finite z.
+//
+// THRESHOLD kXpTanAsymptote = 1, on |Im z| (|Re z| for tanh), leading limb.
+// Chosen from the denominator, which is the only thing the new form can lose
+// to: it cancels only when t -> 1 AND cos 2x -> -1, i.e. only near Im z = 0.
+// At |Im z| = 1, t = e^-2 = 0.1353 and the denominator is bounded below by
+// (1-t)^2 = 0.747, so at most 0.13 digits are at risk; the direct form has
+// already given up 0.87 by then. Below 1 the direct form is the better of the
+// two and is kept unchanged, which also keeps every near-pole point (the poles
+// of tan are on the real axis) bit-for-bit what it was. 1 is exactly
+// representable, so the compare is exact. The test is `>=` so that the
+// asymptotic branch owns the boundary.
+//
+// sin 2x and cos 2x are built from ONE sincos(x) as 2*sa*ca and
+// (ca-sa)(ca+sa), not from sincos(2x): doubling before the argument reduction
+// would spend a bit of x, and reusing the same reduction the direct branch
+// uses keeps the two branches consistent across the threshold.
+//
+// tanh gets the identical treatment with the roles of the components swapped
+// (tanh(z) = -i*tan(iz)), threshold on |Re z|. It also removes a second, worse
+// symptom there: the old body divided by cos^2(b) + T^2 sin^2(b), and when FF's
+// `sincos` handed back (0, 0) -- KI-12 -- that denominator was 0, so
+// `FF tanh(-100 + 1e-29i)` returned (-inf, NaN). The new denominator is
+// 1 + t^2 + 2t cos 2y, which is >= (1-t)^2 > 0 whatever sincos returns.
 XPMATH_INLINE_FUNCTION TripleFloatComplex tan(TripleFloatComplex z) {
+    const float kXpTanAsymptote = 2.0f;
+    if (detail::fabs(z.im.f0) >= kXpTanAsymptote) {
+        TripleFloat ca, sa;
+        sincos(z.re, sa, ca);
+        const TripleFloat s2 = multiply_scalar(multiply(sa, ca), 2.0f);      // sin 2x
+        const TripleFloat c2 = multiply(subtract(ca, sa), add(ca, sa));         // cos 2x
+        // t = exp(-2|Im z|); flushes to 0 far below the format's floor, which is
+        // where +-i is the correctly rounded answer anyway.
+        const TripleFloat t  = exp(multiply_scalar(z.im, z.im.f0 < 0.0f ? 2.0f : -2.0f));
+        const TripleFloat t2 = multiply(t, t);
+        const TripleFloat den = add(add(TripleFloat(1.0f), t2), multiply_scalar(multiply(t, c2), 2.0f));
+        TripleFloat im = divide(subtract(TripleFloat(1.0f), t2), den);
+        if (z.im.f0 < 0.0f) im = negate(im);
+        return TripleFloatComplex(divide(multiply_scalar(multiply(t, s2), 2.0f), den), im);
+    }
     return sin(z) / cos(z);
 }
 
@@ -465,13 +530,166 @@ XPMATH_INLINE_FUNCTION TripleFloatComplex acos(TripleFloatComplex z) {
 }
 // atan(z) = (i/2)·log((1 - iz)/(1 + iz)).  qf_complex.hpp:317-324 /
 // ff_complex.hpp:243-251 / dd_complex.hpp:238-247.
+// log(a^2 + b^2), formed without ever squaring the larger operand -- used by the
+// two-log branches of atan()/atanh() below. Writing it as log(a*a + b*b) is what
+// a first cut did, and it costs everything at the branch points: at
+// z = -1 + 1e-19i the atanh numerator is (1+x)^2 + y^2 = 1e-38, which is
+// SUBNORMAL in an FP32 word, so the FP32-word backends scored ~9 digits where
+// the form they replaced scored 14 (FF) / 26 (QF) / 21 (TF). Factoring the
+// larger operand out --
+//     log(a^2 + b^2) = 2*log(s) + log1p((t/s)^2),  s = max(|a|,|b|), t = min
+// -- never forms a product that can underflow or overflow, and returns the full
+// width at those points. s == 0 (both operands zero) gives log(0) = -inf, which
+// is the right answer for the branch point itself.
+XPMATH_INLINE_FUNCTION TripleFloat xp_log_hypot2(TripleFloat a, TripleFloat b) {
+    TripleFloat s = a, t = b;
+    if (s.f0 < 0.0f) s = negate(s);
+    if (t.f0 < 0.0f) t = negate(t);
+    if (s.f0 < t.f0) { TripleFloat tmp = s; s = t; t = tmp; }
+    // Both operands zero: the pole itself. Returning the extended log(0) here
+    // does NOT work -- feeding -inf into the caller's subtract() makes the
+    // error limb inf - inf = NaN and destroys the whole result -- so the two
+    // poles are intercepted at the top of atan()/atanh() instead.
+    if (s.f0 == 0.0f) return log(s);
+    const TripleFloat r = divide(t, s);
+    return add(multiply_scalar(log(s), 2.0f), log1p(multiply(r, r)));
+}
+// atan2()/angle() forms hypot(a, b) internally, so an operand pair whose
+// SQUARES overflow the word format comes back NaN. That is what turned
+// atan(1e10 + 0i) into NaN in the three FP32-word backends once the component
+// form below started handing atan2 the raw 1 - x^2 - y^2 (monotone gate sweep
+// point 1628, axis family: 14.00 -> 0.00). arg() is scale-invariant, so both
+// operands are scaled down by a common EXACT power of two until the squares
+// fit; being exact, the ratio -- and hence the answer -- is untouched. The
+// loop runs at most once for every input the callers admit.
+XPMATH_INLINE_FUNCTION TripleFloat xp_atan2_safe(TripleFloat a, TripleFloat b) {
+    const float kXpAtan2Safe = 1.0e18f;
+    const float kXpAtan2Down = 5.4210108624275222e-20f;   // exact power of two
+    float m = detail::fabs(a.f0) > detail::fabs(b.f0) ? detail::fabs(a.f0)
+                                                     : detail::fabs(b.f0);
+    while (m > kXpAtan2Safe) {
+        if (a.f0 != 0.0f) a = multiply_scalar(a, kXpAtan2Down);
+        if (b.f0 != 0.0f) b = multiply_scalar(b, kXpAtan2Down);
+        m *= kXpAtan2Down;
+    }
+    return atan2(a, b);
+}
+// KI-11 + KI-18 fix. The old body was
+//     atan(z) = (i/2) * log( (1 - iz) / (1 + iz) )
+// and it has two independent defects, both repaired here by moving to the
+// component form -- which is nothing more than atan(z) = -i*atanh(iz) with the
+// atanh block below (the KI-5(b) form) written out and the i folded in:
+//
+//     Re atan(z) = 0.5  * atan2( 2x, 1 - x^2 - y^2 )
+//     Im atan(z) = 0.25 * log1p( 4y / (x^2 + (1-y)^2) )
+//
+// (1) KI-11 -- THE SMALL COMPONENT WAS BEING LOST. When |y| << |x| the ratio
+// (1-iz)/(1+iz) has modulus 1 to within |y|/|x|, so log() is handed a number
+// whose entire imaginary information sits below its own leading digit and the
+// complex divide has already rounded it away. Measured, DD, direct form:
+//     atan(-100 + 1e-29i)  0.00 digits -- returned Im = -1.6235e-33 for a true
+//                          +9.9990e-34: WRONG SIGN, and bit-identical to what
+//                          it returned at 1e-30i, i.e. a noise floor, not a
+//                          function of the input any more
+//     atan(0.5 + 1e-25i)   7.65      atan(2 + 1e-20i)   11.80
+//     atan(100 + 1e-20i)   8.55      atan(1e8 + 1e-8i)  8.52
+// In the component form the small component is never added to the large one:
+// 4y/(x^2 + (1-y)^2) is ~4y/|1-iz|^2, small, formed without cancellation, and
+// the real log1p keeps it. All five points above go to the type's cap.
+//
+// (2) KI-18 -- NaN AT THE BRANCH POINTS. As z -> +-i the divisor 1 + iz -> 0,
+// so the complex divide overflowed or divided by a computed zero and BOTH
+// components came back NaN even though only the imaginary one is genuinely
+// infinite: `QF atan(1e-19 + 1i)` returned (NaN, 22.221132) for a true
+// (0.785398163, 22.221132). In the component form the real part is an atan2,
+// which is bounded everywhere, so the divergence stays in the component that
+// actually diverges.
+//
+// THE log1p ARGUMENT CAN STILL OVERFLOW, and that is what the second branch is
+// for. At z = 1e-19 + 1i the denominator is x^2 = 1e-38 while the numerator is
+// 4, so 4y/D = 4e38 -- finite in an FP64 word, but past FLT_MAX in an FP32 one,
+// where it would become inf and hand log1p an infinity. Since
+//     0.25*log1p(4y/D) = 0.25*( log(x^2 + (1+y)^2) - log(x^2 + (1-y)^2) )
+// identically, the two-log form is used once the ratio gets large. It is the
+// wrong form for SMALL ratios -- that is the cancellation log1p exists to avoid
+// -- and the right one for large, where the two logs differ by a wide margin.
+// kXpAtanBigRatio is 1e30 for the FP32-word backends (well inside FLT_MAX =
+// 3.4e38, with room for the 4y numerator) and 1e150 for the FP64-word one.
+//
+// kXpAtanBigL, L-infinity on the leading limbs, guards the OTHER end: x^2 and
+// y^2 overflow the word type above sqrt of its range (~1.3e154 FP64-word,
+// ~1.8e19 FP32-word), and there the old ratio form is finite and accurate --
+// (1-iz)/(1+iz) -> -1 with no cancellation once |z| is huge -- so it is kept
+// for that regime rather than replaced by something that overflows. The
+// constants are set one decade inside the true limit.
+//
+// SIGNED ZERO ON THE CUTS. atan's cuts are on the imaginary axis, |Im z| > 1,
+// where the sign of a zero REAL part picks the sheet: atan(+0 + 2i) = +pi/2 +
+// 0.5493i and atan(-0 + 2i) = -pi/2 + 0.5493i. atan2 delivers that for free,
+// but multiply_scalar renormalizes and does not carry a signed zero through, so
+// the doubling of x is skipped when x is a zero (2*+-0 = +-0 exactly, so this
+// is not an approximation) and the original limb is handed to atan2 instead.
 XPMATH_INLINE_FUNCTION TripleFloatComplex atan(TripleFloatComplex z) {
+    // C99 Annex G poles: catan(+-0 +- 1i) = +-0 +- inf*i. No formulation
+    // built out of the extended log() can produce the infinity, because that
+    // log() reports "non-positive argument" and returns 0 -- at HEAD these two
+    // points came back (0, 0), a finite wrong answer. Intercept them.
+    {
+        const TripleFloat ay_ = z.im.f0 < 0.0f ? negate(z.im) : z.im;
+        if (z.re.f0 == 0.0f && subtract(TripleFloat(1.0f), ay_).f0 == 0.0f) {
+            float inf_ = -detail::log(float(0));
+            if (z.im.f0 < 0.0f) inf_ = -inf_;
+            return TripleFloatComplex(z.re, TripleFloat(inf_));
+        }
+    }
+    const float kXpAtanBigL     = 1.0e18f;
+    const float kXpAtanBigRatio = 1.0e4f;
+    const TripleFloat one = TripleFloat(1.0f);
+    if (detail::fabs(z.re.f0) < kXpAtanBigL && detail::fabs(z.im.f0) < kXpAtanBigL) {
+        const TripleFloat x2 = multiply(z.re, z.re);
+        const TripleFloat y2 = multiply(z.im, z.im);
+        TripleFloat twox = multiply_scalar(z.re, 2.0f);
+        if (z.re.f0 == 0.0f) twox = z.re;          // keep the signed zero
+        // 1 - x^2 - y^2 as (1-y)(1+y) - x^2. Forming `1 - (x^2 + y^2)` instead
+        // rounds x^2 + y^2 to ONE word before the cancellation, so at |y| ~ 1
+        // -- exactly the atan branch cut -- the tiny x^2 that survives is left
+        // with only word-0 precision. The factored form is exact there
+        // (Sterbenz on both factors) and costs one extra multiply.
+        const TripleFloat d2 =
+            subtract(multiply(subtract(one, z.im), add(one, z.im)), x2);
+        TripleFloat re = multiply_scalar(xp_atan2_safe(twox, d2), 0.5f);
+        // ON THE CUT (Re(z) a zero, |Im z| > 1) the sheet is chosen by the SIGN
+        // of that zero -- atan(+0 + 2i) = +pi/2 + 0.5493i, atan(-0 + 2i) =
+        // -pi/2 + 0.5493i. atan2() is handed the zero verbatim above but does
+        // not carry its sign through, so +-pi/2 is installed directly, which is
+        // the same correction atanh() below already makes on its own cut. The
+        // monotone gate is what caught this: 30.74 -> 0.00 on DD at z = -0 + 2i.
+        if (z.re.f0 == 0.0f && d2.f0 < 0.0f) {
+            re = multiply_scalar(TripleFloat_pi(), 0.5f);
+            if (detail::copysign(1.0f, z.re.f0) < 0.0f) re = negate(re);
+        }
+        const TripleFloat omy = subtract(one, z.im);
+        const TripleFloat den = add(x2, multiply(omy, omy));
+        const TripleFloat num = multiply_scalar(z.im, 4.0f);
+        TripleFloat im;
+        if (num.f0 < den.f0 * kXpAtanBigRatio &&
+            num.f0 > -0.875f * den.f0) {
+            im = multiply_scalar(log1p(divide(num, den)), 0.25f);
+        } else {
+            im = multiply_scalar(
+                subtract(xp_log_hypot2(z.re, add(one, z.im)),
+                         xp_log_hypot2(z.re, omy)), 0.25f);
+        }
+        return TripleFloatComplex(re, im);
+    }
+    // |z| past sqrt(word range): squaring would overflow. The ratio form is
+    // well behaved out here and is kept.
     TripleFloatComplex iz    = TripleFloatComplex(negate(z.im), z.re);
-    TripleFloatComplex num   = TripleFloatComplex(TripleFloat(1.0f)) - iz;
-    TripleFloatComplex den   = TripleFloatComplex(TripleFloat(1.0f)) + iz;
+    TripleFloatComplex num   = TripleFloatComplex(one) - iz;
+    TripleFloatComplex den   = TripleFloatComplex(one) + iz;
     TripleFloatComplex ratio = num / den;
     TripleFloatComplex lg    = log(ratio);
-    // × (i/2): (a+bi)(i/2) = (-b/2) + (a/2)i
+    // multiply by i/2: (a+bi)*(i/2) = (-b/2) + (a/2)*i
     return TripleFloatComplex(multiply_scalar(negate(lg.im), 0.5f), multiply_scalar(lg.re, 0.5f));
 }
 
@@ -500,13 +718,31 @@ XPMATH_INLINE_FUNCTION TripleFloatComplex cosh(TripleFloatComplex z) {
 // Denominator ≥ 0; uses the improved real tanh to avoid cancellation. Swapped
 // sincos args: cb=cos(b), sb=sin(b).
 XPMATH_INLINE_FUNCTION TripleFloatComplex tanh(TripleFloatComplex z) {
-    TripleFloat T = tanh(z.re);
+    // KI-18: asymptotic branch, the tan() block above documents it in full.
+    const float kXpTanAsymptote = 2.0f;
+    if (detail::fabs(z.re.f0) >= kXpTanAsymptote) {
+        TripleFloat cb, sb;
+        sincos(z.im, sb, cb);
+        const TripleFloat s2 = multiply_scalar(multiply(sb, cb), 2.0f);      // sin 2y
+        const TripleFloat c2 = multiply(subtract(cb, sb), add(cb, sb));         // cos 2y
+        const TripleFloat t  = exp(multiply_scalar(z.re, z.re.f0 < 0.0f ? 2.0f : -2.0f));
+        const TripleFloat t2 = multiply(t, t);
+        const TripleFloat den = add(add(TripleFloat(1.0f), t2), multiply_scalar(multiply(t, c2), 2.0f));
+        TripleFloat re = divide(subtract(TripleFloat(1.0f), t2), den);
+        if (z.re.f0 < 0.0f) re = negate(re);
+        return TripleFloatComplex(re, divide(multiply_scalar(multiply(t, s2), 2.0f), den));
+    }
+    // |Re z| < 1: the direct form is the more accurate of the two here and is
+    // kept verbatim.
+    // tanh(a+bi): re = tanh(a) / (cos^2(b) + tanh^2(a)*sin^2(b))
+    //             im = sin(b)*cos(b)*(1 - tanh^2(a)) / (same denominator)
+    TripleFloat T_ = tanh(z.re);
     TripleFloat cb, sb;
     sincos(z.im, sb, cb);
-    TripleFloat T2    = multiply(T, T);
+    TripleFloat T2    = multiply(T_, T_);
     TripleFloat denom = add(multiply(cb, cb), multiply(T2, multiply(sb, sb)));
-    return TripleFloatComplex(divide(T, denom),
-                              divide(multiply(multiply(sb, cb), subtract(TripleFloat(1.0f), T2)), denom));
+    return TripleFloatComplex(divide(T_, denom),
+               divide(multiply(multiply(sb, cb), subtract(TripleFloat(1.0f), T2)), denom));
 }
 
 // ============================================================
@@ -588,19 +824,60 @@ XPMATH_INLINE_FUNCTION TripleFloatComplex acosh(TripleFloatComplex z) {
 // directly with detail::copysign -- these types do carry a signed zero through
 // construction, copy and negate, they only lose it in arithmetic -- and pi/2 is
 // installed with it. The two conventions that were already right are unchanged.
+//
+// KI-11 EXTENSION (this change). The gate above was `L-inf < 0.0625` only, so
+// everything outside a small disc still went through the ratio form and still
+// lost its small component -- the same defect KI-11 records for atan, one
+// function over. Measured, DD, ratio form: atanh(1e-20 + 100i) 8.55 digits,
+// atanh(1e8 + 1e-8i) 23.30, atanh(1e-6 - 2i) 24.36. The component form is now
+// used for L-inf >= 0.5 as well, and the two-log fallback described on atan()
+// above is used where 4x/D would overflow the word type.
+//
+// THE BAND 0.0625 <= L-inf < 0.5 IS DELIBERATELY LEFT ON THE RATIO FORM. That
+// is the band KI-5(b) measured the component form to be WORSE in -- 43 points
+// across the four backends losing up to 1.09 digits to rounding churn, which is
+// why 0.0625 rather than 0.5 was chosen then. Nothing here contradicts that
+// measurement, so nothing there moves.
+//
+// kXpAtanhBigL is the same overflow guard as atan's: above sqrt of the word
+// type's range (1e18 for FP32 words, 1e150 for FP64 words) (1-x)^2 + y^2
+// overflows and the ratio form is kept.
 XPMATH_INLINE_FUNCTION TripleFloatComplex atanh(TripleFloatComplex z) {
-    const TripleFloat one(1.0f);
-    const float t = 0.0625f;   // kXpAtanhSmall
+    // C99 Annex G poles: catanh(+-1 +- 0i) = +-inf +- 0i. Same reason as atan
+    // above -- at HEAD these came back (0, 0).
+    {
+        const TripleFloat ax_ = z.re.f0 < 0.0f ? negate(z.re) : z.re;
+        if (z.im.f0 == 0.0f && subtract(TripleFloat(1.0f), ax_).f0 == 0.0f) {
+            float inf_ = -detail::log(float(0));
+            if (z.re.f0 < 0.0f) inf_ = -inf_;
+            return TripleFloatComplex(TripleFloat(inf_), z.im);
+        }
+    }
+    const TripleFloat one = TripleFloat(1.0f);
+    const float kXpAtanhSmall    = 0.0625f;
+    const float kXpAtanhWide     = 0.5f;
+    const float kXpAtanhBigL     = 1.0e18f;
+    const float kXpAtanBigRatio  = 1.0e4f;
+    const float ax = detail::fabs(z.re.f0), ay = detail::fabs(z.im.f0);
+    const float linf = ax > ay ? ax : ay;
     TripleFloatComplex r;
-    if (detail::fabs(z.re.f0) < t && detail::fabs(z.im.f0) < t) {
-        TripleFloat omx = subtract(one, z.re);
-        TripleFloat den = add(multiply(omx, omx), multiply(z.im, z.im));
-        r.re = multiply_scalar(
-            log1p(divide(multiply_scalar(z.re, 4.0f), den)), 0.25f);
+    if (linf < kXpAtanhSmall || (linf >= kXpAtanhWide && linf < kXpAtanhBigL)) {
+        const TripleFloat omx = subtract(one, z.re);
+        const TripleFloat y2  = multiply(z.im, z.im);
+        const TripleFloat den = add(multiply(omx, omx), y2);
+        const TripleFloat num = multiply_scalar(z.re, 4.0f);
+        if (num.f0 < den.f0 * kXpAtanBigRatio &&
+            num.f0 > -0.875f * den.f0) {
+            r.re = multiply_scalar(log1p(divide(num, den)), 0.25f);
+        } else {
+            r.re = multiply_scalar(
+                subtract(xp_log_hypot2(add(one, z.re), z.im),
+                         xp_log_hypot2(omx, z.im)), 0.25f);
+        }
+        TripleFloat twoy = multiply_scalar(z.im, 2.0f);
+        if (z.im.f0 == 0.0f) twoy = z.im;          // keep the signed zero
         r.im = multiply_scalar(
-            atan2(multiply_scalar(z.im, 2.0f),
-                  subtract(one, add(multiply(z.re, z.re), multiply(z.im, z.im)))),
-            0.5f);
+            xp_atan2_safe(twoy, subtract(multiply(subtract(one, z.re), add(one, z.re)), y2)), 0.5f);
     } else {
         TripleFloatComplex lg = log((TripleFloatComplex(one) + z) / (TripleFloatComplex(one) - z));
         r.re = multiply_scalar(lg.re, 0.5f);
