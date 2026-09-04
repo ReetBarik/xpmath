@@ -6309,3 +6309,241 @@ failing cells.** `ctest` 34/34.
 KI-23 (QF `log` family losing digits at *large* argument, resolved batch-6) —
 that was argument reduction, was QF-only, and was a large-`|ln v|` effect. This
 one is all four backends, is worst at *small* `|ln v|`, and survives KI-23's fix.
+
+## KI-35 — the sweep classifier judges a COMPLEX point's representability by its LARGER component, while the scorer scores each component against ITSELF **[OPEN — tool defect, accounts for 1,217 of the 1,391 UNEXPLAINED points]**
+
+**Severity: NONE to the library, HIGH to the triage.** Filed 2026-09-04 by the
+session that attacked the 1,391-point UNEXPLAINED residue. No library code is
+wrong. This is a defect in `scripts/sweep_accuracy.cpp`, which is outside the
+edit scope of the session that found it, so it is filed rather than fixed.
+
+### What
+
+`classify_complex()` decides UNDERFLOW / subnormal-limb by a single magnitude:
+
+```
+scripts/sweep_accuracy.cpp:1560
+  const double ref_l10 = (ref_nan || ref_inf)
+                           ? 0.0
+                           : l10_mag(fabsq(rre) > fabsq(rim) ? rre : rim);
+```
+
+It takes the **larger** of the two reference components. But the scorer — and
+the `ach` block twelve lines below, which says so in its own comment
+(`// Mirror the scorer: each component relative to itself`) — scores **each
+component against itself**. So whenever a complex result has one O(1) component
+and one tiny component, the tiny component is *scored* on its own relative
+error while representability is *judged* from the big one. `ref_l10` comes back
+as ~0, `range_digits` comes back as `cap`, both underflow tests miss, and the
+point falls through to UNEXPLAINED.
+
+`tanh(-100 + i)` is the canonical case. The true value is
+`(-1, 2.5167471e-87)`. The imaginary part is 41 orders of magnitude below the
+smallest FP32 subnormal (`2⁻¹⁴⁹ = 1.401e-45`), so **zero is the correctly
+rounded answer** and the library returns exactly that. The classifier sees
+`max(|-1|, |2.5e-87|) = 1`, concludes the result is comfortably representable,
+and files a correctly-rounded answer as a candidate defect.
+
+### Measured — the achievable-floor probe
+
+For each cell: `got` = what the library returns; `ref` = `ctanhq` evaluated at
+the **stored** (backend-rounded) inputs; `best` = that same `ref` rounded back
+*into* the backend's own storage, i.e. the best value any implementation could
+possibly return. Digits of the imaginary component:
+
+| point | DD got/best | FF got/best | TF got/best | QF got/best |
+|---|---|---|---|---|
+| `tanh(-100+1i)`    | 30.25 / 31.00 | **0.00 / 0.00** | **0.00 / 0.00** | **0.00 / 0.00** |
+| `tanh(-100+0.1i)`  | 30.52 / 31.00 | **0.00 / 0.00** | **0.00 / 0.00** | **0.00 / 0.00** |
+| `tanh(100+1e-29i)` | 30.56 / 31.00 | **0.00 / 0.00** | **0.00 / 0.00** | **0.00 / 0.00** |
+| `tanh(-10+1e-23i)` | 31.00 / 31.00 | 13.82 / 14.00 | 13.31 / 14.76 | 13.31 / 14.76 |
+| `tanh(-10+1e-26i)` | 31.00 / 31.00 | 10.88 / 11.43 | 10.52 / 11.43 | 10.52 / 11.43 |
+| `tanh(-10+1e-27i)` | 31.00 / 31.00 |  9.56 / 10.19 |  9.56 / 10.19 |  9.56 / 10.19 |
+| `tanh(-10+1e-30i)` | 31.00 / 31.00 |  7.05 /  7.09 |  7.05 /  7.09 |  7.05 /  7.09 |
+| `tanh(5555.7+8314.7i)` | **0.00 / 0.00** | — | — | **0.00 / 0.00** |
+
+`got == best` on the first three rows and the last: the best attainable value
+*is* zero, and the library returns zero. On the middle rows the library is
+within 0.04–1.45 digits of the provably best representable value.
+
+**DD is the control and it behaves exactly as predicted.** DD scores 30–31
+digits on every `cut-re` row — FP64 holds `2.5e-87` without trouble — which is
+why DD contributes no `cut-re` cells at all. On the `polar` rows, where the
+true imaginary part is `-3.87e-4826` and below *binary128*'s minimum, DD's
+`best` is zero too and DD fails alongside the others. The DD/non-DD split in
+the population is therefore a property of the FP32 exponent range, not of any
+code path.
+
+**The identical-digits fingerprint is derived, not coincidental.** QF (4 words)
+and TF (3 words) return the *same* digit count — 13.31, 10.52, 9.56, 7.05 —
+at every one of these points. Word count cannot matter here because the binding
+constraint is the FP32 subnormal floor on the trailing limb, which is `2⁻¹⁴⁹`
+regardless of how many limbs follow. This is the `subnormal_floor_ulps()`
+regime already derived at `scripts/sweep_accuracy.cpp:1060-1095`, already
+labelled there an INHERENT FORMAT LIMIT, and already exempted by the ULP gate
+as `SUBNORMAL_LIMB` — the `--classify` path simply never consults it for the
+minor component of a complex result.
+
+### Census
+
+Reference components parsed from column 16 of `sweep_classified.csv`, the
+smaller of the two compared against each backend's format minimum and against
+its `full_prec` crossing (DD 4.008e-292, QF 1.110e-16, TF 6.617e-24,
+FF 3.944e-31, from the table at `sweep_accuracy.cpp:1086-1090`):
+
+| bucket | points |
+|---|---|
+| A. smaller ref component below the FORMAT MINIMUM (0 is correctly rounded) | 522 |
+| B. smaller ref component in the SUBNORMAL-LIMB band (derived floor) | 695 |
+| **A + B — componentwise format-limited** | **1,217 (87.5%)** |
+| C. neither — genuine candidate defects | 174 |
+
+(A includes the 96 `polar` cells of `c tanh` and `c tan` whose reference
+components are ~`1e-4826`; those underflow a naive `float()` parse and must be
+read from the exponent text.)
+
+Every cell of `c tanh` (482 points, all four backends), `c tan` (108),
+`c mul` (114), `c asinh`, `c exp`, `c polar`, `c asin`, `c atan`, `c sinh`,
+`c cosh`, `c log`, `c log10`, `c acos`, `c acosh`, `c atanh` falls in A or B.
+
+### Closing it
+
+One line. Replace the max-component `ref_l10` with the per-component test the
+scorer already implies — compute `digits_at_magnitude` for `rre` and `rim`
+separately and take the **minimum**, exactly as the loop over `xq[k]` above it
+already does for the *arguments*. The argument side of the same function is
+already componentwise; only the result side is not.
+
+Until then the UNEXPLAINED column overstates the number of candidate defects by
+about 8×, and `--classify` exits 3 on a library that is, at those points,
+returning the correctly rounded answer.
+
+---
+
+## KI-36 — complex division rounds each cross product before differencing them, so the quotient loses `log10(C)` digits to a cancellation the format could absorb **[OPEN — real defect, ~69 points]**
+
+**Severity: MEDIUM, all four backends.** Filed 2026-09-04 by the same session.
+This is the residue of the complex-`div` population that KI-35 does *not*
+explain, and unlike KI-35 it is a genuine library shortfall: the probe shows
+the correct answer is fully representable and the library does not reach it.
+
+### What
+
+`operator/` forms the quotient's numerators as a difference of two separately
+rounded products (`tf_complex.hpp:198-201`, and bit-identically
+`dd_complex.hpp:199-202`, `ff_complex.hpp`, `qf_complex.hpp`):
+
+```
+TripleFloat denom = add(multiply(b.re, b.re), multiply(b.im, b.im));
+TripleFloat inv   = divide(TripleFloat(1.0f), denom);
+return TripleFloatComplex(multiply(add(multiply(re, b.re), multiply(im, b.im)), inv),
+                          multiply(subtract(multiply(im, b.re), multiply(re, b.im)), inv));
+```
+
+`multiply(im, b.re)` and `multiply(re, b.im)` are each rounded to the type
+before `subtract` sees them. When `z₁` is nearly parallel to `z₂` the two
+products cancel, the rounding error of each survives at full size, and the
+imaginary component of the quotient loses digits in direct proportion to the
+cancellation ratio `C = |im·b.re| / |im·b.re − re·b.im|`.
+
+Smith's algorithm, taken past the KI-8 scaling gate, does not help: its
+numerator `im − re·(b.im/b.re)` equals `(im·b.re − re·b.im)/b.re`, the same
+cancellation with the same ratio. KI-19/KI-27/KI-28 fixed the non-finite
+signalling of this code and left the conditioning of the numerator untouched.
+
+### Measured
+
+Same probe. `best` = the exact quotient rounded into the backend's storage;
+digits of the imaginary component:
+
+| `z₁ / z₂` | C | digits lost to C | DD got/best | FF got/best | TF got/best | QF got/best |
+|---|---|---|---|---|---|---|
+| `(9.8078528e-9 + 1.95090322e-9i) / (9.80785277e-9 + 1.95090321e-9i)` | 4.84e8 | 8.68 | 25.66 / **31.00** | 6.50 / **14.00** | 15.80 / **21.70** | 20.69 / **29.00** |
+| `(-9.8078528e-9 + 1.95090322e-9i) / (-9.80785284e-9 + 1.95090323e-9i)` | 9.55e8 | 8.98 | 25.23 / **31.00** | 5.98 / **14.00** | 14.14 / **21.70** | 19.16 / **29.00** |
+| `(0.097545161 + 0.49039264i) / (0.097545161 + 0.49039264i)` | ∞ (det = 0) | — | 31.00 / 31.00 | 14.00 / 14.00 | 21.70 / 21.70 | 29.00 / 29.00 |
+
+`best` is the **full cap** on every row. The exact quotient is representable to
+the last bit the format carries; the library gives back 5–9 digits fewer. The
+shortfall tracks `log10(C)` on all four backends, which is the signature of
+"the products were rounded before they were differenced" and not of any
+conditioning in the problem — the inputs here are *exactly* representable, so
+there is no input error for the problem to amplify, which is exactly why
+`classify_complex` computes `ach = cap` for these points (`delta[k] = 0` for an
+algebraic op with exactly-stored inputs, `sweep_accuracy.cpp:1577-1582`) and
+correctly files them UNEXPLAINED. The classifier is right here; the library is
+not.
+
+By Reet's standard — *"if it is mathematically possible for the backends, they
+should deliver that precision"* — this is not inherent. The exact 2×2
+determinant `im·b.re − re·b.im` of four exactly-stored extended-precision
+values is computable.
+
+### Not every `div` point is this
+
+The third probe row and the `6.123234e-25 / 6.13519344e-25` row separate the
+two populations. On the latter, TF and QF *both* return 5.78 digits against a
+`best` of 21.70/21.89 — but there the exact determinant is `-3.20e-41`, only
+`2.3e4` above the `2⁻¹⁴⁹` limb floor, so ~4.4 digits is all the format can
+resolve and the QF≡TF equality is the KI-35 fingerprint again. Of the 295
+complex-`div` UNEXPLAINED points, 155 are KI-35 subnormal-limb, 27 are KI-35
+below-format-min, and **69 are this defect** (TF 58, FF 6, DD 5).
+
+### Closing it
+
+A compensated 2×2 determinant. Each backend needs `a·b − c·d` evaluated without
+rounding the products first: the leading limbs give an exact `two_prod`
+residual (`tf_math.hpp:169`, `qf_math.hpp:qf_two_prod`, and the DD/FF
+equivalents), so `a·b` can be carried as an unevaluated `(p₀, tail)` pair at
+roughly double the type's precision, the two heads differenced exactly by
+`two_sum`, and the tails added in afterwards. This is Kahan's determinant
+lifted from FMA-on-scalars to two_prod-on-limbs.
+
+**Not implemented.** It is a new primitive in four headers, and every complex
+op built on division — `tan`, `atan`, `asin`, `acos`, `atanh`, the inverse
+family — inherits whatever it does, so it needs the full monotone and ULP
+gates behind it rather than the tail of a session. Estimated at one focused
+sub-plan.
+
+---
+
+## KI-37 — the sweep oracle scores `round` with ties-away-from-zero, but KI-20 made the library ties-to-even **[OPEN — tool defect, 32 points]**
+
+**Severity: NONE to the library.** Filed 2026-09-04. All 32 points are the
+eight exact half-integers `±0.5, ±2.5, ±4.5, ±6.5`, on all four backends.
+
+`round(-6.5)` is scored `ref = -7, got = -6`; `round(-0.5)` is scored
+`ref = -1, got = 0` and tagged `returned-zero`. The library is right both
+times: KI-20 deliberately adopted IEEE 754 `roundToIntegralTiesToEven`, under
+which `-6.5 → -6` and `-0.5 → -0`. The oracle still calls libquadmath's
+`roundq`, which is C's `round` and breaks ties **away from zero**. The two
+conventions disagree at exactly the tie points and nowhere else, which is why
+the count is exactly 8 per backend.
+
+Nothing to fix in `include/xp/`. The oracle for `C_Round`/`R_Round` in
+`scripts/sweep_accuracy.cpp` should use `rintq` under the default rounding mode
+(or an explicit ties-to-even helper) rather than `roundq`. Out of this
+session's edit scope.
+
+---
+
+## KI-38 — real `fma` loses digits to cancellation in `a·b + c` **[OPEN — 59 points, undiagnosed]**
+
+**Severity: unknown, TF 44 / QF 11 / FF 4.** Filed 2026-09-04 as the remaining
+un-attacked cell of the UNEXPLAINED residue, so that it is not lost.
+
+Examples (TF, `log` and `linear` families, `partial-digit-loss`):
+
+| ref | got | digits |
+|---|---|---|
+| `-7.5672974830798267e-19` | `-7.5672974822817267e-19` | 9.98 |
+| `-4.5757950238323323e+19` | `-4.5757948802642215e+19` | 7.50 |
+| `-2.1696766505040289e+22` | `-2.169676674480147e+22` | 7.96 |
+| `-4.3073100641781306e-13` | `-4.3073100645165405e-13` | 10.10 |
+
+These are *not* KI-35: the results are single real values, well inside the
+format's normal range, so the componentwise story does not apply and the
+classifier's verdict stands unchallenged. The shape — roughly half the cap,
+across two unrelated input families — is consistent with the same
+round-then-cancel mechanism as KI-36 (`a·b` rounded before `c` is added, where
+`a·b ≈ -c`), but **this has not been measured** and no achievable-floor probe
+has been run against it. Do not assume the KI-36 diagnosis transfers.
