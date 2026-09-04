@@ -571,14 +571,29 @@ XPMATH_INLINE_FUNCTION QuadFloat xp_asin_imag_mag(QuadFloat x, QuadFloat y) {
     const QuadFloat s_ = hypot(xm1, y);
     const QuadFloat d1 = add(r,  xp1);
     const QuadFloat d2 = add(s_, xm1);
-    // v = (1/d1 + 1/d2)/2, so the y-dependent half of a-1 is exactly y^2*v.
-    // Carrying v rather than the two quotients is what lets sqrt(a-1) be formed
-    // as y*sqrt(v) below, with y never squared.
-    QuadFloat v(QuadFloat(0.0f));
-    if (d1.f0 != 0.0f) v = add(v, divide(one, d1));
-    if (d2.f0 != 0.0f) v = add(v, divide(one, d2));
-    v = multiply_scalar(v, 0.5f);
-    QuadFloat m = multiply(y, multiply(y, v));
+    // v = (1/d1 + 1/d2)/2, so the y-dependent half of a-1 is exactly y^2*v, and
+    // where v is still built (the sm branch below) it is what lets sqrt(a-1) be
+    // formed as y*sqrt(v), with y never squared.
+    //
+    // KI-33.  v is NOT materialised on the m path, because |v| ~ 1/|z| and a
+    // QuadFloat of magnitude 2^E carries f3 at 2^(E-72): f3 leaves the FP32
+    // NORMAL range 2^-126 once E < -54 (|v| < 5.6e-17, |z| > 1.8e16) and is
+    // gone entirely below 2^-149, at E < -77 (|v| < 6.6e-24, |z| > 1.5e23).
+    // Past that the four-word format cannot hold 96 bits of a number that
+    // small AT ALL and QF degrades to exactly TF's 72 bits -- measured, QF and
+    // TF both scored 19.52 digits on 1/d1 at z = 1e18 + 1e26i, the same number
+    // to two decimals, and QF's divide was tracking the representable-set
+    // bound the whole way (see KNOWN_ISSUES.md KI-33 for the table).
+    //
+    // The cure is not a better divide -- divide is already optimal -- it is to
+    // never form the tiny quantity.  y^2*v = (y*(y/d1) + y*(y/d2))/2 keeps
+    // every intermediate at O(1) or O(|z|), where all four words are normal.
+    // Each quotient is non-negative (y is |Im z| and d1, d2 >= 0), so the sum
+    // cannot cancel.  This is the same FP32 subnormal floor KI-23 found inside
+    // log(); the log fix moved exp's argument, this one moves the divide's.
+    const QuadFloat q1 = (d1.f0 != 0.0f) ? divide(y, d1) : QuadFloat(0.0f);
+    const QuadFloat q2 = (d2.f0 != 0.0f) ? divide(y, d2) : QuadFloat(0.0f);
+    QuadFloat m = multiply_scalar(add(multiply(y, q1), multiply(y, q2)), 0.5f);
     // + (max(x,1) - 1), tested on the SIGNED difference rather than on x's
     // leading word, so an x whose leading word is exactly 1 but whose tail is
     // positive still takes the term (the KI-16 value-based-guard rule).
@@ -591,7 +606,30 @@ XPMATH_INLINE_FUNCTION QuadFloat xp_asin_imag_mag(QuadFloat x, QuadFloat y) {
     // may still underflow there, and that is harmless -- next to sqrt(2*m) it
     // is a correction of relative size sqrt(m/2), i.e. already below the
     // format's own resolution wherever it underflows.
-    const QuadFloat sm = (xm1s.f0 > 0.0f) ? sqrt(m) : multiply(y, sqrt(v));
+    // Where the max(x,1) term is present sqrt(m) is the only option.  Where it
+    // is absent m is exactly y^2*v, so sqrt(m) and y*sqrt(v) agree
+    // mathematically, and y*sqrt(v) is the better of the two wherever it is
+    // available: it never routes y through a square and a root.  MEASURED --
+    // forcing sqrt(m) across the board costs asin at 1e-4 + 1e-2i 0.41 digits,
+    // asinh at 10 + 1e-3i 0.22 and asinh at 0.9 + 9e-5i 0.15.
+    //
+    // It is unavailable in exactly one regime, and KI-33 adds a second:
+    //   * m underflowing at tiny y (the original reason for this branch), and
+    //   * v itself losing words to the subnormal floor, |v| < 5.5e-17.
+    // The selector tests d1 rather than v so v need not be built to decide.
+    // On this branch x <= 1, so d1 = hypot(x+1,y) + x + 1 <= 2(x+1) + y and a
+    // large d1 forces a large y -- which is the case where m is comfortably
+    // normal and sqrt(m) is the safe form.  1/5.5e-17 = 1.8e16.
+    QuadFloat sm;
+    if (xm1s.f0 > 0.0f || d1.f0 > 1.8e16f) {
+        sm = sqrt(m);
+    } else {
+        QuadFloat v(QuadFloat(0.0f));
+        if (d1.f0 != 0.0f) v = add(v, divide(one, d1));
+        if (d2.f0 != 0.0f) v = add(v, divide(one, d2));
+        v  = multiply_scalar(v, 0.5f);
+        sm = multiply(y, sqrt(v));
+    }
     // acosh(1+m) = log1p( m + sqrt(m)*sqrt(m+2) ). Split into two roots rather
     // than sqrt(m*(m+2)) so the product never overflows: each factor is O(|z|)
     // at worst and their product is the ~2|z| that log1p wants anyway. The
@@ -649,13 +687,15 @@ XPMATH_INLINE_FUNCTION QuadFloat xp_asin_real_mag(QuadFloat x, QuadFloat y) {
     const QuadFloat s_ = hypot(xm1, y);
     const QuadFloat d1 = add(r,  xp1);
     const QuadFloat d2 = add(s_, xm1);
-    QuadFloat v(QuadFloat(0.0f));
-    if (d1.f0 != 0.0f) v = add(v, divide(one, d1));
-    if (d2.f0 != 0.0f) v = add(v, divide(one, d2));
-    v = multiply_scalar(v, 0.5f);
-    // a - x, both terms >= 0.  y is never squared on its own (y*(y*v)), for the
-    // subnormal reason spelled out in xp_asin_imag_mag.
-    QuadFloat amx = multiply(y, multiply(y, v));
+    // a - x, both terms >= 0.  KI-33, exactly as in xp_asin_imag_mag: y^2*v is
+    // reassociated to (y*(y/d1) + y*(y/d2))/2 so that v -- magnitude ~1/|z|,
+    // and therefore stripped of its fourth word by the FP32 subnormal floor
+    // once |z| > 1.8e16 -- is never materialised on this path.  y is still
+    // never squared on its own, which is the OTHER subnormal hazard this line
+    // has always had to dodge (see the sqrt(a-x) comment below).
+    const QuadFloat q1 = (d1.f0 != 0.0f) ? divide(y, d1) : QuadFloat(0.0f);
+    const QuadFloat q2 = (d2.f0 != 0.0f) ? divide(y, d2) : QuadFloat(0.0f);
+    QuadFloat amx = multiply_scalar(add(multiply(y, q1), multiply(y, q2)), 0.5f);
     // + (max(1,x) - x) = (1 - x) when x < 1, nothing when x >= 1.  Tested on the
     // SIGNED difference, not on x's leading word (the KI-16 value-based rule).
     const bool xlt1 = (xm1s.f0 < 0.0f);
@@ -665,7 +705,25 @@ XPMATH_INLINE_FUNCTION QuadFloat xp_asin_real_mag(QuadFloat x, QuadFloat y) {
     // uses on sqrt(a-1) and for the same reason.  MEASURED, not assumed: y^2*v
     // is 1.9e-41 at z = 3 + 1e-20i, subnormal in an FP32 word, and taking the
     // root of it cost QF 3.58 digits (29.00 -> 25.42) before this line existed.
-    const QuadFloat sax = xlt1 ? sqrt(amx) : multiply(y, sqrt(v));
+    //
+    // KI-33 adds the middle branch.  For x >= 1 the y*sqrt(v) form is still
+    // preferred, but it is unusable once v has lost words to the subnormal
+    // floor (d1 > 1.8e16); there amx = y^2*v exactly, and where amx is itself
+    // normal sqrt(amx) is the form that survives.  Both tests are needed: at
+    // z = 1e18 + 1e-20i v is truncated AND amx is 5e-59, so neither form is
+    // clean and y*sqrt(v) remains the lesser loss.
+    QuadFloat sax;
+    if (xlt1) {
+        sax = sqrt(amx);
+    } else if (d1.f0 > 1.8e16f && amx.f0 >= 5.5451e-17f /* 2^72 * FLT_MIN */) {
+        sax = sqrt(amx);
+    } else {
+        QuadFloat v(QuadFloat(0.0f));
+        if (d1.f0 != 0.0f) v = add(v, divide(one, d1));
+        if (d2.f0 != 0.0f) v = add(v, divide(one, d2));
+        v   = multiply_scalar(v, 0.5f);
+        sax = multiply(y, sqrt(v));
+    }
     const QuadFloat apx = add(multiply_scalar(add(r, s_), 0.5f), x);   // a + x
     return atan2(x, multiply(sax, sqrt(apx)));
 }

@@ -61,6 +61,7 @@ either currently resolved or currently open.
 | 30 | DD `multiply` returns NaN whenever either operand exceeds ~1.34e300 (Dekker splitter) | RESOLVED | batch-7 § |
 | 31 | DD `divide_scalar` returns a quotient 2^64 too large above 1.339e300 | RESOLVED | batch-7 § |
 | 32 | complex `asin` loses its REAL part on the far real axis — `iz + sqrt(1-z^2)` cancels to (0,0), and NaNs above 1e19 on FF/QF/TF | **RESOLVED** | batch-9 ‖ — HFT `atan2(x, sqrt((a-x)(a+x)))`; the sum is never formed |
+| 33 | QF complex inverse family loses up to 9.49 digits at large \|z\| — the shared `v = (1/d1 + 1/d2)/2` has magnitude ~1/\|z\| and the FP32 subnormal floor strips its fourth word | **RESOLVED** | batch-10 — `y^2*v` reassociated so the tiny `v` is never formed |
 
 **31 resolved, 1 open** (29).
 
@@ -5674,3 +5675,190 @@ subsections, and KI-3, KI-6, KI-7 and KI-9 date their Resolution without a sha �
 these are all commits that were being written at the time the text was. The
 status table above supplies the real sha for each; the body prose was left
 untouched so that the historical record of what each session knew stays intact.
+
+---
+
+## KI-33 — QF complex inverse family: the shared `v = (1/d1 + 1/d2)/2` is stripped of its fourth word by the FP32 subnormal floor **[RESOLVED batch-10]**
+
+**Severity: medium (up to 9.49 digits of a 29-digit budget, silently, at large
+|z|; no NaN and no warning). QF only — the mechanism exists in TF and FF too but
+does not bite inside their own caps at any point measured.**
+
+### What was reported, and what is actually true
+
+The entry was opened on the observation that at `z = 1e8 + 1e-8i` the complex
+inverse family reads DD 31.00, TF 21.70, FF 14.00 — every backend exactly at its
+cap — while QF alone reads 25.50 on `asin`/`acos`/`asinh`/`acosh` and 24.52 on
+`sqrt`. **That framing does not survive measurement, and the 25.50 does not
+reproduce.** Measured on `aa121e8` against a `__float128` oracle, per component:
+
+```
+z = 1e8 + 1e-8i          QF re     QF im   |   TF re     TF im
+  asin                   29.44     28.52   |   22.88     22.76
+  acos                   27.66     28.52   |   22.60     22.76
+  asinh                  29.68     28.64   |   23.98     22.81
+  acosh                  28.52     27.66   |   22.76     22.60
+  sqrt                   exact     30.84   |   exact     23.46
+```
+
+Two corrections fall out of that table:
+
+1. **QF is not behind TF at this point — it is ~5 digits ahead.** TF "hits its
+   cap exactly" because its cap (21.70) sits roughly a digit *below* what TF
+   actually delivers there (22.6–24.0), so every TF cell clamps. The same is
+   true of DD and FF. QF's cap of 29.00 sits 0.10 digits *above* the 96-bit
+   half-ulp wall of a 4×FP32 expansion (2⁻⁹⁶ = 1.26e-29 → 28.90 digits), so QF
+   can essentially never read "at cap" at all. **"Three backends at cap and one
+   at 88% of cap" is a cap-calibration artifact, not a QF defect.**
+2. `sqrt` at this point scores 30.84 on its imaginary part and is *exact* on its
+   real part — it clamps to 29.00 and is not short by anything. See the sqrt
+   verdict below.
+
+The right control is not the cap but the **achievable floor**: the oracle rounded
+into each backend's own format by greedy nearest split, which is where a
+correctly-rounded result would land. Over 555 points of the complex inverse
+family (15 magnitudes × 7 component ratios × 5 ops):
+
+| backend | mean score | mean achievable | mean excess loss | points losing >0.5 |
+|---|---|---|---|---|
+| DD | 29.01 | 29.16 | **0.15** | 62 |
+| FF | 13.02 | 13.17 | **0.15** | 45 |
+| TF | 20.25 | 20.41 | **0.16** | 55 |
+| QF | 26.75 | 27.18 | **0.43** | 162 |
+
+So there *is* a real, QF-specific, systemic excess loss — about 3× the other
+three — but it is 0.43 digits on average, not 3.5, and it concentrates in a tail
+rather than sitting at 25.50 everywhere.
+
+### Extent
+
+Where the tail lives (before/after this fix; "achievable" is the format's own
+floor at that point, and `-` marks a backend already at its floor):
+
+| op | z | QF before | QF after | achievable | TF | DD | FF |
+|---|---|---|---|---|---|---|---|
+| asin | 1e18 + 1e26i | 19.51 | **29.00** | 29.00 | 19.80 (floor 21.70) | 31.00 - | 14.00 - |
+| acos/acosh | 1e18 + 1e26i | 21.30 | **29.00** | 29.00 | 21.30 (floor 21.70) | 31.00 - | 13.66 |
+| asin | 1e14 + 1e22i | 23.41 | **29.00** | 29.00 | 21.70 - | 31.00 - | 13.93 |
+| acos/acosh | 1e14 + 1e22i | 24.95 | **29.00** | 29.00 | 21.59 | 31.00 - | 13.58 |
+| asin | 1e18 + 1e20i | 25.23 | **29.00** | 29.00 | 21.45 | 30.91 | 13.52 |
+| asin | 1e10 + 1e18i | 27.15 | **29.00** | 29.00 | 21.70 - | 31.00 - | 14.00 - |
+| asin | 1e18 + 1e18i | 27.44 | **29.00** | 29.00 | 21.70 - | 31.00 - | 14.00 - |
+| acos/acosh | 1e18 + 1e20i | 27.35 | **28.14** | 29.00 | 21.59 | 30.39 | 13.74 |
+| asin/acos/acosh | 0.5 + 5e-17i | 28.27 | **29.00** | 29.00 | 21.70 - | 31.00 - | 14.00 - |
+
+Note the second column of the TF entries: at `1e18 + 1e26i` **TF misses its own
+floor too** (19.80 against 21.70). This was never a QF-only phenomenon; QF is
+merely where it is large enough to see.
+
+### Why — the derivation
+
+Both `xp_asin_imag_mag()` and `xp_asin_real_mag()`
+(`include/xp/qf_complex.hpp:564` and `:680`) build the Hull–Fairgrove–Tang
+quantity
+
+```
+v = (1/d1 + 1/d2)/2,   d1 = r + (x+1),  d2 = s + |x-1|
+```
+
+and then consume it only as `y²·v` and `y·√v`. `v` has magnitude ~1/|z|.
+
+A `QuadFloat` of magnitude 2^E carries its four words at 2^E, 2^(E-24),
+2^(E-48), 2^(E-72). The fourth word therefore leaves the FP32 **normal** range
+(2⁻¹²⁶) once `E < -54` — |v| < 5.5e-17, i.e. |z| > 1.8e16 — and is gone
+altogether below the smallest subnormal (2⁻¹⁴⁹) once `E < -77` — |v| < 6.6e-24,
+i.e. |z| > 1.5e23. **Below that threshold the four-word format cannot hold 96
+bits of a number that small at all**; QF degrades to exactly TF's 72 bits.
+
+Measured, and this is the decisive observation — the representable-set bound for
+a value of magnitude |v|, against what QF's `divide` actually delivers:
+
+```
+ |v|      QF representable   TF representable   QF divide   predicted 2^-149/|v|
+ 1e-10         30.50               22.91          30.50           (28.90 cap)
+ 1e-16         29.18               22.87          29.18            28.85
+ 1e-18         27.41               23.94          27.88            26.85
+ 1e-20         25.67               22.90          25.67            24.85
+ 1e-22         23.38               22.62          23.38            22.85
+ 1e-24         21.70               21.70          21.54            20.85
+ 1e-26         19.39               19.39          19.43            18.85
+ 1e-30         16.08               16.08          16.43            14.85
+```
+
+Two things are settled by that table. **QF's representable resolution collapses
+to bit-for-bit TF's from |v| ≈ 1e-24 downward** — the fourth word has nowhere to
+live. And **`divide` is not the defect**: it tracks the representable bound to
+within a few hundredths the whole way down. The corroborating measurement in the
+complex code is that at `z = 1e18 + 1e26i` QF and TF both score **19.52** digits
+on `1/d1` — the same number to two decimals, from two different formats, because
+at that magnitude they *are* the same format.
+
+This is the same FP32 subnormal floor KI-23 found inside `log()`. There, the fix
+moved `exp`'s argument so it was evaluated at a non-negative point; here the
+quantity that must move is the divide's.
+
+### Fix
+
+Never form `v`. Both consumers want something of magnitude O(|z|), not O(1/|z|):
+
+```
+y²·v = ( y·(y/d1) + y·(y/d2) ) / 2
+```
+
+keeps every intermediate at O(1) or O(|z|), where all four words are normal.
+Each quotient is non-negative (`y` is `|Im z|`, and `d1, d2 ≥ 0`), so the sum
+cannot cancel. `v` is still built, lazily, on the one branch that needs it —
+`y·√v` is the only form that survives `m` underflowing at tiny `y`, which is the
+hazard the `sm`/`sax` split has always existed to dodge, and where `y` is that
+small `v` is O(1) and perfectly conditioned. The branch selector tests `d1`
+rather than `v` so that `v` need not be built to decide whether to build it.
+
+`sqrt(m)` versus `y·√v` where both are available: `y·√v` wins and is kept.
+MEASURED — forcing `sqrt(m)` across the board costs `asin` at `1e-4 + 1e-2i`
+0.41 digits, `asinh` at `10 + 1e-3i` 0.22 and `asinh` at `0.9 + 9e-5i` 0.15.
+
+Result over the 555-point extent grid: mean excess loss **0.43 → 0.34**, points
+losing more than 0.5 digits **162 → 147**, and every point in the extent table
+above now sits exactly on its achievable floor.
+
+### The `sqrt` verdict — a different cause, and not this one
+
+`sqrt` at `z = 1e8 + 1e-8i` is **exact** on its real part and 30.84 digits on its
+imaginary part; it clamps to 29.00 and is short by nothing. The reported 24.52
+does not reproduce. Complex `sqrt` does not route through `xp_asin_*_mag` at all
+— it is the Kahan form on `abs(z)` — and this fix does not touch it, before or
+after.
+
+`sqrt` does have a genuine weak spot, but it is in the opposite corner of the
+plane: `1e-8 + 1e-24i` scores 20.53 against an achievable floor of 25.34 (gap
+4.81) and `1e-4 + 1e-20i` scores 24.63 against 27.05 (gap 2.42) — tiny |z| with
+an extreme component ratio, where TF is also short (gap 0.89) and DD and FF are
+clean. That is a separate defect on a separate path and is **not** closed here.
+
+### Evidence
+
+- Probed on `aa121e8` against a `__float128` / `__complex128` libquadmath oracle,
+  scoring reproduced from `scripts/sweep_accuracy.cpp:721-745` (per-component,
+  min of the two, zero-reference scored absolutely against the other component).
+- `sweep_accuracy` before/after, same binary rebuilt from each source state, two
+  runs each and byte-identical within each state: **157 decreases, 218
+  increases**, worst drop `QF c asin` point 292 29.00 → 28.24, best gain
+  `QF c asin` point 361 28.14 → 28.99. Every decrease and every increase is
+  confined to `QF c asin`/`acos`/`asinh`/`acosh` — no other backend and no real
+  op moves, which is the shape the change predicts.
+- Condition-aware ulp gate: **2348 gated points before, 2348 after** — unchanged,
+  and equal to the figure batch 9 left it at.
+- `ctest` 34/34.
+
+### Not implicated
+
+DD and FF are untouched and were measured clean at every point in the extent
+grid: DD's second word sits at 2^(E-53) and only underflows near the double
+format's own denormal edge, and FF's at 2^(E-24), which needs |z| > 4e37. TF's
+third word sits at 2^(E-48) and does underflow — TF misses its own floor by 1.90
+digits at `1e18 + 1e26i` — but the same reassociation was not applied there this
+batch, because TF's cap is loose enough that no TF cell in the shipped gates
+reads short. **That is a calibration accident, not a clean bill of health**: the
+mechanism is present in `include/xp/tf_complex.hpp:546` and `:624` in exactly the
+same two lines, and the same three-line change would close it. Filed here rather
+than as a separate entry so the two do not drift apart.
