@@ -598,6 +598,32 @@ void fill_complex_operands(int id, size_t i, const std::vector<GridPoint>& grid,
 // reference_complex, including its use of powq for exp2/exp10 (exp10q does not
 // exist and exp2q is absent from older libquadmath).
 // ---------------------------------------------------------------------------
+// KI-37.  `round` is the one op where the oracle and the library follow
+// DIFFERENT conventions, and the oracle was the wrong one.  C's `round` — and
+// therefore libquadmath's `roundq` — breaks ties AWAY from zero, so it scores
+// round(-6.5) as -7 and round(-0.5) as -1.  KI-20 deliberately gave the library
+// IEEE 754 `roundToIntegralTiesToEven`, under which those are -6 and -0, and
+// the library implements that correctly.  The two conventions differ at the
+// exact half-integers and nowhere else, which is why the disagreement was
+// exactly 8 points per backend.  Round the tie to even here so the oracle
+// scores the convention the library actually implements.
+//
+// Written out rather than delegating to rintq/nearbyintq: those honour the
+// DYNAMIC rounding mode, and the sweep must not depend on the mode a caller
+// happens to leave set.
+__float128 round_ties_even_q(__float128 a) {
+  if (isnanq(a) || !finiteq(a) || a == 0) return a;
+  const __float128 t = truncq(a);                    // toward zero, exact
+  const __float128 f = a - t;                        // |f| < 1, exact (Sterbenz)
+  const __float128 af = fabsq(f);
+  if (af < (__float128)0.5) return t;
+  if (af > (__float128)0.5) return t + copysignq((__float128)1.0, a);
+  // Exact tie: keep the even neighbour.
+  const __float128 h = t * (__float128)0.5;          // exact
+  if (h == truncq(h)) return t;                      // t already even
+  return t + copysignq((__float128)1.0, a);
+}
+
 // The quad-argument form. --classify needs to evaluate the oracle at PERTURBED
 // inputs, which are quad and not exactly representable as double, so the body
 // lives here and the double entry point below just widens and forwards.
@@ -640,7 +666,7 @@ __float128 reference_real_q(int id, __float128 a, __float128 b, __float128 c) {
     case R_Fma:       return fmaq(a, b, c);
     case R_Ceil:      return ceilq(a);
     case R_Floor:     return floorq(a);
-    case R_Round:     return roundq(a);
+    case R_Round:     return round_ties_even_q(a);           // KI-37
     case R_Trunc:     return truncq(a);
   }
   return (__float128)0.0;
@@ -1560,10 +1586,38 @@ void classify_complex(const char* be, const Range& rg, double cap, double thresh
 
   const bool ref_nan = (isnanq(rre) || isnanq(rim)) != 0;
   const bool ref_inf = !ref_nan && (!finiteq(rre) || !finiteq(rim));
-  const double ref_l10 = (ref_nan || ref_inf)
-                           ? 0.0
-                           : l10_mag(fabsq(rre) > fabsq(rim) ? rre : rim);
-  out.range_digits = (ref_nan || ref_inf) ? cap : digits_at_magnitude(ref_l10, rg, cap);
+  // KI-35.  Judge representability COMPONENTWISE, the way the scorer scores.
+  // This used to take a single magnitude — the LARGER of the two components —
+  // while the scorer (and the `ach` block below, which says so in its own
+  // comment) measures each component against ITSELF.  A result with one O(1)
+  // component and one component 40 orders below the format minimum was
+  // therefore scored on the tiny component's own relative error but judged
+  // representable from the big one, and a correctly-rounded zero landed in
+  // UNEXPLAINED.  `tanh(-100+i) = (-1, 2.5e-87)` is the canonical case.
+  //
+  // The argument loop above is already componentwise; this mirrors it.  A
+  // component that is exactly zero is exact, not degraded, and is skipped —
+  // same convention as the argument loop, and the same one the scorer uses
+  // when it normalises a zero component against the other one.
+  //   OVERFLOW  is a property of the LARGER component  (l10_hi)
+  //   UNDERFLOW and the subnormal-limb band are properties of the SMALLER
+  //             one (l10_lo), because the score is the worst component.
+  double l10_hi = -HUGE_VAL, l10_lo = HUGE_VAL;
+  if (!ref_nan && !ref_inf) {
+    const __float128 rc[2] = {rre, rim};
+    for (int k = 0; k < 2; ++k) {
+      const double lm = l10_mag(rc[k]);
+      if (lm == -HUGE_VAL) continue;            // exact zero component
+      if (lm > l10_hi) l10_hi = lm;
+      if (lm < l10_lo) l10_lo = lm;
+    }
+  }
+  const bool ref_zero = (rre == 0 && rim == 0);
+  if (l10_hi == -HUGE_VAL) { l10_hi = 0.0; l10_lo = 0.0; }   // NaN/inf, or 0+0i
+  const double ref_l10 = l10_hi;               // OVERFLOW side
+  out.range_digits = (ref_nan || ref_inf || ref_zero)
+                       ? cap
+                       : digits_at_magnitude(l10_lo, rg, cap);
 
   double est = 0.0;
   const bool have_est = est_log10_mag_complex(id, xq[0], xq[1], xq[2], xq[3], est);
@@ -1613,7 +1667,7 @@ void classify_complex(const char* be, const Range& rg, double cap, double thresh
                            { out.cls = 1; out.reason = ref_inf ? "true-result-exceeds-binary128"
                                                                : "true-result-exceeds-word-max"; return; }
   if (oracle_underflowed)  { out.cls = 0; out.reason = "true-result-underflows-binary128"; return; }
-  if (!ref_nan && !ref_inf && !(rre == 0 && rim == 0) && ref_l10 < rg.l10_min_sub)
+  if (!ref_nan && !ref_inf && !ref_zero && l10_lo < rg.l10_min_sub)   // KI-35
                            { out.cls = 0; out.reason = "true-result-below-word-min"; return; }
   if (out.range_digits < thresh)
                            { out.cls = 0; out.reason = "result-in-subnormal-limb-band"; return; }

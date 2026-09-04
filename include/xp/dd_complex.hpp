@@ -57,6 +57,132 @@
 
 namespace xp {
 
+namespace detail {
+
+// ============================================================================
+// KI-36 — COMPENSATED 2x2 DETERMINANT.  a*b - c*d, evaluated so the SUBTRACTION
+// happens between EXACT quantities.  This block is the derivation the FF, TF and
+// QF siblings (ff_complex.hpp, tf_complex.hpp, qf_complex.hpp) cite; they carry
+// the same algorithm with their own word count and expansion length.
+//
+// THE DEFECT.  Complex division formed each quotient numerator as a difference
+// of two SEPARATELY ROUNDED products:
+//
+//     subtract(multiply(im, b.re), multiply(re, b.im))
+//
+// Each `multiply` rounds to the type before `subtract` sees it, so each carries
+// an error of eps_T*|im*b.re|.  When z1 is nearly parallel to z2 the two
+// products cancel; the true difference shrinks by the cancellation ratio
+//
+//     C = |im*b.re| / |im*b.re - re*b.im|
+//
+// but the two rounding errors do not shrink at all, so the quotient's imaginary
+// part loses log10(C) digits.  Measured at inputs that are EXACTLY STORED — so
+// there is no input error to blame — with C = 4.84e8:
+//
+//     DD 25.66 of 31 | FF 6.50 of 14 | TF 15.80 of 21.7 | QF 20.69 of 29
+//
+// and the achievable value at those points is the FULL CAP on all four
+// backends.  The shortfall tracking log10(C) identically across four different
+// word counts is the round-then-cancel signature, not conditioning.  Smith's
+// algorithm does not help: it reassociates but still differences two rounded
+// products.
+//
+// THE FIX.  Expand both products into EXACT words with the header's two_prod,
+// feed the words of a*b and -c*d into a magnitude-descending expansion
+// accumulator in INTERLEAVED order (head against head, tail against tail, so
+// each cancellation resolves the moment it arrives and resolves exactly), and
+// renormalise the expansion at the end.  This is Kahan's determinant lifted
+// from FMA-on-scalars to two_prod-on-limbs.
+//
+// WHY THE TOP TWO WORDS.  Only the part of each product that can survive the
+// cancellation has to be exact.  Split x = xhi + xlo with xhi the top TWO
+// words:
+//
+//   a*b - c*d = (ahi*bhi - chi*dhi) + (ahi*blo + alo*b - chi*dlo - clo*d)
+//                \_ exact, 8 words _/  \_ magnitude <= u^2*|a*b|, plain T _/
+//
+// with u the WORD roundoff (2^-53 here, 2^-24 on the FP32 backends).  The right
+// bracket is computed in ordinary type arithmetic and so carries an absolute
+// error eps_T*u^2*|a*b| = eps_T*u^2*C*|det|; at the measured C = 9.55e8 that is
+// 2^-18 of one eps_T, i.e. the correctly rounded determinant with 18 bits to
+// spare.  ONE word of peel would leave u*C = 2^5.8 — six bits SHORT — which is
+// why the split is two words and not one.  DoubleDouble and FloatFloat have
+// exactly two words, so xlo is identically zero for them and the determinant is
+// exact outright; only TF and QF carry the correction term.
+//
+// EXPANSION LENGTH.  The accumulator keeps L words and the residue that falls
+// off the bottom is u^L of the leading word.  DD needs eps_T/C = 2^-106-30 =
+// 2^-136 and L = 5 gives 2^-265.
+//
+// SCOPE.  Only the DIRECT branch of operator/ is rewritten.  Past the KI-8
+// gate, Smith's algorithm divides by rr = b.im/b.re first, and rr's OWN
+// rounding — not the products' — then sets the floor at eps_T*C; compensating
+// the products there buys nothing.  See KI-36's entry in docs/KNOWN_ISSUES.md
+// for the measurement.  The non-finite guard below keeps KI-19/KI-27/KI-28
+// signalling bit-identical: if either leading product is not finite, the old
+// expression runs unchanged and produces the same inf/NaN it always did.
+// ============================================================================
+
+// Exact sum of two doubles (Knuth two_sum; no ordering assumption).
+XPMATH_INLINE_FUNCTION double dd_cross_two_sum(double a, double b, double& err) {
+    const double s  = a + b;
+    const double bb = s - a;
+    err = (a - (s - bb)) + (b - bb);
+    return s;
+}
+
+// Shewchuk grow-expansion into a fixed-length, magnitude-descending expansion.
+// The exact sum of e[] is preserved at every step; only the residue that falls
+// out of the bottom slot is rounded in.
+XPMATH_INLINE_FUNCTION void dd_cross_accum(double* e, double w) {
+    for (int i = 0; i < 5; ++i) {
+        double err;
+        e[i] = dd_cross_two_sum(e[i], w, err);
+        w = err;
+        if (w == 0.0) return;
+    }
+    e[4] += w;
+}
+
+XPMATH_INLINE_FUNCTION DoubleDouble dd_cross(DoubleDouble a, DoubleDouble b,
+                                             DoubleDouble c, DoubleDouble d) {
+    const double ga = a.hi * b.hi, gc = c.hi * d.hi;
+    if (!detail::isfinite(ga) || !detail::isfinite(gc))
+        return subtract(multiply(a, b), multiply(c, d));   // KI-19/27/28 path
+
+    double e[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+    const double aw[2] = {a.hi, a.lo}, bw[2] = {b.hi, b.lo};
+    const double cw[2] = {c.hi, c.lo}, dw[2] = {d.hi, d.lo};
+    for (int i = 0; i < 2; ++i) {
+        for (int j = 0; j < 2; ++j) {
+            const DoubleDouble p = two_prod(aw[i], bw[j]);
+            const DoubleDouble q = two_prod(cw[i], dw[j]);
+            dd_cross_accum(e,  p.hi);  dd_cross_accum(e, -q.hi);
+            dd_cross_accum(e,  p.lo);  dd_cross_accum(e, -q.lo);
+        }
+    }
+    // The forward cascade does NOT leave e[] magnitude-descending: once the
+    // leading terms cancel, |e[1]| can exceed |e[0]| by many orders (measured
+    // on QF at grid point 911: e = [-3.7e-26, 1.1e-22, 0, 0, 0]).  Every
+    // renormalisation downstream assumes descending order, so run one backward
+    // VecSum sweep first (Ogita-Rump-Oishi Alg. 4.3) -- order-agnostic, exact,
+    // and it leaves the vector S-nonoverlapping.
+    double s = e[4];
+    for (int i = 3; i >= 0; --i) {
+        double er;
+        s = dd_cross_two_sum(e[i], s, er);
+        e[i + 1] = er;
+    }
+    e[0] = s;
+    // Fold the tail ascending, then one quick_two_sum into the two stored words.
+    const double t  = ((e[4] + e[3]) + e[2]) + e[1];
+    const double hi = e[0] + t;
+    return DoubleDouble(hi, t - (hi - e[0]));
+}
+
+} // namespace detail
+
 // ============================================================
 // DoubleDoubleComplex struct
 // ============================================================
@@ -199,8 +325,11 @@ struct DoubleDoubleComplex {
         }
         DoubleDouble denom = add(multiply(b.re, b.re), multiply(b.im, b.im));
         DoubleDouble inv   = divide(DoubleDouble(1.0), denom);
-        return DoubleDoubleComplex(multiply(add(multiply(re, b.re), multiply(im, b.im)), inv),
-                         multiply(subtract(multiply(im, b.re), multiply(re, b.im)), inv));
+        // KI-36: both numerators are 2x2 determinants and both can cancel, so
+        // both go through the compensated form.  ac+bd is a*b - (-c)*d.
+        return DoubleDoubleComplex(
+            multiply(detail::dd_cross(re, b.re, negate(im), b.im), inv),
+            multiply(detail::dd_cross(im, b.re, re, b.im), inv));
     }
     XPMATH_INLINE_FUNCTION DoubleDoubleComplex operator-() const {
         return DoubleDoubleComplex(negate(re), negate(im));

@@ -94,6 +94,82 @@
 
 namespace xp {
 
+namespace detail {
+
+// KI-36 — compensated 2x2 determinant a*b - c*d.  Full derivation (why the
+// round-then-cancel form loses log10(C) digits, why the peel is two words, how
+// the expansion length is chosen, and why only the DIRECT branch changes) is
+// the block comment at dd_complex.hpp:detail; this is the four-word instance.
+// Measured at C = 4.84e8 the old form returned 20.69 of QF's 29 digits.
+//
+// QuadFloat carries TWO words beyond the peel, so the correction term is
+// ahi*blo + alo*b - chi*dlo - clo*d with xlo two words wide, magnitude
+// <= u^2*|a*b| at u = 2^-24, evaluated in plain QuadFloat arithmetic.  L = 7
+// words: the residue off the bottom is u^7 = 2^-168 of the leading word,
+// against the eps_T/C = 2^-96-30 = 2^-126 the determinant needs.
+
+XPMATH_INLINE_FUNCTION void qf_cross_accum(float* e, float w) {
+    for (int i = 0; i < 7; ++i) {
+        float err;
+        e[i] = qf_two_sum(e[i], w, err);
+        w = err;
+        if (w == 0.0f) return;
+    }
+    e[6] += w;
+}
+
+XPMATH_INLINE_FUNCTION QuadFloat qf_cross(QuadFloat a, QuadFloat b,
+                                          QuadFloat c, QuadFloat d) {
+    const float ga = a.f0 * b.f0, gc = c.f0 * d.f0;
+    if (!detail::isfinite(ga) || !detail::isfinite(gc))
+        return subtract(multiply(a, b), multiply(c, d));   // KI-19/27/28 path
+
+    // Word-pair grid, all scalar.  a_i*b_j has relative weight 2^-24(i+j), so
+    // i+j <= 3 must be carried EXACTLY (two_prod head + error), i+j == 4 sits at
+    // the 2^-96 resolution and its own rounding is 2^-120, and i+j >= 5 is below
+    // the format entirely.
+    //
+    // Deliberately NOT the earlier two-word peel plus a QuadFloat correction
+    // term: that built QuadFloat(b.f2, b.f3, 0, 0) and multiplied it, and when
+    // b's low words are subnormal -- routine here, since f3 is 2^-72 of f0 --
+    // the multiply's Dekker split of a subnormal leading word sheds bits.
+    // Measured on complex tan at z = (-2, 1e-18): the peel scored the imaginary
+    // numerator 27.08 of 29 where the scalar grid reaches full cap.
+    float e[7] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    const float aw[4] = {a.f0, a.f1, a.f2, a.f3}, bw[4] = {b.f0, b.f1, b.f2, b.f3};
+    const float cw[4] = {c.f0, c.f1, c.f2, c.f3}, dw[4] = {d.f0, d.f1, d.f2, d.f3};
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4 && j + i <= 4; ++j) {
+            if (i + j <= 3) {
+                float ep, eq;
+                const float p = qf_two_prod(aw[i], bw[j], ep);
+                const float q = qf_two_prod(cw[i], dw[j], eq);
+                qf_cross_accum(e,  p);  qf_cross_accum(e, -q);
+                qf_cross_accum(e, ep);  qf_cross_accum(e, -eq);
+            } else {
+                qf_cross_accum(e,  aw[i] * bw[j]);
+                qf_cross_accum(e, -cw[i] * dw[j]);
+            }
+        }
+    }
+
+    // Backward VecSum sweep -- renorm_4 is a quick_two_sum chain and needs a
+    // magnitude-descending input, which the forward cascade does not give once
+    // the leading terms cancel.  See dd_cross for the measured counterexample.
+    float s = e[6];
+    for (int i = 5; i >= 0; --i) {
+        float er;
+        s = qf_two_sum(e[i], s, er);
+        e[i + 1] = er;
+    }
+    e[0] = s;
+    e[4] = (e[6] + e[5]) + e[4];
+    renorm_4(e[0], e[1], e[2], e[3], e[4]);
+    return QuadFloat(e[0], e[1], e[2], e[3]);
+}
+
+} // namespace detail
+
 // ============================================================
 // QuadFloatComplex struct
 // ============================================================
@@ -215,8 +291,10 @@ struct QuadFloatComplex {
         }
         QuadFloat denom = add(multiply(b.re, b.re), multiply(b.im, b.im));
         QuadFloat inv   = divide(QuadFloat(1.0f), denom);
-        return QuadFloatComplex(multiply(add(multiply(re, b.re), multiply(im, b.im)), inv),
-                                multiply(subtract(multiply(im, b.re), multiply(re, b.im)), inv));
+        // KI-36: both numerators are 2x2 determinants and both can cancel.
+        return QuadFloatComplex(
+            multiply(detail::qf_cross(re, b.re, negate(im), b.im), inv),
+            multiply(detail::qf_cross(im, b.re, re, b.im), inv));
     }
     XPMATH_INLINE_FUNCTION QuadFloatComplex operator-() const {
         return QuadFloatComplex(negate(re), negate(im));

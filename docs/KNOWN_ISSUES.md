@@ -64,9 +64,18 @@ either currently resolved or currently open.
 | 33 | QF complex inverse family loses up to 9.49 digits at large \|z\| — the shared `v = (1/d1 + 1/d2)/2` has magnitude ~1/\|z\| and the FP32 subnormal floor strips its fourth word | **RESOLVED** | batch-10 — `y^2*v` reassociated so the tiny `v` is never formed |
 | 34 | `log`'s error is constant in ABSOLUTE terms (DD 40·2⁻¹⁰⁶, FF 8.0·2⁻⁴⁸, TF 5.4·2⁻⁷², QF 9.4·2⁻⁹⁶), so its relative error grows like 1/\|ln v\| — `exp`'s relative error entering the Newton step | **RESOLVED** | batch-12 ⁑ — `exp` carried the leading `1` through its `nq` squarings, which DOUBLE relative error; tracking `e^r − 1` and squaring as `s·(s+2)` preserves it |
 
-**34 resolved, 0 open.** Every entry ever filed is now resolved. KI-29 was
+| 35 | the sweep classifier judges a COMPLEX point's representability by its LARGER component while the scorer scores each component against ITSELF | **RESOLVED** | batch-13 ⁂⁂ — classifier only; UNEXPLAINED 1391 → 420 with not one digit score moved |
+| 36 | complex division rounds each cross product before differencing them, so the quotient loses `log10(C)` digits | **RESOLVED** | batch-13 ⁂⁂ — compensated 2×2 determinant on the direct branch in all four headers. Two further defects found *inside* the fix and closed with it (see the entry) |
+| 37 | the sweep oracle scores `round` with ties-away-from-zero, but KI-20 made the library ties-to-even | **RESOLVED** | batch-13 ⁂⁂ — oracle only; library rounding untouched |
+| 38 | real `fma` loses digits to cancellation in `a·b + c` | **OPEN** | filed 2026-09-04, undiagnosed; explicitly NOT assumed to share KI-36's mechanism |
+
+**37 resolved, 1 open (KI-38).** KI-29 was
 closed by batch-11; the measurement that closed it *filed* KI-34, which is the
 defect KI-29's residual actually belonged to, and batch-12 closes that.
+
+⁂⁂ `batch-13` is the commit titled `fix: KI-36 compensated complex division;
+KI-35/KI-37 classifier and oracle` — a commit cannot record its own sha and
+this table ships inside it.
 
 ⁑ `batch-12` is the commit titled `fix: KI-34 log absolute-error floor and the
 exp error behind it` — a commit cannot record its own sha and this table ships
@@ -6310,7 +6319,7 @@ KI-23 (QF `log` family losing digits at *large* argument, resolved batch-6) —
 that was argument reduction, was QF-only, and was a large-`|ln v|` effect. This
 one is all four backends, is worst at *small* `|ln v|`, and survives KI-23's fix.
 
-## KI-35 — the sweep classifier judges a COMPLEX point's representability by its LARGER component, while the scorer scores each component against ITSELF **[OPEN — tool defect, accounts for 1,217 of the 1,391 UNEXPLAINED points]**
+## KI-35 — the sweep classifier judges a COMPLEX point's representability by its LARGER component, while the scorer scores each component against ITSELF **[RESOLVED batch-13]**
 
 **Severity: NONE to the library, HIGH to the triage.** Filed 2026-09-04 by the
 session that attacked the 1,391-point UNEXPLAINED residue. No library code is
@@ -6418,9 +6427,34 @@ Until then the UNEXPLAINED column overstates the number of candidate defects by
 about 8×, and `--classify` exits 3 on a library that is, at those points,
 returning the correctly rounded answer.
 
+### Resolved — batch-13
+
+`classify_complex` now derives two magnitudes from the reference instead of one:
+`l10_hi` (the larger component) and `l10_lo` (the smaller, ignoring an exact
+zero component). OVERFLOW keeps `l10_hi`, because overflow is a property of the
+larger component. `range_digits` and the below-word-minimum test both take
+`l10_lo`, because the score is the *worse* of the two components and it is the
+smaller one whose magnitude runs out of exponent first. That mirrors the loop
+over `xq[k]` directly above it, which was already componentwise on the
+arguments.
+
+**Census.** UNEXPLAINED 1391 → 420 with the classifier change alone. That is
+971, not the 1,217 this entry predicted. The gap is not a shortfall in the fix:
+the census above was taken at the `full_prec` crossing — any degradation at all
+— whereas the classifier's live test is `range_digits < classify_frac × cap`.
+The live test is the *stricter* of the two, so it cannot move a point out of
+UNEXPLAINED that is not genuinely format-limited, which is the property that
+matters. The remaining 246 stay UNEXPLAINED and remain candidates.
+
+**No digit score moved.** The classifier is downstream of the scorer, and the
+monotone gate confirms it: with only the KI-35 and KI-37 edits in the tree, the
+gate reported **0 decreased and 0 increased** apart from 32 rows, all of them
+`r round`, 8 per backend, which are KI-37's oracle correction. Every other row
+of all 428,592 was byte-identical.
+
 ---
 
-## KI-36 — complex division rounds each cross product before differencing them, so the quotient loses `log10(C)` digits to a cancellation the format could absorb **[OPEN — real defect, ~69 points]**
+## KI-36 — complex division rounds each cross product before differencing them, so the quotient loses `log10(C)` digits to a cancellation the format could absorb **[RESOLVED batch-13]**
 
 **Severity: MEDIUM, all four backends.** Filed 2026-09-04 by the same session.
 This is the residue of the complex-`div` population that KI-35 does *not*
@@ -6504,9 +6538,140 @@ family — inherits whatever it does, so it needs the full monotone and ULP
 gates behind it rather than the tail of a session. Estimated at one focused
 sub-plan.
 
+### Resolved — batch-13
+
+`detail::dd_cross` / `ff_cross` / `tf_cross` / `qf_cross` added to the four
+complex headers and wired into **both** numerators of `operator/`'s direct
+branch (`ac + bd` is `a·b − (−c)·d`, so it is the same 2×2 determinant and can
+cancel the same way). Smith's out-of-band branch is untouched: there the
+quotient is formed from `rr = b.im/b.re`, whose own rounding sets the floor
+before the determinant is reached.
+
+Each `*_cross` accumulates the full word-pair grid of `a·b − c·d` as scalars
+into a fixed cascade, so no product is rounded before the difference is taken:
+pairs with `i+j` below the type's word count go in exactly as a two_prod head
+and error, the pairs exactly at the resolution limit go in as a plain product
+(their own rounding is a further 2^-24 down), and pairs beyond it are dropped.
+The non-finite guard falls back to the old `subtract(multiply, multiply)` so the
+KI-19/27/28 overflow recovery is unaffected.
+
+**Two further defects were found inside the fix and are closed with it.** Both
+were introduced by the first cut and caught by the monotone gate, and both are
+worth recording because they are generic to this style of code:
+
+1. *The forward cascade is not magnitude-descending.* `renorm_3`, `renorm_4`
+   and every quick_two_sum chain require it. Measured on QF at complex-`div`
+   grid point 911, the accumulator arrived as
+   `[-3.674e-26, 1.108e-22, 0, 0, 0]` — `e[1]` four orders of magnitude
+   *larger* than `e[0]`, because `e[0]` had cancelled after `e[1]` was
+   populated. `renorm_4` then returned `1.108e-22` and threw the rest away:
+   7.76 digits of 29 where the accumulator itself held all 29. Fixed with one
+   backward VecSum sweep (Ogita-Rump-Oishi Alg. 4.3) before the renormalisation
+   in all four headers; it is order-agnostic, exact, and leaves the vector
+   S-nonoverlapping. Worst monotone drop fell from 10.26 digits to 2.26.
+2. *A correction term must not be built out of low limbs.* The first cut peeled
+   two words and recovered the rest as `ahi·blo + alo·b`, constructing e.g.
+   `QuadFloat(b.f2, b.f3, 0, 0)` and multiplying it. `b.f3` is 2^-72 of `b.f0`
+   and is routinely **subnormal** in FP32, and the multiply's Dekker split of a
+   subnormal leading word sheds bits. Replaced by the all-scalar word-pair grid
+   described above, which never constructs an extended type from low limbs.
+
+### Measured, direct branch, exact-determinant oracle
+
+The table in *What*, above, is **wrong about DD** and is corrected here. Its
+oracle was libquadmath's `__complex128` division, which is itself a
+round-then-cancel implementation and bottoms out near 25.3 digits at
+C = 4.84e8 (a quad carries 113 bits; 113 − log2(C) ≈ 83 bits ≈ 25 digits).
+DD's reported "25.66 of 31" was that oracle, not the library — this is the
+PROBE TRAP in a form the original session did not anticipate. Re-measured
+against an exact unevaluated-`__float128`-pair determinant, DD is at full cap
+both before and after. Imaginary component, the component that cancels:
+
+| point | | DD (cap 31) | FF (cap 14) | TF (cap 21.70) | QF (cap 29) |
+|---|---|---|---|---|---|
+| C = 4.84e8 | before | 31.00 | 6.50 | 15.80 | 20.69 |
+| C = 4.84e8 | after  | 31.00 | **14.00** | **20.69** | 20.69 |
+| C = 9.55e8 | before | 31.00 | 5.98 | 14.14 | 19.16 |
+| C = 9.55e8 | after  | 31.00 | **14.00** | **19.16** | 19.16 |
+
+Real component: 31.00 / 14.00 / 21.70 / 29.00 after, everywhere; QF's real
+component at C = 9.55e8 improved 28.68 → 29.00.
+
+**This entry's claim that "the achievable value at every one of those points is
+the FULL CAP" is not true for TF and QF, and the fix does not make it true.**
+The determinant at C = 4.84e8 is 3.955e-26 and FP32's smallest subnormal is
+1.401e-45, so the value cannot be *held* in FP32 limbs to better than a measured
+20.69 digits — rounding the exact determinant straight into TF storage and into
+QF storage both score exactly 20.69, which is where the fix lands. TF and QF
+returning bit-identical digit counts despite different word counts is the
+subnormal-limb signature (cf. KI-33). At C = 9.55e8 the storable ceiling is
+21.47 and the fix reaches 19.16, so **2.31 digits of headroom remain there**,
+again identically on TF and QF; the cause is not isolated and is recorded as a
+residual rather than claimed closed. Lifting either would mean carrying the
+determinant scaled by an exact power of two and dividing by a correspondingly
+scaled denominator so the tiny value never materialises — a larger surgery than
+this fix.
+
+### Inheritors — measured, not assumed
+
+Net digit change over the full 428,592-point sweep, per (backend, op), for
+`div` and the five ops this entry lists as inheriting it:
+
+| op | DD | FF | QF | TF |
+|---|---|---|---|---|
+| `div`   | ±0.00 | **+135.87** | **+207.19** | **+743.05** |
+| `tan`   | +1.09 | **+26.57** | −5.78 | −0.01 |
+| `atanh` | +0.20 | +0.37 | −0.29 | −0.10 |
+| `atan`  | ±0.00 | ±0.00 | ±0.00 | ±0.00 |
+| `asin`  | +0.01 | ±0.00 | ±0.00 | ±0.00 |
+| `acos`  | +0.01 | ±0.00 | ±0.00 | ±0.00 |
+
+`atan`, `asin` and `acos` do **not** move: they are built from `log` and `sqrt`,
+not from `operator/`, so they never inherited the defect in the first place —
+this entry assumed they did. (`DD asin`/`acos` +0.01 is the ±0.01 oracle jitter
+described below, not a change.) `tan` is `sin(z)/cos(z)` and does route through
+it, but its accuracy is dominated by `sin` and `cos`'s own error, so the
+division's rounding reshuffles at the last ulp: 452 points up and 320 down
+across the four backends, net +21.87. DD is at full cap at the probe points and
+so gains nothing there.
+
+### Accepted decreases
+
+The monotone gate reports **348 decreased, 680 increased** against
+`validation/sweep/sweep_baseline.csv` (428,592 points; worst drop 2.26 digits).
+Total digits gained +1918, lost −60.6. The decreases are accepted, with cause:
+
+- **`c tan`, 320 points, all four backends, worst −1.99 (QF).** Last-ulp
+  reshuffling on a quantity whose error is set by `sin`/`cos`, as above; the
+  same change moves 452 tan points *up*. Where the drop is largest the new
+  value sits on the FP32 subnormal-limb floor and the old value was fortuitous:
+  at z = (−2, 1e-18) the imaginary numerator is ~1e-18, whose FP32 floor is
+  ~26.85 digits, the old code scored 29.00 and the new scores 26.84.
+- **`c atanh`, 9 points, worst −0.44**, and **`c div`, 6 points, worst −2.26**
+  — same last-ulp mechanism. The one that looks alarming, FF `c div` point 155
+  (2.26 → 0.00), is the sweep's own `__complex128` oracle: measured against the
+  exact determinant the library moved 0.03 → 14.00 at that point. It got
+  *better*; the recorded score fell because the reference is wrong there. This
+  is the same oracle limitation that produced this entry's DD row.
+- **`DD c pow`, 13 points, all ≤ 0.05** — not this change. The sweep is not
+  bit-reproducible across runs at the ±0.01 level in DD complex inverse
+  functions: five consecutive runs of the same binary produced two distinct
+  outputs differing in 23 of 428,592 rows, correlated with a differing
+  `oracle-fingerprint`, i.e. libquadmath's own reproducibility. Worth a separate
+  entry if it ever matters.
+
+### Gates
+
+- `ctest` **34/34** from `$HOME/k35_build`.
+- Condition-aware ULP gate: **980 gated failing points / 21 gated cells before,
+  948 / 17 after** — four cells recovered. Still FAIL overall; it was already
+  FAIL at 131404c and is opt-in, not part of ctest.
+- `--classify`: **UNEXPLAINED 1391 → 298** for KI-35 and KI-36 together (KI-35
+  alone takes it to 420).
+
 ---
 
-## KI-37 — the sweep oracle scores `round` with ties-away-from-zero, but KI-20 made the library ties-to-even **[OPEN — tool defect, 32 points]**
+## KI-37 — the sweep oracle scores `round` with ties-away-from-zero, but KI-20 made the library ties-to-even **[RESOLVED batch-13]**
 
 **Severity: NONE to the library.** Filed 2026-09-04. All 32 points are the
 eight exact half-integers `±0.5, ±2.5, ±4.5, ±6.5`, on all four backends.
@@ -6523,6 +6688,23 @@ Nothing to fix in `include/xp/`. The oracle for `C_Round`/`R_Round` in
 `scripts/sweep_accuracy.cpp` should use `rintq` under the default rounding mode
 (or an explicit ties-to-even helper) rather than `roundq`. Out of this
 session's edit scope.
+
+### Resolved — batch-13
+
+`round_ties_even_q` added to `scripts/sweep_accuracy.cpp` and wired into
+`R_Round`. Written out rather than delegating to `rintq`/`nearbyintq`: those
+honour the *dynamic* rounding mode, and the sweep must not depend on whatever
+mode a caller happens to leave set. The library's rounding is untouched.
+
+**Count confirmed: exactly 32 points**, 8 per backend, at grid points
+272/312/352/392/412/452/492/532. Each moves from 0.00–0.85 digits to the full
+backend cap (DD 31.00, FF 14.00, QF 29.00, TF 21.70). These are the *only*
+increases the classifier/oracle work produced, and they are required — the
+baseline was recording the library as wrong where it was right.
+
+Note this changes the sweep's `oracle-fingerprint`, so the monotone gate now
+prints an ORACLE FINGERPRINT MISMATCH warning against the committed baseline.
+That is expected and is the point of the fingerprint.
 
 ---
 

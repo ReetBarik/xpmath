@@ -57,6 +57,69 @@
 
 namespace xp {
 
+namespace detail {
+
+// KI-36 — compensated 2x2 determinant a*b - c*d.  Full derivation (why the
+// round-then-cancel form loses log10(C) digits, why the peel is two words, how
+// the expansion length is chosen, and why only the DIRECT branch changes) is
+// the block comment at dd_complex.hpp:detail; this is the two-word FP32
+// instance of it.  FloatFloat has exactly two words, so the peel covers the
+// whole value and the determinant is EXACT before renormalisation.  Measured at
+// C = 4.84e8 the old form returned 6.50 of FF's 14 digits.
+// L = 5 words: the residue off the bottom is u^5 = 2^-120 of the leading word,
+// against the eps_T/C = 2^-48-30 = 2^-78 the determinant needs.
+
+// Exact sum of two floats (Knuth two_sum; no ordering assumption).
+XPMATH_INLINE_FUNCTION float ff_cross_two_sum(float a, float b, float& err) {
+    const float s  = a + b;
+    const float bb = s - a;
+    err = (a - (s - bb)) + (b - bb);
+    return s;
+}
+
+XPMATH_INLINE_FUNCTION void ff_cross_accum(float* e, float w) {
+    for (int i = 0; i < 5; ++i) {
+        float err;
+        e[i] = ff_cross_two_sum(e[i], w, err);
+        w = err;
+        if (w == 0.0f) return;
+    }
+    e[4] += w;
+}
+
+XPMATH_INLINE_FUNCTION FloatFloat ff_cross(FloatFloat a, FloatFloat b,
+                                           FloatFloat c, FloatFloat d) {
+    const float ga = a.hi * b.hi, gc = c.hi * d.hi;
+    if (!detail::isfinite(ga) || !detail::isfinite(gc))
+        return subtract(multiply(a, b), multiply(c, d));   // KI-19/27/28 path
+
+    float e[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    const float aw[2] = {a.hi, a.lo}, bw[2] = {b.hi, b.lo};
+    const float cw[2] = {c.hi, c.lo}, dw[2] = {d.hi, d.lo};
+    for (int i = 0; i < 2; ++i) {
+        for (int j = 0; j < 2; ++j) {
+            const FloatFloat p = two_prod(aw[i], bw[j]);
+            const FloatFloat q = two_prod(cw[i], dw[j]);
+            ff_cross_accum(e,  p.hi);  ff_cross_accum(e, -q.hi);
+            ff_cross_accum(e,  p.lo);  ff_cross_accum(e, -q.lo);
+        }
+    }
+    // Backward VecSum sweep before normalising -- see dd_cross for why the
+    // forward cascade cannot be assumed magnitude-descending.
+    float s = e[4];
+    for (int i = 3; i >= 0; --i) {
+        float er;
+        s = ff_cross_two_sum(e[i], s, er);
+        e[i + 1] = er;
+    }
+    e[0] = s;
+    const float t  = ((e[4] + e[3]) + e[2]) + e[1];
+    const float hi = e[0] + t;
+    return FloatFloat(hi, t - (hi - e[0]));
+}
+
+} // namespace detail
+
 // ============================================================
 // FloatFloatComplex struct
 // ============================================================
@@ -172,8 +235,10 @@ struct FloatFloatComplex {
         }
         FloatFloat denom = add(multiply(b.re, b.re), multiply(b.im, b.im));
         FloatFloat inv   = divide(FloatFloat(1.0f), denom);
-        return FloatFloatComplex(multiply(add(multiply(re, b.re), multiply(im, b.im)), inv),
-                         multiply(subtract(multiply(im, b.re), multiply(re, b.im)), inv));
+        // KI-36: both numerators are 2x2 determinants and both can cancel.
+        return FloatFloatComplex(
+            multiply(detail::ff_cross(re, b.re, negate(im), b.im), inv),
+            multiply(detail::ff_cross(im, b.re, re, b.im), inv));
     }
     XPMATH_INLINE_FUNCTION FloatFloatComplex operator-() const {
         return FloatFloatComplex(negate(re), negate(im));

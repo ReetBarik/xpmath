@@ -77,6 +77,75 @@
 
 namespace xp {
 
+namespace detail {
+
+// KI-36 — compensated 2x2 determinant a*b - c*d.  Full derivation (why the
+// round-then-cancel form loses log10(C) digits, why the peel is two words, how
+// the expansion length is chosen, and why only the DIRECT branch changes) is
+// the block comment at dd_complex.hpp:detail; this is the three-word instance.
+// Measured at C = 4.84e8 the old form returned 15.80 of TF's 21.70 digits.
+//
+// TripleFloat has a THIRD word beyond the two-word peel, so unlike DD/FF this
+// instance carries the correction term  ahi*blo + alo*b - chi*dlo - clo*d,
+// magnitude <= u^2*|a*b| with u = 2^-24, evaluated in plain TripleFloat
+// arithmetic.  L = 6 words: the residue off the bottom is u^6 = 2^-144 of the
+// leading word, against the eps_T/C = 2^-72-30 = 2^-102 the determinant needs.
+
+XPMATH_INLINE_FUNCTION void tf_cross_accum(float* e, float w) {
+    for (int i = 0; i < 6; ++i) {
+        float err;
+        e[i] = tf_two_sum(e[i], w, err);
+        w = err;
+        if (w == 0.0f) return;
+    }
+    e[5] += w;
+}
+
+XPMATH_INLINE_FUNCTION TripleFloat tf_cross(TripleFloat a, TripleFloat b,
+                                            TripleFloat c, TripleFloat d) {
+    const float ga = a.f0 * b.f0, gc = c.f0 * d.f0;
+    if (!detail::isfinite(ga) || !detail::isfinite(gc))
+        return subtract(multiply(a, b), multiply(c, d));   // KI-19/27/28 path
+
+    // Word-pair grid, all scalar -- i+j <= 2 exactly, i+j == 3 at the 2^-72
+    // resolution, i+j >= 4 below the format.  See qf_cross for why this replaced
+    // a two-word peel plus a TripleFloat correction term: that form multiplied a
+    // TripleFloat whose leading word was a subnormal low limb.
+    float e[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    const float aw[3] = {a.f0, a.f1, a.f2}, bw[3] = {b.f0, b.f1, b.f2};
+    const float cw[3] = {c.f0, c.f1, c.f2}, dw[3] = {d.f0, d.f1, d.f2};
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3 && j + i <= 3; ++j) {
+            if (i + j <= 2) {
+                float ep, eq;
+                const float p = tf_two_prod(aw[i], bw[j], ep);
+                const float q = tf_two_prod(cw[i], dw[j], eq);
+                tf_cross_accum(e,  p);  tf_cross_accum(e, -q);
+                tf_cross_accum(e, ep);  tf_cross_accum(e, -eq);
+            } else {
+                tf_cross_accum(e,  aw[i] * bw[j]);
+                tf_cross_accum(e, -cw[i] * dw[j]);
+            }
+        }
+    }
+
+    // Backward VecSum sweep -- renorm_3 is a quick_two_sum chain and needs a
+    // magnitude-descending input, which the forward cascade does not give once
+    // the leading terms cancel.  See dd_cross for the measured counterexample.
+    float s = e[5];
+    for (int i = 4; i >= 0; --i) {
+        float er;
+        s = tf_two_sum(e[i], s, er);
+        e[i + 1] = er;
+    }
+    e[0] = s;
+    e[3] = (e[5] + e[4]) + e[3];
+    renorm_3(e[0], e[1], e[2], e[3]);
+    return TripleFloat(e[0], e[1], e[2]);
+}
+
+} // namespace detail
+
 // ============================================================
 // TripleFloatComplex struct
 // ============================================================
@@ -197,8 +266,10 @@ struct TripleFloatComplex {
         }
         TripleFloat denom = add(multiply(b.re, b.re), multiply(b.im, b.im));
         TripleFloat inv   = divide(TripleFloat(1.0f), denom);
-        return TripleFloatComplex(multiply(add(multiply(re, b.re), multiply(im, b.im)), inv),
-                                  multiply(subtract(multiply(im, b.re), multiply(re, b.im)), inv));
+        // KI-36: both numerators are 2x2 determinants and both can cancel.
+        return TripleFloatComplex(
+            multiply(detail::tf_cross(re, b.re, negate(im), b.im), inv),
+            multiply(detail::tf_cross(im, b.re, re, b.im), inv));
     }
     XPMATH_INLINE_FUNCTION TripleFloatComplex operator-() const {
         return TripleFloatComplex(negate(re), negate(im));
