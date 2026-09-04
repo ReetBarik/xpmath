@@ -208,6 +208,55 @@ XPMATH_INLINE_FUNCTION DoubleDouble subtract(DoubleDouble a, DoubleDouble b) {
     return DoubleDouble(hi, lo);
 }
 
+// KI-30.  Veltkamp split with a large-magnitude guard: the FP64 counterpart of
+// qf_math.hpp:qf_split / tf_math.hpp:tf_split, and a port of QD's own
+// `qd::split` (QD 2.3.24 qd/include/qd/inline.h:66-83) whose threshold branch
+// the DD port had dropped.
+//
+// Splitter 134217729.0 = 2^27+1 for the 53-bit FP64 mantissa.  Without the
+// branch, `a * split` overflows to ±inf for |a| > DBL_MAX / (split + 1) ~
+// 1.34e300, and then `hi = temp - (temp - a)` is inf - inf = NaN, which poisons
+// every consumer: multiply, multiply_scalar and two_prod all returned NaN for
+// ANY operand past that point, even where the true product is exactly
+// representable.  Measured before the fix, with the true product exactly 1.0:
+//   multiply(1e-300, 1e300) -> 1.0    (below the threshold, fine)
+//   multiply(1e-302, 1e302) -> NaN    (above it; the answer is still 1.0)
+// This is the FP64 instance of KI-9, which fixed the same defect at FP32 in
+// qf_split/tf_split and, separately, in DD's own divide()/divide_scalar().
+// multiply was never audited at the time.  It is distinct from KI-27, which
+// concerns products that GENUINELY overflow, where ±inf is the right answer;
+// here nothing overflows but the splitter itself.
+//
+// The guard scales by an exact power of two, so it introduces no rounding:
+// pre-scale by 2^-28 (bringing DBL_MAX down to 6.70e299, inside the safe band —
+// split * 6.70e299 = 8.99e307 < DBL_MAX), split, then unscale hi and lo by 2^28.
+// Both unscalings are exact: |hi| <= |a| and |lo| < ulp(a), so neither can
+// overflow, and |lo| >= 2^-28 * ulp(DBL_MIN_normal) stays 218 binades clear of
+// the subnormal floor.  These are QD's own 2^-28 / 2^28 constants.
+//
+// As in qf_split — and unlike ff_math.hpp's B9 guard, which scales the whole
+// operand and unscales the RESULT — scaling only INSIDE the split leaves the
+// product `p = a.hi * b.hi` untouched.  The non-hazard path is therefore
+// bit-identical to the unguarded code it replaces (same three operations, same
+// order), and the hazard path costs no extra rounding.
+XPMATH_INLINE_FUNCTION void dd_split(double a, double& hi, double& lo) {
+    const double split  = 134217729.0;
+    const double thresh = 1.3393857e300;     // DBL_MAX / (split + 1)
+    double temp;
+    if (a > thresh || a < -thresh) {
+        a  *= 3.7252902984619140625e-09;     // 2^-28, exact
+        temp = split * a;
+        hi   = temp - (temp - a);
+        lo   = a - hi;
+        hi  *= 268435456.0;                  // 2^28, exact
+        lo  *= 268435456.0;
+    } else {
+        temp = split * a;
+        hi   = temp - (temp - a);
+        lo   = a - hi;
+    }
+}
+
 // KI-27.  Non-finite / degenerate signalling on the PRODUCT, the multiply-side
 // counterpart of the guard KI-19 put on divide().  The error-free transform
 // below is only meaningful while the hardware product is a finite non-zero
@@ -237,10 +286,9 @@ XPMATH_INLINE_FUNCTION DoubleDouble subtract(DoubleDouble a, DoubleDouble b) {
 XPMATH_INLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b) {
     const double p = a.hi * b.hi;                                   // KI-27
     if (!detail::isfinite(p) || p == 0.0) return DoubleDouble(p, 0.0);
-    const double split = 134217729.0;
-    double cona = a.hi * split, conb = b.hi * split;
-    double a1 = cona - (cona - a.hi), b1 = conb - (conb - b.hi);
-    double a2 = a.hi - a1,           b2 = b.hi - b1;
+    double a1, a2, b1, b2;                                          // KI-30
+    dd_split(a.hi, a1, a2);
+    dd_split(b.hi, b1, b2);
     double c11 = a.hi * b.hi;
     double c21 = (((a1*b1 - c11) + a1*b2) + a2*b1) + a2*b2;
     double c2  = a.hi * b.lo + a.lo * b.hi;
@@ -326,10 +374,9 @@ XPMATH_INLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b) {
 XPMATH_INLINE_FUNCTION DoubleDouble multiply_scalar(DoubleDouble a, double b) {
     const double p = a.hi * b;                                      // KI-27, see multiply()
     if (!detail::isfinite(p) || p == 0.0) return DoubleDouble(p, 0.0);
-    const double split = 134217729.0;
-    double cona = a.hi * split, conb = b * split;
-    double a1   = cona - (cona - a.hi), b1 = conb - (conb - b);
-    double a2   = a.hi - a1,            b2 = b - b1;
+    double a1, a2, b1, b2;                                          // KI-30
+    dd_split(a.hi, a1, a2);
+    dd_split(b,    b1, b2);
     double c11  = a.hi * b;
     double c21  = (((a1*b1 - c11) + a1*b2) + a2*b1) + a2*b2;
     double c2   = a.lo * b;
@@ -368,17 +415,28 @@ XPMATH_INLINE_FUNCTION DoubleDouble divide_scalar(DoubleDouble a, double b) {
     double t2  = (t11 + t21) / b;
     double hi  = t1 + t2;
     double lo  = t2 - (hi - t1);
-    return DoubleDouble(hi, lo);
+    // KI-31.  Unscale, exactly as divide() does.  This return used to be a bare
+    // `DoubleDouble(hi, lo)`: the KI-19 guard above scaled the DIVISOR by
+    // sd = 2^-64 and the numerator by sn, but the result was never scaled back,
+    // so every divisor past kSplitOverflowThresh came out too large by exactly
+    // 2^64.  Measured before the fix, with the true quotient exactly 1.0:
+    //   divide_scalar(2^996, 2^996) -> 1.0                  (below the threshold)
+    //   divide_scalar(2^997, 2^997) -> 1.8446744073709552e19 (= 2^64)
+    // A silent WRONG VALUE rather than a NaN, which is why neither KI-19 nor the
+    // sweep caught it -- `un` was assigned and then dropped.  divide() has
+    // always been correct here; only the scalar sibling was missed.  Both
+    // factors are 1.0 on the non-hazard path, where `hi * 1.0 * 1.0 == hi`
+    // bit-for-bit.
+    return DoubleDouble(hi * sd * un, lo * sd * un);
 }
 
 // Exact product of two doubles
 XPMATH_INLINE_FUNCTION DoubleDouble two_prod(double da, double db) {
     const double p = da * db;                                       // KI-27, see multiply()
     if (!detail::isfinite(p) || p == 0.0) return DoubleDouble(p, 0.0);
-    const double split = 134217729.0;
-    double cona = da * split, conb = db * split;
-    double a1   = cona - (cona - da), b1 = conb - (conb - db);
-    double a2   = da - a1,            b2 = db - b1;
+    double a1, a2, b1, b2;                                          // KI-30
+    dd_split(da, a1, a2);
+    dd_split(db, b1, b2);
     double s1   = da * db;
     double s2   = (((a1*b1 - s1) + a1*b2) + a2*b1) + a2*b2;
     return DoubleDouble(s1, s2);
@@ -554,17 +612,14 @@ XPMATH_INLINE_FUNCTION DoubleDouble log(DoubleDouble a) {
         // below -ln(DBL_MAX) the switch is unavailable because 1/a overflows.
         if (b.hi < -671.7 && -b.hi <= 709.78271289338397) {
             DoubleDouble s0 = exp(negate(b));                   // e^{|b|} >= 1
-            DoubleDouble aa = a;
-            // Dekker's splitter forms (2^27+1)*x, which overflows FP64 above
-            // DBL_MAX/(2^27+1) ~ 1.34e300 -- measured: multiply(1e-302, 1e302)
-            // returns NaN while multiply(1e-300, 1e300) is exact.  e^{|b|} runs
-            // to 1.8e308 here, so rebalance the product by an exact power of
-            // two first.  2^30 covers the whole 1.8e308/1.34e300 ~ 2^27 excess.
-            for (int j = 0; j < 3 && s0.hi > 1.0e300; ++j) {
-                s0 = DoubleDouble(s0.hi * (1.0 / 1024.0), s0.lo * (1.0 / 1024.0));
-                aa = DoubleDouble(aa.hi * 1024.0, aa.lo * 1024.0);
-            }
-            b = subtract(add(b, multiply(aa, s0)), DoubleDouble(1.0));
+            // KI-30.  e^{|b|} runs to 1.8e308 here, past the point where
+            // Dekker's splitter overflows -- which is why this product used to
+            // carry a local power-of-two rebalance (s0 down and a up by 2^10,
+            // up to three times) to keep multiply() out of the hazard band.
+            // multiply() now guards its own splitter via dd_split(), so the
+            // rebalance is redundant and has been removed; the call below is
+            // exact for every s0 the branch can produce.
+            b = subtract(add(b, multiply(a, s0)), DoubleDouble(1.0));
         } else {
             DoubleDouble s0 = exp(b);                           // e^{b} >= 1
             DoubleDouble s1 = subtract(a, s0);
@@ -961,21 +1016,57 @@ constexpr double kDDHyperbolicSaturate = 40.0;
 // x = cosh(a), y = sinh(a)
 XPMATH_INLINE_FUNCTION void sinhcosh(DoubleDouble a, DoubleDouble& x, DoubleDouble& y) {
     if (detail::fabs(a.hi) > kDDHyperbolicSaturate) {
-        // e^{|a|}/2, reached by the SAME route the two-exponential form took, so
-        // that this branch is bit-identical to it wherever it worked: for a > 0
-        // that is exp(a) itself, for a < 0 the reciprocal 1/exp(a). Halving is
-        // exact (power of two), and the dropped term is below the last bit here
-        // by construction. Only when that route runs out of exponent — e^{|a|}
-        // overflowing FP64 for a > 709.78, or 1/e^{a} doing so for a < -709.78,
-        // in both cases while cosh is still finite up to |a| = 710.48 — is the
-        // argument shifted instead — as it is when the reciprocal NaNs out
-        // instead, which it does above ~1.3e300 where divide()'s Dekker
-        // splitter overflows. That form costs up to ~1 digit (subtracting
-        // ln2 perturbs the argument, and exp turns an absolute argument error
-        // into a relative output error), which is why it is the fallback.
+        // e^{|a|}/2.  Halving is exact (power of two), and the dropped term is
+        // below the last bit here by construction. Only when e^{|a|} runs out of
+        // exponent — overflowing FP64 for |a| > 709.78, while cosh is still
+        // finite up to |a| = 710.48 — is the argument shifted instead. That
+        // form costs up to ~1 digit (subtracting ln2 perturbs the argument, and
+        // exp turns an absolute argument error into a relative output error),
+        // which is why it is the fallback.
+        //
+        // KI-24 (DD sibling — the KI was filed FF-only and asserted DD was
+        // clean; DD has the same defect at DD's own scale, one band further
+        // out).  This used to form e = exp(a) on the SIGNED argument and, for
+        // a < 0, recover e^{|a|} as the reciprocal 1/exp(a), so as to stay
+        // bit-identical to the two-exponential form below.  But cosh is even
+        // and sinh is odd: the sign belongs on the RESULT, not on exp's
+        // argument, and routing a < 0 through exp(a) runs into FP64's subnormal
+        // floor.  DD's lo word sits at hi * 2^-53, so it goes subnormal once
+        // exp(a) < DBL_MIN * 2^53 = 2.0e-292, i.e. below a = -672 — and from
+        // there exp(a) carries a shrinking fraction of DD's 31 digits, which no
+        // reciprocal can put back.  Measured, sinh and cosh:
+        //   before  30.23 (-672)  24.31 (-690)  19.98 (-700)  15.41 (-709.7)
+        //   after   30.23 (-672)  30.35 (-690)  30.24 (-700)  29.98 (-709.7)
+        // At a = -709.7 that is half of DD's precision recovered.  As on FF,
+        // the proof it was never format-forced was already inside this
+        // function: at a = -710 the reciprocal overflows, the isinf fallback
+        // fires, and the shifted-argument route scored 29.64 digits while
+        // a = -709.7 next door scored 15.41.  e^{|a|} evaluated directly beats
+        // both, because the exact halving costs nothing where the ln2 shift
+        // costs ~1 digit.
+        //
+        // Crossover rather than an unconditional switch, for the same reason
+        // qf_math.hpp and tf_math.hpp carry one (their KI-9 floors, -40 and
+        // -55).  ABOVE the floor exp(a) still occupies both words, the
+        // reciprocal is healthy, and the two routes differ only in the last
+        // ulp or two -- measured over a in [-660, -60] the direct route means
+        // 30.194 digits against the reciprocal's 30.120, i.e. it wins on
+        // average but loses at individual points, which the monotone gate
+        // scores as 656 sub-digit regressions for no real gain.  Keeping the
+        // reciprocal there leaves every such point BIT-IDENTICAL.  Below the
+        // floor the reciprocal has nothing left to work with and the direct
+        // route wins by up to 11.6 digits.  DD's lo word sits at hi * 2^-53,
+        // so it stays normal while exp(a) > DBL_MIN * 2^53 = 2.00e-292, i.e.
+        // a > -671.7; -672 is that derived floor.
+        const double kDDReciprocalFloor = -672.0;
         DoubleDouble aa = (a.hi < 0.0) ? negate(a) : a;
-        DoubleDouble e  = exp(a);
-        if (a.hi < 0.0) e = divide(DoubleDouble(1.0), e);
+        DoubleDouble e;
+        if (a.hi < kDDReciprocalFloor) {
+            e = exp(aa);                        // KI-24: direct, at full width
+        } else {
+            e = exp(a);                         // a > 0 makes this exp(aa) too
+            if (a.hi < 0.0) e = divide(DoubleDouble(1.0), e);
+        }
         DoubleDouble h = (detail::isinf(e.hi) || e.hi != e.hi) ? exp(subtract(aa, DoubleDouble_log2()))
                                              : DoubleDouble(e.hi * 0.5, e.lo * 0.5);
         x = h;

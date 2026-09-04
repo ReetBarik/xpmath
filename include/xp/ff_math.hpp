@@ -1067,9 +1067,51 @@ XPMATH_INLINE_FUNCTION void sinhcosh(FloatFloat a, FloatFloat& x, FloatFloat& y)
         // See dd_math.hpp: e^{-2|a|} is below FF's resolution here, so
         // cosh == sinh == e^{|a|}/2. Halving is exact; the shifted-argument
         // form is used only when e^{|a|} overflows FP32 while cosh does not.
+        //
+        // KI-24.  Evaluate e^{|a|} DIRECTLY.  This branch used to compute
+        // e = exp(a) on the SIGNED argument and then, for a < 0, recover
+        // e^{|a|} as 1/e.  cosh is even and sinh is odd, so the sign belongs on
+        // the RESULT, not on the argument of exp — and routing a < 0 through
+        // exp(a) walks straight into FP32's subnormal floor.  For a = -88,
+        // e^{a} = 6.06e-39 is itself subnormal (FLT_MIN = 1.18e-38) and for
+        // a < -70.7 the lo word alone is subnormal, so exp(a) keeps only ~7 of
+        // FF's 14 digits.  Reciprocating cannot recover what the format already
+        // threw away, and the loss then lands on a result — cosh(-88) =
+        // 8.26e37 — that is a perfectly healthy normal number with a normal lo
+        // word.  Measured, sinh and cosh over x in [-88.7, -80]:
+        //   before  11.10 (-80)  9.22 (-85)  7.86 (-87)  7.17 (-88)  7.01 (-88.7)
+        //   after   14.23 (-80) 14.91 (-85) 12.77 (-87) 13.10 (-88) 13.44 (-88.7)
+        // i.e. the full FP32 word KI-24 reported lost.  That the loss was an
+        // artefact and not the format was already visible in this very
+        // function: at a = -89, e^{a} is small enough that the isinf fallback
+        // below fires and takes the exp(|a| - ln2) path instead, which scored
+        // 13.79 digits while a = -88.7 next door scored 7.01.
+        //
+        // Crossover rather than an unconditional switch, matching the KI-9
+        // floors qf_math.hpp (-40) and tf_math.hpp (-55) already carry, and
+        // dd_math.hpp's (-672).  Above the floor exp(a) still occupies both
+        // words and the reciprocal is healthy; the two routes then differ only
+        // in the last ulp or two, which the monotone gate scores as pure
+        // regression for no real gain.  Keeping the reciprocal there leaves
+        // those points BIT-IDENTICAL.  FF's lo word sits at hi * 2^-24, so it
+        // stays normal while exp(a) > FLT_MIN * 2^24 = 1.97e-31, i.e.
+        // a > -70.7 -- the same floor ff log() derives for the same reason.
+        // -75 rather than -70.7: right at the derived floor the lo word has
+        // only just begun to lose bits, so the subnormal loss (0.06 digits at
+        // a = -71) is still smaller than the two routes' ordinary last-ulp
+        // disagreement, and switching there costs 10 sub-digit regressions.
+        // Swept over the monotone gate, -75 is the value that takes every
+        // available gain (50 points improved) at zero regression; -78 and -80
+        // also pass but leave 10 and 20 of those gains on the table.
+        const float kFFReciprocalFloor = -75.0f;
         FloatFloat aa = (a.hi < 0.0f) ? negate(a) : a;
-        FloatFloat e  = exp(a);
-        if (a.hi < 0.0f) e = divide(FloatFloat(1.0f), e);
+        FloatFloat e;
+        if (a.hi < kFFReciprocalFloor) {
+            e = exp(aa);                        // KI-24: direct, at full width
+        } else {
+            e = exp(a);                         // a > 0 makes this exp(aa) too
+            if (a.hi < 0.0f) e = divide(FloatFloat(1.0f), e);
+        }
         FloatFloat h  = (detail::isinf(e.hi) || e.hi != e.hi) ? exp(subtract(aa, FloatFloat_log2()))
                                             : FloatFloat(e.hi * 0.5f, e.lo * 0.5f);
         x = h;

@@ -52,15 +52,16 @@ either currently resolved or currently open.
 | 21 | Missing-complex-oracle path is a hard build failure, not degradation | **OPEN** | — |
 | 22 | DD `asinh`/`atanh`/`sinh` and TF `expm1` collapse to the leading word at small x | RESOLVED | batch-5 † |
 | 23 | QF `log`/`log2`/`log10`/`log1p` lose ~11 digits above \|x\| ≈ 1e29 | RESOLVED | batch-6 ‡ |
-| 24 | FF `sinh`/`cosh` lose one full FP32 word near the `exp` range limit | **OPEN** | — |
+| 24 | FF `sinh`/`cosh` lose one full FP32 word near the `exp` range limit | RESOLVED | batch-7 § |
 | 25 | QF and TF `atan` return a non-finite value at \|x\| ≈ 3.16e19 | RESOLVED | `0ad44fe` |
 | 26 | TF `sin`/`cos`/`tan` and QF `cos`/`tan` non-finite at very large arguments | RESOLVED | `0ad44fe` |
 | 27 | DD and FF `multiply` return NaN on genuine product overflow | RESOLVED | `2e810c2` |
 | 28 | DD and FF complex squaring returns NaN where the true result is finite-or-inf | RESOLVED | batch-6 ‡ |
 | 29 | `asinh` mid-band scatter: the odd reflection costs a few ulps for 1 ≲ \|x\| ≲ 20 | **OPEN** | — |
-| 30 | DD `multiply` returns NaN whenever either operand exceeds ~1.34e300 (Dekker splitter) | **OPEN** | — |
+| 30 | DD `multiply` returns NaN whenever either operand exceeds ~1.34e300 (Dekker splitter) | RESOLVED | batch-7 § |
+| 31 | DD `divide_scalar` returns a quotient 2^64 too large above 1.339e300 | RESOLVED | batch-7 § |
 
-**24 resolved, 6 open** (11, 20, 21, 24, 29, 30).
+**27 resolved, 4 open** (11, 20, 21, 29).
 
 † `batch-5` is the commit titled `fix: KI-16 value-based domain guards; KI-17 TF
 `asinh` odd symmetry; KI-22 small-argument series` — a commit cannot record its
@@ -69,6 +70,9 @@ own sha, and this table ships inside it.
 ‡ `batch-6` is the commit titled `fix: KI-23 QF log family at large argument;
 KI-28 complex multiply Annex G recovery` — same reason: a commit cannot record
 its own sha, and this table ships inside it.
+
+§ `batch-7` is the commit titled `fix: KI-30 scale multiply past the Dekker
+splitter limit; KI-24 fixed` — same reason.
 
 Three sections that are not KI entries also live in this file and are neither
 resolved nor open: the classifier verdict (2026-09-03), the soft-failure map
@@ -4459,7 +4463,7 @@ does improve here — 33 sweep points gain — but `pow` also picks up 1 decreas
 
 ---
 
-## KI-24 — FF `sinh` and `cosh` lose one full FP32 word near the `exp` range limit **[OPEN]**
+## KI-24 — FF `sinh` and `cosh` lose one full FP32 word near the `exp` range limit **[RESOLVED batch-7]**
 
 **Severity: low, FF only. Filed 2026-09-03 by the step-1c ULP triage;
 measured, not fixed.**
@@ -4489,6 +4493,86 @@ corresponding point in their own ranges.
 ```
 /tmp/sweep --ulp --ulp-explain sinh:0
 ```
+
+### RESOLVED 2026-09-04 — commit `fix: KI-30 scale multiply past the Dekker splitter limit; KI-24 fixed`
+
+**Verdict: not format-forced. An implementation artefact, and fixed.**
+
+The filing was right that the loss is a clean whole word and wrong about where
+it came from. It is not the `e^x − e^{−x}` subtraction — as the brief noted,
+`e^{−x}` has underflowed to zero there and contributes nothing. It is the
+*intermediate*: for x = −87.96 the saturate branch computed `e = exp(a)` at
+`a = −87.96`, giving 6.0e−39, which is **subnormal in FP32**. A subnormal `hi`
+word cannot carry a `lo` word at `hi·2^−24` — that would be 3.6e−46, far below
+FLT_MIN·2^−23 — so `e.lo` is flushed and `e` degrades to a bare FP32 float. The
+code then reciprocated that half-width value, and the returned `sinh` inherited
+its 7 digits.
+
+**The result was never the problem.** `sinh(−87.96) = −8.3e37` is an ordinary
+normal FP32 number with an ordinary normal `lo` word; there is no bit-budget
+argument that forbids 14 digits there. The proof was already sitting inside the
+same function: `x = −89` scored **13.79** digits, because `exp(−89)` returns
+`+inf` on the reciprocal and tripped the `isinf` fallback into
+`exp(|a| − ln 2)`, which never forms the subnormal. x = −88.7, one step away and
+on the other side of that test, scored **7.01**. Two neighbouring inputs, same
+conditioning, 6.8 digits apart — a branch artefact, not a format ceiling.
+
+**The fix** is the transformation the brief pointed at, and the one QF and TF
+already carry (`kQFReciprocalFloor = -40.0f`, `kTFReciprocalFloor = -55.0f`,
+both from the KI-9 session): below a floor, drop the reciprocal and evaluate
+`exp(|a|)` directly at full width, then halve. FF gains
+`kFFReciprocalFloor = -75.0f`, DD gains `kDDReciprocalFloor = -672.0`.
+
+FF, digits of 14:
+
+| x | before | after |
+|---|---|---|
+| −80 | 11.10 | **14.23** |
+| −85 | 9.22 | **14.91** |
+| −87 | 7.86 | **12.77** |
+| −87.96 (the filed point) | 7.07 | **13.2** |
+| −88 | 7.17 | **13.10** |
+| −88.5 | 7.71 | **13.20** |
+| −88.7 | 7.01 | **13.44** |
+| −89 (already on the `isinf` path) | 13.79 | 13.79 |
+
+The positive side is bit-identical — `a.hi < 0.0` gates the whole change, and
+for `a > 0` the new `exp(aa)` is literally `exp(a)`.
+
+### The same defect in DD, found by the audit
+
+DD has the identical shape at its own floor. DD's `lo` word goes subnormal when
+`hi < DBL_MIN·2^53 = 2.00e−292`, i.e. `a < −671.7`, and DD's saturate branch was
+reciprocating `exp(a)` right through that band. Digits of 31:
+
+| x | before | after |
+|---|---|---|
+| −672 | 30.23 | 30.3 |
+| −690 | 24.31 | ~30 |
+| −700 | 19.98 | ~30 |
+| −709.7 | 15.41 | ~29.9 |
+
+The floor is set at −672, matching the derived 2.00e−292 crossover.
+
+### Why the floors are where they are
+
+The natural floor is the subnormal crossover itself (FF: `FLT_MIN·2^24` =
+1.97e−31 at a = −70.7; DD: −671.7). Switching there unconditionally is not free:
+the direct path is a different rounding sequence, so points *above* the
+crossover that happen to score well on the reciprocal can lose a fraction of a
+digit. Setting FF's floor at −70.7 produced **656 sub-digit monotone decreases**
+(worst −1.12) across DD and FF real and complex `sinh`/`cosh`. Backing off to
+−71 left 10; −75 left **zero**, and −78 and −80 also pass but close fewer points
+(50 increases at −75, 40 at −78, 30 at −80). −75 is the most aggressive floor
+that keeps the monotone gate clean, so that is the one shipped. The band between
+the true crossover and the floor still loses part of a word, but the loss there
+is under a digit, not the whole word this entry was filed for.
+
+### Gate effect
+
+The condition-aware ULP gate goes from 44 failing cells / 2,390 failing points
+to **42 / 2,350**. The two closed cells are exactly `FF r sinh` and `FF r cosh`
+— this entry's cells. No cell that passed before fails now.
 
 ---
 
@@ -4957,7 +5041,7 @@ error term, or an error-free `log1p` argument (keeping `x²/(1+s)` as an unevalu
 sum), would decide it. Until then the reflected form is the right default: it is
 never catastrophic, and it is the only one that is odd.
 
-## KI-30 — DD `multiply` returns NaN whenever either operand exceeds ~1.34e300, because Dekker's splitter overflows **[OPEN]**
+## KI-30 — DD `multiply` returns NaN whenever either operand exceeds ~1.34e300, because Dekker's splitter overflows **[RESOLVED batch-7]**
 
 **Severity: medium, DD only. Filed 2026-09-04 while fixing KI-23; measured, not
 fixed — the KI-23 fix works around it locally rather than closing it.**
@@ -5017,6 +5101,160 @@ guarded for KI-9: scale the operand down by an exact power of two before
 splitting and scale the two output words back afterwards, or use an FMA-based
 `two_prod` where the compiler provides one. Then remove the local rebalance in
 `log` and extend the real `mul` grid above 1.34e300.
+
+### RESOLVED 2026-09-04 — commit `fix: KI-30 scale multiply past the Dekker splitter limit; KI-24 fixed`
+
+Fixed at the primitive, by the route this section proposed and the one QF and TF
+already used. `dd_math.hpp` gained **`dd_split()`** — the FP64 counterpart of
+`qf_split`/`tf_split`, itself a port of QD's `qd::split` (QD 2.3.24
+`qd/include/qd/inline.h:66-83`) whose threshold branch the DD port had dropped.
+Above `DBL_MAX / (split + 1) = 1.3393857e300` it pre-scales by `2^-28`, splits,
+and unscales both output words by `2^28`. All three constants are QD's own.
+
+The scaling sits **inside the split**, not around the operand. That matters: the
+product `p = a.hi * b.hi` is never touched, so the non-hazard path performs the
+same three operations in the same order as the unguarded code it replaced and is
+**bit-identical** to it. (This is `qf_split`'s design; `ff_math.hpp`'s B9 guard
+takes the other route — scale the operand, unscale the result — which is also
+exact but does perturb the hazard path.) The three unguarded DD sites —
+`multiply`, `multiply_scalar` and `two_prod` — now all call it.
+
+Measured on the fixed tree, with the true product exactly `1.0` in every row:
+
+| call | before | after | true product representable? |
+|---|---|---|---|
+| `multiply(1e-296, 1e296)` | `1.0` | `1.0` | yes |
+| `multiply(1e-300, 1e300)` | `1.0` | `1.0` | yes |
+| `multiply(1e-301, 1e301)` | **NaN** | `1.0000000000000002` | yes |
+| **`multiply(1e-302, 1e302)`** | **NaN** | **`1.0`** | **yes** |
+| `multiply(1e-304, 1e304)` | **NaN** | `0.99999999999999989` | yes |
+| `multiply(1e-306, 1e306)` | **NaN** | `1.0` | yes |
+| `multiply(1e-308, 1e308)` | **NaN** | `0.99999999999999989` | yes |
+| `multiply(2^-1020, 2^1020)` | **NaN** | `1.0` (exact) | yes |
+| `multiply(1e300, 1e300)` | `+inf` | `+inf` | **no** — genuine overflow, KI-27 |
+
+The rows that land one ulp off `1.0` do so because `1e±304` and `1e±308` are not
+exact powers of ten in FP64, so their true product is not exactly `1.0` either;
+the exact power-of-two pair `(2^-1020, 2^1020)` returns exactly `1.0`, which is
+the clean check. The last row confirms KI-27's genuine-overflow semantics
+survive: the guard on `p` still runs first and still returns `±inf`.
+
+**Threshold, before and after.** DD `multiply`, `multiply_scalar` and `two_prod`
+failed from `2^997` (1.339e300) and are now clean through `2^1023` (8.99e307),
+i.e. to the top of the format. Full audit table below.
+
+**The KI-23 local workaround was removed.** `dd_math.hpp`'s `log` carried a loop
+that rebalanced `multiply(a, s0)` by `2^10` up to three times to keep `s0`
+(which runs to 1.8e308) out of the hazard band. `multiply` now guards its own
+splitter, so the rebalance is redundant; it is deleted and the call is a plain
+`multiply(a, s0)`. DD `log` accuracy is unchanged by the removal — the monotone
+gate reports zero decreased points across all 428,592.
+
+### The splitter audit
+
+Every Dekker/Veltkamp split site in all four backends, with the operand
+magnitude at which the op returns a non-finite or wrong result while the true
+result is still representable. Measured by binade scan
+(`multiply(1/2^k, 2^k)` and friends, true result `1.0`).
+
+| backend | site | guard before | threshold before | threshold after |
+|---|---|---|---|---|
+| DD | `multiply` | **none** | **fails from 2^997 (1.34e300)** | clean to 2^1023 |
+| DD | `multiply_scalar` | **none** | **fails from 2^997 (1.34e300)** | clean to 2^1023 |
+| DD | `two_prod(double,double)` | **none** | **fails from 2^997 (1.34e300)** | clean to 2^1023 |
+| DD | `divide` | KI-19 (divisor + quotient) | clean to 2^1023 | clean to 2^1023 |
+| DD | `divide_scalar` | KI-19, **unscale missing** | **wrong value from 2^997** — see KI-31 | clean to 2^1023 |
+| DD | `sqrt` | via `two_prod`; operand ≤ 1.3e154 | clean to 2^1023 | clean to 2^1023 |
+| FF | `multiply` | B9 (both operands) | clean to 2^127 | unchanged |
+| FF | `multiply_scalar` | B9 | clean to 2^127 | unchanged |
+| FF | `two_prod(float,float)` | B9 | clean to 2^127 | unchanged |
+| FF | `divide` | B8/B10 | clean to 2^127 | unchanged |
+| FF | `divide_scalar` | B8/B9 | clean to 2^127 | unchanged |
+| QF | `qf_split` (all consumers) | KI-9 | clean to 2^127 | unchanged |
+| QF | `multiply` / `multiply_scalar` / `sqr` | via `qf_split` | clean to 2^127 | unchanged |
+| QF | `divide` / `divide_scalar` | via `qf_split` | clean to 2^127 | unchanged |
+| TF | `tf_split` (all consumers) | KI-9 | clean to 2^127 | unchanged |
+| TF | `multiply` / `multiply_scalar` / `sqr` | via `tf_split` | clean to 2^127 | unchanged |
+| TF | `divide` / `divide_scalar` | via `tf_split` | clean to 2^127 | unchanged |
+
+Notes on the audit:
+
+- **DD was the only backend with unguarded split sites.** FF re-derived the
+  guard independently as B8/B9/B10; QF and TF carry it inside `qf_split`/
+  `tf_split`, which every one of their product and quotient paths routes
+  through. There is no raw `* split` anywhere in QF or TF outside those two
+  functions, and none at all in any of the four `*_complex.hpp` headers — the
+  complex paths consume the splitter only through `multiply`/`divide`, so
+  fixing the primitive fixes them.
+- `2^115` (4.15e34) is the FP32 threshold and `2^997` (1.34e300) the FP64 one;
+  both are `FORMAT_MAX / (split + 1)`.
+- **`sqr` on QF and TF is clean.** An earlier scan of this audit flagged both
+  from `2^100`, but that was the scan's own fault: `sqr(2^100) = 2^200`
+  genuinely overflows FP32. Re-run over `k <= 63`, where the square is
+  representable, QF and TF `sqr` are exact at every point.
+- DD `sqrt` never reaches the hazard band — it splits `t2 ~ sqrt(a.hi)`, at most
+  1.3e154 — but it now inherits the guard anyway through `two_prod`.
+
+---
+
+## KI-31 — DD `divide_scalar` returns a quotient 2^64 too large above 1.339e300 **[RESOLVED batch-7]**
+
+**Severity: high — a silently wrong finite value, not a NaN. DD only. Found
+2026-09-04 by the KI-30 splitter audit; fixed in the same commit.**
+
+### What
+
+`divide_scalar(a, b)` for `|a.hi|` or `|b|` above `1.3393857e300` returns a
+result exactly `2^64` times too large. Not non-finite, not lost digits — a
+plausible-looking finite number that is wrong by nineteen orders of magnitude.
+
+| call | true quotient | returned before | returned after |
+|---|---|---|---|
+| `divide_scalar(2^997, 2^997)` | `1.0` | **`1.8446744073709552e19`** (= 2^64) | `1.0` |
+| `divide_scalar(2^1000, 2^1000)` | `1.0` | **`1.8446744073709552e19`** | `1.0` |
+| `divide_scalar(2^1023, 2^1023)` | `1.0` | **`1.8446744073709552e19`** | `1.0` |
+| `divide_scalar(2^996, 2^996)` | `1.0` | `1.0` | `1.0` |
+
+The threshold is `DBL_MAX / (split + 1)` — the same 1.339e300 as KI-30, because
+it is the same hazard band.
+
+### Mechanism
+
+This is a **defect in the KI-19 fix, not in the original code**. KI-19 added a
+scale-and-unscale guard to `divide_scalar`: when an operand is in the hazard
+band it scales the dividend by `sd` and the divisor by `un`, computes the
+quotient on the scaled values, and must multiply the two output words by
+`sd * un` on the way out. The scaling was written; the unscale was not. The
+function ended with a bare
+
+```cpp
+    return DoubleDouble(hi, lo);
+```
+
+so `sd` and `un` were computed, applied to the inputs, and then dropped. With
+both operands in the band, `sd * un = 2^64`, which is exactly the observed
+error. Below the band the guard does not fire, `sd = un = 1`, and the bug is
+invisible — which is why it survived KI-19's own validation and why the sweep
+grid, which stops well short of 1e300, never saw it.
+
+The sibling `divide(DoubleDouble, DoubleDouble)` applies its unscale correctly;
+only the scalar overload was missing it. FF, QF and TF `divide_scalar` are all
+correct — measured clean through 2^127.
+
+### Resolution
+
+One line, restoring the unscale the guard intended:
+
+```cpp
+    return DoubleDouble(hi * sd * un, lo * sd * un);
+```
+
+Both `sd` and `un` are exact powers of two, so the correction introduces no
+rounding. Verified over every binade from 2^900 to 2^1023 with the true quotient
+held at 1.0. The monotone gate reports no change to any existing point, since no
+gridded input reaches the band — which is also the reason this entry is filed:
+the sweep cannot currently see this class of defect, and the `mul` and `div`
+grids should be extended above 1e300 to cover it.
 
 ---
 
