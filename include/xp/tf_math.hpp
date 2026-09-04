@@ -92,6 +92,7 @@ XPMATH_INLINE_FUNCTION TripleFloat round_to_nearest_int(TripleFloat a);
 XPMATH_INLINE_FUNCTION TripleFloat pow_int(TripleFloat a, int n);
 XPMATH_INLINE_FUNCTION TripleFloat exp(TripleFloat a);
 XPMATH_INLINE_FUNCTION TripleFloat log(TripleFloat a);
+XPMATH_INLINE_FUNCTION TripleFloat log1p(TripleFloat a);   // asinh() is defined above it
 XPMATH_INLINE_FUNCTION TripleFloat pow(TripleFloat a, TripleFloat b);
 XPMATH_INLINE_FUNCTION void   sincos(TripleFloat a, TripleFloat& sin_a, TripleFloat& cos_a);
 XPMATH_INLINE_FUNCTION void   sinhcosh(TripleFloat a, TripleFloat& sinh_a, TripleFloat& cosh_a);
@@ -1270,16 +1271,33 @@ XPMATH_INLINE_FUNCTION TripleFloat atan(TripleFloat a) {
     return r;
 }
 
+// KI-16.  Compare the VALUE, not the leading word.  Full derivation at
+// dd_math.hpp's dd_cmp_one: `a.f0` is the value rounded to one FP32, and near a
+// domain edge at +-1 that rounding crosses the edge in both directions -- it
+// rejects legal arguments strictly inside the domain and accepts illegal ones
+// just outside.  `subtract` renormalises and, for |a| in [1/2, 2], cancels the
+// leading words EXACTLY by Sterbenz, so the residual words decide and decide
+// correctly.  Returns -1, 0, +1 for a < 1, a == 1, a > 1.
+XPMATH_INLINE_FUNCTION int tf_cmp_one(TripleFloat a) {
+    const TripleFloat d = subtract(a, TripleFloat(1.0f));
+    if (d.f0 > 0.0f) return  1;
+    if (d.f0 < 0.0f) return -1;
+    return 0;
+}
+XPMATH_INLINE_FUNCTION int tf_cmp_abs_one(TripleFloat a) { return tf_cmp_one(abs(a)); }
+
 // asin(a) = atan2(a, sqrt(1 - a^2)).  QD qd_real.cpp:2479-2491.
 XPMATH_INLINE_FUNCTION TripleFloat asin(TripleFloat a) {
     TripleFloat abs_a = abs(a);
-    if (abs_a.f0 > 1.0f) {
+    const int c = tf_cmp_one(abs_a);                                    // KI-16
+    if (c > 0) {
         XPMATH_PRINTF("TFASIN: argument out of domain\n");
         return TripleFloat(0.0f);
     }
     // |a| == 1 exactly: sqrt(1-a^2) is 0 and the Newton denominator degenerates.
-    // QD short-circuits to +-pi/2 (qd_real.cpp:2487-2489).
-    if (abs_a.f0 == 1.0f && abs_a.f1 == 0.0f && abs_a.f2 == 0.0f) {
+    // QD short-circuits to +-pi/2 (qd_real.cpp:2487-2489).  The old test read
+    // the three words directly; tf_cmp_one is the same test, spelled once.
+    if (c == 0) {
         TripleFloat pi_2 = mul_pwr2(TripleFloat_pi(), 0.5f);
         return (a.f0 > 0.0f) ? pi_2 : negate(pi_2);
     }
@@ -1291,11 +1309,12 @@ XPMATH_INLINE_FUNCTION TripleFloat asin(TripleFloat a) {
 // the subtraction loses digits to cancellation as a -> 1.
 XPMATH_INLINE_FUNCTION TripleFloat acos(TripleFloat a) {
     TripleFloat abs_a = abs(a);
-    if (abs_a.f0 > 1.0f) {
+    const int c = tf_cmp_one(abs_a);                                    // KI-16
+    if (c > 0) {
         XPMATH_PRINTF("TFACOS: argument out of domain\n");
         return TripleFloat(0.0f);
     }
-    if (abs_a.f0 == 1.0f && abs_a.f1 == 0.0f && abs_a.f2 == 0.0f) {
+    if (c == 0) {
         return (a.f0 > 0.0f) ? TripleFloat(0.0f) : TripleFloat_pi();
     }
     return angle(a, sqrt(subtract(TripleFloat(1.0f), sqr(a))));
@@ -1315,20 +1334,43 @@ XPMATH_INLINE_FUNCTION TripleFloat acos(TripleFloat a) {
 // second term's log(2) ~ 0.69 by orders of magnitude, and both are computed to
 // full relative precision.  Below the band the original expression is kept
 // bit-for-bit.  Full argument at ff_math.hpp's asinh.
-// TF's asinh carries no odd reflection (unlike DD/FF/QF), so the branch below
-// works on |a| and re-applies the sign itself.
+// KI-17.  asinh is ODD, and TF was the one backend that did not say so.  For
+// a < 0 the closed form below computes sqrt(a^2+1) ~ |a| and then adds a to it,
+// which is a catastrophic cancellation that lands on or below zero -- log then
+// sees a non-positive argument and bails to 0.  TF asinh(-1e12) returned 0
+// while asinh(+1e12) was correct; the asymmetry was the whole diagnosis.
+// Reflecting first is exact (a sign flip on every word) and free, and it is
+// what DD, FF and QF have always done.  Verified while fixing this: the REAL
+// asinh in DD (dd_math.hpp), FF (ff_math.hpp) and QF (qf_math.hpp) each already
+// open with the same `if (leading word < 0) return negate(asinh(negate(a)));`,
+// so TF was the sole omission.  (KI-5(a) fixed the COMPLEX case separately.)
+// The kTFSqHi branch below used to re-apply the sign itself; with the reflection
+// in front of it, it only ever sees a >= 0, so that bookkeeping is gone.
 XPMATH_INLINE_FUNCTION TripleFloat asinh(TripleFloat a) {
-    if (detail::fabs(a.f0) > detail::kTFSqHi) {
-        TripleFloat aa = abs(a);
-        TripleFloat u  = divide(TripleFloat(1.0f), aa);
+    if (a.f0 < 0.0f) return negate(asinh(negate(a)));                   // KI-17
+    if (a.f0 > detail::kTFSqHi) {
+        TripleFloat u  = divide(TripleFloat(1.0f), a);
         u = multiply(u, u);
-        TripleFloat r = add(log(aa), log(add(TripleFloat(1.0f), sqrt(add(TripleFloat(1.0f), u)))));
-        return (a.f0 < 0.0f) ? negate(r) : r;
+        return add(log(a), log(add(TripleFloat(1.0f), sqrt(add(TripleFloat(1.0f), u)))));
     }
-    return log(add(a, sqrt(add(sqr(a), TripleFloat(1.0f)))));
+    // KI-22: log1p(a + a^2/(1+sqrt(a^2+1))).  Derivation at dd_math.hpp's asinh.
+    // TF is the backend that MEASURED the series alternative as a regression --
+    // 36 terms of rounding at the crossover to save 1 bit of cancellation.
+    const TripleFloat a2 = sqr(a);
+    const TripleFloat s  = sqrt(add(a2, TripleFloat(1.0f)));
+    if (a.f0 < 0.5f) {
+        return log1p(add(a, divide(a2, add(TripleFloat(1.0f), s))));
+    }
+    return log(add(a, s));
 }
 
 XPMATH_INLINE_FUNCTION TripleFloat acosh(TripleFloat a) {
+    // KI-16 audit.  TF was the one backend with NO acosh domain guard at all:
+    // a < 1 fell through to sqrt of a negative, whose own guard printed and
+    // returned 0, and log(a + 0) then returned a silently wrong negative number
+    // instead of the diagnostic.  Value-based from the start, per dd_cmp_one.
+    if (tf_cmp_one(a) < 0) {
+        XPMATH_PRINTF("TFACOSH: argument < 1\n"); return TripleFloat(0.0f); }
     if (a.f0 > detail::kTFSqHi) {
         TripleFloat u = divide(TripleFloat(1.0f), a);
         u = multiply(u, u);
@@ -1338,6 +1380,16 @@ XPMATH_INLINE_FUNCTION TripleFloat acosh(TripleFloat a) {
 }
 
 XPMATH_INLINE_FUNCTION TripleFloat atanh(TripleFloat a) {
+    // KI-16 audit.  TF was the one backend with NO atanh domain guard: |a| >= 1
+    // fell through to log of a non-positive quotient, which printed TFLOG's
+    // diagnostic rather than TFATANH's and returned 0 by accident rather than
+    // by decision.  Value-based from the start, per dd_cmp_one.
+    // |a| == 1 is the C99 pole, not a domain error: atanh(+-1) = +-inf.  TF's
+    // guardless code reached that by accident; the guard must preserve it.
+    const int c_atanh = tf_cmp_abs_one(a);
+    if (c_atanh > 0) {
+        XPMATH_PRINTF("TFATANH: |argument| > 1\n"); return TripleFloat(0.0f); }
+    if (c_atanh == 0) return TripleFloat(a.f0 > 0.0f ? HUGE_VALF : -HUGE_VALF);
     if (abs(a).f0 < 0.5f) {
         // Taylor: a + a^3/3 + a^5/5 + ...
         TripleFloat a2 = sqr(a);
@@ -1367,7 +1419,23 @@ XPMATH_INLINE_FUNCTION TripleFloat exp10(TripleFloat a) {
 }
 
 XPMATH_INLINE_FUNCTION TripleFloat expm1(TripleFloat a) {
-    return subtract(exp(a), TripleFloat(1.0f));
+    if (detail::fabs(a.f0) > 0.5f) {
+        // |e^a - 1| > e^0.5 - 1 ~ 0.65: subtracting 1 costs no significant
+        // cancellation.  Crossover derived at dd_math.hpp's asinh (Sterbenz).
+        return subtract(exp(a), TripleFloat(1.0f));
+    }
+    // KI-22.  a + a^2/2! + a^3/3! + ...   Below the crossover `e^a - 1` throws
+    // away every bit of a below 2^-72 relative to 1: at a = 1e-9 that left
+    // 10.81 of TF's 21.7 digits.  TF's u = 2^-72 needs a relative tail
+    // a^(N-1)/N! <= u, which at |a| = 1/2 is N = 19 terms.  DD, FF and QF all
+    // already had this branch; TF was the omission.
+    TripleFloat sum = a, term = a;
+    for (int k = 2; k <= 40; ++k) {
+        term = divide_scalar(multiply(term, a), (float)k);
+        sum  = add(sum, term);
+        if (detail::fabs(term.f0) < 1.0e-21f * detail::fabs(sum.f0)) break;
+    }
+    return sum;
 }
 
 // Series 2*atanh(a/(2+a)) for |a| < 1/4, plain log(1+a) outside; see

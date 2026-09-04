@@ -975,8 +975,24 @@ XPMATH_INLINE_FUNCTION FloatFloat angle(FloatFloat x, FloatFloat y) {
     return a;
 }
 
+// KI-16.  Compare the VALUE, not the leading word.  Full derivation at
+// dd_math.hpp's dd_cmp_one: `a.hi` is the value rounded to one FP32, and near a
+// domain edge at +-1 that rounding crosses the edge in both directions -- it
+// rejects legal arguments as far inside as 1 - 2.2e-16 (KI-16's reported FF and
+// QF `atanh` symptom) and accepts illegal ones just outside.  `subtract`
+// renormalises and, for |a| in [1/2, 2], cancels the leading words EXACTLY by
+// Sterbenz, so the residual word decides and decides correctly.
+// Returns -1, 0, +1 for a < 1, a == 1, a > 1.
+XPMATH_INLINE_FUNCTION int ff_cmp_one(FloatFloat a) {
+    const FloatFloat d = subtract(a, FloatFloat(1.0f));
+    if (d.hi > 0.0f) return  1;
+    if (d.hi < 0.0f) return -1;
+    return 0;
+}
+XPMATH_INLINE_FUNCTION int ff_cmp_abs_one(FloatFloat a) { return ff_cmp_one(abs(a)); }
+
 XPMATH_INLINE_FUNCTION FloatFloat asin(FloatFloat a) {
-    if (detail::fabs(a.hi) > 1.0f) {
+    if (ff_cmp_abs_one(a) > 0) {                                        // KI-16
         XPMATH_PRINTF("FFASIN: argument out of range\n");
         return FloatFloat(0.0f);
     }
@@ -984,7 +1000,7 @@ XPMATH_INLINE_FUNCTION FloatFloat asin(FloatFloat a) {
     return angle(t, a);
 }
 XPMATH_INLINE_FUNCTION FloatFloat acos(FloatFloat a) {
-    if (detail::fabs(a.hi) > 1.0f) {
+    if (ff_cmp_abs_one(a) > 0) {                                        // KI-16
         XPMATH_PRINTF("FFACOS: argument out of range\n");
         return FloatFloat(0.0f);
     }
@@ -1086,10 +1102,19 @@ XPMATH_INLINE_FUNCTION FloatFloat asinh(FloatFloat a) {
         u = multiply(u, u);
         return add(log(a), log(add(FloatFloat(1.0f), sqrt(add(FloatFloat(1.0f), u)))));
     }
-    return log(add(a, sqrt(add(multiply(a, a), FloatFloat(1.0f)))));
+    // KI-22: log1p(a + a^2/(1+sqrt(a^2+1))).  Derivation at dd_math.hpp's asinh.
+    // KI-22 named only DD, but the old `1 + x` inside the log lost the same
+    // u/|x| here -- one FP32 word of two at x = 1e-7.
+    const FloatFloat a2 = multiply(a, a);
+    const FloatFloat s  = sqrt(add(a2, FloatFloat(1.0f)));
+    if (a.hi < 0.5f) {
+        return log1p(add(a, divide(a2, add(FloatFloat(1.0f), s))));
+    }
+    return log(add(a, s));
 }
 XPMATH_INLINE_FUNCTION FloatFloat acosh(FloatFloat a) {
-    if (a.hi < 1.0f) { XPMATH_PRINTF("FFACOSH: argument < 1\n"); return FloatFloat(0.0f); }
+    if (ff_cmp_one(a) < 0) {                                            // KI-16
+        XPMATH_PRINTF("FFACOSH: argument < 1\n"); return FloatFloat(0.0f); }
     if (a.hi > detail::kFFSqHi) {
         FloatFloat u = divide(FloatFloat(1.0f), a);
         u = multiply(u, u);
@@ -1099,7 +1124,11 @@ XPMATH_INLINE_FUNCTION FloatFloat acosh(FloatFloat a) {
     return log(add(a, sqrt(t1)));
 }
 XPMATH_INLINE_FUNCTION FloatFloat atanh(FloatFloat a) {
-    if (detail::fabs(a.hi) >= 1.0f) { XPMATH_PRINTF("FFATANH: |argument| >= 1\n"); return FloatFloat(0.0f); }
+    // |a| == 1 is the C99 pole, not a domain error: atanh(+-1) = +-inf.
+    const int c_atanh = ff_cmp_abs_one(a);                              // KI-16
+    if (c_atanh > 0) {
+        XPMATH_PRINTF("FFATANH: |argument| > 1\n"); return FloatFloat(0.0f); }
+    if (c_atanh == 0) return FloatFloat(a.hi > 0.0f ? HUGE_VALF : -HUGE_VALF);
     // Taylor for |a|<0.5 avoids calling log (which loses precision when its
     // argument is close to 1). All terms positive — no cancellation.
     if (detail::fabs(a.hi) < 0.5f) {
@@ -1718,7 +1747,8 @@ XPMATH_INLINE_FUNCTION FloatFloat bessel_yn(int n, FloatFloat x) {
 }
 
 XPMATH_INLINE_FUNCTION FloatFloat zeta(FloatFloat s) {
-    if (s.hi <= 1.0f) { XPMATH_PRINTF("FFZETA: s <= 1\n"); return FloatFloat(0.0f); }
+    if (ff_cmp_one(s) <= 0) {                                           // KI-16
+        XPMATH_PRINTF("FFZETA: s <= 1\n"); return FloatFloat(0.0f); }
     const int N = 30;
     FloatFloat sum = FloatFloat(0.0f);
     for (int k = 1; k <= N; ++k)

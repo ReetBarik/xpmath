@@ -1275,8 +1275,24 @@ XPMATH_INLINE_FUNCTION QuadFloat angle(QuadFloat x, QuadFloat y) {
 }
 
 // asin(a) = atan2(a, sqrt(1-a^2)).  QD qd_real.cpp:2479.
+// KI-16.  Compare the VALUE, not the leading word.  Full derivation at
+// dd_math.hpp's dd_cmp_one: `a.f0` is the value rounded to one FP32, and near a
+// domain edge at +-1 that rounding crosses the edge in both directions -- it
+// rejects legal arguments as far inside as 1 - 2.2e-16 (KI-16's reported QF
+// `atanh` symptom, 42 of its 46 points) and accepts illegal ones just outside.
+// `subtract` renormalises and, for |a| in [1/2, 2], cancels the leading words
+// EXACTLY by Sterbenz, so the residual words decide and decide correctly.
+// Returns -1, 0, +1 for a < 1, a == 1, a > 1.
+XPMATH_INLINE_FUNCTION int qf_cmp_one(QuadFloat a) {
+    const QuadFloat d = subtract(a, QuadFloat(1.0f));
+    if (d.f0 > 0.0f) return  1;
+    if (d.f0 < 0.0f) return -1;
+    return 0;
+}
+XPMATH_INLINE_FUNCTION int qf_cmp_abs_one(QuadFloat a) { return qf_cmp_one(abs(a)); }
+
 XPMATH_INLINE_FUNCTION QuadFloat asin(QuadFloat a) {
-    if (detail::fabs(a.f0) > 1.0f) {
+    if (qf_cmp_abs_one(a) > 0) {                                        // KI-16
         XPMATH_PRINTF("QFASIN: argument out of range\n");
         return QuadFloat(0.0f);
     }
@@ -1285,7 +1301,7 @@ XPMATH_INLINE_FUNCTION QuadFloat asin(QuadFloat a) {
 }
 // acos(a) = atan2(sqrt(1-a^2), a).  QD qd_real.cpp:2494.
 XPMATH_INLINE_FUNCTION QuadFloat acos(QuadFloat a) {
-    if (detail::fabs(a.f0) > 1.0f) {
+    if (qf_cmp_abs_one(a) > 0) {                                        // KI-16
         XPMATH_PRINTF("QFACOS: argument out of range\n");
         return QuadFloat(0.0f);
     }
@@ -1434,11 +1450,18 @@ XPMATH_INLINE_FUNCTION QuadFloat asinh(QuadFloat a) {
         u = multiply(u, u);
         return add(log(a), log(add(QuadFloat(1.0f), sqrt(add(QuadFloat(1.0f), u)))));
     }
-    return log(add(a, sqrt(add(multiply(a, a), QuadFloat(1.0f)))));
+    // KI-22: log1p(a + a^2/(1+sqrt(a^2+1))).  Derivation at dd_math.hpp's asinh.
+    const QuadFloat a2 = sqr(a);
+    const QuadFloat s  = sqrt(add(a2, QuadFloat(1.0f)));
+    if (a.f0 < 0.5f) {
+        return log1p(add(a, divide(a2, add(QuadFloat(1.0f), s))));
+    }
+    return log(add(a, s));
 }
 // acosh(a) = log(a + sqrt(a^2 - 1)).  QD qd_real.cpp:2580.
 XPMATH_INLINE_FUNCTION QuadFloat acosh(QuadFloat a) {
-    if (a.f0 < 1.0f) { XPMATH_PRINTF("QFACOSH: argument < 1\n"); return QuadFloat(0.0f); }
+    if (qf_cmp_one(a) < 0) {                                            // KI-16
+        XPMATH_PRINTF("QFACOSH: argument < 1\n"); return QuadFloat(0.0f); }
     if (a.f0 > detail::kQFSqHi) {                                       // KI-13
         QuadFloat u = divide(QuadFloat(1.0f), a);
         u = multiply(u, u);
@@ -1450,7 +1473,11 @@ XPMATH_INLINE_FUNCTION QuadFloat acosh(QuadFloat a) {
 // Taylor branch for |a| < 0.5 (PORT_NOTES §3c, ff_math.hpp:595) — all-positive
 // terms, no cancellation, and avoids log() evaluated near 1.
 XPMATH_INLINE_FUNCTION QuadFloat atanh(QuadFloat a) {
-    if (detail::fabs(a.f0) >= 1.0f) { XPMATH_PRINTF("QFATANH: |argument| >= 1\n"); return QuadFloat(0.0f); }
+    // |a| == 1 is the C99 pole, not a domain error: atanh(+-1) = +-inf.
+    const int c_atanh = qf_cmp_abs_one(a);                              // KI-16
+    if (c_atanh > 0) {
+        XPMATH_PRINTF("QFATANH: |argument| > 1\n"); return QuadFloat(0.0f); }
+    if (c_atanh == 0) return QuadFloat(a.f0 > 0.0f ? HUGE_VALF : -HUGE_VALF);
     const float eps = 1.0e-28f;
     if (detail::fabs(a.f0) < 0.5f) {
         QuadFloat a2 = multiply(a, a);

@@ -855,8 +855,37 @@ XPMATH_INLINE_FUNCTION DoubleDouble angle(DoubleDouble x, DoubleDouble y) {
     return a;
 }
 
+// KI-16 -----------------------------------------------------------------------
+// A domain guard must compare the VALUE the expansion represents against the
+// domain edge, NOT its leading word.  `a.hi` is that value rounded to a single
+// FP64, and near an edge at +-1 that rounding crosses the edge in BOTH
+// directions:
+//
+//   * a LEGAL argument strictly inside the domain whose leading word rounds to
+//     exactly 1.0 is rejected -- KI-16's reported symptom, `atanh` returning 0
+//     for arguments as far inside as 1 - 2.2e-16; and
+//   * an ILLEGAL argument just outside whose leading word rounds to 1.0 is
+//     accepted, so the caller gets a silent NaN instead of the diagnostic.
+//
+// Both go away if the guard SUBTRACTS.  `subtract` renormalises, so the sign of
+// the difference's leading word is the sign of the whole difference; and for
+// |a| in [1/2, 2] -- exactly the band where the leading-word test is wrong --
+// Sterbenz makes the leading-word cancellation EXACT, so the residual words
+// survive into `d.hi` and decide the comparison correctly.  Outside that band
+// the leading word alone already decides, and `subtract` agrees with it.
+//
+// Returns -1, 0, +1 for a < 1, a == 1, a > 1.  Same helper, same reasoning, in
+// all four backends.
+XPMATH_INLINE_FUNCTION int dd_cmp_one(DoubleDouble a) {
+    const DoubleDouble d = subtract(a, DoubleDouble(1.0));
+    if (d.hi > 0.0) return  1;
+    if (d.hi < 0.0) return -1;
+    return 0;
+}
+XPMATH_INLINE_FUNCTION int dd_cmp_abs_one(DoubleDouble a) { return dd_cmp_one(abs(a)); }
+
 XPMATH_INLINE_FUNCTION DoubleDouble asin(DoubleDouble a) {
-    if (detail::fabs(a.hi) > 1.0) {
+    if (dd_cmp_abs_one(a) > 0) {                                        // KI-16
         XPMATH_PRINTF("DDASIN: argument out of range\n");
         return DoubleDouble(0.0);
     }
@@ -864,7 +893,7 @@ XPMATH_INLINE_FUNCTION DoubleDouble asin(DoubleDouble a) {
     return angle(t, a); // atan2(a, sqrt(1-a^2))
 }
 XPMATH_INLINE_FUNCTION DoubleDouble acos(DoubleDouble a) {
-    if (detail::fabs(a.hi) > 1.0) {
+    if (dd_cmp_abs_one(a) > 0) {                                        // KI-16
         XPMATH_PRINTF("DDACOS: argument out of range\n");
         return DoubleDouble(0.0);
     }
@@ -933,6 +962,25 @@ XPMATH_INLINE_FUNCTION void sinhcosh(DoubleDouble a, DoubleDouble& x, DoubleDoub
     DoubleDouble s0 = exp(a);
     DoubleDouble s1 = divide(DoubleDouble(1.0), s0);
     x = multiply_scalar(add(s0, s1), 0.5);
+    if (detail::fabs(a.hi) < 0.5) {                                     // KI-22
+        // ONLY sinh cancels.  (e^a - e^-a)/2 subtracts two numbers near 1 and
+        // keeps the O(a) difference, costing u/|a| relative; (e^a + e^-a)/2
+        // adds them and costs nothing.  So the Taylor sum replaces y and cosh
+        // stays on the exp path above -- computing cosh from a series only adds
+        // rounding, and measurably did: 26 DD complex grid points (cos, sin,
+        // tan, sinh, cosh) regressed up to 0.23 digits when it was replaced too.
+        // ff/qf/tf_math.hpp's own branches replace both; DD's does not, and the
+        // sweep says DD is right.  Crossover is the Sterbenz 1/2 derived below.
+        const DoubleDouble a2 = multiply(a, a);
+        DoubleDouble sinh_sum = a, sinh_term = a;
+        for (int k = 1; k <= 40; ++k) {
+            sinh_term = divide_scalar(multiply(sinh_term, a2), (double)((2*k) * (2*k + 1)));
+            sinh_sum  = add(sinh_sum, sinh_term);
+            if (detail::fabs(sinh_term.hi) < 1.0e-32 * detail::fabs(sinh_sum.hi)) break;
+        }
+        y = sinh_sum;
+        return;
+    }
     y = multiply_scalar(subtract(s0, s1), 0.5);
 }
 
@@ -972,7 +1020,80 @@ XPMATH_INLINE_FUNCTION DoubleDouble tanh(DoubleDouble a) {
 // second term's log(2) ~ 0.69 by orders of magnitude, and both are computed to
 // full relative precision.  Below the band the original expression is kept
 // bit-for-bit.  Full argument at ff_math.hpp's asinh.
+// KI-22 -----------------------------------------------------------------------
+// SMALL-ARGUMENT SERIES, and where its crossover comes from.
+//
+// asinh, atanh, sinh and expm1 are all asymptotically linear at the origin, so
+// they are perfectly conditioned there (kappa = 1) and the format's full
+// mantissa is available.  Their closed forms are not: each of them routes the
+// answer through an intermediate of magnitude ~1 from which an O(x) quantity
+// must then be recovered.
+//
+//   asinh(x) = log(x + sqrt(x^2+1))     -> forms 1 + x inside the log
+//   atanh(x) = 1/2 log((1+x)/(1-x))     -> forms 1 +- x
+//   sinh(x)  = (e^x - e^-x)/2           -> subtracts two numbers near 1
+//   expm1(x) = e^x - 1                  -> same
+//
+// Forming `1 + x` for |x| < 1 discards every bit of x below 2^-p relative to 1,
+// so what survives is p - log2(1/|x|) bits: at DD's p = 106 and x = 1e-15 that
+// is 106 - 50 = 56 bits, i.e. ONE FP64 WORD OF TWO, which is exactly the 15.91
+// of 31 digits KI-22 measured.  The loss is u/|x| in relative terms.
+//
+// THE CROSSOVER IS NOT A TUNING CONSTANT.  It is Sterbenz's lemma: the
+// subtraction 1 - x is EXACT precisely when x is in [1/2, 2], and the addition
+// 1 + x likewise keeps every bit of x while |x| >= 1/2.  At |x| = 1/2 the
+// closed form is therefore still within ~1 ulp; the first bit is lost the
+// moment |x| drops below it.  So the series branch takes |x| < 1/2 and the
+// closed form keeps everything else, in every backend, for all four functions.
+// (FF, QF and TF already used 1/2 for atanh, sinh and expm1; this is the same
+// number, now derived rather than inherited, and now applied to the cases that
+// were missing it.)
+//
+// TERMS NEEDED AT THE CROSSOVER, for full precision at |x| = 1/2:
+//
+//   asinh:  sum (-1)^k (2k)!/(4^k (k!)^2 (2k+1)) x^(2k+1); coefficients <= 1, so
+//           the tail after N terms is ~x^(2N) = 2^(-2N).  2^(-2N) <= 2^-106
+//           needs N = 53 terms (through x^105).  DD 53, QF 48, TF 36, FF 24.
+//   atanh:  sum x^(2k+1)/(2k+1); same 2^(-2N) tail -> N = 53.
+//   sinh:   sum x^(2k+1)/(2k+1)!; the factorial dominates -- x^(2N)/(2N+1)! at
+//           N = 12 is 0.5^24/25! = 3.8e-33 <= u = 1.23e-32 -> N = 12 terms.
+//   expm1:  sum x^k/k!, relative tail x^(N-1)/N!; at DD's u that is N = 26.
+//
+// The loops below carry a cap comfortably above those counts and exit on a
+// relative-tolerance test, so only arguments actually AT the crossover pay the
+// full count; at x = 1e-15 asinh converges in two terms.
+//
+// WHY asinh DOES NOT USE THE SERIES, though the derivation above admits it.
+// A term count is also a rounding-error count: N terms cost ~N ulps, and asinh
+// and atanh are the two with the slow 2^(-2N) tail, so they are the two whose
+// crossover term count is largest.  Measured, the asinh series at |x| = 1/2 was
+// WORSE than the closed form it replaced -- the dense sweep flagged 88 TF asinh
+// grid points losing up to 1.21 digits, because TF pays 36 terms of rounding to
+// avoid 1 bit of cancellation.  The trade is only favourable well below 1/2.
+//
+// Rather than retune the crossover, note the cancellation is removable in CLOSED
+// FORM.  With s = sqrt(x^2+1) and x >= 0,
+//
+//     x + s = 1 + x + (s^2 - 1)/(1 + s) = 1 + x + x^2/(1 + s)
+//
+// so asinh(x) = log1p(x + x^2/(1+s)) with every term non-negative.  The leading
+// 1 is never formed: log1p carries its own small-argument series (2*atanh(t),
+// t = z/(2+z)) and receives an O(x) argument.  No crossover, no term count, and
+// full precision at EVERY magnitude below kDDSqHi -- strictly better than either
+// branch it replaces.  asinh is the only one of the four with such an identity;
+// atanh, sinh and expm1 keep the series at the Sterbenz crossover above.
+//
+// Scope: DD was missing the branch on asinh, atanh and sinh; TF was missing it
+// on expm1; and asinh was missing it in ALL FOUR backends (KI-22 named only DD
+// because the sweep grid happened to catch DD first -- the defect is identical
+// in FF, QF and TF, just at those formats' own magnitudes).
+// The closed form is not free either: the extra divide and the handoff to log1p
+// cost a fixed ~0.4 digits, while the `1 + x` it replaces loses log10(1/|x|).
+// Those cross near |x| = 0.4, so the same Sterbenz 1/2 that bounds the series
+// bounds this too -- measured across the 1,652-point real grid, 1/2 leaves no
+// decrease in any backend while capturing the whole collapse below it.
 XPMATH_INLINE_FUNCTION DoubleDouble asinh(DoubleDouble a) {
+    const double kXpAsinhSmall = 0.5;
     // Reflect: asinh(-a) = -asinh(a). For positive a, a + sqrt(a²+1) >= 1 always,
     // so log argument never causes cancellation.
     if (a.hi < 0.0) return negate(asinh(negate(a)));
@@ -981,10 +1102,17 @@ XPMATH_INLINE_FUNCTION DoubleDouble asinh(DoubleDouble a) {
         u = multiply(u, u);
         return add(log(a), log(add(DoubleDouble(1.0), sqrt(add(DoubleDouble(1.0), u)))));
     }
-    return log(add(a, sqrt(add(multiply(a, a), DoubleDouble(1.0)))));
+    const DoubleDouble a2 = multiply(a, a);
+    const DoubleDouble s  = sqrt(add(a2, DoubleDouble(1.0)));
+    if (a.hi < kXpAsinhSmall) {                                         // KI-22
+        // log1p(a + a^2/(1+sqrt(a^2+1))) -- see the derivation above.
+        return log1p(add(a, divide(a2, add(DoubleDouble(1.0), s))));
+    }
+    return log(add(a, s));
 }
 XPMATH_INLINE_FUNCTION DoubleDouble acosh(DoubleDouble a) {
-    if (a.hi < 1.0) { XPMATH_PRINTF("DDACOSH: argument < 1\n"); return DoubleDouble(0.0); }
+    if (dd_cmp_one(a) < 0) {                                            // KI-16
+        XPMATH_PRINTF("DDACOSH: argument < 1\n"); return DoubleDouble(0.0); }
     if (a.hi > detail::kDDSqHi) {
         DoubleDouble u = divide(DoubleDouble(1.0), a);
         u = multiply(u, u);
@@ -994,7 +1122,27 @@ XPMATH_INLINE_FUNCTION DoubleDouble acosh(DoubleDouble a) {
     return log(add(a, sqrt(t1)));
 }
 XPMATH_INLINE_FUNCTION DoubleDouble atanh(DoubleDouble a) {
-    if (detail::fabs(a.hi) >= 1.0) { XPMATH_PRINTF("DDATANH: |argument| >= 1\n"); return DoubleDouble(0.0); }
+    // KI-16: compare the VALUE, not the leading word.  |a| == 1 is not a domain
+    // error -- atanh(+-1) = +-inf, the same C99 Annex G pole dd_complex.hpp's
+    // catanh already honours.  Only |a| > 1 leaves the domain.  The old guard
+    // rejected both together and returned 0 for the pole.
+    const int c_atanh = dd_cmp_abs_one(a);                              // KI-16
+    if (c_atanh > 0) {
+        XPMATH_PRINTF("DDATANH: |argument| > 1\n"); return DoubleDouble(0.0); }
+    if (c_atanh == 0) return DoubleDouble(a.hi > 0.0 ? HUGE_VAL : -HUGE_VAL);
+    if (detail::fabs(a.hi) < 0.5) {                                     // KI-22
+        // a + a^3/3 + a^5/5 + ...; all terms share a's sign, no cancellation.
+        // Matches the branch ff_math.hpp and qf_math.hpp already carried.
+        const DoubleDouble a2 = multiply(a, a);
+        DoubleDouble sum = a, pwr = a;
+        for (int k = 1; k <= 60; ++k) {
+            pwr = multiply(pwr, a2);
+            const DoubleDouble term = divide_scalar(pwr, (double)(2*k + 1));
+            sum = add(sum, term);
+            if (detail::fabs(term.hi) < 1.0e-32 * detail::fabs(sum.hi)) break;
+        }
+        return sum;
+    }
     DoubleDouble t1 = add(DoubleDouble(1.0), a);
     DoubleDouble t2 = subtract(DoubleDouble(1.0), a);
     return multiply_scalar(log(divide(t1, t2)), 0.5);
@@ -1598,7 +1746,8 @@ XPMATH_INLINE_FUNCTION DoubleDouble bessel_yn(int n, DoubleDouble x) {
 
 // Zeta function — Euler-Maclaurin for s > 1
 XPMATH_INLINE_FUNCTION DoubleDouble zeta(DoubleDouble s) {
-    if (s.hi <= 1.0) { XPMATH_PRINTF("DDZETA: s <= 1\n"); return DoubleDouble(0.0); }
+    if (dd_cmp_one(s) <= 0) {                                           // KI-16
+        XPMATH_PRINTF("DDZETA: s <= 1\n"); return DoubleDouble(0.0); }
     const int N = 50;
     DoubleDouble sum = DoubleDouble(0.0);
     for (int k = 1; k <= N; ++k)
