@@ -84,10 +84,82 @@ struct DoubleDoubleComplex {
     XPMATH_INLINE_FUNCTION DoubleDoubleComplex operator-(DoubleDoubleComplex b) const {
         return DoubleDoubleComplex(subtract(re, b.re), subtract(im, b.im));
     }
+    // Exact power-of-two rescale.  If the scaled leading word leaves the finite
+    // range the tail is meaningless, so drop it and keep the infinity clean.
+    static XPMATH_INLINE_FUNCTION DoubleDouble scale2(DoubleDouble v, double s) {
+        DoubleDouble r(v.hi * s, v.lo * s);
+        if (r.hi != r.hi || detail::isinf(r.hi)) return DoubleDouble(r.hi);
+        return r;
+    }
+
+    // KI-28.  The naive product turns an infinite true result into NaN:
+    // re = ac - bd is inf - inf once both products overflow.  Two distinct
+    // causes, handled in order.
+    //
+    // (1) An OPERAND has an infinite component.  C99 Annex G.5.1 prescribes
+    //     normalising each infinity to +/-1 and each finite part to its sign,
+    //     zeroing any NaN in the other operand, then scaling by infinity.  That
+    //     box is transcribed below.  After normalisation every value is +/-1 or
+    //     +/-0, so the scalar leading words carry the whole result exactly and
+    //     no extended arithmetic is needed.
+    //
+    // (2) All four components are FINITE but their products overflow.  Annex G
+    //     does NOT cover this: glibc's __muldc3 reaches its third clause, finds
+    //     no NaN operand to zero, and returns inf*NaN = NaN.  The true result is
+    //     nevertheless well defined -- (1e300 + 1e300i)^2 = 2e600i, i.e.
+    //     (0, +inf) -- so recompute on operands scaled down by an exact power of
+    //     two and scale the result back up in two steps, letting the overflow
+    //     happen once, at the end, on the component that genuinely overflows.
+    //     2^-513 is the largest scale that cannot overflow: |a|,|b| <= 2^1024
+    //     gives a scaled product <= 2^1022, and the sum of two of those <= 2^1023.
+    //     Components more than ~2^513 below their partner's magnitude flush to
+    //     zero, which costs at most a relative 2^-513 term -- far below DD's
+    //     2^-104 resolution, and the alternative is NaN.
+    //
+    // If an operand component is itself NaN the NaN is the correct answer and is
+    // propagated unchanged.
+    static XPMATH_INLINE_FUNCTION DoubleDoubleComplex
+    mul_recover(DoubleDoubleComplex a, DoubleDoubleComplex b,
+                DoubleDouble rr, DoubleDouble ri) {
+        const double ar = a.re.hi, ai = a.im.hi, br = b.re.hi, bi = b.im.hi;
+        if (ar != ar || ai != ai || br != br || bi != bi)
+            return DoubleDoubleComplex(rr, ri);      // NaN in, NaN out
+
+        double nar = ar, nai = ai, nbr = br, nbi = bi;
+        bool recalc = false;
+        if (detail::isinf(ar) || detail::isinf(ai)) {          // Annex G.5.1
+            nar = detail::copysign(detail::isinf(ar) ? 1.0 : 0.0, ar);
+            nai = detail::copysign(detail::isinf(ai) ? 1.0 : 0.0, ai);
+            recalc = true;
+        }
+        if (detail::isinf(br) || detail::isinf(bi)) {
+            nbr = detail::copysign(detail::isinf(br) ? 1.0 : 0.0, br);
+            nbi = detail::copysign(detail::isinf(bi) ? 1.0 : 0.0, bi);
+            recalc = true;
+        }
+        if (recalc) {
+            const double inf = HUGE_VAL;
+            return DoubleDoubleComplex(
+                DoubleDouble(inf * (nar * nbr - nai * nbi)),
+                DoubleDouble(inf * (nar * nbi + nai * nbr)));
+        }
+
+        const double S = 0x1p-513, U = 0x1p513;    // exact, and U*U is not
+        DoubleDouble sar = scale2(a.re, S), sai = scale2(a.im, S);
+        DoubleDouble sbr = scale2(b.re, S), sbi = scale2(b.im, S);
+        DoubleDouble qr = subtract(multiply(sar, sbr), multiply(sai, sbi));
+        DoubleDouble qi = add(multiply(sar, sbi), multiply(sai, sbr));
+        return DoubleDoubleComplex(scale2(scale2(qr, U), U),
+                                   scale2(scale2(qi, U), U));
+    }
+
     XPMATH_INLINE_FUNCTION DoubleDoubleComplex operator*(DoubleDoubleComplex b) const {
         // (a+bi)(c+di) = (ac-bd) + (ad+bc)i
-        return DoubleDoubleComplex(subtract(multiply(re, b.re), multiply(im, b.im)),
-                         add(multiply(re, b.im), multiply(im, b.re)));
+        DoubleDouble rr = subtract(multiply(re, b.re), multiply(im, b.im));
+        DoubleDouble ri = add(multiply(re, b.im), multiply(im, b.re));
+        if (rr.hi != rr.hi || ri.hi != ri.hi)                  // KI-28
+            return mul_recover(*this, b, rr, ri);
+        return DoubleDoubleComplex(rr, ri);
     }
     XPMATH_INLINE_FUNCTION DoubleDoubleComplex operator/(DoubleDoubleComplex b) const {
         if (b.re.hi == 0.0 && b.im.hi == 0.0) {

@@ -896,8 +896,21 @@ XPMATH_INLINE_FUNCTION TripleFloat log(TripleFloat a) {
     TripleFloat x = TripleFloat(detail::log(a.f0));
 
     for (int i = 0; i < 3; i++) {
-        TripleFloat e = exp(x);
-        x = add(x, divide(subtract(a, e), e));
+        // KI-23, small-argument mirror image.  See qf_math.hpp's log for the
+        // derivation.  The residual form evaluates e^{x}, which for a << 1 is
+        // tiny and loses its low words to FP32 underflow -- TF measured 9.54 of
+        // 22 digits at 1e-38.  Switch to QD's form only where that bites: f2
+        // sits at 2^(E-48), leaving the FP32 normal range 2^-126 once E < -78,
+        // i.e. x < -78*ln2 = -54.1.  Above that the residual form is strictly
+        // better (relative rather than absolute error on the correction), and
+        // below -ln(FLT_MAX) the switch is unavailable because 1/a overflows.
+        if (x.f0 < -54.1f && -x.f0 <= 88.722839f) {
+            TripleFloat e = exp(negate(x));                     // e^{|x|} >= 1
+            x = subtract(add(x, multiply(a, e)), TripleFloat(1.0f));
+        } else {
+            TripleFloat e = exp(x);                             // e^{x} >= 1
+            x = add(x, divide(subtract(a, e), e));
+        }
     }
 
     return x;

@@ -696,10 +696,23 @@ XPMATH_INLINE_FUNCTION FloatFloat log(FloatFloat a) {
     // Initial approximation then 2 Newton steps (FP32 base gives ~6 digits, doubles per iter -> 24 -> 48 bits)
     FloatFloat b = FloatFloat(detail::log(a.hi));
     for (int k = 0; k < 2; ++k) {
-        FloatFloat s0 = exp(b);
-        FloatFloat s1 = subtract(a, s0);
-        FloatFloat s2 = divide(s1, s0);
-        b = add(b, s2);
+        // KI-23, small-argument mirror image.  See qf_math.hpp's log for the
+        // derivation.  The residual form evaluates e^{b}, which for a << 1 is
+        // tiny and loses its lo word to FP32 underflow -- FF measured 9.54 of
+        // 14 digits at 1e-38.  Switch to QD's form only where that bites: lo
+        // sits at 2^(E-24), leaving the FP32 normal range 2^-126 once E < -102,
+        // i.e. b < -102*ln2 = -70.7.  Above that the residual form is strictly
+        // better (relative rather than absolute error on the correction), and
+        // below -ln(FLT_MAX) the switch is unavailable because 1/a overflows.
+        if (b.hi < -70.7f && -b.hi <= 88.722839f) {
+            FloatFloat s0 = exp(negate(b));                     // e^{|b|} >= 1
+            b = subtract(add(b, multiply(a, s0)), FloatFloat(1.0f));
+        } else {
+            FloatFloat s0 = exp(b);                             // e^{b} >= 1
+            FloatFloat s1 = subtract(a, s0);
+            FloatFloat s2 = divide(s1, s0);
+            b = add(b, s2);
+        }
     }
     return b;
 }

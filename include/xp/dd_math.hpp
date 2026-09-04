@@ -544,10 +544,33 @@ XPMATH_INLINE_FUNCTION DoubleDouble log(DoubleDouble a) {
     // Initial approximation then 3 Newton steps: b <- b + (a - exp(b)) / exp(b)
     DoubleDouble b = DoubleDouble(detail::log(a.hi));
     for (int k = 0; k < 3; ++k) {
-        DoubleDouble s0 = exp(b);
-        DoubleDouble s1 = subtract(a, s0);
-        DoubleDouble s2 = divide(s1, s0);
-        b = add(b, s2);
+        // KI-23, small-argument mirror image.  See qf_math.hpp's log for the
+        // derivation.  The residual form evaluates e^{b}, which for a << 1 is
+        // tiny and loses its lo word to FP64 underflow -- DD measured 19.98 of
+        // 32 digits at 1e-307.  Switch to QD's form only where that bites: lo
+        // sits at 2^(E-53), leaving the FP64 normal range 2^-1022 once E < -969,
+        // i.e. b < -969*ln2 = -671.7.  Above that the residual form is strictly
+        // better (relative rather than absolute error on the correction), and
+        // below -ln(DBL_MAX) the switch is unavailable because 1/a overflows.
+        if (b.hi < -671.7 && -b.hi <= 709.78271289338397) {
+            DoubleDouble s0 = exp(negate(b));                   // e^{|b|} >= 1
+            DoubleDouble aa = a;
+            // Dekker's splitter forms (2^27+1)*x, which overflows FP64 above
+            // DBL_MAX/(2^27+1) ~ 1.34e300 -- measured: multiply(1e-302, 1e302)
+            // returns NaN while multiply(1e-300, 1e300) is exact.  e^{|b|} runs
+            // to 1.8e308 here, so rebalance the product by an exact power of
+            // two first.  2^30 covers the whole 1.8e308/1.34e300 ~ 2^27 excess.
+            for (int j = 0; j < 3 && s0.hi > 1.0e300; ++j) {
+                s0 = DoubleDouble(s0.hi * (1.0 / 1024.0), s0.lo * (1.0 / 1024.0));
+                aa = DoubleDouble(aa.hi * 1024.0, aa.lo * 1024.0);
+            }
+            b = subtract(add(b, multiply(aa, s0)), DoubleDouble(1.0));
+        } else {
+            DoubleDouble s0 = exp(b);                           // e^{b} >= 1
+            DoubleDouble s1 = subtract(a, s0);
+            DoubleDouble s2 = divide(s1, s0);
+            b = add(b, s2);
+        }
     }
     return b;
 }

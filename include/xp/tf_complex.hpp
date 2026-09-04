@@ -107,10 +107,57 @@ struct TripleFloatComplex {
     XPMATH_INLINE_FUNCTION TripleFloatComplex operator-(TripleFloatComplex b) const {
         return TripleFloatComplex(subtract(re, b.re), subtract(im, b.im));
     }
+    // KI-28.  Annex G.5.1 recovery plus the finite-operand overflow case Annex G
+    // does not cover.  Full derivation at dd_complex.hpp's mul_recover.  The FP32
+    // scale is 2^-65: |a|,|b| <= 2^128 gives a scaled product <= 2^126 and a sum
+    // of two of those <= 2^127.
+    static XPMATH_INLINE_FUNCTION TripleFloat scale2(TripleFloat v, float s) {
+        TripleFloat r(v.f0 * s, v.f1 * s, v.f2 * s);
+        if (r.f0 != r.f0 || detail::isinf(r.f0)) return TripleFloat(r.f0);
+        return r;
+    }
+    static XPMATH_INLINE_FUNCTION TripleFloatComplex
+    mul_recover(TripleFloatComplex a, TripleFloatComplex b,
+                TripleFloat rr, TripleFloat ri) {
+        const float ar = a.re.f0, ai = a.im.f0, br = b.re.f0, bi = b.im.f0;
+        if (ar != ar || ai != ai || br != br || bi != bi)
+            return TripleFloatComplex(rr, ri);       // NaN in, NaN out
+
+        float nar = ar, nai = ai, nbr = br, nbi = bi;
+        bool recalc = false;
+        if (detail::isinf(ar) || detail::isinf(ai)) {          // Annex G.5.1
+            nar = detail::copysign(detail::isinf(ar) ? 1.0f : 0.0f, ar);
+            nai = detail::copysign(detail::isinf(ai) ? 1.0f : 0.0f, ai);
+            recalc = true;
+        }
+        if (detail::isinf(br) || detail::isinf(bi)) {
+            nbr = detail::copysign(detail::isinf(br) ? 1.0f : 0.0f, br);
+            nbi = detail::copysign(detail::isinf(bi) ? 1.0f : 0.0f, bi);
+            recalc = true;
+        }
+        if (recalc) {
+            const float inf = HUGE_VALF;
+            return TripleFloatComplex(
+                TripleFloat(inf * (nar * nbr - nai * nbi)),
+                TripleFloat(inf * (nar * nbi + nai * nbr)));
+        }
+
+        const float S = 0x1p-65f, U = 0x1p65f;
+        TripleFloat sar = scale2(a.re, S), sai = scale2(a.im, S);
+        TripleFloat sbr = scale2(b.re, S), sbi = scale2(b.im, S);
+        TripleFloat qr = subtract(multiply(sar, sbr), multiply(sai, sbi));
+        TripleFloat qi = add(multiply(sar, sbi), multiply(sai, sbr));
+        return TripleFloatComplex(scale2(scale2(qr, U), U),
+                                  scale2(scale2(qi, U), U));
+    }
+
     XPMATH_INLINE_FUNCTION TripleFloatComplex operator*(TripleFloatComplex b) const {
         // (a+bi)(c+di) = (ac-bd) + (ad+bc)i  (qf_complex.hpp:128-131)
-        return TripleFloatComplex(subtract(multiply(re, b.re), multiply(im, b.im)),
-                                  add(multiply(re, b.im), multiply(im, b.re)));
+        TripleFloat rr = subtract(multiply(re, b.re), multiply(im, b.im));
+        TripleFloat ri = add(multiply(re, b.im), multiply(im, b.re));
+        if (rr.f0 != rr.f0 || ri.f0 != ri.f0)                  // KI-28
+            return mul_recover(*this, b, rr, ri);
+        return TripleFloatComplex(rr, ri);
     }
     XPMATH_INLINE_FUNCTION TripleFloatComplex operator/(TripleFloatComplex b) const {
         // (a+bi)/(c+di) = [(ac+bd) + (bc-ad)i] / (c²+d²)  (qf_complex.hpp:133-142)

@@ -51,19 +51,24 @@ either currently resolved or currently open.
 | 20 | `round` is half-to-even, not half-away-from-zero | **OPEN** | — |
 | 21 | Missing-complex-oracle path is a hard build failure, not degradation | **OPEN** | — |
 | 22 | DD `asinh`/`atanh`/`sinh` and TF `expm1` collapse to the leading word at small x | RESOLVED | batch-5 † |
-| 23 | QF `log`/`log2`/`log10`/`log1p` lose ~11 digits above \|x\| ≈ 1e29 | **OPEN** | — |
+| 23 | QF `log`/`log2`/`log10`/`log1p` lose ~11 digits above \|x\| ≈ 1e29 | RESOLVED | batch-6 ‡ |
 | 24 | FF `sinh`/`cosh` lose one full FP32 word near the `exp` range limit | **OPEN** | — |
 | 25 | QF and TF `atan` return a non-finite value at \|x\| ≈ 3.16e19 | RESOLVED | `0ad44fe` |
 | 26 | TF `sin`/`cos`/`tan` and QF `cos`/`tan` non-finite at very large arguments | RESOLVED | `0ad44fe` |
 | 27 | DD and FF `multiply` return NaN on genuine product overflow | RESOLVED | `2e810c2` |
-| 28 | DD and FF complex squaring returns NaN where the true result is finite-or-inf | **OPEN** | — |
+| 28 | DD and FF complex squaring returns NaN where the true result is finite-or-inf | RESOLVED | batch-6 ‡ |
 | 29 | `asinh` mid-band scatter: the odd reflection costs a few ulps for 1 ≲ \|x\| ≲ 20 | **OPEN** | — |
+| 30 | DD `multiply` returns NaN whenever either operand exceeds ~1.34e300 (Dekker splitter) | **OPEN** | — |
 
-**22 resolved, 7 open** (11, 20, 21, 23, 24, 28, 29).
+**24 resolved, 6 open** (11, 20, 21, 24, 29, 30).
 
 † `batch-5` is the commit titled `fix: KI-16 value-based domain guards; KI-17 TF
 `asinh` odd symmetry; KI-22 small-argument series` — a commit cannot record its
 own sha, and this table ships inside it.
+
+‡ `batch-6` is the commit titled `fix: KI-23 QF log family at large argument;
+KI-28 complex multiply Annex G recovery` — same reason: a commit cannot record
+its own sha, and this table ships inside it.
 
 Three sections that are not KI entries also live in this file and are neither
 resolved nor open: the classifier verdict (2026-09-03), the soft-failure map
@@ -4254,7 +4259,7 @@ QF 29.00; `99.00 d / 0 ulp` means bit-exact against the `__float128` oracle):
 The condition-aware ulp gate closes two cells on this entry alone — `DD r sinh`
 and `TF r expm1` both leave UNEXPLAINED — and opens none.
 
-## KI-23 — QF `log`, `log2`, `log10`, `log1p` lose ~11 digits above |x| ≈ 1e29 **[OPEN]**
+## KI-23 — QF `log`, `log2`, `log10`, `log1p` lose ~11 digits above |x| ≈ 1e29 **[RESOLVED batch-6]**
 
 **Severity: medium, QF only. Filed 2026-09-03 by the step-1c ULP triage;
 measured, not fixed.**
@@ -4292,6 +4297,165 @@ not been established, so they are filed separately.
 Trace QF `log`'s argument handling above 1e29 — most likely the initial estimate
 or the exponent extraction feeding Newton. Acceptance: the four cells drop under
 8x, and check whether KI-19 closes with them.
+
+### RESOLVED 2026-09-04 — commit `fix: KI-23 QF log family at large argument; KI-28 complex multiply Annex G recovery`
+
+**None of the four filed hypotheses was right.** It is not the exponent
+extraction, not a short constant, not the FP32 seed, and not a premature square.
+The cause is **which argument `exp` is evaluated at inside the Newton step**, and
+it was found exactly where this entry suggested looking — by diffing QF's `log`
+against TF's.
+
+#### The QF-vs-TF diagnosis
+
+The two implementations use algebraically identical but numerically different
+Newton corrections:
+
+| backend | Newton step | `exp` is evaluated at |
+|---|---|---|
+| DD, FF, TF | `x += (a − e^x)/e^x`  (residual form) | **+x** |
+| QF | `x += a·e^{−x} − 1`  (QD `qd_real.cpp:1007-1009`) | **−x** |
+
+QF was the only backend carrying QD's form. For `a = 1e29`, `x = ln a = 66.8`, so
+QF evaluates `exp(−66.8) = 2^−96.4`. QF's fourth word `f3` sits at `2^(E−72)`
+relative to a value of magnitude `2^E`, i.e. at `2^−168.4` — **below FP32's
+smallest subnormal `2^−149`**. The bottom words are not merely inaccurate, they
+are *not representable*, and `qf_math.hpp`'s final componentwise scaling
+(`s3.f3 * pow2`) flushes them to zero.
+
+The measured signature confirms it exactly. Over `1e20 → 1e38` — 18 decades, 59.8
+bits of exponent — the loss is 27.18 → 8.92 digits, i.e. 60.6 bits. **One bit of
+result lost per bit of argument exponent**, which is precisely what a fixed
+underflow floor at `2^−149` produces and is not what any conditioning or
+seed-quality argument predicts.
+
+#### The mirror image: three backends had the same defect at the other end
+
+The residual form has the identical weakness reflected about `a = 1`: it
+evaluates `e^x`, which for `a ≪ 1` is tiny and loses *its* low words. Measured on
+the shipped tree before this fix:
+
+| x | DD | FF | QF | TF |
+|---|---|---|---|---|
+| 1e−20 | 32.00 | 14.00 | 29.00 | 22.00 |
+| 1e−30 | 32.00 | 14.00 | 29.00 | **18.02** |
+| 1e−38 | 32.00 | **9.54** | 29.00 | **9.54** |
+| 1e−300 | **26.92** | — | — | — |
+| 1e−307 | **19.98** | — | — | — |
+
+QF, the backend that fails at the large end, is the only one *clean* at the small
+end — because QD's form is the one that evaluates `exp` at the large argument
+there. **The filed scope was half the defect.** Both ends are fixed here, in all
+four backends.
+
+#### The fix
+
+Each backend keeps its own form as the default and switches to the other only
+where the default's `exp` argument genuinely underflows. The switch point is
+derived from the format, not tuned: the last word sits at `2^(E−w)` for a value
+of magnitude `2^E` (w = 53 for DD's `lo`, 24 for FF's, 72 for QF's `f3`, 48 for
+TF's `f2`), so it leaves the normal range when `E − w < E_min`.
+
+| backend | default form | switches to the other when | that is |
+|---|---|---|---|
+| DD | residual | `x < −969·ln2 = −671.7` | a < 1e−291 |
+| FF | residual | `x < −102·ln2 = −70.7` | a < 2e−31 |
+| TF | residual | `x < −78·ln2 = −54.1` | a < 3e−24 |
+| QF | QD | `x > +54·ln2 = +37.4` | a > 1.7e16 |
+
+Each branch is additionally unavailable past its format's `ln(MAX)`, where the
+reciprocal itself overflows; there the default is the only finite option.
+
+**The defaults are not symmetric, and that is a measured result, not an
+oversight.** An earlier revision of this fix made the residual form the default
+for QF too, on the reasoning that its correction carries *relative* rather than
+*absolute* error. The sweep rejected it: **7,817 decreases**, up to 6.77 digits,
+concentrated in QF `log`/`asinh`/`acosh`/`pow`. QF's `divide` is a long division
+and the residual form needs one per Newton step; QD's choice of the
+multiply-only form for `qd_real` is vindicated. Inverting QF's branch to match
+took the same sweep to 5 decreases. DD, FF and TF have the opposite preference
+and keep the residual form.
+
+#### After — `log` family, digits and ulps (DD/FF/TF are the control)
+
+Digits (format caps: DD 32, FF 14, QF 29, TF 22). QF before → after:
+
+| op | x | QF before | QF after | DD | FF | TF |
+|---|---|---|---|---|---|---|
+| `log` | 1e20 | 27.18 | **29.00** | 31.89 | 14.00 | 22.00 |
+| `log` | 1e25 | 22.17 | **29.00** | 32.00 | 14.00 | 22.00 |
+| `log` | 1e29 | 18.43 | **29.00** | 32.00 | 14.00 | 22.00 |
+| `log` | 1e32 | 15.05 | **29.00** | 31.71 | 14.00 | 22.00 |
+| `log` | 1e35 | 12.35 | **28.82** | 32.00 | 14.00 | 22.00 |
+| `log` | 1e38 | 8.92 | **29.00** | 31.68 | 14.00 | 22.00 |
+
+`log2`, `log10` and `log1p` are the same natural log rescaled and move
+identically (`log10` at 1e35 lands at 28.81, everything else matches to 0.01).
+
+Ulps of the true value at each format's `u`:
+
+| op | x | QF before | QF after | DD | FF | TF |
+|---|---|---|---|---|---|---|
+| `log` | 1e20 | 5.28e+01 | **5.40e−01** | 2.61e−01 | 2.29e−01 | 6.05e−02 |
+| `log` | 1e25 | 5.33e+06 | **2.84e−01** | 1.74e−01 | 1.38e−02 | 2.60e−02 |
+| `log` | 1e29 | 2.95e+10 | **9.75e−02** | 4.12e−02 | 1.72e−01 | 5.00e−03 |
+| `log` | 1e32 | 7.06e+13 | **2.54e−01** | 3.97e−01 | 7.36e−02 | 1.18e−01 |
+| `log` | 1e35 | 3.52e+16 | **1.19e+00** | 2.79e−02 | 1.05e−01 | 3.06e−02 |
+| `log` | 1e38 | 9.49e+19 | **9.45e−02** | 4.23e−01 | 1.09e−01 | 5.40e−03 |
+
+The four QF cells go from 2.03e11× over bound to sub-ulp. **DD, FF and TF were
+always clean at these inputs and are unchanged by the QF branch**, which is what
+made the defect diagnosable in the first place.
+
+#### KI-13's residual observation: yes, `asinh`/`acosh` lift with it
+
+KI-13's residuals recorded "QF `asinh`/`acosh` decay above the band (27.18@1e20
+→ 8.93@1e38, tracks QF `log()` at large argument)". Measured here, it tracks it
+to the second decimal — same root cause, and it closes with it:
+
+| op | x | QF before | QF after |
+|---|---|---|---|
+| `asinh`/`acosh` | 1e20 | 27.18 | **29.00** |
+| `asinh`/`acosh` | 1e25 | 22.18 | **29.00** |
+| `asinh`/`acosh` | 1e29 | 18.43 | **29.00** |
+| `asinh`/`acosh` | 1e32 | 15.05 | **29.00** |
+| `asinh`/`acosh` | 1e35 | 12.36 | **28.84** |
+| `asinh`/`acosh` | 1e38 | 8.93 | **29.00** |
+
+Above the band both are `log(a) + log(1 + sqrt(1 ± 1/a²))`, so they inherit
+`log`'s error directly. No change was needed in `asinh` or `acosh` themselves.
+
+#### Small end, after
+
+| x | DD | FF | QF | TF |
+|---|---|---|---|---|
+| 1e−30 | 32.00 | 14.00 | 29.00 | 22.00 (was 18.02) |
+| 1e−38 | 32.00 | 14.00 (was 9.54) | 29.00 | 22.00 (was 9.54) |
+| 1e−300 | 32.00 (was 26.92) | — | — | — |
+| 1e−307 | 32.00 (was 19.98) | — | — | — |
+
+`1e−45` sits at 8.13 digits on all three FP32 backends. That is the FORMAT: the
+input itself is subnormal and cannot be represented to more than that, so no
+implementation can do better. It is an improvement on QF's previous **NaN**
+there.
+
+#### KI-19
+
+This entry asked whether KI-19 (QF `pow` at 1e30) closes with it. KI-19 was
+already resolved separately at `0ad44fe`. QF `pow` does route through `log` and
+does improve here — 33 sweep points gain — but `pow` also picks up 1 decrease
+(see the decreases note below).
+
+#### Gates
+
+- ULP gate: **48 gated cells / 2,650 gated points → 44 / 2,390.** The four
+  removed cells are exactly QF `log`, `log2`, `log10`, `log1p`.
+- Monotone gate, measured against HEAD so prior batches' accepted decreases do
+  not confound it: **485 increases, 5 decreases.** All five are `pow`, which
+  routes through `log`: QF `pow` pt190 29.00→27.70, TF `pow` pt16 21.11→21.05,
+  TF complex `pow` pts 1565/1566/1568 (worst 0.40). Accepted — `pow` is
+  exp-family and carries the §10 conditioning caveat, and the same op gains 47
+  points across the two backends.
 
 ---
 
@@ -4611,7 +4775,7 @@ same list as the KI-19 `div` grid extension.
 
 ---
 
-## KI-28 — DD and FF complex SQUARING returns NaN where the true result is finite-or-infinite **[OPEN]**
+## KI-28 — DD and FF complex SQUARING returns NaN where the true result is finite-or-infinite **[RESOLVED batch-6]**
 
 **Severity: medium (wrong kind of non-finite value), DD and FF complex. Filed
 2026-09-04 while fixing KI-27; measured, not fixed — outside that batch's
@@ -4660,6 +4824,96 @@ recompute with the infinities normalized to ±1/±0 and the finite parts to thei
 signs, then scale. Then extend the complex sweep grid to cover an overflowing
 componentwise product, alongside the KI-19 `div` and KI-27 `mul` grid gaps.
 
+### RESOLVED 2026-09-04 — commit `fix: KI-23 QF log family at large argument; KI-28 complex multiply Annex G recovery`
+
+#### The filed scope was too narrow — all four backends needed it
+
+This entry said "QF/TF unprobed". They were probed here, and **all four backends
+carry the identical naive formula and all four fail**:
+
+| backend | probe | before |
+|---|---|---|
+| DD | `(1e300 + 1e300i)²` | `(-nan, -nan)` |
+| FF | `(1e30 + 1e30i)²` | `(-nan, -nan)` |
+| QF | `(1e30 + 1e30i)²` | `(-nan, inf)` |
+| TF | `(1e30 + 1e30i)²` | `(-nan, inf)` |
+
+QF and TF differ only in that their imaginary part already survived — their
+`multiply` primitive returns `+inf` on overflow, so `2·a·b` was correct while
+`re = ac − bd` was still `inf − inf`. The real part is NaN on every backend.
+
+#### What C99 Annex G actually requires — and where it is not enough
+
+Annex G.5.1 gives an explicit recovery box for complex multiplication, and it is
+narrower than this entry assumed. It fires when an **operand** has an infinite
+component: each infinity is normalised to `±1`, each finite part to its sign,
+any NaN in the *other* operand to a signed zero, and the result is recomputed as
+`inf × (normalised product)`. That box is transcribed verbatim into all four
+headers and handles e.g. `(inf + 1i)·(2 + 3i) → (inf, inf)`.
+
+**It does not cover the filed case.** For `(1e300 + 1e300i)²` every operand
+component is *finite*; the infinities appear only in the intermediate products.
+Annex G reaches its third clause, finds no NaN operand to zero, and recomputes
+`inf × (inf − inf)` = `inf × NaN` = **NaN**. glibc's `__muldc3` does exactly this
+and returns NaN. Following Annex G to the letter would have left the filed defect
+open.
+
+So a second recovery is implemented, for finite operands whose products overflow:
+recompute on operands scaled down by an exact power of two, then scale the result
+back up in two steps, letting the overflow happen once, at the end, on the
+component that genuinely overflows. `2^-513` is the largest DD scale that cannot
+overflow (`|a|,|b| ≤ 2^1024` gives a scaled product `≤ 2^1022`, and a sum of two
+of those `≤ 2^1023`); the FP32 backends use `2^-65` on the same argument. All
+scaling is by powers of two, so the recomputation is exact except at the final
+deliberate overflow. Components more than ~2^513 (~2^65) below their partner's
+magnitude flush to zero, costing a relative term far below the format's
+resolution — and the alternative is NaN.
+
+Order of attempt: NaN operand → propagate NaN unchanged (NaN is the right
+answer); infinite operand → Annex G.5.1 box; otherwise → scaled retry.
+
+#### The contract, asserted
+
+*For complex `a*b` where the true result has an infinite component and neither
+operand is NaN, the result carries the correct infinity with the correct sign,
+not NaN.* Measured after:
+
+| backend | probe | before | after | true |
+|---|---|---|---|---|
+| DD | `(1e300 + 1e300i)²` | `(-nan, -nan)` | **`(0, +inf)`** | `(0, +inf)` |
+| DD | `(1e300 + 0i)²` | `(-nan, 0)` | **`(+inf, 0)`** | `(+inf, 0)` |
+| DD | `(0 + 1e300i)²` | `(-nan, 0)` | **`(-inf, 0)`** | `(-inf, 0)` |
+| DD | `(inf + 1i)·(2 + 3i)` | `(-nan, -nan)` | **`(+inf, +inf)`** | `(+inf, +inf)` |
+| DD | `(2 + 3i)·(inf + 1i)` | `(-nan, -nan)` | **`(+inf, +inf)`** | `(+inf, +inf)` |
+| FF | `(1e30 + 1e30i)²` | `(-nan, -nan)` | **`(0, +inf)`** | `(0, +inf)` |
+| FF | `(inf + 1i)·(2 + 3i)` | `(-nan, -nan)` | **`(+inf, +inf)`** | `(+inf, +inf)` |
+| QF | `(1e30 + 1e30i)²` | `(-nan, inf)` | **`(0, +inf)`** | `(0, +inf)` |
+| QF | `(inf + 1i)·(2 + 3i)` | `(inf, inf)` | `(+inf, +inf)` | `(+inf, +inf)` |
+| TF | `(1e30 + 1e30i)²` | `(-nan, inf)` | **`(0, +inf)`** | `(0, +inf)` |
+| TF | `(inf + 1i)·(2 + 3i)` | `(inf, inf)` | `(+inf, +inf)` | `(+inf, +inf)` |
+
+Note the sign discrimination: `(1e300 + 0i)²` gives `+inf` and `(0 + 1e300i)²`
+gives `−inf` in the real part, which is the whole point of recovering rather
+than clamping.
+
+#### One case that stays NaN, correctly
+
+`(inf + 0i)·(0 − 1i)` returns `(-nan, -inf)`. This is **not** a residual defect:
+the real part is `inf·0`, which is genuinely indeterminate, and Annex G's own box
+produces NaN there (`inf × (1·0 − 0·(−1))` = `inf × 0`). The imaginary part is
+`−inf` and correct. A projective reading of the complex infinity would give
+`(0, −inf)`, but deviating from the standard on a case the standard explicitly
+decides is not worth the divergence. Matching Annex G here is deliberate.
+
+#### Not surfaced by the sweep
+
+Unchanged from the filing: the complex `mul`/`sqr` grid still places no point
+where the componentwise products overflow, so the sweep neither caught this nor
+scores the fix. Extending the complex grid to cover an overflowing componentwise
+product remains open, alongside the KI-19 `div` and KI-27 `mul` grid gaps. The
+0 decreases this change contributes to the monotone gate therefore reflect a grid
+gap, not a verification.
+
 ---
 
 ## KI-29 — `asinh`'s odd reflection costs a few ulps for 1 ≲ |x| ≲ 20, where the unreflected form's subtraction is Sterbenz-exact **[OPEN]**
@@ -4702,6 +4956,69 @@ is in `log`/`log1p`'s own rounding rather than in the argument. A doubled-`log`
 error term, or an error-free `log1p` argument (keeping `x²/(1+s)` as an unevaluated
 sum), would decide it. Until then the reflected form is the right default: it is
 never catastrophic, and it is the only one that is odd.
+
+## KI-30 — DD `multiply` returns NaN whenever either operand exceeds ~1.34e300, because Dekker's splitter overflows **[OPEN]**
+
+**Severity: medium, DD only. Filed 2026-09-04 while fixing KI-23; measured, not
+fixed — the KI-23 fix works around it locally rather than closing it.**
+
+### What
+
+`dd_math.hpp`'s `multiply` forms Dekker's split `(2^27 + 1)·x`. That product
+overflows FP64 once `|x| > DBL_MAX/(2^27 + 1) ≈ 1.34e300`, and the resulting
+`inf` propagates into the error term, so the whole DoubleDouble comes back NaN —
+even though the true product is perfectly representable.
+
+Measured on the shipped tree, with the true product exactly `1.0` in every row:
+
+| call | result |
+|---|---|
+| `multiply(1e-296, 1e296)` | `1.0` (lo `-1.296e-17`) |
+| `multiply(1e-298, 1e298)` | `1.0` (lo `8.409e-17`) |
+| `multiply(1e-300, 1e300)` | `1.0` (lo `7.756e-17`) |
+| `multiply(1e-302, 1e302)` | **`(-nan, -nan)`** |
+| `multiply(1e-304, 1e304)` | **`(-nan, -nan)`** |
+| `multiply(1e-306, 1e306)` | **`(-nan, -nan)`** |
+| `multiply(1e-308, 1e308)` | **`(-nan, -nan)`** |
+
+The cutover between 1e300 and 1e302 is exactly `ln(DBL_MAX/(2^27+1))`, which
+identifies the splitter as the mechanism and rules out genuine overflow: the
+answer is `1.0`, not a large number.
+
+This is the **same class** as KI-9 (QF/TF `div` outrunning the Dekker splitter,
+resolved at `82427f6`/`0ad44fe`) and the FP64 instance of it. KI-9 was fixed in
+`divide`; `multiply` was not audited at the time. It is distinct from KI-27,
+which was about `multiply` returning NaN where the product *genuinely* overflows
+and `±inf` is correct — here nothing overflows but the splitter.
+
+### Extent
+
+DD only, and only for operands above ~1.34e300 — the top ~8 decades of FP64,
+about 2.6% of the exponent range. The FP32 backends do not show it at the
+corresponding point (`multiply(1e-38, 1e38)` is exact on FF, QF and TF), so
+whatever guard they carry is absent from `dd_math.hpp`.
+
+Not surfaced by the sweep: the real `mul` grid places no point with an operand
+above 1.34e300.
+
+### How KI-23 works around it
+
+`dd_math.hpp`'s `log` now evaluates `e^{|b|}` for `a < 1e-291`, which runs up to
+1.8e308 and hits this directly — it was the reason DD `log(1e-307)` first came
+back NaN. The KI-23 fix rebalances *that one product* by an exact power of two
+before multiplying (`s0` down by 2^10 up to three times, `aa` up by the same),
+which is correct and exact but is local to `log`. Every other caller of DD
+`multiply` is still exposed.
+
+### Closing it
+
+Guard the splitter in `dd_math.hpp`'s `two_prod`/`multiply` the way `divide` was
+guarded for KI-9: scale the operand down by an exact power of two before
+splitting and scale the two output words back afterwards, or use an FMA-based
+`two_prod` where the compiler provides one. Then remove the local rebalance in
+`log` and extend the real `mul` grid above 1.34e300.
+
+---
 
 ## Note on resolution markers — CLOSED 2026-09-04
 

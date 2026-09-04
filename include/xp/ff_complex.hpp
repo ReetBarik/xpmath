@@ -83,9 +83,56 @@ struct FloatFloatComplex {
     XPMATH_INLINE_FUNCTION FloatFloatComplex operator-(FloatFloatComplex b) const {
         return FloatFloatComplex(subtract(re, b.re), subtract(im, b.im));
     }
+    // KI-28.  Annex G.5.1 recovery plus the finite-operand overflow case Annex G
+    // does not cover.  Full derivation at dd_complex.hpp's mul_recover.  The FP32
+    // scale is 2^-65: |a|,|b| <= 2^128 gives a scaled product <= 2^126 and a sum
+    // of two of those <= 2^127.
+    static XPMATH_INLINE_FUNCTION FloatFloat scale2(FloatFloat v, float s) {
+        FloatFloat r(v.hi * s, v.lo * s);
+        if (r.hi != r.hi || detail::isinf(r.hi)) return FloatFloat(r.hi);
+        return r;
+    }
+    static XPMATH_INLINE_FUNCTION FloatFloatComplex
+    mul_recover(FloatFloatComplex a, FloatFloatComplex b,
+                FloatFloat rr, FloatFloat ri) {
+        const float ar = a.re.hi, ai = a.im.hi, br = b.re.hi, bi = b.im.hi;
+        if (ar != ar || ai != ai || br != br || bi != bi)
+            return FloatFloatComplex(rr, ri);        // NaN in, NaN out
+
+        float nar = ar, nai = ai, nbr = br, nbi = bi;
+        bool recalc = false;
+        if (detail::isinf(ar) || detail::isinf(ai)) {          // Annex G.5.1
+            nar = detail::copysign(detail::isinf(ar) ? 1.0f : 0.0f, ar);
+            nai = detail::copysign(detail::isinf(ai) ? 1.0f : 0.0f, ai);
+            recalc = true;
+        }
+        if (detail::isinf(br) || detail::isinf(bi)) {
+            nbr = detail::copysign(detail::isinf(br) ? 1.0f : 0.0f, br);
+            nbi = detail::copysign(detail::isinf(bi) ? 1.0f : 0.0f, bi);
+            recalc = true;
+        }
+        if (recalc) {
+            const float inf = HUGE_VALF;
+            return FloatFloatComplex(
+                FloatFloat(inf * (nar * nbr - nai * nbi)),
+                FloatFloat(inf * (nar * nbi + nai * nbr)));
+        }
+
+        const float S = 0x1p-65f, U = 0x1p65f;
+        FloatFloat sar = scale2(a.re, S), sai = scale2(a.im, S);
+        FloatFloat sbr = scale2(b.re, S), sbi = scale2(b.im, S);
+        FloatFloat qr = subtract(multiply(sar, sbr), multiply(sai, sbi));
+        FloatFloat qi = add(multiply(sar, sbi), multiply(sai, sbr));
+        return FloatFloatComplex(scale2(scale2(qr, U), U),
+                                 scale2(scale2(qi, U), U));
+    }
+
     XPMATH_INLINE_FUNCTION FloatFloatComplex operator*(FloatFloatComplex b) const {
-        return FloatFloatComplex(subtract(multiply(re, b.re), multiply(im, b.im)),
-                         add(multiply(re, b.im), multiply(im, b.re)));
+        FloatFloat rr = subtract(multiply(re, b.re), multiply(im, b.im));
+        FloatFloat ri = add(multiply(re, b.im), multiply(im, b.re));
+        if (rr.hi != rr.hi || ri.hi != ri.hi)                  // KI-28
+            return mul_recover(*this, b, rr, ri);
+        return FloatFloatComplex(rr, ri);
     }
     XPMATH_INLINE_FUNCTION FloatFloatComplex operator/(FloatFloatComplex b) const {
         if (b.re.hi == 0.0f && b.im.hi == 0.0f) {

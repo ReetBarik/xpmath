@@ -1024,8 +1024,32 @@ XPMATH_INLINE_FUNCTION QuadFloat log(QuadFloat a) {
         return QuadFloat(0.0f);
     QuadFloat x = QuadFloat(detail::log(a.f0));     // ~24-bit FP32 seed
     for (int k = 0; k < 3; ++k) {
-        // x = x + a*exp(-x) - 1   (QD qd_real.cpp:1007-1009)
-        x = subtract(add(x, multiply(a, exp(negate(x)))), QuadFloat(1.0f));
+        // KI-23: evaluate exp at a NON-NEGATIVE argument wherever the format
+        // allows.  e^{|x|} >= 1 keeps all four words normal; e^{-|x|} pushes the
+        // low words below the smallest FP32 subnormal (2^-149) and truncates
+        // them, losing one bit of the result per bit of the argument's exponent.
+        // QD's single form  x += a*e^{-x} - 1  (qd_real.cpp:1007-1009) is the
+        // e^{-|x|} branch, and is the reason QF alone shed ~11 digits above
+        // 1e29 while DD/FF/TF -- which all use the residual form -- were clean.
+        // QD's form stays the DEFAULT for QF -- measured, it beats the residual
+        // form across the whole mid-range (the sweep's QF log/asinh/acosh/pow
+        // cells lose up to 6.77 digits if the residual form is used there),
+        // which is presumably why QD chose it: QF's divide is a long division,
+        // and the residual form needs one per Newton step.  DD/FF/TF have the
+        // opposite preference and keep the residual form as their default.
+        //
+        // Switch to the residual form only where e^{-x} underflows: f3 sits at
+        // 2^(E-72) for a value of magnitude 2^E, so it leaves the FP32 normal
+        // range 2^-126 once E < -54, i.e. x > 54*ln2 = 37.4 (a > 1.7e16).  That
+        // is exactly the KI-23 band.  Also take it below -ln(FLT_MAX), where
+        // e^{-x} = 1/a overflows and the residual form is the only finite one.
+        if (x.f0 > 37.4f || x.f0 < -88.722839f) {
+            QuadFloat e = exp(x);                               // e^{x} normal
+            x = add(x, divide(subtract(a, e), e));
+        } else {
+            QuadFloat e = exp(negate(x));                       // e^{-x} normal
+            x = subtract(add(x, multiply(a, e)), QuadFloat(1.0f));
+        }
     }
     return x;
 }

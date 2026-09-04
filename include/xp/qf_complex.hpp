@@ -125,10 +125,57 @@ struct QuadFloatComplex {
     XPMATH_INLINE_FUNCTION QuadFloatComplex operator-(QuadFloatComplex b) const {
         return QuadFloatComplex(subtract(re, b.re), subtract(im, b.im));
     }
+    // KI-28.  Annex G.5.1 recovery plus the finite-operand overflow case Annex G
+    // does not cover.  Full derivation at dd_complex.hpp's mul_recover.  The FP32
+    // scale is 2^-65: |a|,|b| <= 2^128 gives a scaled product <= 2^126 and a sum
+    // of two of those <= 2^127.
+    static XPMATH_INLINE_FUNCTION QuadFloat scale2(QuadFloat v, float s) {
+        QuadFloat r(v.f0 * s, v.f1 * s, v.f2 * s, v.f3 * s);
+        if (r.f0 != r.f0 || detail::isinf(r.f0)) return QuadFloat(r.f0);
+        return r;
+    }
+    static XPMATH_INLINE_FUNCTION QuadFloatComplex
+    mul_recover(QuadFloatComplex a, QuadFloatComplex b,
+                QuadFloat rr, QuadFloat ri) {
+        const float ar = a.re.f0, ai = a.im.f0, br = b.re.f0, bi = b.im.f0;
+        if (ar != ar || ai != ai || br != br || bi != bi)
+            return QuadFloatComplex(rr, ri);         // NaN in, NaN out
+
+        float nar = ar, nai = ai, nbr = br, nbi = bi;
+        bool recalc = false;
+        if (detail::isinf(ar) || detail::isinf(ai)) {          // Annex G.5.1
+            nar = detail::copysign(detail::isinf(ar) ? 1.0f : 0.0f, ar);
+            nai = detail::copysign(detail::isinf(ai) ? 1.0f : 0.0f, ai);
+            recalc = true;
+        }
+        if (detail::isinf(br) || detail::isinf(bi)) {
+            nbr = detail::copysign(detail::isinf(br) ? 1.0f : 0.0f, br);
+            nbi = detail::copysign(detail::isinf(bi) ? 1.0f : 0.0f, bi);
+            recalc = true;
+        }
+        if (recalc) {
+            const float inf = HUGE_VALF;
+            return QuadFloatComplex(
+                QuadFloat(inf * (nar * nbr - nai * nbi)),
+                QuadFloat(inf * (nar * nbi + nai * nbr)));
+        }
+
+        const float S = 0x1p-65f, U = 0x1p65f;
+        QuadFloat sar = scale2(a.re, S), sai = scale2(a.im, S);
+        QuadFloat sbr = scale2(b.re, S), sbi = scale2(b.im, S);
+        QuadFloat qr = subtract(multiply(sar, sbr), multiply(sai, sbi));
+        QuadFloat qi = add(multiply(sar, sbi), multiply(sai, sbr));
+        return QuadFloatComplex(scale2(scale2(qr, U), U),
+                                scale2(scale2(qi, U), U));
+    }
+
     XPMATH_INLINE_FUNCTION QuadFloatComplex operator*(QuadFloatComplex b) const {
         // (a+bi)(c+di) = (ac-bd) + (ad+bc)i  (ff_complex.hpp:67-70)
-        return QuadFloatComplex(subtract(multiply(re, b.re), multiply(im, b.im)),
-                                add(multiply(re, b.im), multiply(im, b.re)));
+        QuadFloat rr = subtract(multiply(re, b.re), multiply(im, b.im));
+        QuadFloat ri = add(multiply(re, b.im), multiply(im, b.re));
+        if (rr.f0 != rr.f0 || ri.f0 != ri.f0)                  // KI-28
+            return mul_recover(*this, b, rr, ri);
+        return QuadFloatComplex(rr, ri);
     }
     XPMATH_INLINE_FUNCTION QuadFloatComplex operator/(QuadFloatComplex b) const {
         // (a+bi)/(c+di) = [(ac+bd) + (bc-ad)i] / (c²+d²)  (ff_complex.hpp:71-80)
