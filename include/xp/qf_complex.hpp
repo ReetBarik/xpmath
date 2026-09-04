@@ -344,7 +344,15 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex sqrt(QuadFloatComplex z) {
         b.re = divide(z.im, s1);
         if (b.re.f0 < 0.0f) b.re = negate(b.re);
         b.im = s0;
-        if (z.im.f0 < 0.0f) b.im = negate(b.im);
+        // KI-11. `z.im.f0 < 0` is FALSE for -0.0, so both zero conventions landed
+        // on the +i sheet and sqrt(-a - 0i) came back as +i*sqrt(a) -- the sign of
+        // the whole answer wrong, 0.00 digits at every negative-real-axis grid
+        // point (C99 Annex G: csqrt(-a -+ 0i) = -+ i*sqrt(a)). Reading the sign off
+        // copysign instead costs nothing on the two conventions that were already
+        // right. This also settles acosh(-a - 0i), whose imaginary part inherited
+        // the sheet, and asinh(+-0 + yi) for |y| > 1, where sqrt(1 - y^2 -+ 0i) is
+        // the term that decides which side of the cut the answer lands on.
+        if (detail::copysign(1.0f, z.im.f0) < 0.0f) b.im = negate(b.im);
     }
     return b;
 }
@@ -512,6 +520,91 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex tan(QuadFloatComplex z) {
 // sign of Im(z)'s zero, which the subtraction destroys (0 - (+-0) == +0 in
 // round-to-nearest). Read it off Im(z) instead: Im(1 - z^2) = -2*Re*Im, so the
 // root is negative-imaginary exactly when Re and Im share a sign.
+// KI-11. |Im asin(z)| -- the one component the log form destroys, and the piece
+// that also carries Re acosh and Re asinh (both are this same quantity under an
+// exact identity; see their bodies).
+//
+// asin(z) = -i*log(w) with w = iz + sqrt(1 - z^2), so Im asin(z) = -log|w|, and
+// |w| -> 1 for EVERY z near the real segment [-1,1] -- not just on it. Taking
+// log of a number within eps of 1 rounds the answer away before log() is
+// entered: at z = 0.5 + 1e-30i the true |w| is 1 - 1.15e-30, so forming it
+// destroys log10(1/1.15e-30) = 29.9 digits and leaves ~1.1 of a 29-digit
+// budget. Measured on this backend before the fix: 0.21 digits of 29.00.
+//
+// THAT IS NOT CONDITIONING. Probed against the binary128 oracle, the component
+// condition number |(d Im f / d in_j)*in_j / Im f| is exactly 1.000 at these
+// points (a relative eps on Im z moves Im asin by the same relative eps), and
+// |z f'(z)/f(z)| = 1.10 -- so log10(kappa) = 0.04 and the format permits
+// 29 - 0.04 digits here. The gap is entirely the formulation's.
+//
+// The cure is Hull, Fairgrove & Tang (1997), "Implementing the complex arcsine
+// and arccosine functions using exception handling", ACM TOMS 23(3):299-335.
+// With x = |Re z|, y = |Im z| and
+//     r = hypot(x+1, y),   s = hypot(x-1, y),   a = (r + s)/2
+// one has |Im asin z| = acosh(a) exactly, and a -> 1 is precisely the lossy
+// region -- so carry a-1, never a. Because r and s are exact distances,
+//     r = (x+1) + y^2/(r + (x+1)),        s = |x-1| + y^2/(s + |x-1|)
+// hold identically, and substituting gives
+//     a - 1 = (max(x,1) - 1) + (1/2)*( y^2/(r+(x+1)) + y^2/(s+|x-1|) )
+// -- a sum of NON-NEGATIVE terms at every x, so there is no cancellation left
+// to lose anything to. acosh(1+m) = log1p( m + sqrt(m*(m+2)) ) then keeps it,
+// through the same real log1p that KI-5(b) rebuilt.
+//
+// y^2 is written y*(y/d), never (y*y)/d. Both r >= y and s >= y, so each
+// quotient is <= 1 and the product cannot overflow at any |z|; the bare y*y
+// overflows a 4xFP32 word above |y| ~ 1.8e19 and would hand the whole upper
+// half of the range back as inf.
+//
+// One branch covers the whole plane: sqrt(m*(m+2)) is evaluated as the product
+// of two separate roots, so nothing overflows however large |z| is, and log1p
+// degrades gracefully into log for large arguments. An earlier revision split
+// at a >= 2 into log(a) + log1p(sqrt(1 - (1/a)^2)); it measured WORSE (FF asin
+// 14.00 -> 13.81, QF asinh 28.83 -> 27.75 at z = 2, pure rounding churn from
+// the extra log), so the split does not ship.
+XPMATH_INLINE_FUNCTION QuadFloat xp_asin_imag_mag(QuadFloat x, QuadFloat y) {
+    const QuadFloat one(1.0f);
+    const QuadFloat xp1  = add(x, one);
+    const QuadFloat xm1s = subtract(x, one);            // signed, for the max(x,1) term
+    QuadFloat xm1 = xm1s;
+    if (xm1.f0 < 0.0f) xm1 = negate(xm1);      // |x - 1|
+    const QuadFloat r  = hypot(xp1, y);
+    const QuadFloat s_ = hypot(xm1, y);
+    const QuadFloat d1 = add(r,  xp1);
+    const QuadFloat d2 = add(s_, xm1);
+    // v = (1/d1 + 1/d2)/2, so the y-dependent half of a-1 is exactly y^2*v.
+    // Carrying v rather than the two quotients is what lets sqrt(a-1) be formed
+    // as y*sqrt(v) below, with y never squared.
+    QuadFloat v(QuadFloat(0.0f));
+    if (d1.f0 != 0.0f) v = add(v, divide(one, d1));
+    if (d2.f0 != 0.0f) v = add(v, divide(one, d2));
+    v = multiply_scalar(v, 0.5f);
+    QuadFloat m = multiply(y, multiply(y, v));
+    // + (max(x,1) - 1), tested on the SIGNED difference rather than on x's
+    // leading word, so an x whose leading word is exactly 1 but whose tail is
+    // positive still takes the term (the KI-16 value-based-guard rule).
+    if (xm1s.f0 > 0.0f) m = add(m, xm1s);
+    // sqrt(a-1). Where the max(x,1) term is absent, a-1 is exactly y^2*v and
+    // the root is y*sqrt(v) -- formed WITHOUT ever squaring y. That is not a
+    // micro-optimisation: y^2 goes subnormal in an FP32 word below |y| ~ 1e-19
+    // and zero below ~1e-22, and the first cut of this fix (which did square)
+    // took QF asin at 0.5 + 1e-30i to -0.00 for exactly that reason. m itself
+    // may still underflow there, and that is harmless -- next to sqrt(2*m) it
+    // is a correction of relative size sqrt(m/2), i.e. already below the
+    // format's own resolution wherever it underflows.
+    const QuadFloat sm = (xm1s.f0 > 0.0f) ? sqrt(m) : multiply(y, sqrt(v));
+    // acosh(1+m) = log1p( m + sqrt(m)*sqrt(m+2) ). Split into two roots rather
+    // than sqrt(m*(m+2)) so the product never overflows: each factor is O(|z|)
+    // at worst and their product is the ~2|z| that log1p wants anyway. The
+    // algebraically equivalent sm*(sm + sqrt(m+2)) was measured too and is
+    // very slightly worse overall (5290 sweep cells down vs 5126), so this
+    // form ships.
+    return log1p(add(m, multiply(sm, sqrt(add(m, QuadFloat(2.0f))))));
+}
+// |Re z| and |Im z|, the two arguments xp_asin_imag_mag() wants. Split out so
+// asin/acosh/asinh cannot disagree about them.
+XPMATH_INLINE_FUNCTION QuadFloat xp_abs_word(QuadFloat v) {
+    return (v.f0 < 0.0f) ? negate(v) : v;
+}
 XPMATH_INLINE_FUNCTION QuadFloatComplex asin(QuadFloatComplex z) {
     QuadFloatComplex iz  = QuadFloatComplex(negate(z.im), z.re);
     QuadFloatComplex z2  = z * z;
@@ -524,8 +617,16 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex asin(QuadFloatComplex z) {
         if (want_neg != have_neg) root.im = negate(root.im);
     }
     QuadFloatComplex sum = iz + root;
-    QuadFloatComplex lg  = log(sum);
-    return QuadFloatComplex(lg.im, negate(lg.re));  // × (-i): (a+bi)(-i) = b - ai
+    // Re asin(z) = arg(sum) -- this component was never the problem, and
+    // atan2(sum.im, sum.re) is exactly what log(sum).im was returning.
+    const QuadFloat re = atan2(sum.im, sum.re);
+    // Im asin(z) = sign(Im z) * acosh(a); see xp_asin_imag_mag above. The sign is
+    // read off copysign so a signed zero on the real cuts picks the C99 Annex G
+    // side -- the same convention the KI-5(d) block above enforces for the root
+    // that feeds the real part.
+    QuadFloat im = xp_asin_imag_mag(xp_abs_word(z.re), xp_abs_word(z.im));
+    if (detail::copysign(1.0f, z.im.f0) < 0.0f) im = negate(im);
+    return QuadFloatComplex(re, im);
 }
 // acos(z) = π/2 - asin(z).  ff_complex.hpp:214-218 / dd_complex.hpp:232-237.
 // Principal sqrt of (u, v) with the sign of a ZERO v respected. The header's
@@ -533,7 +634,9 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex asin(QuadFloatComplex z) {
 // it puts BOTH zero conventions on the +i sheet. That is the same class of defect
 // as KI-5(d) and it is corrected locally here rather than inside sqrt itself,
 // which would move every other caller (acosh included) in one undocumented step.
-// The general sqrt defect is recorded in docs/KNOWN_ISSUES.md, not fixed here.
+// The general sqrt defect was recorded in docs/KNOWN_ISSUES.md as part of KI-11
+// and HAS since been fixed at source (sqrt now reads the sheet off copysign), so
+// this local helper is now belt-and-braces rather than the only correct path.
 // `vsign` is +1/-1, the intended sign of v when v is a zero: multiply_scalar does
 // NOT carry a signed zero through (it renormalizes, and quick_two_sum(-0,+0) is
 // +0), so the caller passes the sign it read off the original Im(z) rather than
@@ -839,13 +942,28 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex tanh(QuadFloatComplex z) {
 // dd_complex.hpp's asinh for the full rationale, the magnitude threshold and its
 // measured justification, and the Re(z) == ±0 boundary decision — all identical
 // here.
+// Re asinh(z), the KI-11 form. Kept as its own function so the reflected and
+// unreflected branches below cannot drift apart.
+XPMATH_INLINE_FUNCTION QuadFloat xp_ki11_asinh_re(QuadFloatComplex z) {
+    QuadFloat v = xp_asin_imag_mag(xp_abs_word(z.im), xp_abs_word(z.re));
+    if (detail::copysign(1.0f, z.re.f0) < 0.0f) v = negate(v);
+    return v;
+}
+// KI-11. Re asinh(z) = sign(Re z) * |Im asin(iz)| -- exact, from
+// asinh(z) = -i*asin(iz): the real part of asinh is the imaginary part of asin
+// with the arguments transposed, since Re(iz) = -Im z and Im(iz) = Re z. So the
+// same xp_asin_imag_mag() serves, called as (|Im z|, |Re z|) rather than
+// (|Re z|, |Im z|). log(z + sqrt(z^2+1)) loses it for the same reason asin's
+// log did -- |z + sqrt(z^2+1)| -> 1 all along the imaginary segment [-i,i] --
+// measured 5.79 of 29.00 at z = 1e-25 + 0.5i. The imaginary part keeps the
+// existing body, reflection branch and all; it was never the losing one.
 XPMATH_INLINE_FUNCTION QuadFloatComplex asinh(QuadFloatComplex z) {
     const float t = 4.0f;   // kXpAsinhReflect
     if (z.re.f0 < 0.0f && (-z.re.f0 > t || detail::fabs(z.im.f0) > t)) {
         QuadFloatComplex w = -z;
-        return -log(w + sqrt(w*w + QuadFloatComplex(QuadFloat(1.0f))));
+        return QuadFloatComplex(xp_ki11_asinh_re(z), negate(log(w + sqrt(w*w + QuadFloatComplex(QuadFloat(1.0f)))).im));
     }
-    return log(z + sqrt(z*z + QuadFloatComplex(QuadFloat(1.0f))));
+    return QuadFloatComplex(xp_ki11_asinh_re(z), log(z + sqrt(z*z + QuadFloatComplex(QuadFloat(1.0f)))).im);
 }
 // acosh(z) = log(z + sqrt(z² - 1)).  ff_complex.hpp:259-261 / dd_complex.hpp:286-289.
 // KI-1 fix: Kahan 1987's branch-correct form, acosh(z) = 2*log(sqrt((z+1)/2) +
@@ -860,8 +978,22 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex acosh(QuadFloatComplex z) {
     QuadFloatComplex rm = sqrt(QuadFloatComplex(
         multiply_scalar(subtract(z.re, one), 0.5f), half_im));
     QuadFloatComplex lg = log(rp + rm);
-    return QuadFloatComplex(multiply_scalar(lg.re, 2.0f),
-                            multiply_scalar(lg.im, 2.0f));
+    // KI-11. Re acosh(z) = |Im asin(z)| is an identity (acosh(z) = +-i*acos(z)
+    // and Im acos = -Im asin), and 2*log|rp+rm| has exactly the disease
+    // xp_asin_imag_mag() exists to cure: |rp+rm| -> 1 all along the real segment
+    // [-1,1], so at z = 0.5 + 1e-30i it scored 0.12 of 29.00. The imaginary part
+    // is Kahan's and stays -- it is the well-conditioned one here.
+        // KI-11. acosh(conj z) = conj acosh(z) and the principal strip is
+    // Im acosh in (-pi, pi], so sign(Im acosh z) = sign(Im z) EVERYWHERE,
+    // signed zeros on the cut included (C99 Annex G). Kahan's form got that
+    // sign from a chain of sqrt/log that drops -0.0 on the FP32-word backends:
+    // QF and TF returned acosh(-0.1 - 0i) = +1.670964i, the wrong sheet and
+    // 0.00 digits, while DD and FF happened to keep it. Taking the magnitude
+    // and re-attaching the sign from copysign(Im z) is exact and cannot drift.
+    QuadFloat im_ = multiply_scalar(lg.im, 2.0f);
+    if (im_.f0 < 0.0f) im_ = negate(im_);
+    if (detail::copysign(1.0f, z.im.f0) < 0.0f) im_ = negate(im_);
+    return QuadFloatComplex(xp_asin_imag_mag(xp_abs_word(z.re), xp_abs_word(z.im)), im_);
 }
 // atanh(z) = ½·log((1 + z)/(1 - z)).  ff_complex.hpp:262-266 / dd_complex.hpp:290-295.
 // KI-5(b) fix. Two independent defects lived in the old one-line body

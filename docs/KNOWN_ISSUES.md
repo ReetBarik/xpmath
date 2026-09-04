@@ -39,7 +39,7 @@ either currently resolved or currently open.
 | 8 | `hypot` and complex `abs` unscaled — overflow/underflow far inside range | RESOLVED | `4cd7dcb`, then `7680809` |
 | 9 | QF/TF `div` returns NaN when the quotient outruns the Dekker splitter | RESOLVED | `82427f6`, completed by `0ad44fe` (KI-19) |
 | 10 | `fmod`/`remainder` lose half their digits on far-apart operands | RESOLVED | `fc7b0fb`, then `58fda3b` |
-| 11 | Complex inverse family loses digits when one component ≪ the other | **OPEN** | partial: `855292d` (`atan`/`atanh` only) |
+| 11 | Complex inverse family loses digits when one component ≪ the other | RESOLVED | `855292d` (`atan`/`atanh`), then batch-8 ¶ (`asin`/`acos`/`asinh`/`acosh`/`sqrt`) |
 | 12 | FF `sincos` never converges below \|x\| ≈ 1e-20 and skips its out-params | RESOLVED | `0ad44fe` (headline), then `2e810c2` (reduction band) |
 | 13 | `angle`/`asinh`/`acosh` form an unscaled sum of squares — NaN above 1.8e19 | RESOLVED | `7680809` |
 | 14 | FF `floor`/`ceil`/`trunc`/`round` return zero for every \|x\| ≥ 2^47 | RESOLVED | `2e810c2` |
@@ -49,7 +49,7 @@ either currently resolved or currently open.
 | 18 | Complex `tan`/`tanh`/`atan`/`atanh` have no asymptotic branch | RESOLVED | `855292d` |
 | 19 | QF/TF `divide` returns NaN where `inf` is correct, on quotient overflow | RESOLVED | `0ad44fe` |
 | 20 | `round` is half-to-even, not half-away-from-zero | **OPEN** | — |
-| 21 | Missing-complex-oracle path is a hard build failure, not degradation | **OPEN** | — |
+| 21 | Missing-complex-oracle path is a hard build failure, not degradation | RESOLVED | batch-8 ¶ |
 | 22 | DD `asinh`/`atanh`/`sinh` and TF `expm1` collapse to the leading word at small x | RESOLVED | batch-5 † |
 | 23 | QF `log`/`log2`/`log10`/`log1p` lose ~11 digits above \|x\| ≈ 1e29 | RESOLVED | batch-6 ‡ |
 | 24 | FF `sinh`/`cosh` lose one full FP32 word near the `exp` range limit | RESOLVED | batch-7 § |
@@ -60,8 +60,9 @@ either currently resolved or currently open.
 | 29 | `asinh` mid-band scatter: the odd reflection costs a few ulps for 1 ≲ \|x\| ≲ 20 | **OPEN** | — |
 | 30 | DD `multiply` returns NaN whenever either operand exceeds ~1.34e300 (Dekker splitter) | RESOLVED | batch-7 § |
 | 31 | DD `divide_scalar` returns a quotient 2^64 too large above 1.339e300 | RESOLVED | batch-7 § |
+| 32 | FF complex `asin` returns 0 for its REAL part on the far real axis — `iz + sqrt(1-z^2)` cancels to (0,0) | **OPEN** | — |
 
-**27 resolved, 4 open** (11, 20, 21, 29).
+**29 resolved, 3 open** (20, 29, 32).
 
 † `batch-5` is the commit titled `fix: KI-16 value-based domain guards; KI-17 TF
 `asinh` odd symmetry; KI-22 small-argument series` — a commit cannot record its
@@ -73,6 +74,9 @@ its own sha, and this table ships inside it.
 
 § `batch-7` is the commit titled `fix: KI-30 scale multiply past the Dekker
 splitter limit; KI-24 fixed` — same reason.
+
+¶ `batch-8` is the commit titled `fix: KI-11 complex inverse small-component;
+KI-21 vanilla-Kokkos degradation` — same reason.
 
 Three sections that are not KI entries also live in this file and are neither
 resolved nor open: the classifier verdict (2026-09-03), the soft-failure map
@@ -1536,7 +1540,8 @@ well-conditioned there — so the loss is the algorithm's, not the format's.
 and documented only. **KI-6 and KI-7 have since been resolved** (2026-09-02,
 commit `ad82f4f`), **KI-8** (2026-09-02, commit `4cd7dcb`) and **KI-9**
 (2026-09-02, commit `82427f6`) — but see **KI-19**, which shows the KI-9 fix
-moved the ceiling rather than removing it. KI-10 and KI-11 remain open, and
+moved the ceiling rather than removing it. **KI-10** has since been resolved
+(`58fda3b`) and **KI-11** likewise (`855292d`, completed in batch-8), and
 KI-12…KI-20 were added on 2026-09-03 by the session that diagnosed the 9,238
 UNEXPLAINED sweep points. `docs/DOMAINS.md`
 records the resulting usable ranges per backend per op, and is generated from the
@@ -2714,7 +2719,7 @@ no notion of the jump regime either. The divergence remains deliberate.
 
 ---
 
-## KI-11 — The complex inverse family loses most of its digits when one component is far smaller than the other **[OPEN]**
+## KI-11 — The complex inverse family loses most of its digits when one component is far smaller than the other **[RESOLVED 855292d / batch-8]**
 
 **Severity: medium, all backends, 4,759 points. PARTIALLY RESOLVED by commit
 `855292d` — `atan`/`atanh` fixed and measured; `asin`/`acos`/`asinh`/`acosh`/
@@ -2832,27 +2837,158 @@ Sweep-wide effect on the affected cells (read-only monotone gate against
 **10,915 points increased, 1,932 decreased, worst decrease −2.04 digits, none
 below 3 digits of loss and none reaching zero.**
 
-### What is left — NOT fixed, and NOT inherent
+### The other five ops — settled by measurement (batch-8, 2026-09-04)
 
-`asin`, `acos`, `asinh`, `acosh` and `sqrt` were **not touched** and their rows
-are bit-identical before and after (verifiable in the table generator: every
-`asin`/`acos`/`asinh`/`acosh` row above is unchanged). Their loss is *not*
-demonstrated to be conditioning, and this entry must not be read as saying so.
-The mechanism was diagnosed and is the same disease `log1p` exists to cure:
+`asin`, `acos`, `asinh`, `acosh` and `sqrt` were left untouched by `855292d`
+and their loss was *described* as conditioning without a derivation. It is not
+conditioning. Each was probed against the binary128 oracle at its worst point:
+kappa = |z f'(z)/f(z)| and the per-component kappa_c = max_j |(d f_c/d in_j)·in_j / f_c|,
+both by central difference in binary128, then compared with the measured digits.
+
+| op | worst probe point | failing component | kappa = \|z f'/f\| | component kappa_c | achievable (DD cap 31.00) | measured DD / FF / QF / TF | verdict |
+|---|---|---|---|---|---|---|---|
+| `asin`  | 0.5 + 1e-30i  | Im | 1.10  | 1.000 | 31.00 − log10(1.00) = **31.00** | 1.55 / 0.00 / 0.21 / 0.00 | **FIXABLE** |
+| `acos`  | 0.5 + 1e-30i  | Im (= −Im asin) | 0.551 | 1.000 | **31.00** | 1.55 / 0.00 / 0.21 / 0.00 | **FIXABLE** |
+| `asinh` | 1e-25 + 0.5i  | Re | 1.10  | 1.000 | **31.00** | 6.54 / 0.00 / 5.79 / 0.00 | **FIXABLE** |
+| `acosh` | 0.5 + 1e-30i  | Re (= \|Im asin\|) | 0.551 | 1.000 | **31.00** | 1.19 / 0.00 / 0.12 / 0.00 | **FIXABLE** |
+| `sqrt`  | −0.1 − 0i     | Im (sign)          | 0.500 | 0.500 | **31.30** | 0.00 / 0.00 / 0.00 / 0.00 | **FIXABLE** |
+
+Every component kappa_c is 1.000 or below — a relative eps on the small input
+component moves the scored output component by the *same* relative eps, and
+log10(kappa) is 0.04 or less. **Nothing here is conditioning. The whole gap was
+formulation.** Five for five; none of the split the entry allowed for
+("partly fixable, partly inherent") turned out to exist.
+
+**Mechanism 1 — the modulus rounds the answer away (asin, acos, asinh, acosh).**
+`Im asin(z) = −log|w|` with `w = iz + sqrt(1−z²)`, and `|w| → 1` for every z near
+the real segment [−1,1] — not just on it. At `z = 0.5 + 1e-30i` the true `|w|` is
+`1 − 1.155e-30`, so forming `|w|` at all destroys `log10(1/1.155e-30) = 29.9`
+digits before `log` is ever entered. `acosh`'s real part and `asinh`'s real part
+are the *same quantity* under exact identities, which is why all four move
+together.
+
+**Mechanism 2 — `-0.0` fails a `< 0` test (sqrt, and the sheet it feeds).**
+`sqrt`'s negative-real-axis branch chose its sheet with `if (z.im.hi < 0.0)`,
+which is **false for `-0.0`**. Both zero conventions therefore landed on the `+i`
+sheet, so `sqrt(-a - 0i)` returned `+i·sqrt(a)` — the sign of the whole answer
+wrong, 0.00 digits, at every negative-real-axis grid point (C99 Annex G requires
+`csqrt(-a ∓ 0i) = ∓ i·sqrt(a)`). Reading the sign off `copysign` instead is free
+on the two conventions that were already right.
+
+### The fix
+
+Four headers, `include/xp/{dd,ff,qf,tf}_complex.hpp`, identically.
+
+**`xp_asin_imag_mag(x, y)`** — Hull, Fairgrove & Tang (1997), *Implementing the
+complex arcsine and arccosine functions using exception handling*, ACM TOMS
+23(3):299–335. With `x = |Re z|`, `y = |Im z|`,
 
 ```
-DD asin(0.5 + 1e-25i)   6.48 digits
+r = hypot(x+1, y),   s = hypot(|x-1|, y),   a = (r + s)/2,   |Im asin z| = acosh(a)
 ```
 
-`asin(z) = −i·log(iz + √(1−z²))`. At this point `|iz + √(1−z²)|² = 1 − 2.3e−25`,
-so `Re log` of it is `0.5·log1p(−2.3e−25)` — a log of something within 1e−25 of
-1. Forming it as `log(w)` rounds `w` to 1 first, and the predicted loss
-`log10(1/2.3e-25) ≈ 24.6` digits off a 31-digit cap leaves ~6.4; measured 6.48.
-The complex `log1p` added by KI-5(b) is exactly the tool, and routing these five
-through it is the obvious next step. **Closing KI-11 requires doing that work
-or measuring that it does not help — it is deliberately left open here.**
+exactly — and `a → 1` is precisely the lossy region, so the code carries `a − 1`
+and never `a`. Because `r` and `s` are exact distances,
+`r = (x+1) + y²/(r + (x+1))` and `s = |x−1| + y²/(s + |x−1|)` hold identically,
+giving
 
-### Accepted decreases
+```
+a - 1 = (max(x,1) - 1) + (1/2)*( y²/(r+(x+1)) + y²/(s+|x-1|) )
+```
+
+— a sum of **non-negative** terms at every x, so there is no cancellation left
+to lose anything to. `acosh(1+m) = log1p(m + sqrt(m)·sqrt(m+2))` then keeps it,
+through the real `log1p` KI-5(b) rebuilt.
+
+Two implementation details that were each worth digits and are commented in the
+source:
+
+- The two `y²` terms are carried as `v = (1/d1 + 1/d2)/2`, so `sqrt(a−1)` is
+  formed as `y·sqrt(v)` — **y is never squared**. `y²` goes subnormal in an FP32
+  word below `|y| ~ 1e-19` and flushes to zero below `~1e-22`; the first cut of
+  this fix did square, and took QF `asin` at `0.5 + 1e-30i` to `-0.00`.
+- `sqrt(m·(m+2))` is evaluated as `sqrt(m)·sqrt(m+2)`, two separate roots, so
+  the product cannot overflow at any `|z|`.
+
+**`acosh`'s imaginary part** now takes its sign from `copysign(Im z)` on the
+magnitude. `acosh(conj z) = conj acosh(z)` and the principal strip is
+`Im ∈ (−π, π]`, so `sign(Im acosh z) = sign(Im z)` everywhere, signed zeros on
+the cut included. Kahan's chain dropped that `-0.0` on the FP32-word backends:
+QF and TF returned `acosh(-0.1 - 0i) = +1.670964i`, wrong sheet, 0.00 digits,
+while DD and FF happened to keep it.
+
+`acos` was **not** edited — it already delegates its imaginary part to
+`negate(asin(z).im)`, so it inherits the fix.
+
+### After
+
+Probe (binary128 oracle, worst point per op, min of the two components):
+
+| op | point | DD before → after | FF | QF | TF |
+|---|---|---|---|---|---|
+| `asin`  | 0.5 + 1e-30i | 1.55 → **31.00** | 0.00 → **13.97** | 0.21 → **14.68** | 0.00 → **14.68** |
+| `acos`  | 0.5 + 1e-30i | 1.55 → **31.00** | 0.00 → **13.97** | 0.21 → **14.68** | 0.00 → **14.68** |
+| `acosh` | 0.5 + 1e-30i | 1.19 → **31.00** | 0.00 → **13.97** | 0.12 → **14.68** | 0.00 → **14.68** |
+| `asinh` | 1e-25 + 0.5i | 6.54 → **31.00** | 0.00 → **13.97** | 5.79 → **19.50** | 0.00 → **19.50** |
+| `sqrt`  | −0.1 − 0i    | 0.00 → **31.00** | 0.00 → **14.00** | 0.00 → **29.00** | 0.00 → **21.70** |
+| `acosh` | −0.1 − 0i    | 0.00 → **30.71** | 0.00 → **14.00** | 0.00 → **29.00** | 0.00 → **21.70** |
+| `asinh` | 0 − 10i      | 0.00 → **30.57** | 0.00 → **14.00** | 0.00 → **28.28** | 0.00 → **21.36** |
+
+**The QF/TF numbers at `1e-30` and `1e-25` are the FORMAT, and this time with the
+derivation.** A QF/TF value of magnitude 2^e stores word k at magnitude
+2^(e−24k), and any word below 2^−126 is an FP32 subnormal, so the usable
+significand is `min(24·nwords, e + 126)` bits. At the answer's magnitude
+1.155e-30 (e ≈ −100) that is 24 + 26 = 50 bits = **15.0 digits** (measured
+14.68); at 1.155e-25 (e ≈ −83), 24 + 43 = 67 bits = **20.2 digits** (measured
+19.50). Both are at the ceiling. DD's FP64 words have exponents down to 2^−1022
+and so do not hit this at all — hence 31.00 across the board.
+
+### Sweep-wide effect (batch-8)
+
+Read-only comparison of the full 428,592-point sweep, this change alone (the
+same binary run before and after the header edits, so no oracle-fingerprint
+drift enters):
+
+**14,474 points increased, 5,126 decreased.** Of the increases, **1,329 went
+from zero correct digits to non-zero** and **2,679 gained 10 digits or more**.
+Of the decreases, 1,029 give up ≥ 0.5 digit and 222 give up ≥ 1.0; the worst is
+−5.45. Every decreased cell is in the complex inverse family (`asin`, `acos`,
+`asinh`, `acosh`) except 8 `DD c log10` and 2 `DD c pow` points, which route
+through the same `sqrt` sheet.
+
+Worst decreases:
+
+| cell | pt | family | z | before | after |
+|---|---|---|---|---|---|
+| QF c asinh | 1554/1555 | axis | −1e−21 ± 0i | 29.00 | 23.55 |
+| QF c asin / acos | 748 | cut-re | 0 + 1e−21i | 29.00 | 23.55 |
+| QF c asinh | 1536–1539 | axis | ±1e−17 ± 0i | 29.00 | 27.25 |
+| QF c asin / acos | 740/741 | cut-re | 0 ± 1e−17i | 29.00 | 27.25 |
+| TF c acosh | 237 | polar | −0.91461657 + 0.61112726i | 21.52 | 19.97 |
+| QF c acosh | 129 | polar | 0.97097743 + 0.19313942i | 28.52 | 26.98 |
+
+The −5.45 group is the same subnormal-limb ceiling derived above, seen from the
+other side: at `|z| = 1e-21` the answer needs a fourth QF word at ~2e−43, which
+is subnormal, so **any** general computation there is capped near 24 digits. The
+old code scored 29.00 only because its shortcut returned the input expansion
+*unchanged* — exact by luck of the identity `asinh(y) ≈ y`, not by carrying the
+digits. The remaining ~5,000 decreases are sub-digit rounding churn from a
+formula with more operations (two `hypot`, two `divide`, a `sqrt`, a `log1p`)
+replacing one complex `log`.
+
+Judgement: 5,126 points give up a median well under 0.5 digit — and four points
+give up 5.45 to a documented format floor — so that 14,474 points improve,
+1,329 of them from zero. Recorded, not silently taken.
+
+### Residual, filed separately
+
+FF complex `asin` at `z = 1e8 + 1e-8i` returns **0** for its real part (true
+value π/2). This is not the small-component loss: `sum = iz + sqrt(1−z²)`
+cancels to `(0, 0)` in FF's two FP32 words and `atan2(0,0) = 0`. It predates
+this change (the old `log(sum).im` had the identical cancellation) and is
+FF-only. Filed as **KI-32**.
+
+### Accepted decreases (`855292d`, the `atan`/`atanh` half)
 
 All are ≤ 2.04 digits and all sit on the `polar` family (|z| = 1, where
 `1 − x² − y²` is an exact cancellation of two O(1) quantities, so the atan2
@@ -3932,7 +4068,7 @@ is deliberately *not* KI-2, which was about `nint` one ulp below a tie.
 
 ---
 
-## KI-21 — The missing-complex-oracle path is documented as graceful degradation but is a hard build failure **[OPEN]**
+## KI-21 — The missing-complex-oracle path is documented as graceful degradation but is a hard build failure **[RESOLVED batch-8]**
 
 **Severity: medium (build/packaging, not numerics). Surfaced by S7 while
 standing up CI against a vanilla Kokkos install.**
@@ -3991,6 +4127,47 @@ ground is the only option that is actively misleading.
 `patches/kokkos_complex_quad_math.hpp` into the Kokkos source tree before
 configuring, and then asserts the header reached the install tree. With that
 copy in place the lane is 34/34.
+
+### Fixed (batch-8, 2026-09-04)
+
+The first of the two options above — honour the documented posture. In
+`CMakeLists.txt` each of the four complex demo targets is now wrapped in
+`if(KOKKOS_HAS_COMPLEX_QUADMATH_WRAPPER) ... endif()`, appending its own name to
+`XP_COMPLEX_DEMO_TARGETS` as it goes; the `install(TARGETS ...)` list names that
+variable instead of the four literals, because naming a target that was never
+added is itself a hard configure error. Nothing else changed — the four demos
+are the only consumers of the header (`scripts/smoke_kokkos_complex_quad.cpp`
+also includes it but is not a CMake target). The `message(WARNING)` now says
+plainly which four targets are being skipped and that the ctest suite is
+unaffected, instead of the vague "will not compile its __complex128 oracle".
+
+**How this was verified — against a Kokkos install that really lacks the
+header.** Not by simulation and not by deleting the include from a source file:
+
+```
+cp -al $HOME/kokkos-install-quadmath /tmp/kokkos-noheader        # hardlink copy
+rm /tmp/kokkos-noheader/kokkos-install-quadmath/include/impl/Kokkos_ComplexQuadPrecisionMath.hpp
+cmake -S . -B /tmp/ki21_build -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_PREFIX_PATH=/tmp/kokkos-noheader/kokkos-install-quadmath
+cmake --build /tmp/ki21_build -j8 && ctest --test-dir /tmp/ki21_build -j4 --timeout 1800
+```
+
+The hardlink copy leaves `$HOME/kokkos-install-quadmath` untouched (verified:
+the original header is still present afterwards, and `find` shows zero copies
+under `/tmp/kokkos-noheader`). Results:
+
+- configure: **rc 0**, and the probe reports `Kokkos install is MISSING
+  impl/Kokkos_ComplexQuadPrecisionMath.hpp; the four complex demos … are
+  SKIPPED`.
+- `cmake --build --target help` lists no `kokkos_ep_demo_*complex` target, and
+  does still list `dd/ff/qf/tf_complex_accuracy_test` — those never needed the
+  header.
+- build: **rc 0**, whole tree.
+- **`ctest`: 34/34 passed, 0 failed**, versus 7 passed and 27 `***Not Run`
+  before. That is the degradation the warning has been promising since T0.0.
+
+The CI workaround in `.github/workflows/ci.yml` is left in place, as intended:
+it exists so the CI lane exercises the *complex demos*, not to paper over this.
 
 ---
 
@@ -5258,6 +5435,46 @@ grids should be extended above 1e300 to cover it.
 
 ---
 
+## KI-32 — FF complex `asin` returns ZERO for its real part on the far real axis **[OPEN]**
+
+**Severity: medium (a full component lost, no NaN to warn you). FF only, found
+while closing KI-11 in batch-8. Not caused by that change — the pre-fix code
+had the identical cancellation.**
+
+### What
+
+```
+FF asin(1e8 + 1e-8i)   ref = (1.570796e+00, 1.911383e+01)
+                       got = (0.000000e+00, 1.911383e+01)     0.00 digits on Re
+```
+
+`Re asin(z) = arg(iz + sqrt(1 - z^2))`. At `z = 1e8 + 1e-8i` the root is
+`(1e-8, -1e8)` and `iz` is `(-1e-8, 1e8)`, so **both** components of the sum are
+a subtraction of two equal quantities. In FF's two FP32 words the real parts
+cancel to exactly 0 (their true difference is ~1e-24, twenty orders below FF's
+resolution at 1e-8) and the imaginary parts likewise, leaving `atan2(0, 0) = 0`.
+DD, QF and TF have enough words to survive it and score 31.00 / 29.00 / 21.70 at
+the same point.
+
+### Why it is a separate entry from KI-11
+
+KI-11 is the *small component* being destroyed by a modulus. This is the *large*
+component being destroyed by a cancellation in the argument of `atan2`, it is
+FF-only, and it is unchanged by the KI-11 fix (the old `log(sum).im` and the new
+`atan2(sum.im, sum.re)` read the same `sum`). Conflating them would have made
+the KI-11 close look conditional when it is not.
+
+### Closing it
+
+Compute `Re asin` from a form that does not build `iz + sqrt(1-z^2)`
+explicitly — Hull, Fairgrove & Tang give
+`Re asin(z) = atan2(x, Re sqrt(1-z^2))` with the same `r`/`s` machinery
+`xp_asin_imag_mag()` already carries, which never forms the cancelling sum. The
+helper is in place in all four headers, so this is a small change; it was left
+out of batch-8 to keep that change's measurement clean.
+
+---
+
 ## Note on resolution markers — CLOSED 2026-09-04
 
 This section used to track a drift between what the headings said and what the
@@ -5285,9 +5502,11 @@ lines 67 and 74 do now read `-DCMAKE_CXX_STANDARD=20`, but the repository's
 `CLAUDE.md` still documents the C++17 trap as *"Reported in the S1 STATUS block,
 not yet fixed"*. `CLAUDE.md` was outside this batch's edit scope, so it is
 recorded here rather than changed. Two lesser cases were also checked and are
-**not** mismatches: KI-11 is genuinely `[OPEN]` (`855292d` fixed `atan`/`atanh`
-only, leaving `asin`/`acos`/`asinh`/`acosh`/`sqrt`), and KI-12's body correctly
-credits `0ad44fe` with most of the fix and `2e810c2` with the rest.
+**not** mismatches: KI-11 was genuinely `[OPEN]` (`855292d` fixed `atan`/`atanh`
+only, leaving `asin`/`acos`/`asinh`/`acosh`/`sqrt` — batch-8 has since closed
+those five, so the entry now reads `[RESOLVED 855292d / batch-8]`), and KI-12's
+body correctly credits `0ad44fe` with most of the fix and `2e810c2` with the
+rest.
 
 ### Body-text shas that were left as written
 

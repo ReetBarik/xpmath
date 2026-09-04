@@ -66,9 +66,12 @@ if("LIBQUADMATH" IN_LIST Kokkos_TPLS)
   else()
     message(WARNING
       "Kokkos install is MISSING impl/Kokkos_ComplexQuadPrecisionMath.hpp; "
-      "kokkos_ep_demo_complex will not compile its __complex128 oracle. This "
-      "header is a local extension carried in this repo — apply it per "
-      "patches/README.md, then rebuild Kokkos with -DKokkos_ENABLE_LIBQUADMATH=ON.")
+      "the four complex demos (kokkos_ep_demo_complex, _ff_complex, "
+      "_qf_complex, _tf_complex) are SKIPPED — they are the only targets that "
+      "need it. Everything else, including the whole ctest suite, still "
+      "configures and builds. This header is a local extension carried in this "
+      "repo — apply it per patches/README.md, then rebuild Kokkos with "
+      "-DKokkos_ENABLE_LIBQUADMATH=ON to get the complex demos back.")
   endif()
 endif()
 
@@ -86,9 +89,17 @@ add_executable(kokkos_ep_demo src/demo_real.cpp)
 target_include_directories(kokkos_ep_demo PRIVATE ${THIRD_PARTY_INCLUDE})
 target_link_libraries(kokkos_ep_demo PRIVATE Kokkos::kokkos)
 
-add_executable(kokkos_ep_demo_complex src/demo_complex.cpp)
-target_include_directories(kokkos_ep_demo_complex PRIVATE ${THIRD_PARTY_INCLUDE})
-target_link_libraries(kokkos_ep_demo_complex PRIVATE Kokkos::kokkos)
+# KI-21. Defined only when the probe above found the header. Without the
+# guard the WARNING promised degradation and then the build failed anyway:
+# src/demo_complex.cpp includes the oracle unconditionally, so `make` stopped
+# here and 27 of the 34 ctest targets — none of which need the header —
+# never linked and read as `***Not Run`.
+if(KOKKOS_HAS_COMPLEX_QUADMATH_WRAPPER)
+  add_executable(kokkos_ep_demo_complex src/demo_complex.cpp)
+  target_include_directories(kokkos_ep_demo_complex PRIVATE ${THIRD_PARTY_INCLUDE})
+  target_link_libraries(kokkos_ep_demo_complex PRIVATE Kokkos::kokkos)
+  list(APPEND XP_COMPLEX_DEMO_TARGETS kokkos_ep_demo_complex)
+endif()
 
 # ---- FF (float-float) demos (T2.0) ------------------------------------------
 # Same oracle plumbing as the DD demos: the __float128 real oracle comes through
@@ -99,9 +110,17 @@ add_executable(kokkos_ep_demo_ff src/demo_ff_real.cpp)
 target_include_directories(kokkos_ep_demo_ff PRIVATE ${THIRD_PARTY_INCLUDE})
 target_link_libraries(kokkos_ep_demo_ff PRIVATE Kokkos::kokkos)
 
-add_executable(kokkos_ep_demo_ff_complex src/demo_ff_complex.cpp)
-target_include_directories(kokkos_ep_demo_ff_complex PRIVATE ${THIRD_PARTY_INCLUDE})
-target_link_libraries(kokkos_ep_demo_ff_complex PRIVATE Kokkos::kokkos)
+# KI-21. Defined only when the probe above found the header. Without the
+# guard the WARNING promised degradation and then the build failed anyway:
+# src/demo_ff_complex.cpp includes the oracle unconditionally, so `make` stopped
+# here and 27 of the 34 ctest targets — none of which need the header —
+# never linked and read as `***Not Run`.
+if(KOKKOS_HAS_COMPLEX_QUADMATH_WRAPPER)
+  add_executable(kokkos_ep_demo_ff_complex src/demo_ff_complex.cpp)
+  target_include_directories(kokkos_ep_demo_ff_complex PRIVATE ${THIRD_PARTY_INCLUDE})
+  target_link_libraries(kokkos_ep_demo_ff_complex PRIVATE Kokkos::kokkos)
+  list(APPEND XP_COMPLEX_DEMO_TARGETS kokkos_ep_demo_ff_complex)
+endif()
 
 # ---- QF (quad-float, 4xFP32) demos (T3.0b real, T3.0c complex) ---------------
 # Real transcendentals exercised against the __float128 oracle (T3.0b) and
@@ -113,9 +132,17 @@ add_executable(kokkos_ep_demo_qf src/demo_qf_real.cpp)
 target_include_directories(kokkos_ep_demo_qf PRIVATE ${THIRD_PARTY_INCLUDE})
 target_link_libraries(kokkos_ep_demo_qf PRIVATE Kokkos::kokkos)
 
-add_executable(kokkos_ep_demo_qf_complex src/demo_qf_complex.cpp)
-target_include_directories(kokkos_ep_demo_qf_complex PRIVATE ${THIRD_PARTY_INCLUDE})
-target_link_libraries(kokkos_ep_demo_qf_complex PRIVATE Kokkos::kokkos)
+# KI-21. Defined only when the probe above found the header. Without the
+# guard the WARNING promised degradation and then the build failed anyway:
+# src/demo_qf_complex.cpp includes the oracle unconditionally, so `make` stopped
+# here and 27 of the 34 ctest targets — none of which need the header —
+# never linked and read as `***Not Run`.
+if(KOKKOS_HAS_COMPLEX_QUADMATH_WRAPPER)
+  add_executable(kokkos_ep_demo_qf_complex src/demo_qf_complex.cpp)
+  target_include_directories(kokkos_ep_demo_qf_complex PRIVATE ${THIRD_PARTY_INCLUDE})
+  target_link_libraries(kokkos_ep_demo_qf_complex PRIVATE Kokkos::kokkos)
+  list(APPEND XP_COMPLEX_DEMO_TARGETS kokkos_ep_demo_qf_complex)
+endif()
 
 # ---- TF (triple-float, 3xFP32) demos (S10 Phase 5 real + complex) ----------
 # TF real transcendentals exercised against the __float128 oracle (S10 P5) and
@@ -127,9 +154,17 @@ add_executable(kokkos_ep_demo_tf src/demo_tf_real.cpp)
 target_include_directories(kokkos_ep_demo_tf PRIVATE ${THIRD_PARTY_INCLUDE})
 target_link_libraries(kokkos_ep_demo_tf PRIVATE Kokkos::kokkos)
 
-add_executable(kokkos_ep_demo_tf_complex src/demo_tf_complex.cpp)
-target_include_directories(kokkos_ep_demo_tf_complex PRIVATE ${THIRD_PARTY_INCLUDE})
-target_link_libraries(kokkos_ep_demo_tf_complex PRIVATE Kokkos::kokkos)
+# KI-21. Defined only when the probe above found the header. Without the
+# guard the WARNING promised degradation and then the build failed anyway:
+# src/demo_tf_complex.cpp includes the oracle unconditionally, so `make` stopped
+# here and 27 of the 34 ctest targets — none of which need the header —
+# never linked and read as `***Not Run`.
+if(KOKKOS_HAS_COMPLEX_QUADMATH_WRAPPER)
+  add_executable(kokkos_ep_demo_tf_complex src/demo_tf_complex.cpp)
+  target_include_directories(kokkos_ep_demo_tf_complex PRIVATE ${THIRD_PARTY_INCLUDE})
+  target_link_libraries(kokkos_ep_demo_tf_complex PRIVATE Kokkos::kokkos)
+  list(APPEND XP_COMPLEX_DEMO_TARGETS kokkos_ep_demo_tf_complex)
+endif()
 
 # ---- Cost benchmark ----------------------------------------------------------
 # Times each backend against the incumbent at comparable precision (FF vs FP64,
@@ -140,11 +175,16 @@ add_executable(kokkos_ep_bench_cost src/bench_cost.cpp)
 target_include_directories(kokkos_ep_bench_cost PRIVATE ${THIRD_PARTY_INCLUDE})
 target_link_libraries(kokkos_ep_bench_cost PRIVATE Kokkos::kokkos)
 
-install(TARGETS kokkos_ep_demo kokkos_ep_demo_complex
-                kokkos_ep_demo_ff kokkos_ep_demo_ff_complex
-                kokkos_ep_demo_qf kokkos_ep_demo_qf_complex
-                kokkos_ep_demo_tf kokkos_ep_demo_tf_complex
+# KI-21: the four complex demos are named through XP_COMPLEX_DEMO_TARGETS, which
+# is empty when the probe did not find impl/Kokkos_ComplexQuadPrecisionMath.hpp.
+# Naming a target that was never added is a hard configure error, so this list
+# cannot be spelled out literally.
+install(TARGETS kokkos_ep_demo
+                kokkos_ep_demo_ff
+                kokkos_ep_demo_qf
+                kokkos_ep_demo_tf
                 kokkos_ep_bench_cost
+                ${XP_COMPLEX_DEMO_TARGETS}
         RUNTIME DESTINATION bin)
 
 # ---- Tests (T0.1: backend-parameterized harness) ----------------------------
