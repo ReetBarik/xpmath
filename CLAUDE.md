@@ -27,9 +27,13 @@ Each includes its `include/xp/` counterpart and re-exposes it as
 forwarders, so existing Kokkos code compiles unchanged. Tests and demos include
 these paths, which keeps the wrapper layer continuously validated.
 
-Validation: a 23-test ctest suite in `tests/` plus seven demo executables in
-`src/`, all measured against a `__float128` (libquadmath) **host** oracle. All 23
-tests pass on `main`.
+Validation: **one** measurement — error in ulps against a `__float128` /
+`__complex128` host oracle — with **one** verdict per point against a bound
+derived from the format and the condition number, and **two** ctest gates over
+that number (`sweep_absolute_gate`, `sweep_monotone_gate`). Read
+**docs/CORRECTNESS.md** before adding anything that judges correctness; the whole
+point is that nothing else issues a competing verdict. 29 ctest targets, all
+passing on `main`.
 
 ## Executables
 
@@ -125,7 +129,7 @@ staleness guard) are committed. Nothing consumes it yet.
 
 - **README.md** — operation inventory, measured accuracy tables, algorithm references
 - **docs/UPSTREAM_PLAN.md** — standalone extraction + Kokkos upstream arc (S0–S10), active
-- **docs/KNOWN_ISSUES.md** — reproduced defects deliberately deferred, with evidence and
+- **docs/history/KNOWN_ISSUES.md** — reproduced defects deliberately deferred, with evidence and
   what closing each one involves. Read before assuming a surprising result is new.
 - **docs/UPSTREAM_PLAN_STATUS.md** — one STATUS block per completed sub-plan; read this before starting one
 - **docs/TEST_SUITE_PLAN.md** — test suite architecture and conventions

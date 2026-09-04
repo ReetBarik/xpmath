@@ -5,10 +5,11 @@
 
 Reads three files, all committed:
 
-  validation/sweep/sweep_baseline.csv    digits scored at every (backend, op, point)
+  validation/sweep/sweep_baseline.csv.gz digits, ulps, bound and verdict at every
+                                         (backend, op, point)
   validation/sweep/sweep_grid.csv        the input each `point` id refers to
-  validation/sweep/sweep_classified.csv  why each low-scoring point fails
-                                         (scripts/sweep_accuracy --classify)
+  validation/sweep/open_defects.txt      the points known to exceed their bound
+
 
 WHY A GENERATOR AND NOT PROSE
   Two documents in this repository have already drifted from reality because a
@@ -23,15 +24,17 @@ THE THREE THRESHOLDS, and the judgment in each
                        what the formats actually deliver, so honest points sit a
                        few hundredths under and a 1.00 test would call them
                        failures.
-  TRIAGE = 0.50 x cap  below this a point is triaged and classified. Same
-                       threshold the classifier uses; changing it here alone
-                       would make the "below 50%" counts disagree with
-                       sweep_classified.csv.
+  TRIAGE = 0.50 x cap  below this a point is counted as a failure in the
+                       "fails" column. This is a DISPLAY threshold for the
+                       document only. It is not a verdict: the verdict is the
+                       ulp measurement against the derived bound, carried in the
+                       baseline's `state` column and in the register.
   Anything between the two is degraded but usable, and is reported as the
   boundary band rather than as a failure.
 """
 
 import collections
+import gzip
 import os
 import sys
 
@@ -39,9 +42,9 @@ TRUST_FRAC = 0.90
 TRIAGE_FRAC = 0.50
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BASELINE = os.path.join(ROOT, "validation/sweep/sweep_baseline.csv")
+BASELINE = os.path.join(ROOT, "validation/sweep/sweep_baseline.csv.gz")
 GRID = os.path.join(ROOT, "validation/sweep/sweep_grid.csv")
-CLASSED = os.path.join(ROOT, "validation/sweep/sweep_classified.csv")
+REGISTER = os.path.join(ROOT, "validation/sweep/open_defects.txt")
 
 CAPS = {"DD": 31.00, "QF": 29.00, "TF": 21.70, "FF": 14.00}
 BACKENDS = ["DD", "QF", "TF", "FF"]          # widest cap first
@@ -77,11 +80,13 @@ FAMILIES = [
 ]
 
 CLASS_BLURB = {
-    "UNDERFLOW": "true result below the smallest magnitude the words hold",
-    "OVERFLOW": "true result above the largest magnitude the words hold",
-    "ARG_RANGE": "the input itself is outside what the words hold",
-    "CONDITIONING": "measured ill-conditioning: no implementation at this precision does better",
-    "UNEXPLAINED": "NOT explained by range or conditioning -- see docs/KNOWN_ISSUES.md",
+    "at or below bound": "every point is at or under the bound the format and the "
+                         "conditioning derive for it -- nothing left to explain",
+    "UNRESOLVED": "no verdict issuable: the answer, an operand or an intermediate "
+                  "does not fit the format, or the derived bound already exceeds "
+                  "2^p ulps",
+    "OPEN DEFECT": "at least one point exceeds its derived bound and is carried in "
+                   "validation/sweep/open_defects.txt",
 }
 
 FAMILY_BLURB = {
@@ -111,32 +116,39 @@ def read_grid():
 
 
 def read_baseline():
-    rows = collections.defaultdict(list)      # (backend, kind, op) -> [(point, digits)]
-    with open(BASELINE) as f:
-        for line in f:
-            if line.startswith("#") or line.startswith("backend,"):
-                continue
-            be, kind, op, point, digits = line.rstrip("\n").split(",")
-            rows[(be, kind, op)].append((int(point), float(digits)))
-    return rows
+    """(backend, kind, op) -> [(point, digits)], plus the per-cell verdict counts.
 
-
-def read_classified():
-    """(backend, kind, op) -> {class: count}, and -> {reason: count}."""
-    by_class = collections.defaultdict(collections.Counter)
-    by_reason = collections.defaultdict(collections.Counter)
-    if not os.path.exists(CLASSED):
-        sys.stderr.write("missing %s -- run scripts/sweep_accuracy --classify\n" % CLASSED)
-        sys.exit(2)
-    with open(CLASSED) as f:
+    One file, one measurement. `state` is the single verdict the sweep issues
+    per point: S scored against a derived bound, U unresolved because the format
+    cannot carry the question, the answer or the work, N unscorable, X no
+    condition number issuable.
+    """
+    rows = collections.defaultdict(list)
+    states = collections.defaultdict(collections.Counter)
+    op = gzip.open if BASELINE.endswith(".gz") else open
+    with op(BASELINE, "rt") as f:
         for line in f:
             if line.startswith("#") or line.startswith("backend,"):
                 continue
             p = line.rstrip("\n").split(",")
-            key = (p[0], p[1], p[2])
-            by_class[key][p[7]] += 1
-            by_reason[key][p[8]] += 1
-    return by_class, by_reason
+            be, kind, opn, point, digits = p[0], p[1], p[2], p[3], p[4]
+            rows[(be, kind, opn)].append((int(point), float(digits)))
+            states[(be, kind, opn)][p[7]] += 1
+    return rows, states
+
+
+def read_register():
+    """(backend, kind, op) -> count of points known to exceed their bound."""
+    out = collections.Counter()
+    if not os.path.exists(REGISTER):
+        sys.stderr.write("missing %s\n" % REGISTER)
+        sys.exit(2)
+    with open(REGISTER) as f:
+        for line in f:
+            line = line.split("#", 1)[0].split()
+            if len(line) == 4:
+                out[(line[0], line[1], line[2])] += 1
+    return out
 
 
 def fmt_mag(v):
@@ -148,7 +160,7 @@ def fmt_mag(v):
     return "%.0e" % v
 
 
-def cell(be, kind, op, grid, baseline, by_class, by_reason):
+def cell(be, kind, op, grid, baseline, states, register):
     """Everything DOMAINS.md says about one (backend, op) pair."""
     cap = CAPS[be]
     pts = baseline[(be, kind, op)]
@@ -208,9 +220,15 @@ def cell(be, kind, op, grid, baseline, by_class, by_reason):
     if not boundary:
         boundary.append("--" if not bad else "no trusted band")
 
-    classes = by_class[(be, kind, op)]
-    dominant = classes.most_common(1)[0][0] if classes else "--"
-    unexplained = classes.get("UNEXPLAINED", 0)
+    st = states[(be, kind, op)]
+    n_above = register.get((be, kind, op), 0)
+    n_unres = st.get("U", 0) + st.get("N", 0) + st.get("X", 0)
+    if n_above:
+        dominant = "OPEN DEFECT"
+    elif n_unres:
+        dominant = "UNRESOLVED"
+    else:
+        dominant = "at or below bound"
 
     # Where the failures sit, by grid family -- this is the "excluded region".
     fam = collections.Counter(f for _, f, _, _ in bad)
@@ -219,15 +237,17 @@ def cell(be, kind, op, grid, baseline, by_class, by_reason):
     return {
         "n": n, "mean": mean, "band": band, "n_bad": len(bad),
         "ok_pct": 100.0 * n_ok / n, "boundary": "; ".join(boundary),
-        "dominant": dominant, "unexplained": unexplained,
-        "classes": classes, "reasons": by_reason[(be, kind, op)], "region": region,
+        "dominant": dominant, "unexplained": n_above,
+        "classes": collections.Counter({dominant: 1}),
+        "reasons": collections.Counter({"unresolved": n_unres, "above bound": n_above}),
+        "region": region,
     }
 
 
 def main():
     grid = read_grid()
-    baseline = read_baseline()
-    by_class, by_reason = read_classified()
+    baseline, states = read_baseline()
+    register = read_register()
 
     o = []
     w = o.append
@@ -236,7 +256,7 @@ def main():
     w("")
     w("**GENERATED FILE — do not edit.** Produced by `scripts/gen_domains.py` from")
     w("`validation/sweep/sweep_baseline.csv`, `validation/sweep/sweep_grid.csv` and")
-    w("`validation/sweep/sweep_classified.csv`. Regenerate with:")
+    w("`validation/sweep/open_defects.txt`. Regenerate with:")
     w("")
     w("```bash")
     w("scripts/gen_domains.py > docs/DOMAINS.md")
@@ -278,7 +298,10 @@ def main():
     w("  the digits measured there, so the degradation is quantified and not merely")
     w("  located.")
     w("- **fails** — how many of the op's points score below 50% of cap, and the")
-    w("  dominant classification of those failures.")
+    w("  single verdict for the cell: `at or below bound` when every point is")
+    w("  explained by the format and the conditioning, `UNRESOLVED` when the format")
+    w("  cannot carry some point at all, `OPEN DEFECT` when some point exceeds its")
+    w("  derived bound and is carried in `validation/sweep/open_defects.txt`.")
     w("")
     w("**Caveat for the binary ops** (`add sub mul div pow hypot fmod remainder`")
     w("`copysign fmax fmin fdim fma`, and the complex `add sub mul div pow`): the")
@@ -286,21 +309,21 @@ def main():
     w("log-uniformly over a per-op window, with one point in seven a deliberately")
     w("cancelling pair, so a failure at a given |x| may be caused by the operand")
     w("paired with it rather than by x. For those rows read the `fails` count and the")
-    w("classification, and treat the band as indicative. The unary rows have no such")
+    w("verdict, and treat the band as indicative. The unary rows have no such")
     w("ambiguity.")
     w("")
-    w("Classifications, from `scripts/sweep_accuracy --classify`:")
+    w("Verdicts, from `scripts/sweep_accuracy --ulp`:")
     w("")
-    for k in ["UNDERFLOW", "OVERFLOW", "ARG_RANGE", "CONDITIONING", "UNEXPLAINED"]:
+    for k in ["at or below bound", "UNRESOLVED", "OPEN DEFECT"]:
         w("- **%s** — %s" % (k, CLASS_BLURB[k]))
     w("")
-    w("`UNDERFLOW`, `OVERFLOW` and `ARG_RANGE` are *format* limits: they are properties")
-    w("of 2xFP32 or 4xFP32 and no implementation can remove them. `CONDITIONING` is a")
-    w("*mathematical* limit, measured by perturbing each operand by the error the")
-    w("backend actually carries and re-evaluating the oracle. **`UNEXPLAINED` is")
-    w("neither** — those are the points where the answer was representable and the")
-    w("problem well-conditioned, and the implementation still lost the digits. They")
-    w("are filed as KI-6 through KI-11 in `docs/KNOWN_ISSUES.md`.")
+    w("There is one measurement behind all three: the error in ulps against the")
+    w("`__float128` / `__complex128` oracle, compared against a bound derived from the")
+    w("format (word count, exponent range, intermediate width) and the condition")
+    w("number — never from what the implementation currently scores. The derivation is")
+    w("in `docs/CORRECTNESS.md`. `UNRESOLVED` and `at or below bound` are both healthy")
+    w("outcomes; `OPEN DEFECT` is the only one that names a bug, and every such point")
+    w("is listed by name in the register.")
     w("")
     w("### Why grouped by operation family rather than by backend")
     w("")
@@ -319,18 +342,18 @@ def main():
     for title, kind, ops in FAMILIES:
         w("## %s (%s)" % (title, "real" if kind == "r" else "complex"))
         w("")
-        w("| op | backend | cap | mean | trusted \\|%s\\| | at cap | boundary (digits) | fails | dominant class |"
+        w("| op | backend | cap | mean | trusted \\|%s\\| | at cap | boundary (digits) | fails | verdict |"
           % ("x" if kind == "r" else "z"))
         w("|---|---|---:|---:|---|---:|---|---:|---|")
         for op in ops:
             for be in BACKENDS:
-                c = cell(be, kind, op, grid, baseline, by_class, by_reason)
+                c = cell(be, kind, op, grid, baseline, states, register)
                 totals.update(c["classes"])
                 w("| `%s` | %s | %.2f | %.2f | %s | %.0f%% | %s | %d | %s |" % (
                     op, be, CAPS[be], c["mean"], c["band"], c["ok_pct"],
                     c["boundary"], c["n_bad"],
                     c["dominant"] + ("" if c["unexplained"] == 0
-                                     else " (**%d unexplained**)" % c["unexplained"])))
+                                     else " (**%d above bound**)" % c["unexplained"])))
         w("")
 
         # Per-family note on where the failures concentrate, and the specific
@@ -338,7 +361,7 @@ def main():
         notes = []
         for op in ops:
             for be in BACKENDS:
-                c = cell(be, kind, op, grid, baseline, by_class, by_reason)
+                c = cell(be, kind, op, grid, baseline, states, register)
                 if c["n_bad"] and c["region"]:
                     notes.append((op, be, c["n_bad"], c["region"], c["reasons"]))
         if notes:
@@ -379,8 +402,9 @@ def main():
     w("")
     w("Note that the check only proves the markdown matches the CSVs. If a numeric fix")
     w("lands, the CSVs must be regenerated first — `scripts/sweep_accuracy` to")
-    w("re-baseline, then `scripts/sweep_accuracy --classify")
-    w("validation/sweep/sweep_classified.csv` — and only then this file.")
+    w("lands, the baseline must be regenerated first — `scripts/sweep_accuracy --ulp")
+    w("--register validation/sweep/open_defects.txt --out <tmp>`, gzipped into")
+    w("`validation/sweep/sweep_baseline.csv.gz` — and only then this file.")
 
     sys.stdout.write("\n".join(o) + "\n")
 

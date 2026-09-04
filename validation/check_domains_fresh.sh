@@ -6,7 +6,8 @@
 # be exactly what scripts/gen_domains.py currently emits, so it cannot drift the
 # way CLAUDE.md twice did.
 #
-# Needs only Python 3 and the three CSVs -- no build, no Kokkos, no libquadmath.
+# Needs only Python 3, the gzipped baseline, the grid and the open-defect
+# register -- no build, no Kokkos, no libquadmath.
 # Runs in well under a second, which is why it is safe to put in front of CI.
 #
 #   validation/check_domains_fresh.sh        # exit 0 if fresh, 1 if stale

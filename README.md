@@ -63,7 +63,7 @@ All four backends expose the same 39 real operations:
 IEEE 754 `roundToIntegralTiesToEven`, so `round(0.5) == 0`, `round(1.5) == 2`,
 `round(2.5) == 2`. This is a deliberate divergence from C99 `round`/libquadmath
 `roundq` (ties away from zero) and from QD 2.3.24's `nint` (ties toward
-`+infinity`); see KI-20 in `docs/KNOWN_ISSUES.md` for the reasoning. `remainder`
+`+infinity`); see KI-20 in `docs/history/KNOWN_ISSUES.md` for the reasoning. `remainder`
 is half-even too, as IEEE 754 requires of it.
 
 All four complex layers expose the same 24 complex operations:
@@ -102,7 +102,7 @@ mostly format limits: the three FP32-word backends (FF, QF, TF) bottom out near
 backends the trailing limbs go subnormal well before the leading word does. Of
 the 26,723 points scoring below half their cap, 15,660 are format range
 (UNDERFLOW / OVERFLOW / ARG_RANGE), 9,672 are measured ill-conditioning, and
-1,391 are neither — see [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md), whose 34
+1,391 are neither — see [`docs/history/KNOWN_ISSUES.md`](docs/history/KNOWN_ISSUES.md), whose 34
 entries are all resolved as of `85eea13`.
 
 **Accuracy only — no cost figures are reported here.** How to present the cost

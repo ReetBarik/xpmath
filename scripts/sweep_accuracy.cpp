@@ -234,13 +234,16 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
+#include <iterator>
+#include <string>
 #include <random>
 #include <string>
 #include <vector>
 
 namespace {
 
-const char* const kFormatVersion = "xp-sweep-1";
+const char* const kFormatVersion = "xp-sweep-2";
 const char* const kDefaultOut    = "validation/sweep/sweep_baseline.csv";
 // Triage threshold: a point scoring below this fraction of its backend's cap is
 // classified. 0.50 is a judgment call — see the CLASSIFICATION section.
@@ -996,6 +999,119 @@ bool kappa_real(int id, __float128 a, __float128 b, __float128 c, double& kappa)
 // Chebyshev-like recurrences whose gain is not simply 2^nq. Deriving that gain
 // honestly is step-1d work; charging them 2^nq on the strength of the analogy
 // would be exactly the fitted-tolerance move this metric exists to remove.
+//
+// ---------------------------------------------------------------------------
+// THE TRIG-FAMILY ABSOLUTE FLOOR  (consolidation; closes the step-1c deferral)
+// ---------------------------------------------------------------------------
+// step 1c refused to charge the circular family 2^nq "on the strength of the
+// analogy" with exp, because the doubling recurrence is not a squaring. It is
+// not — and once written out it gives a DIFFERENT and stricter law, which is
+// why the analogy was rightly refused and the derivation is worth doing.
+//
+// All four backends reduce s3 = x - 2pi*nint(x/2pi), scale r = s3/2^nq, Taylor
+// both series, then apply the JOINT doubling nq times (dd_math.hpp:812,
+// ff_math.hpp:789, qf_math.hpp:1146, tf_math.hpp:966):
+//
+//     sin(2u) = 2 sin(u) cos(u)        cos(2u) = cos(u)^2 - sin(u)^2
+//
+// Track the ABSOLUTE error of the PAIR, e = max(|dsin|, |dcos|). One step:
+//     |d(2sc)|      <= 2(|c| |ds| + |s| |dc|) <= 2e (|s| + |c|) <= 2e*sqrt(2)
+//     |d(c^2-s^2)|  <= 2(|c||dc| + |s||ds|)   <= 2e
+// and both outputs are themselves bounded by 1, so each step also adds one
+// rounding of a quantity of magnitude <= 1, i.e. 2^-p absolute. The absolute
+// error therefore at most DOUBLES per step and picks up 2^-p:
+//
+//     e_{j+1} <= 2 e_j + 2^-p   =>   e_nq <= 2^nq * (e_0 + 2^-p)
+//
+// with e_0 the Taylor sum's own absolute error, a couple of 2^-p. So
+//
+//     ABSOLUTE error of the (sin, cos) pair  ~  2^nq * 2^-p
+//
+// This is an ABSOLUTE floor, like the log family's, NOT a relative one like
+// exp's — the difference the analogy would have got wrong. Two consequences
+// the exp analogy does not have:
+//
+//   * it is divided by |f| to become ulps, so it explodes at the zeros of sin
+//     and cos rather than being flat;
+//   * it SATURATES. sin and cos live in [-1, 1], so the absolute error can
+//     never exceed 2 however bad the reduction is. That ceiling is a property
+//     of the CODOMAIN, and it is what bounds the huge-argument points.
+//
+// The reduction itself contributes a second absolute term. 2pi is stored to p
+// bits, so 2pi*nint(x/2pi) carries an absolute error of |x|*2^-p, which lands
+// directly on s3 and propagates to sin/cos with gain <= 1 (|f'| <= 1). Hence
+//
+//     Aulp(x) = min( 2^nq + |x| , 2^(p+1) )        [in units of 2^-p]
+//
+// and, for the forward pair, floor_ulps = Aulp / |f|.
+//
+// MEASURED against this tree, all at ratio < 1 (i.e. the law is an upper bound
+// and is not slack by orders of magnitude):
+//     DD sin  x=1.01     Aulp=32+1.01,  |f|=0.847 -> 39.0   measured 22.8
+//     FF cos  x=pi(dbl)  Aulp=16+3.14,  |f|=1.00  -> 19.1   measured 13.8
+//     DD asin x=0.3183   (inverse form below)     -> 104    measured 51.5
+//     DD atan x~1        (inverse form below)     -> 57.5   measured 54.5
+//
+// The inverse functions are Newton iterations ON the forward pair (the same
+// relationship log has to exp), so they inherit Aulp through the derivative of
+// the forward function at the answer:
+//
+//     asin, acos : db = A / |cos b|  = A / sqrt(1-x^2)
+//     atan       : db = A (1+|x|) |cos b|,  |cos b| = 1/sqrt(1+x^2)
+//     tan = s/c  : dt = A (1 + |t|) / |c|
+//
+// divided in each case by the result's own magnitude to reach ulps.
+//
+// NOT applied to the hyperbolic family: sinh/cosh/tanh go through exp, not the
+// circular doubling, and are already charged the exp-family 2^nq.
+//
+// One further format limit, and it is the KI-40 shape exactly -- it lives in an
+// INTERMEDIATE that no input-side probe can see. The reduction multiple
+// n = nint(x/2pi) is formed by the per-word round-to-nearest-integer trick, so
+// it must be an exactly representable integer of ONE WORD: |x|/2pi < 2^s, with
+// s the WORD significand (53 for an FP64 limb, 24 for an FP32 limb) -- NOT the
+// expansion's p. Past that, nint saturates, the headers say so out loud
+// ("DDNINT: argument too large", dd_math.hpp:820), the residual is garbage and
+// the codomain guard returns the identity point (1, 0). The absolute error is
+// then the full codomain diameter, and the saturated Aulp is the honest bound.
+// Note this is keyed off the WORD, so DD -- with the most bits overall -- hits
+// it at 2pi*2^53 while carrying 106 bits of precision, which is why DD reads
+// WORSE than QF at x = 1e17. An input-width model predicts the opposite.
+double trig_floor_ulps(int id, int trig_nq, int sig_bits, int word_bits,
+                       __float128 aq, __float128 ref) {
+  const double x  = std::fabs((double)aq);
+  const double f  = std::fabs((double)ref);
+  if (!(f > 0.0) || !std::isfinite(f)) return 1.0;
+  const bool reduction_formable =
+      (x / 6.283185307179586) < std::exp2((double)word_bits);
+  // Absolute error of the (sin, cos) pair, in units of 2^-p. Saturates at the
+  // codomain diameter 2 = 2^(p+1) * 2^-p: however lost the reduction is, sin
+  // and cos cannot be more than 2 apart from the truth.
+  double A = reduction_formable ? std::exp2((double)trig_nq) + x
+                                : std::exp2((double)sig_bits + 1.0);
+  const double sat = std::exp2((double)sig_bits + 1.0);
+  if (!(A < sat)) A = sat;
+  switch (id) {
+    case R_Sin: case R_Cos:
+      return A / f;
+    case R_Tan: {
+      // dt = A (1+|t|)/|c|, in ulps of t. c = cos(x) recovered as t/sin — use
+      // the reference tan and the identity |c| = 1/sqrt(1+t^2) (sign-free).
+      const double t = f;
+      const double c = 1.0 / std::sqrt(1.0 + t * t);
+      return (c > 0.0) ? A * (1.0 + t) / (c * t) : HUGE_VAL;
+    }
+    case R_Asin: case R_Acos: {
+      const double s = std::sqrt(std::fabs(1.0 - x * x));
+      return (s > 0.0) ? A / (s * f) : HUGE_VAL;
+    }
+    case R_Atan:
+      return A * (1.0 + x) / (std::sqrt(1.0 + x * x) * f);
+    default:
+      return 1.0;
+  }
+}
+
 double algo_floor_ulps(int id, int exp_squarings, __float128 a) {
   const double g = std::exp2((double)exp_squarings);   // the squaring gain
   switch (id) {
@@ -1025,24 +1141,194 @@ double algo_floor_ulps(int id, int exp_squarings, __float128 a) {
   }
 }
 
-// The bound a point is judged against, in ulps.
+// ---------------------------------------------------------------------------
+// THE CONSOLIDATED BOUND
+// ---------------------------------------------------------------------------
+// One expression, four terms, every one of them derived from the FORMAT (word
+// type, limb count, exponent range), the ALGORITHM's published structure (the
+// reduction depth nq read out of the headers), or the MATHEMATICAL condition
+// number. No term is fitted to a measurement of this implementation.
 //
-//     expected = max(out_floor, algo_floor) + kappa * in_delta
+//     bound_ulps = ( res + kappa * in_delta + kappa_int ) * gain + abs_floor
 //
-// The first term is "the smallest error this implementation can have at this
-// magnitude", from two independent causes — what the format can STORE
-// (out_floor) and what the algorithm's own structure costs (algo_floor). They
-// are not additive sources in any meaningful sense, so the bound takes the max,
-// which is the tighter and therefore safer choice for a gate.
+//   res       resolution floor at |ref| — 1 ulp normally, growing as 1/|ref|
+//             once the trailing limbs go subnormal (subnormal_floor_ulps)
+//   kappa     condition number of the mathematical map
+//   in_delta  the input perturbation the format cannot avoid, in ulps
+//   kappa_int INTERMEDIATE width: the algorithm rounds its intermediates into
+//             the same p bits, so an intermediate I that is later cancelled
+//             down to f contributes |I|/|f| ulps of the RESULT. This is the
+//             term KI-40 is about; it is what makes a 53-bit double input
+//             expensive for a 48/72/96-bit format even though the input itself
+//             is held exactly.
+//   gain      the algorithm's own amplification (2^nq for the reduce-square
+//             families), which multiplies everything upstream of it rather
+//             than sitting beside it — squaring amplifies the storage floor
+//             and the conditioning error alike. Outside the subnormal band and
+//             for gain == 1 this reduces EXACTLY to the previous bound.
+//   abs_floor an additive absolute error the algorithm leaves behind that is
+//             not a multiple of anything upstream (the log family's Newton
+//             residue, the circular family's doubling residue).
+struct Bound {
+  double res, kappa, in_delta, kappa_int, gain, abs_floor, value;
+};
+
+double bound_value(const Bound& b) {
+  return (b.res + b.kappa * b.in_delta + b.kappa_int) * b.gain + b.abs_floor;
+}
+
+// The multiplicative amplification of the reduce-and-recombine families, read
+// out of the headers (nq), NOT fitted. exp squares nq times at gain 2 per
+// squaring; log is Newton on exp and inherits it; pow/sinh/cosh/tanh route
+// through exp. Everything else is 1.
+double algo_gain(int id, int exp_nq) {
+  switch (id) {
+    case R_Exp: case R_Exp2: case R_Exp10: case R_Expm1:
+    case R_Pow: case R_Sinh: case R_Cosh: case R_Tanh:
+    case R_Log: case R_Log2: case R_Log10: case R_Log1p:
+      return std::exp2((double)exp_nq);
+    default:
+      return 1.0;
+  }
+}
+
+// Every complex transcendental is built from the REAL exp / sincos of the
+// components (z = x+iy -> exp(x)*(cos y, sin y) and so on), so it inherits the
+// real family's reduce-and-recombine amplification. Read from the same nq.
+double complex_algo_gain(int id, int exp_nq) {
+  switch (id) {
+    case C_Add: case C_Sub: case C_Mul: case C_Div:
+    case C_Abs: case C_Conj: case C_Sqrt:
+      return 1.0;
+    default:
+      return std::exp2((double)exp_nq);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// COMPLEX: kappa BY NUMERICAL DIFFERENTIATION OF THE ORACLE
+// ---------------------------------------------------------------------------
+// The real ops carry hand-derived, per-op kappa formulae (docs/CORRECTNESS.md).
+// Writing 24 more by hand for the complex ops is where the previous attempt
+// stopped, and it left the complex half of the sweep on the digit gate -- which
+// is where KI-1 and KI-5 hid. There is no need to write them: kappa is a
+// property of the MATHEMATICAL map, and the map is already implemented to 113
+// bits in the oracle. Differentiate that.
 //
-// STEP 1c widened both ends of this from the constants step 1a used (1 and 1).
-// Both terms are now magnitude-dependent, and both reduce EXACTLY to the old
-// constants everywhere the expansion's trailing limbs are normal — see
-// subnormal_floor_ulps() below. Nothing outside the subnormal-limb band moved.
-double expected_ulps(double out_floor, double algo_floor, double kappa,
-                     double in_delta) {
-  const double base = out_floor > algo_floor ? out_floor : algo_floor;
-  return base + kappa * in_delta;
+//     kappa = sum over operands of  | (f(z_j(1+h)) - f(z_j)) / (f * h) |
+//
+// evaluated in binary128 with h = 2^-40, which leaves ~73 bits of headroom
+// below the oracle's own precision, so the quotient is a derivative and not
+// noise. This is the same first-order sum-of-partials the real formulae are,
+// obtained by measurement OF THE ORACLE rather than of the implementation --
+// the distinction that matters. It cannot encode an implementation defect as
+// a specification, because the implementation is never called.
+double kappa_complex_numeric(int id, __float128 are, __float128 aim,
+                             __float128 bre, __float128 bim,
+                             __float128 fre, __float128 fim) {
+  const __float128 h = ldexpq((__float128)1.0, -40);
+  const __float128 fm = hypotq(fre, fim);
+  if (fm == 0 || !finiteq(fm)) return -1.0;            // no bound issuable
+  // Four independent REAL directions, not two complex ones. Perturbing
+  // a -> a(1+h) scales re and im together, which is a purely RADIAL move and
+  // cannot see a tangential sensitivity. log(z) near |z| = 1 is the canonical
+  // case: log|z| is flat there while arg(z) is not, so a radial probe reports
+  // kappa ~ 1 for an operand that is in fact ill-conditioned.
+  double kappa = 0.0;
+  for (int j = 0; j < 4; ++j) {
+    __float128 pa_re = are, pa_im = aim, pb_re = bre, pb_im = bim;
+    switch (j) {
+      case 0:  pa_re = are * (1 + h); break;
+      case 1:  pa_im = aim * (1 + h); break;
+      case 2:  pb_re = bre * (1 + h); break;
+      default: pb_im = bim * (1 + h); break;
+    }
+    __float128 gre = 0, gim = 0;
+    reference_complex_q(id, pa_re, pa_im, pb_re, pb_im, gre, gim);
+    if (!finiteq(gre) || !finiteq(gim)) return -1.0;
+    const __float128 d = hypotq(gre - fre, gim - fim) / (fm * h);
+    if (!finiteq(d)) return -1.0;
+    kappa += (double)d;
+  }
+  return kappa;
+}
+
+// The intermediates the complex algorithms actually form. Only the algebraic
+// ops have any that are not the answer itself: the bilinear products of a
+// complex multiply and the components of a divide. These are exactly the
+// products that need 2 x 53 bits when the grid hands the backend two doubles,
+// and exactly the ones that cancel -- KI-39's mechanism B, KI-40's clause 2.
+int complex_intermediates(int id, __float128 are, __float128 aim,
+                          __float128 bre, __float128 bim, __float128* out) {
+  switch (id) {
+    case C_Mul:
+      out[0] = are * bre; out[1] = aim * bim;
+      out[2] = are * bim; out[3] = aim * bre;   return 4;
+    case C_Div: {
+      const __float128 q = bre * bre + bim * bim;
+      if (q == 0) return 0;
+      out[0] = (are * bre) / q; out[1] = (aim * bim) / q;
+      out[2] = (aim * bre) / q; out[3] = (are * bim) / q;
+      // q itself is held in the working format. |b|^2 leaves the FP32 limb
+      // range long before b does, so the divisor is a format limit living
+      // entirely in an intermediate -- invisible from the operands.
+      out[4] = q;                                          return 5;
+    }
+    case C_Abs:
+      out[0] = are * are; out[1] = aim * aim;   return 2;
+    // The inverse trig/hyperbolic family is log(z + sqrt(1 -+ z^2)) or
+    // 1/2 log((1+z)/(1-z)). Both form a SUM whose addends can be much larger
+    // than the sum -- 1 - z^2 near z = +-1, 1 - z near z = 1. The addend is
+    // the intermediate the algorithm must hold in p bits, so it is the term
+    // that sets the cancellation, exactly as a*b does for fma.
+    case C_Asin: case C_Acos: case C_Asinh: case C_Acosh: {
+      const __float128 zr = are * are - aim * aim;
+      const __float128 zi = 2 * are * aim;
+      out[0] = hypotq(zr, zi); out[1] = 1;       return 2;
+    }
+    case C_Atan: case C_Atanh:
+      out[0] = hypotq(are, aim); out[1] = 1;     return 2;
+    default:
+      return 0;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// INTERMEDIATES — the quantities the algorithm must hold in p bits on the way
+// to the answer. Read off each op's expression tree, not guessed: these are the
+// products and squares the headers actually form. Used for two things, clause
+// (3) above (does the intermediate fit the exponent range at all) and the
+// kappa_int cancellation term (how much of it survives into the answer).
+// ---------------------------------------------------------------------------
+int real_intermediates(int id, __float128 a, __float128 b, __float128 c,
+                       __float128* out) {
+  switch (id) {
+    case R_Fma:    out[0] = a * b;  out[1] = c;      return 2;   // a*b + c
+    case R_Hypot:  out[0] = a * a;  out[1] = b * b;  return 2;   // sqrt(a^2+b^2)
+    case R_Mul:    out[0] = a * b;                   return 1;
+    case R_Div:    out[0] = a / b;                   return 1;
+    default:       (void)c;                          return 0;
+  }
+}
+
+// kappa_int: the cancellation an intermediate suffers before it reaches the
+// answer. Each intermediate is stored to p bits, so it carries |I| * 2^-p of
+// absolute error; against a result of magnitude |f| that is |I|/|f| ulps.
+// Where the intermediates cancel (|f| << |I|) this is the dominant term, and
+// it is invisible to any probe that perturbs only the INPUTS -- which is
+// exactly the blind spot KI-40 records.
+double kappa_intermediate(const __float128* inter, int ninter, __float128 ref) {
+  if (ninter == 0 || ref == 0 || !finiteq(ref)) return 0.0;
+  const __float128 f = fabsq(ref);
+  __float128 worst = 0;
+  for (int k = 0; k < ninter; ++k) {
+    if (!finiteq(inter[k])) continue;
+    const __float128 r = fabsq(inter[k]) / f;
+    if (r > worst) worst = r;
+  }
+  // An intermediate no larger than the answer cancels nothing; charge 0 there
+  // so well-behaved ops keep the bound they had.
+  return (worst > 1) ? (double)worst - 1.0 : 0.0;
 }
 
 // ---------------------------------------------------------------------------
@@ -1160,6 +1446,54 @@ Range range_float(int limbs) {
   return r;
 }
 
+// ---------------------------------------------------------------------------
+// THE FOUR-CLAUSE UNRESOLVED PREDICATE  (replaces five classifier categories)
+// ---------------------------------------------------------------------------
+// The old apparatus had UNDERFLOW, OVERFLOW, ARG_RANGE, CONDITIONING and
+// UNEXPLAINED, plus the SUBNORMAL_LIMB and JUMP_UNRESOLVED region labels bolted
+// on beside them — seven names for "the measurement does not mean what it
+// usually means here", each with its own rule. Every one of them is a special
+// case of a single statement:
+//
+//     the format cannot carry this point, so no verdict is issuable.
+//
+// Four clauses, each a pure predicate over the format's exponent range and the
+// derived bound. Nothing keys off an op name or an exclusion list.
+//
+//   (1) the ANSWER does not fit: |ref| is zero, non-finite, or outside
+//       [min_sub, max_val] of the leading word.      (was UNDERFLOW/OVERFLOW)
+//   (2) the QUESTION does not fit: some exact operand is outside that range,
+//       so the backend was handed a different problem. (was ARG_RANGE-low)
+//   (3) the WORK does not fit: some intermediate the algorithm must form is
+//       outside the range — a product that overflows the word, a square that
+//       flushes.                                      (was ARG_RANGE-high)
+//   (4) the BOUND ITSELF says there is nothing left: it already predicts >= 2^p
+//       ulps, i.e. >= 100% relative error. A verdict against a bound that
+//       permits total loss adds no information.  (was SUBNORMAL_LIMB and
+//       JUMP_UNRESOLVED, both of which reach 2^p exactly)
+//
+// Clause 4 is the load-bearing one: it is why JUMP_UNRESOLVED needs no label.
+// An fmod whose integral quotient the format cannot resolve is charged its
+// honest absolute error, one modulus |b|, which is >= |f| by definition of a
+// remainder — so the bound reaches 2^p and clause 4 fires by arithmetic.
+bool out_of_format(__float128 v, const Range& rg) {
+  if (v == 0) return false;                      // exact zero is representable
+  if (!finiteq(v)) return true;
+  const __float128 m = fabsq(v);
+  return m > (__float128)rg.max_val || m < (__float128)rg.min_sub;
+}
+
+bool point_unresolved(double bound, __float128 ref, const __float128* exact,
+                      int nops, const __float128* inter, int ninter,
+                      const Range& rg, int sig_bits) {
+  if (ref == 0 || !finiteq(ref) || out_of_format(ref, rg)) return true;   // (1)
+  for (int k = 0; k < nops; ++k)
+    if (out_of_format(exact[k], rg)) return true;                         // (2)
+  for (int k = 0; k < ninter; ++k)
+    if (out_of_format(inter[k], rg)) return true;                         // (3)
+  return !(bound < std::exp2((double)sig_bits));                          // (4)
+}
+
 // sig_bits() is limbs x word-significand (FP64 53, FP32 24, hidden bit
 // included) — the p in ulp(true) = |true| * 2^-p. Same arithmetic the SCORING
 // section uses to argue that widening to binary128 is exact.
@@ -1167,21 +1501,25 @@ struct BackendDD { using S = xp::DoubleDouble; using Z = xp::DoubleDoubleComplex
                    static const char* name() { return "DD"; } static double cap() { return 31.0; }
                    static int sig_bits() { return 106; }   // 2 x 53
                    static int exp_squarings() { return 6; }  // dd_math.hpp:374
+                   static int trig_squarings() { return 5; } // dd_math.hpp sincos nq
                    static Range range() { return range_double(2); } };
 struct BackendFF { using S = xp::FloatFloat;   using Z = xp::FloatFloatComplex;
                    static const char* name() { return "FF"; } static double cap() { return 14.0; }
                    static int sig_bits() { return 48; }    // 2 x 24
                    static int exp_squarings() { return 4; }  // ff_math.hpp:606
+                   static int trig_squarings() { return 4; } // ff_math.hpp sincos nq
                    static Range range() { return range_float(2); } };
 struct BackendQF { using S = xp::QuadFloat;    using Z = xp::QuadFloatComplex;
                    static const char* name() { return "QF"; } static double cap() { return 29.0; }
                    static int sig_bits() { return 96; }    // 4 x 24
                    static int exp_squarings() { return 6; }  // qf_math.hpp:927
+                   static int trig_squarings() { return 5; } // qf_math.hpp sincos nq
                    static Range range() { return range_float(4); } };
 struct BackendTF { using S = xp::TripleFloat;  using Z = xp::TripleFloatComplex;
                    static const char* name() { return "TF"; } static double cap() { return 21.7; }
                    static int sig_bits() { return 72; }    // 3 x 24
                    static int exp_squarings() { return 5; }  // tf_math.hpp:844
+                   static int trig_squarings() { return 4; } // tf_math.hpp sincos nq
                    static Range range() { return range_float(3); } };
 
 template <class S>
@@ -1268,439 +1606,21 @@ Z eval_complex(int id, const Z& a, const Z& b, bool& is_real) {
 }
 
 // ===========================================================================
-// CLASSIFICATION (--classify)  — why is this point scoring badly?
-// ===========================================================================
-// Every point whose score falls below --classify-frac of its backend's cap is
-// assigned exactly one class. The classes and the ORDER they are tested in:
-//
-//   C  ARGUMENT RANGE  the INPUT is outside what the backend's words can hold,
-//                      so the op never had a chance. Tested first: if the
-//                      operand was already destroyed on the way in, what the
-//                      algorithm then did with it is not the interesting fact.
-//   B  OVERFLOW        the true result exceeds the backend's largest finite
-//                      magnitude (or exceeds binary128's, i.e. the oracle
-//                      itself returned an infinity).
-//   A  UNDERFLOW       the true result is below the backend's smallest
-//                      representable magnitude, or lies in the band where the
-//                      TRAILING limbs are subnormal so the type cannot carry
-//                      its nominal digits at that magnitude.
-//   D  CONDITIONING    a MEASURED statement, not an assertion: perturbing each
-//                      operand by the error the backend actually carries moves
-//                      the true result by more than the threshold. No
-//                      implementation at this storage could have scored better.
-//   E  UNEXPLAINED     none of the above. Every E is a candidate defect.
-//
-// THE CONDITIONING PROBE, and why it is honest about EXACT ops
-//   ach ("achievable digits") is computed by evaluating the QUAD oracle at
-//   perturbed inputs and measuring how far the true result moves:
-//
-//       ach = -log10 max      |f(x .* (1 + s.*delta)) - f(x)| / |f(x)|
-//                   s in {-1,+1}^n
-//
-//   Independent signs per operand are essential. Perturbing a and b in the SAME
-//   direction scales a+b by (1+delta) and detects no amplification at all; it
-//   is the OPPOSITE-sign combination that exposes cancellation, so all 2^n sign
-//   patterns are swept (n <= 3 real, <= 4 complex components).
-//
-//   delta is chosen per op class:
-//     * ALGEBRAIC ops (add sub mul div sqrt fma hypot abs copysign fmax fmin
-//       fdim fmod remainder ceil floor round trunc, and their complex
-//       counterparts) get delta = the operand's ACTUAL storage error only, i.e.
-//       |stored - exact| / |exact|. These ops have exactly- or faithfully-
-//       rounded extended-precision algorithms: twoSum is exact, so cancellation
-//       between two EXACTLY held operands loses nothing, and floor of an
-//       exactly held input is exact. Charging them a fictional one-ulp
-//       perturbation would let a genuine defect hide behind "ill-conditioned".
-//       For DD the storage error of a double input is zero, so an algebraic DD
-//       point cannot be excused as conditioning at all — it lands in E.
-//     * TRANSCENDENTAL ops get delta = max(storage error, the type's own eps).
-//       Their algorithms round to the type at every internal step, so a
-//       relative perturbation of order eps is unavoidable and its amplification
-//       by the function is a real floor. This is what makes DD sin near k*pi
-//       come out as CONDITIONING (recovering sin(x) ~ 1e-16 there needs a pi
-//       wider than the backend's own) rather than as a defect.
-//
-// A class is a claim about the point, and every claim here is derived from the
-// oracle and from the word format. Nothing is keyed off an op name or a
-// hand-maintained exclusion list.
-// ===========================================================================
-
-const char* const kClassName[5] = {"UNDERFLOW", "OVERFLOW", "ARG_RANGE",
-                                   "CONDITIONING", "UNEXPLAINED"};
-
-double clampd(double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); }
-
-// log10 of a magnitude, computed in quad so that values outside double's range
-// survive. Returns -inf for zero.
-double l10_mag(__float128 v) {
-  if (v == 0) return -HUGE_VAL;
-  return (double)log10q(fabsq(v));
-}
-
-// Digits available to a value whose log10 magnitude is l10: how far it sits
-// above the smallest representable magnitude, capped by the type's nominal
-// precision.
-double digits_at_magnitude(double l10, const Range& rg, double cap) {
-  if (l10 == -HUGE_VAL) return cap;             // exact zero is exactly held
-  if (l10 >= rg.l10_full_prec) return cap;      // all limbs normal
-  return clampd(l10 - rg.l10_min_sub, 0.0, cap);
-}
-
-// Relative error the backend's storage introduces for an input value.
-double storage_rel_err(__float128 stored, __float128 exact) {
-  if (exact == 0) return (stored == 0) ? 0.0 : 1.0;
-  if (!finiteq(exact) || !finiteq(stored)) return 0.0;
-  const __float128 e = fabsq(stored - exact) / fabsq(exact);
-  return (double)e;
-}
-
-// Order-of-magnitude estimate of log10|f(x)| for the ops that can carry a
-// result clean out of binary128's own range, so that "the oracle returned 0 /
-// inf" can be separated into a genuine zero and a true under/overflow.
-// Returns false when no estimate is available.
-bool est_log10_mag_real(int id, __float128 a, __float128 b, double& out) {
-  const double kLog10E = 0.4342944819032518;
-  const double la = (a == 0) ? 0.0 : (double)log10q(fabsq(a));
-  switch (id) {
-    case R_Exp:   out = (double)a * kLog10E;                  return true;
-    case R_Exp2:  out = (double)a * 0.30102999566398120;      return true;
-    case R_Exp10: out = (double)a;                            return true;
-    case R_Sinh:
-    case R_Cosh:  out = std::fabs((double)a) * kLog10E - 0.30102999566398120; return true;
-    case R_Pow:   if (a == 0) return false; out = (double)b * la; return true;
-    case R_Mul:   if (a == 0 || b == 0) return false;
-                  out = la + (double)log10q(fabsq(b));        return true;
-    case R_Div:   if (a == 0 || b == 0) return false;
-                  out = la - (double)log10q(fabsq(b));        return true;
-    default: return false;
-  }
-}
-
-bool est_log10_mag_complex(int id, __float128 are, __float128 aim,
-                           __float128 bre, __float128 bim, double& out) {
-  const double kLog10E = 0.4342944819032518;
-  const double ma = (double)hypotq(are, aim), mb = (double)hypotq(bre, bim);
-  switch (id) {
-    case C_Exp:  out = (double)are * kLog10E;                         return true;
-    case C_Sin: case C_Cos: case C_Sinh: case C_Cosh: case C_Tan: case C_Tanh:
-                 out = std::fabs((double)(id == C_Sin || id == C_Cos ? aim : are)) * kLog10E
-                       - 0.30102999566398120;                         return true;
-    case C_Mul:  if (ma == 0 || mb == 0) return false;
-                 out = std::log10(ma) + std::log10(mb);               return true;
-    case C_Div:  if (ma == 0 || mb == 0) return false;
-                 out = std::log10(ma) - std::log10(mb);               return true;
-    case C_Pow:  if (ma == 0) return false;
-                 out = (double)bre * std::log10(ma);                  return true;
-    default: return false;
-  }
-}
-
-// binary128's own exponent range — used only to tell a true zero from a value
-// that underflowed inside the ORACLE.
-const double kQuadLog10Min = -4965.0;
-const double kQuadLog10Max =  4932.0;
-
-bool is_algebraic_real(int id) {
-  switch (id) {
-    case R_Add: case R_Sub: case R_Mul: case R_Div: case R_Sqrt: case R_Abs:
-    case R_Hypot: case R_Fmod: case R_Remainder: case R_Copysign:
-    case R_Fmax: case R_Fmin: case R_Fdim: case R_Fma:
-    case R_Ceil: case R_Floor: case R_Round: case R_Trunc:
-      return true;
-    default: return false;
-  }
-}
-bool is_algebraic_complex(int id) {
-  switch (id) {
-    case C_Add: case C_Sub: case C_Mul: case C_Div: case C_Abs: case C_Conj:
-    case C_Sqrt:
-      return true;
-    default: return false;
-  }
-}
-
-struct ClassRow {
-  const char* backend;
-  char        kind;
-  const char* op;
-  int         point;
-  const char* family;
-  double      digits, cap, ach, repr_digits, range_digits;
-  int         cls;            // index into kClassName
-  const char* reason;
-  char        in_s[3][44];
-  char        ref_s[44], got_s[44];
-};
-
-void fmt_q(char* buf, size_t n, __float128 v) { quadmath_snprintf(buf, n, "%.17Qg", v); }
-void fmt_q2(char* buf, size_t n, __float128 re, __float128 im) {
-  char a[22], b[22];
-  quadmath_snprintf(a, sizeof(a), "%.9Qg", re);
-  quadmath_snprintf(b, sizeof(b), "%.9Qg", im);
-  std::snprintf(buf, n, "%s|%s", a, b);
-}
-
-// --- real ------------------------------------------------------------------
-void classify_real(const char* be, const Range& rg, double cap, double thresh,
-                   int id, int point, const char* family,
-                   double a, double b, double c,
-                   __float128 sa, __float128 sb, __float128 sc,
-                   __float128 ref, __float128 got, double digits,
-                   ClassRow& out) {
-  const int nops = kReal[id].nops;
-  const __float128 xq[3] = {(__float128)a, (__float128)b, (__float128)c};
-  const __float128 sq[3] = {sa, sb, sc};
-
-  out.backend = be; out.kind = 'r'; out.op = kReal[id].name; out.point = point;
-  out.family = family; out.digits = digits; out.cap = cap;
-  for (int k = 0; k < 3; ++k) {
-    if (k < nops) fmt_q(out.in_s[k], sizeof(out.in_s[k]), xq[k]);
-    else          std::snprintf(out.in_s[k], sizeof(out.in_s[k]), "-");
-  }
-  fmt_q(out.ref_s, sizeof(out.ref_s), ref);
-  fmt_q(out.got_s, sizeof(out.got_s), got);
-
-  // --- input side ---------------------------------------------------------
-  bool   arg_unrep = false;
-  double arg_digits = cap, repr = cap;
-  for (int k = 0; k < nops; ++k) {
-    const double lm = l10_mag(xq[k]);
-    if (lm != -HUGE_VAL && (lm > rg.l10_max || lm < rg.l10_min_sub)) arg_unrep = true;
-    const double ad = digits_at_magnitude(lm, rg, cap);
-    if (ad < arg_digits) arg_digits = ad;
-    const double re = storage_rel_err(sq[k], xq[k]);
-    const double rd = (re > 0.0) ? clampd(-std::log10(re), 0.0, cap) : cap;
-    if (rd < repr) repr = rd;
-  }
-  out.repr_digits = repr;
-
-  // --- result side --------------------------------------------------------
-  const bool   ref_nan = isnanq(ref) != 0;
-  const bool   ref_inf = !ref_nan && !finiteq(ref);
-  const double ref_l10 = (ref_nan || ref_inf) ? 0.0 : l10_mag(ref);
-  out.range_digits = (ref_nan || ref_inf) ? cap : digits_at_magnitude(ref_l10, rg, cap);
-
-  double est = 0.0;
-  const bool have_est = est_log10_mag_real(id, xq[0], xq[1], est);
-  const bool oracle_underflowed = (ref == 0) && have_est && est < kQuadLog10Min;
-  const bool oracle_overflowed  = ref_inf || (have_est && est > kQuadLog10Max);
-
-  // --- conditioning probe -------------------------------------------------
-  const bool algebraic = is_algebraic_real(id);
-  double delta[3] = {0.0, 0.0, 0.0};
-  bool   any_delta = false;
-  for (int k = 0; k < nops; ++k) {
-    const double re = storage_rel_err(sq[k], xq[k]);
-    delta[k] = algebraic ? re : (re > rg.eps ? re : rg.eps);
-    if (xq[k] == 0) delta[k] = 0.0;
-    if (delta[k] > 0.0) any_delta = true;
-  }
-  double ach = cap;
-  if (any_delta && !ref_nan && !ref_inf && ref != 0) {
-    double worst = 0.0;
-    const int combos = 1 << nops;
-    for (int m = 0; m < combos; ++m) {
-      __float128 p[3] = {sq[0], sq[1], sq[2]};
-      for (int k = 0; k < nops; ++k) {
-        const __float128 s = ((m >> k) & 1) ? (__float128)1.0 : (__float128)-1.0;
-        p[k] = sq[k] * ((__float128)1.0 + s * (__float128)delta[k]);
-      }
-      const __float128 rp = reference_real_q(id, p[0], p[1], p[2]);
-      if (isnanq(rp) || !finiteq(rp)) { worst = 1.0; continue; }
-      const double dev = (double)(fabsq(rp - ref) / fabsq(ref));
-      if (dev > worst) worst = dev;
-    }
-    ach = (worst > 0.0) ? clampd(-std::log10(worst), 0.0, cap) : cap;
-  }
-  out.ach = ach;
-
-  // --- verdict ------------------------------------------------------------
-  if (arg_unrep)             { out.cls = 2; out.reason = "input-outside-word-range"; return; }
-  if (arg_digits < thresh)   { out.cls = 2; out.reason = "input-in-subnormal-limb-band"; return; }
-  if (oracle_overflowed ||
-      (!ref_nan && !ref_inf && ref_l10 > rg.l10_max))
-                             { out.cls = 1; out.reason = ref_inf ? "true-result-exceeds-binary128"
-                                                                 : "true-result-exceeds-word-max"; return; }
-  if (oracle_underflowed)    { out.cls = 0; out.reason = "true-result-underflows-binary128"; return; }
-  if (!ref_nan && !ref_inf && ref != 0 && ref_l10 < rg.l10_min_sub)
-                             { out.cls = 0; out.reason = "true-result-below-word-min"; return; }
-  if (out.range_digits < thresh)
-                             { out.cls = 0; out.reason = "result-in-subnormal-limb-band"; return; }
-  // A non-finite return where the true result is finite AND inside the
-  // backend's range is never excusable by conditioning, so it is tested BEFORE
-  // the conditioning probe. Ill-conditioning can cost every digit; it cannot
-  // turn a representable number into a NaN.
-  if (!ref_nan && !ref_inf && ref != 0 && (isnanq(got) || !finiteq(got)))
-                             { out.cls = 4; out.reason = isnanq(got) ? "returned-nan"
-                                                                     : "returned-inf"; return; }
-  if (ref_nan)               { out.cls = 3; out.reason = "reference-is-nan"; return; }
-  if (ref == 0)              { out.cls = 3; out.reason = "exact-zero-of-the-function"; return; }
-  if (ach < thresh)          { out.cls = 3; out.reason = algebraic ? "input-error-amplified"
-                                                                   : "ill-conditioned-at-eps"; return; }
-  if (digits >= ach - 1.0)   { out.cls = 3; out.reason = "at-the-achievable-ceiling"; return; }
-  // Nothing explains it. Sub-classify by HOW it failed: a flushed zero, a
-  // flipped sign and a partial digit loss are three different mechanisms and
-  // lumping them together makes the population unreadable.
-  out.cls = 4;
-  if (got == 0)                                   out.reason = "returned-zero";
-  else if (signbitq(got) != signbitq(ref))        out.reason = "returned-wrong-sign";
-  else if (digits == 0.0)                         out.reason = "no-correct-digits";
-  else                                            out.reason = "partial-digit-loss";
-}
-
-// --- complex ----------------------------------------------------------------
-void classify_complex(const char* be, const Range& rg, double cap, double thresh,
-                      int id, int point, const char* family,
-                      double are, double aim, double bre, double bim,
-                      __float128 sare, __float128 saim, __float128 sbre, __float128 sbim,
-                      __float128 rre, __float128 rim, __float128 gre, __float128 gim,
-                      double digits, ClassRow& out) {
-  const int ncomp = kComplex[id].nops * 2;
-  const __float128 xq[4] = {(__float128)are, (__float128)aim,
-                            (__float128)bre, (__float128)bim};
-  const __float128 sq[4] = {sare, saim, sbre, sbim};
-
-  out.backend = be; out.kind = 'c'; out.op = kComplex[id].name; out.point = point;
-  out.family = family; out.digits = digits; out.cap = cap;
-  fmt_q2(out.in_s[0], sizeof(out.in_s[0]), xq[0], xq[1]);
-  if (ncomp > 2) fmt_q2(out.in_s[1], sizeof(out.in_s[1]), xq[2], xq[3]);
-  else           std::snprintf(out.in_s[1], sizeof(out.in_s[1]), "-");
-  std::snprintf(out.in_s[2], sizeof(out.in_s[2]), "-");
-  fmt_q2(out.ref_s, sizeof(out.ref_s), rre, rim);
-  fmt_q2(out.got_s, sizeof(out.got_s), gre, gim);
-
-  bool   arg_unrep = false;
-  double arg_digits = cap, repr = cap;
-  for (int k = 0; k < ncomp; ++k) {
-    const double lm = l10_mag(xq[k]);
-    if (lm != -HUGE_VAL && (lm > rg.l10_max || lm < rg.l10_min_sub)) arg_unrep = true;
-    if (lm != -HUGE_VAL) {                // a zero component is exact, not degraded
-      const double ad = digits_at_magnitude(lm, rg, cap);
-      if (ad < arg_digits) arg_digits = ad;
-    }
-    const double re = storage_rel_err(sq[k], xq[k]);
-    const double rd = (re > 0.0) ? clampd(-std::log10(re), 0.0, cap) : cap;
-    if (rd < repr) repr = rd;
-  }
-  out.repr_digits = repr;
-
-  const bool ref_nan = (isnanq(rre) || isnanq(rim)) != 0;
-  const bool ref_inf = !ref_nan && (!finiteq(rre) || !finiteq(rim));
-  // KI-35.  Judge representability COMPONENTWISE, the way the scorer scores.
-  // This used to take a single magnitude — the LARGER of the two components —
-  // while the scorer (and the `ach` block below, which says so in its own
-  // comment) measures each component against ITSELF.  A result with one O(1)
-  // component and one component 40 orders below the format minimum was
-  // therefore scored on the tiny component's own relative error but judged
-  // representable from the big one, and a correctly-rounded zero landed in
-  // UNEXPLAINED.  `tanh(-100+i) = (-1, 2.5e-87)` is the canonical case.
-  //
-  // The argument loop above is already componentwise; this mirrors it.  A
-  // component that is exactly zero is exact, not degraded, and is skipped —
-  // same convention as the argument loop, and the same one the scorer uses
-  // when it normalises a zero component against the other one.
-  //   OVERFLOW  is a property of the LARGER component  (l10_hi)
-  //   UNDERFLOW and the subnormal-limb band are properties of the SMALLER
-  //             one (l10_lo), because the score is the worst component.
-  double l10_hi = -HUGE_VAL, l10_lo = HUGE_VAL;
-  if (!ref_nan && !ref_inf) {
-    const __float128 rc[2] = {rre, rim};
-    for (int k = 0; k < 2; ++k) {
-      const double lm = l10_mag(rc[k]);
-      if (lm == -HUGE_VAL) continue;            // exact zero component
-      if (lm > l10_hi) l10_hi = lm;
-      if (lm < l10_lo) l10_lo = lm;
-    }
-  }
-  const bool ref_zero = (rre == 0 && rim == 0);
-  if (l10_hi == -HUGE_VAL) { l10_hi = 0.0; l10_lo = 0.0; }   // NaN/inf, or 0+0i
-  const double ref_l10 = l10_hi;               // OVERFLOW side
-  out.range_digits = (ref_nan || ref_inf || ref_zero)
-                       ? cap
-                       : digits_at_magnitude(l10_lo, rg, cap);
-
-  double est = 0.0;
-  const bool have_est = est_log10_mag_complex(id, xq[0], xq[1], xq[2], xq[3], est);
-  const bool oracle_underflowed =
-      (rre == 0 && rim == 0) && have_est && est < kQuadLog10Min;
-  const bool oracle_overflowed = ref_inf || (have_est && est > kQuadLog10Max);
-
-  const bool algebraic = is_algebraic_complex(id);
-  double delta[4] = {0, 0, 0, 0};
-  bool   any_delta = false;
-  for (int k = 0; k < ncomp; ++k) {
-    const double re = storage_rel_err(sq[k], xq[k]);
-    delta[k] = algebraic ? re : (re > rg.eps ? re : rg.eps);
-    if (xq[k] == 0) delta[k] = 0.0;
-    if (delta[k] > 0.0) any_delta = true;
-  }
-  double ach = cap;
-  if (any_delta && !ref_nan && !ref_inf && !(rre == 0 && rim == 0)) {
-    double worst = 0.0;
-    const int combos = 1 << ncomp;
-    for (int m = 0; m < combos; ++m) {
-      __float128 p[4] = {sq[0], sq[1], sq[2], sq[3]};
-      for (int k = 0; k < ncomp; ++k) {
-        const __float128 s = ((m >> k) & 1) ? (__float128)1.0 : (__float128)-1.0;
-        p[k] = sq[k] * ((__float128)1.0 + s * (__float128)delta[k]);
-      }
-      __float128 pr = 0, pi = 0;
-      reference_complex_q(id, p[0], p[1], p[2], p[3], pr, pi);
-      if (isnanq(pr) || isnanq(pi) || !finiteq(pr) || !finiteq(pi)) { worst = 1.0; continue; }
-      // Mirror the scorer: each component relative to itself, or to the other
-      // component when its own reference is exactly zero.
-      const __float128 dre = fabsq(pr - rre), dim = fabsq(pi - rim);
-      const __float128 nre = (rre != 0) ? fabsq(rre) : fabsq(rim);
-      const __float128 nim = (rim != 0) ? fabsq(rim) : fabsq(rre);
-      double dv = 0.0;
-      if (nre != 0) dv = (double)(dre / nre);
-      if (nim != 0) { const double t = (double)(dim / nim); if (t > dv) dv = t; }
-      if (dv > worst) worst = dv;
-    }
-    ach = (worst > 0.0) ? clampd(-std::log10(worst), 0.0, cap) : cap;
-  }
-  out.ach = ach;
-
-  if (arg_unrep)           { out.cls = 2; out.reason = "input-outside-word-range"; return; }
-  if (arg_digits < thresh) { out.cls = 2; out.reason = "input-in-subnormal-limb-band"; return; }
-  if (oracle_overflowed || (!ref_nan && !ref_inf && ref_l10 > rg.l10_max))
-                           { out.cls = 1; out.reason = ref_inf ? "true-result-exceeds-binary128"
-                                                               : "true-result-exceeds-word-max"; return; }
-  if (oracle_underflowed)  { out.cls = 0; out.reason = "true-result-underflows-binary128"; return; }
-  if (!ref_nan && !ref_inf && !ref_zero && l10_lo < rg.l10_min_sub)   // KI-35
-                           { out.cls = 0; out.reason = "true-result-below-word-min"; return; }
-  if (out.range_digits < thresh)
-                           { out.cls = 0; out.reason = "result-in-subnormal-limb-band"; return; }
-  const bool got_nonfinite = isnanq(gre) || isnanq(gim) || !finiteq(gre) || !finiteq(gim);
-  if (!ref_nan && !ref_inf && !(rre == 0 && rim == 0) && got_nonfinite)
-                           { out.cls = 4; out.reason = (isnanq(gre) || isnanq(gim))
-                                                         ? "returned-nan" : "returned-inf"; return; }
-  if (ref_nan)             { out.cls = 3; out.reason = "reference-is-nan"; return; }
-  if (rre == 0 && rim == 0){ out.cls = 3; out.reason = "exact-zero-of-the-function"; return; }
-  if (ach < thresh)        { out.cls = 3; out.reason = algebraic ? "input-error-amplified"
-                                                                 : "ill-conditioned-at-eps"; return; }
-  if (digits >= ach - 1.0) { out.cls = 3; out.reason = "at-the-achievable-ceiling"; return; }
-  out.cls = 4;
-  if (gre == 0 && gim == 0)                       out.reason = "returned-zero";
-  else if (digits == 0.0)                         out.reason = "no-correct-digits";
-  else                                            out.reason = "partial-digit-loss";
-}
-
-// Classification context threaded through the sweep. Null when --classify is off.
-struct ClassifyCtx {
-  double                 frac;
-  std::vector<ClassRow>* rows;
-};
 
 // ---------------------------------------------------------------------------
 // A scored row, in emission order.
 // ---------------------------------------------------------------------------
+// state: S scored, U unresolved (no verdict issuable), N unscorable, X no
+// analytic/numeric kappa. One row per (backend, kind, op, point) -- the single
+// measurement of record.
 struct Row {
   const char* backend;
   char        kind;        // 'r' or 'c'
   const char* op;
   int         point;
   double      digits;
+  double ulps, bound;
+  char   state;
 };
 
 // One (backend, op) aggregate, for the human-readable summary.
@@ -1735,6 +1655,11 @@ struct Cell {
 // legitimate conditioning loss from forcing the whole op's bound open.
 // ---------------------------------------------------------------------------
 const char* const kRegionOK = "OK";
+// The single "no verdict issuable" label, produced by point_unresolved().
+// It replaces UNDERFLOW, OVERFLOW, ARG_RANGE, SUBNORMAL_LIMB and
+// JUMP_UNRESOLVED, which were five names for one fact.
+const char* const kRegionUnresolved = "UNRESOLVED";
+const char* const kRegionAboveBound = "ABOVE_BOUND";
 
 // Step 1c: the third format-derived exemption class, alongside UNDERFLOW and
 // OVERFLOW. The point is in the band where the expansion's trailing limb cannot
@@ -1797,14 +1722,6 @@ bool jump_unresolved(int id, const __float128* stored, const __float128* exact) 
   return ne != ns;
 }
 
-bool in_subnormal_limb_band(const Range& rg, const __float128* exact, int nops,
-                            __float128 ref) {
-  for (int k = 0; k < nops; ++k)
-    if (exact[k] != 0 && finiteq(exact[k]) && fabsq(exact[k]) < (__float128)rg.full_prec)
-      return true;
-  return ref != 0 && finiteq(ref) && fabsq(ref) < (__float128)rg.full_prec;
-}
-
 struct UlpFail {
   const char* backend; char kind; const char* op; int point;
   const char* region;
@@ -1814,7 +1731,7 @@ struct UlpFail {
 
 struct UlpCell {
   const char* backend; char kind; const char* op;
-  long   n_scored, n_unscorable, n_ungated, n_fail;
+  long   n_scored, n_unscorable, n_ungated, n_unresolved, n_fail;
   double worst_ratio;  int worst_point;
   double worst_ulps, worst_expected, worst_kappa, worst_digits;
   double max_ulps;     int max_ulps_point;   // biggest raw ulp error, gated or not
@@ -1835,7 +1752,7 @@ struct UlpCtx {
 UlpCell make_ulp_cell(const char* be, char kind, const char* op) {
   UlpCell u;
   u.backend = be; u.kind = kind; u.op = op;
-  u.n_scored = u.n_unscorable = u.n_ungated = u.n_fail = 0;
+  u.n_scored = u.n_unscorable = u.n_ungated = u.n_unresolved = u.n_fail = 0;
   u.worst_ratio = 0.0; u.worst_point = -1;
   u.worst_ulps = u.worst_expected = u.worst_kappa = u.worst_digits = 0.0;
   u.max_ulps = 0.0; u.max_ulps_point = -1;
@@ -1847,6 +1764,17 @@ UlpCell make_ulp_cell(const char* be, char kind, const char* op) {
 // NOT fit FF's 48 bits, so for FF the stored operand is already off by more than
 // one ulp of the FF format before the algorithm runs; charge that honestly
 // instead of pretending the argument was exact.
+// Relative distance between the operand the backend actually stored and the
+// exact operand the oracle was asked about. This is the "different question"
+// term in the bound: the backend is not wrong for answering the question it was
+// given.
+double storage_rel_err(__float128 stored, __float128 exact) {
+  if (exact == 0) return (stored == 0) ? 0.0 : 1.0;
+  if (!finiteq(exact) || !finiteq(stored)) return 0.0;
+  const __float128 e = fabsq(stored - exact) / fabsq(exact);
+  return (double)e;
+}
+
 double input_delta_ulps(const __float128* stored, const __float128* exact,
                         int nops, int sig_bits) {
   double worst = 1.0;
@@ -1863,7 +1791,7 @@ void sweep_real(int id, const std::vector<GridPoint>& grid,
                 const std::vector<double>& a_in, const std::vector<double>& b_in,
                 const std::vector<double>& c_in, const std::vector<__float128>& ref,
                 std::vector<Row>& rows, std::vector<Cell>& cells,
-                const ClassifyCtx* cx, const UlpCtx* ux) {
+                const UlpCtx* ux) {
   typedef typename B::S S;
   Cell cell = {B::name(), 'r', kReal[id].name, B::cap(), 0.0, B::cap(), 0, 0};
   UlpCell ucell = make_ulp_cell(B::name(), 'r', kReal[id].name);
@@ -1874,23 +1802,18 @@ void sweep_real(int id, const std::vector<GridPoint>& grid,
     const S sa(a_in[i]), sb(b_in[i]), sc(c_in[i]);
     const S r = eval_real<S>(id, sa, sb, sc);
     const double d = score_scalar(to_q(r), ref[i], B::cap());
-    rows.push_back({B::name(), 'r', kReal[id].name, int(i), d});
-    if (cx && d < cx->frac * B::cap()) {
-      ClassRow cr;
-      classify_real(B::name(), rg, B::cap(), cx->frac * B::cap(), id, int(i),
-                    grid[i].family, a_in[i], b_in[i], c_in[i],
-                    to_q(sa), to_q(sb), to_q(sc), ref[i], to_q(r), d, cr);
-      cx->rows->push_back(cr);
-    }
+    rows.push_back({B::name(), 'r', kReal[id].name, int(i), d, -1.0, -1.0, 'N'});
+    Row& row_ = rows.back();
     // --- condition-aware ulp verdict -------------------------------------
     if (ux) {
       const double m = ulps_scalar(to_q(r), ref[i], sb_bits);
       double kappa = 0.0;
+      row_.ulps = m;
       if (m == kUnscorableUlps()) {
-        ++ucell.n_unscorable;
+        ++ucell.n_unscorable; row_.state = 'N';
       } else if (!kappa_real(id, (__float128)a_in[i], (__float128)b_in[i],
                              (__float128)c_in[i], kappa)) {
-        ++ucell.n_ungated;                      // no analytic bound -> digit gate
+        ++ucell.n_ungated; row_.state = 'X';    // no analytic bound
       } else {
         const __float128 stored[3] = {to_q(sa), to_q(sb), to_q(sc)};
         const __float128 exact[3]  = {(__float128)a_in[i], (__float128)b_in[i],
@@ -1907,11 +1830,56 @@ void sweep_real(int id, const std::vector<GridPoint>& grid,
           const double f = subnormal_floor_ulps(exact[k], rg, sb_bits);
           if (f > in_floor) in_floor = f;
         }
-        const double af    = algo_floor_ulps(id, B::exp_squarings(),
-                                             (__float128)a_in[i]);
-        const double exp_u = expected_ulps(out_floor, af, kappa, in_floor);
+        double af = algo_floor_ulps(id, B::exp_squarings(), (__float128)a_in[i]);
+        {   // the circular family's own absolute residue (see trig_floor_ulps)
+          const double tf = trig_floor_ulps(id, B::trig_squarings(), sb_bits,
+                                            rg.limb_bits, (__float128)a_in[i], ref[i]);
+          if (tf > af) af = tf;
+        }
+        // Intermediates: clause (3) of the unresolved predicate, and the
+        // kappa_int cancellation term (KI-40).
+        __float128 inter[3];
+        const int  ninter = real_intermediates(id, exact[0], exact[1], exact[2],
+                                               inter);
+        double k_int = kappa_intermediate(inter, ninter, ref[i]);
+        // KI-10/KI-15 as a BOUND rather than a label. When the stored operands
+        // put the integral quotient on the other side of the jump, the returned
+        // remainder is a different branch of a discontinuous function and the
+        // absolute error is up to one modulus |b|. In ulps of f that is
+        // 2^p*|b|/|f|, which is >= 2^p because |f| < |b| for every remainder --
+        // so clause (4) fires and the point is unresolved, by arithmetic
+        // rather than by an exemption list.
+        if (jump_unresolved(id, stored, exact) && ref[i] != 0) {
+          const double jump = std::ldexp((double)(fabsq(exact[1]) / fabsq(ref[i])),
+                                         sb_bits);
+          if (jump > k_int) k_int = jump;
+        }
+        Bound bd;
+        bd.res       = out_floor;
+        bd.kappa     = kappa;
+        bd.in_delta  = in_floor;
+        bd.kappa_int = k_int;
+        bd.gain      = algo_gain(id, B::exp_squarings());
+        bd.abs_floor = (af > 1.0) ? af : 0.0;
+        bd.value     = bound_value(bd);
+        const double exp_u = bd.value;
+        if (point_unresolved(exp_u, ref[i], exact, nops, inter, ninter,
+                             rg, sb_bits)) {
+          ++ucell.n_unresolved; row_.state = 'U'; row_.bound = exp_u;
+          if (ux->explains && ux->explain_point == int(i) &&
+              std::strcmp(ux->explain_op, kReal[id].name) == 0)
+            ux->explains->push_back({B::name(), 'r', kReal[id].name, int(i),
+                                     kRegionUnresolved, m, kappa, exp_u, 0.0, d,
+                                     out_floor > af ? out_floor : af,
+                                     in_floor, a_in[i]});
+          cell.sum += d;
+          if (d < cell.min) cell.min = d;
+          if (d == 0.0) ++cell.n_zero;
+          ++cell.n;
+          continue;
+        }
         const double ratio = (exp_u > 0.0) ? m / exp_u : HUGE_VAL;
-        ++ucell.n_scored;
+        ++ucell.n_scored; row_.state = 'S'; row_.bound = exp_u;
         if (m > ucell.max_ulps) { ucell.max_ulps = m; ucell.max_ulps_point = int(i); }
         if (ratio > ucell.worst_ratio) {
           ucell.worst_ratio = ratio;    ucell.worst_point    = int(i);
@@ -1925,37 +1893,14 @@ void sweep_real(int id, const std::vector<GridPoint>& grid,
                                    out_floor > af ? out_floor : af,
                                    in_floor, a_in[i]});
         if (ratio > ux->allowance) {
-          // Only now is a region label worth its cost: classify the point and
-          // file the failure under the class it lands in.
-          ClassRow cr;
-          classify_real(B::name(), rg, B::cap(), 0.5 * B::cap(), id, int(i),
-                        grid[i].family, a_in[i], b_in[i], c_in[i],
-                        stored[0], stored[1], stored[2], ref[i], to_q(r), d, cr);
-          // Always take the classifier's verdict, even when the DIGIT score was
-          // healthy enough that --classify would never have looked at this point.
-          // That is the whole premise: a point can read 16 digits and still be
-          // 7e15 ulps out because an intermediate went subnormal.
-          // Step 1c. A point whose operands or reference sit below the
-          // backend's full_prec cliff is in the SUBNORMAL-LIMB band, where the
-          // expansion is demonstrably not carrying its nominal p bits. That is
-          // a property of the FORMAT, so it outranks whatever the digit-shaped
-          // classifier concluded, exactly as UNDERFLOW/OVERFLOW do. It is the
-          // backstop for points the floor-widened bound under-predicts (a
-          // multi-step algorithm can degrade worse than first order in the
-          // band); the bound above, not this label, does most of the work.
-          // KI-10/KI-15. An unresolvable jump outranks every other label for
-          // the same reason SUBNORMAL_LIMB does: it is a property of the
-          // FORMAT, not of the algorithm. Checked first because such a point
-          // also reads as CONDITIONING to the digit-shaped classifier, which
-          // is the wrong story -- kappa is finite and small there, and the
-          // error is a discontinuity kappa never modelled.
-          const char* region =
-              jump_unresolved(id, stored, exact) ? kRegionJumpUnresolved
-              : in_subnormal_limb_band(rg, exact, nops, ref[i])
-                                 ? kRegionSubnormalLimb : kClassName[cr.cls];
+          // ONE verdict. The point is above its derived bound; there is no
+          // second axis to file it under, because every reason a point could
+          // legitimately be above the OLD bound is now a TERM IN the bound and
+          // every reason it could be unmeasurable is a clause of
+          // point_unresolved(). What is left is the finding itself.
           ++ucell.n_fail;
-          ux->fails->push_back({B::name(), 'r', kReal[id].name, int(i), region,
-                                m, kappa, exp_u, ratio, d,
+          ux->fails->push_back({B::name(), 'r', kReal[id].name, int(i),
+                                kRegionAboveBound, m, kappa, exp_u, ratio, d,
                                 out_floor > af ? out_floor : af,
                                 in_floor, a_in[i]});
         }
@@ -1975,7 +1920,7 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
                    const std::vector<double>& b_re, const std::vector<double>& b_im,
                    const std::vector<__float128>& ref_re, const std::vector<__float128>& ref_im,
                    std::vector<Row>& rows, std::vector<Cell>& cells,
-                   const ClassifyCtx* cx, const UlpCtx* ux) {
+                   const UlpCtx* ux) {
   typedef typename B::S S;
   typedef typename B::Z Z;
   Cell cell = {B::name(), 'c', kComplex[id].name, B::cap(), 0.0, B::cap(), 0, 0};
@@ -1990,30 +1935,81 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
     const double dim = is_real ? B::cap()
                                : score_component(to_q(r.im), ref_im[i], ref_re[i], B::cap());
     const double d = dre < dim ? dre : dim;
-    rows.push_back({B::name(), 'c', kComplex[id].name, int(i), d});
-    if (cx && d < cx->frac * B::cap()) {
-      ClassRow cr;
-      classify_complex(B::name(), rg, B::cap(), cx->frac * B::cap(), id, int(i),
-                       grid[i].family, grid[i].re, grid[i].im, b_re[i], b_im[i],
-                       to_q(a.re), to_q(a.im), to_q(b.re), to_q(b.im),
-                       ref_re[i], ref_im[i], to_q(r.re), to_q(r.im), d, cr);
-      cx->rows->push_back(cr);
-    }
-    // --- ulp MEASUREMENT for complex: reported, never gated ---------------
-    // Modulus form: |got - ref| / (|ref| * 2^-p). No kappa is derived here and
-    // no verdict is issued — see the COMPLEX OPS note in the ULP section.
+    rows.push_back({B::name(), 'c', kComplex[id].name, int(i), d, -1.0, -1.0, 'N'});
+    Row& row_ = rows.back();
+    // --- ulp VERDICT for complex: the same bound as the real ops ----------
+    // Modulus form: |got - ref| / (|ref| * 2^-p), judged against the same
+    // consolidated bound, with kappa obtained by differentiating the oracle
+    // (kappa_complex_numeric) instead of by hand.
     if (ux) {
-      const __float128 dre = to_q(r.re) - ref_re[i], dim_ = to_q(r.im) - ref_im[i];
-      const bool bad = isnanq(dre) || isnanq(dim_) ||
+      const __float128 e_re = to_q(r.re) - ref_re[i], e_im = to_q(r.im) - ref_im[i];
+      const __float128 mref = hypotq(ref_re[i], ref_im[i]);
+      const bool bad = isnanq(e_re) || isnanq(e_im) ||
                        isnanq(ref_re[i]) || isnanq(ref_im[i]) ||
                        !finiteq(ref_re[i]) || !finiteq(ref_im[i]);
-      const __float128 mref = hypotq(ref_re[i], ref_im[i]);
       if (bad || mref == 0) {
         ++ucell.n_unscorable;
       } else {
-        const double m = (double)ldexpq(hypotq(dre, dim_) / mref, B::sig_bits());
-        ++ucell.n_ungated;
+        const double m = (double)ldexpq(hypotq(e_re, e_im) / mref, B::sig_bits());
+        row_.ulps = m;
         if (m > ucell.max_ulps) { ucell.max_ulps = m; ucell.max_ulps_point = int(i); }
+        const int sb_bits = B::sig_bits();
+        const double kappa = kappa_complex_numeric(id, (__float128)grid[i].re,
+                                                   (__float128)grid[i].im,
+                                                   (__float128)b_re[i],
+                                                   (__float128)b_im[i],
+                                                   ref_re[i], ref_im[i]);
+        if (kappa < 0.0) {
+          ++ucell.n_ungated; row_.state = 'X';   // no derivative -> no bound
+        } else {
+          const __float128 exact[4] = {(__float128)grid[i].re, (__float128)grid[i].im,
+                                       (__float128)b_re[i], (__float128)b_im[i]};
+          const __float128 stored[4] = {to_q(a.re), to_q(a.im), to_q(b.re), to_q(b.im)};
+          // Only the operands this op actually consumes: a unary op must not be
+          // charged the storage error or the subnormal floor of an unused b,
+          // which the grid fills with an arbitrary magnitude.
+          const int nop4 = (kComplex[id].nops >= 2) ? 4 : 2;
+          // res: the resolution floor at the RESULT's modulus, and the same
+          // floor on each operand, exactly as the real path does. This is the
+          // whole of KI-39 mechanism A -- an FP32-worded expansion at 1e-30 has
+          // a subnormal trailing limb and cannot compute there, however many
+          // limbs it has.
+          const double out_floor = subnormal_floor_ulps(mref, rg, sb_bits);
+          double in_floor = input_delta_ulps(stored, exact, nop4, sb_bits);
+          for (int k = 0; k < nop4; ++k) {
+            const double f2 = subnormal_floor_ulps(exact[k], rg, sb_bits);
+            if (f2 > in_floor) in_floor = f2;
+          }
+          __float128 inter[8];
+          const int ninter = complex_intermediates(id, exact[0], exact[1],
+                                                   exact[2], exact[3], inter);
+          const double k_int = kappa_intermediate(inter, ninter, mref);
+          Bound bd;
+          bd.res = out_floor; bd.kappa = kappa; bd.in_delta = in_floor;
+          bd.kappa_int = k_int;
+          bd.gain = complex_algo_gain(id, B::exp_squarings());
+          bd.abs_floor = 0.0;
+          bd.value = bound_value(bd);
+          row_.bound = bd.value;
+          if (point_unresolved(bd.value, mref, exact, nop4, inter, ninter,
+                               rg, sb_bits)) {
+            ++ucell.n_unresolved; row_.state = 'U';
+          } else {
+            const double ratio = (bd.value > 0.0) ? m / bd.value : HUGE_VAL;
+            ++ucell.n_scored; row_.state = 'S';
+            if (ratio > ucell.worst_ratio) {
+              ucell.worst_ratio = ratio;  ucell.worst_point    = int(i);
+              ucell.worst_ulps  = m;      ucell.worst_expected = bd.value;
+              ucell.worst_kappa = kappa;  ucell.worst_digits   = d;
+            }
+            if (ratio > ux->allowance) {
+              ++ucell.n_fail;
+              ux->fails->push_back({B::name(), 'c', kComplex[id].name, int(i),
+                                    kRegionAboveBound, m, kappa, bd.value, ratio,
+                                    d, out_floor, in_floor, grid[i].re});
+            }
+          }
+        }
       }
     }
     cell.sum += d;
@@ -2034,7 +2030,7 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
 void run_sweep(uint64_t seed, const std::vector<GridPoint>& rgrid,
                const std::vector<GridPoint>& cgrid,
                std::vector<Row>& rows, std::vector<Cell>& cells,
-               const ClassifyCtx* cx, const UlpCtx* ux) {
+               const UlpCtx* ux) {
   const size_t nr = rgrid.size(), nc = cgrid.size();
   rows.reserve(4 * (R_COUNT * nr + C_COUNT * nc));
 
@@ -2049,10 +2045,10 @@ void run_sweep(uint64_t seed, const std::vector<GridPoint>& rgrid,
       a[i] = av; b[i] = bv; c[i] = cv;
       ref[i] = reference_real(id, av, bv, cv);
     }
-    sweep_real<BackendDD>(id, rgrid, a, b, c, ref, rows, cells, cx, ux);
-    sweep_real<BackendFF>(id, rgrid, a, b, c, ref, rows, cells, cx, ux);
-    sweep_real<BackendQF>(id, rgrid, a, b, c, ref, rows, cells, cx, ux);
-    sweep_real<BackendTF>(id, rgrid, a, b, c, ref, rows, cells, cx, ux);
+    sweep_real<BackendDD>(id, rgrid, a, b, c, ref, rows, cells, ux);
+    sweep_real<BackendFF>(id, rgrid, a, b, c, ref, rows, cells, ux);
+    sweep_real<BackendQF>(id, rgrid, a, b, c, ref, rows, cells, ux);
+    sweep_real<BackendTF>(id, rgrid, a, b, c, ref, rows, cells, ux);
   }
 
   for (int id = 0; id < C_COUNT; ++id) {
@@ -2063,10 +2059,10 @@ void run_sweep(uint64_t seed, const std::vector<GridPoint>& rgrid,
       fill_complex_operands(id, i, cgrid, cgrid[i].re, cgrid[i].im, rng, bre[i], bim[i]);
       reference_complex(id, cgrid[i].re, cgrid[i].im, bre[i], bim[i], rre[i], rim[i]);
     }
-    sweep_complex<BackendDD>(id, cgrid, bre, bim, rre, rim, rows, cells, cx, ux);
-    sweep_complex<BackendFF>(id, cgrid, bre, bim, rre, rim, rows, cells, cx, ux);
-    sweep_complex<BackendQF>(id, cgrid, bre, bim, rre, rim, rows, cells, cx, ux);
-    sweep_complex<BackendTF>(id, cgrid, bre, bim, rre, rim, rows, cells, cx, ux);
+    sweep_complex<BackendDD>(id, cgrid, bre, bim, rre, rim, rows, cells, ux);
+    sweep_complex<BackendFF>(id, cgrid, bre, bim, rre, rim, rows, cells, ux);
+    sweep_complex<BackendQF>(id, cgrid, bre, bim, rre, rim, rows, cells, ux);
+    sweep_complex<BackendTF>(id, cgrid, bre, bim, rre, rim, rows, cells, ux);
   }
 }
 
@@ -2088,14 +2084,16 @@ bool write_baseline(const std::string& path, const std::vector<Row>& rows,
   std::fprintf(f, "# built-by: gcc %s   (regenerate under the toolchain of record:\n"
                   "#   module use /soft/modulefiles && module load gcc/13.3.0)\n",
                __VERSION__);
-  std::fprintf(f, "# a 0.00 cell is a recorded present-day defect, not a gap; "
-                  "see docs/KNOWN_ISSUES.md\n");
-  std::fprintf(f, "backend,kind,op,point,digits\n");
+  std::fprintf(f, "# ulps  = |got-ref| / (|ref| * 2^-p), the measurement of record\n");
+  std::fprintf(f, "# bound = the derived bound; see docs/CORRECTNESS.md\n");
+  std::fprintf(f, "# state = S scored | U unresolved | N unscorable | X no kappa\n");
+  std::fprintf(f, "backend,kind,op,point,digits,ulps,bound,state\n");
   char buf[96];
   for (size_t i = 0; i < rows.size(); ++i) {
     const Row& r = rows[i];
-    const int  n = std::snprintf(buf, sizeof(buf), "%s,%c,%s,%d,%.2f\n",
-                                 r.backend, r.kind, r.op, r.point, r.digits);
+    const int  n = std::snprintf(buf, sizeof(buf), "%s,%c,%s,%d,%.2f,%.6g,%.6g,%c\n",
+                                 r.backend, r.kind, r.op, r.point, r.digits,
+                                 r.ulps, r.bound, r.state);
     if (std::fwrite(buf, 1, size_t(n), f) != size_t(n)) {
       std::fprintf(stderr, "write failed\n"); std::fclose(f); return false;
     }
@@ -2127,64 +2125,6 @@ bool write_grid(const std::string& path, const std::vector<GridPoint>& rg,
 // reference, what the backend returned, and the three measured ceilings
 // (repr = digits the input survived storage with, range = digits the RESULT's
 // magnitude leaves room for, ach = digits any implementation could achieve).
-bool write_classification(const std::string& path, const std::vector<ClassRow>& rows,
-                          double frac) {
-  std::FILE* f = std::fopen(path.c_str(), "wb");
-  if (!f) { std::fprintf(stderr, "cannot open %s for writing\n", path.c_str()); return false; }
-  std::fprintf(f, "# %s classification\n", kFormatVersion);
-  std::fprintf(f, "# every sweep point scoring below %.2f x its backend cap, with the\n", frac);
-  std::fprintf(f, "# reason it does. Generated by scripts/sweep_accuracy --classify;\n");
-  std::fprintf(f, "# see the CLASSIFICATION section of scripts/sweep_accuracy.cpp.\n");
-  std::fprintf(f, "# class: UNDERFLOW OVERFLOW ARG_RANGE CONDITIONING UNEXPLAINED\n");
-  std::fprintf(f, "# ach = digits achievable by ANY implementation at this storage,\n");
-  std::fprintf(f, "#       measured by perturbing each operand by the error the backend\n");
-  std::fprintf(f, "#       actually carries and re-evaluating the binary128 oracle.\n");
-  std::fprintf(f, "# rows: %zu\n", rows.size());
-  std::fprintf(f, "backend,kind,op,point,family,digits,cap,class,reason,"
-                  "ach,repr,range,in1,in2,in3,ref,got\n");
-  for (size_t i = 0; i < rows.size(); ++i) {
-    const ClassRow& r = rows[i];
-    std::fprintf(f, "%s,%c,%s,%d,%s,%.2f,%.2f,%s,%s,%.2f,%.2f,%.2f,%s,%s,%s,%s,%s\n",
-                 r.backend, r.kind, r.op, r.point, r.family, r.digits, r.cap,
-                 kClassName[r.cls], r.reason, r.ach, r.repr_digits, r.range_digits,
-                 r.in_s[0], r.in_s[1], r.in_s[2], r.ref_s, r.got_s);
-  }
-  if (std::fclose(f) != 0) { std::fprintf(stderr, "close failed\n"); return false; }
-  return true;
-}
-
-void print_class_summary(const std::vector<ClassRow>& rows, double frac) {
-  long by_class[5] = {0, 0, 0, 0, 0};
-  long zeros_by_class[5] = {0, 0, 0, 0, 0};
-  for (size_t i = 0; i < rows.size(); ++i) {
-    ++by_class[rows[i].cls];
-    if (rows[i].digits == 0.0) ++zeros_by_class[rows[i].cls];
-  }
-  std::printf("\n  classification (threshold: below %.0f%% of cap)\n", frac * 100.0);
-  std::printf("  %-14s %10s %10s\n", "class", "points", "of which 0.00");
-  std::printf("  -------------- ---------- ----------\n");
-  for (int k = 0; k < 5; ++k)
-    std::printf("  %-14s %10ld %10ld\n", kClassName[k], by_class[k], zeros_by_class[k]);
-  std::printf("  %-14s %10zu\n", "TOTAL", rows.size());
-
-  if (by_class[4] == 0) {
-    std::printf("\n  UNEXPLAINED is EMPTY — every low-scoring point is accounted for by a\n"
-                "  range limit or by measured conditioning.\n");
-    return;
-  }
-  std::printf("\n  UNEXPLAINED points (each one is a candidate defect):\n");
-  long shown = 0;
-  for (size_t i = 0; i < rows.size(); ++i) {
-    if (rows[i].cls != 4) continue;
-    const ClassRow& r = rows[i];
-    if (shown < 60)
-      std::printf("    %s %c %-9s pt %-5d %-7s d=%.2f ach=%.2f in=%s ref=%s got=%s\n",
-                  r.backend, r.kind, r.op, r.point, r.family, r.digits, r.ach,
-                  r.in_s[0], r.ref_s, r.got_s);
-    ++shown;
-  }
-  if (shown > 60) std::printf("    (%ld more; see the CSV)\n", shown - 60);
-}
 
 void print_summary(const std::vector<Cell>& cells) {
   std::printf("\n  %-3s %-4s %-9s %8s %8s %8s %8s %8s\n",
@@ -2219,12 +2159,24 @@ void print_summary(const std::vector<Cell>& cells) {
 // reported as an error rather than silently skipped.
 // ---------------------------------------------------------------------------
 int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
-  std::FILE* f = std::fopen(path.c_str(), "rb");
+  // The committed baseline is gzipped -- 428,592 rows is 8.7 MB of text and
+  // 2.6 MB compressed, and it is rewritten on every accepted change, so the
+  // uncompressed form dominates repository growth. Read it through gzip -dc
+  // rather than keeping a second, decompressed copy on disk.
+  const bool gz = path.size() > 3 && path.compare(path.size() - 3, 3, ".gz") == 0;
+  std::FILE* f = nullptr;
+  if (gz) {
+    const std::string cmd = "gzip -dc '" + path + "'";
+    f = popen(cmd.c_str(), "r");
+  } else {
+    f = std::fopen(path.c_str(), "rb");
+  }
   if (!f) { std::fprintf(stderr, "cannot open baseline %s\n", path.c_str()); return 2; }
 
   char   line[256];
   size_t idx = 0, parsed = 0;
   long   decreased = 0, increased = 0, worst_shown = 0;
+  long   state_moved = 0, state_shown = 0;
   double worst_drop = 0.0;
   bool   saw_header = false, structural = false;
 
@@ -2250,8 +2202,10 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
     }
     if (!saw_header && std::strncmp(line, "backend,", 8) == 0) { saw_header = true; continue; }
 
-    char be[16], op[32]; char kind = 0; int point = 0; double dig = 0.0;
-    if (std::sscanf(line, "%15[^,],%c,%31[^,],%d,%lf", be, &kind, op, &point, &dig) != 5) {
+    char be[16], op[32]; char kind = 0; int point = 0;
+    double dig = 0.0, base_ulps = 0.0, base_bound = 0.0; char st = 0;
+    if (std::sscanf(line, "%15[^,],%c,%31[^,],%d,%lf,%lf,%lf,%c", be, &kind, op,
+                    &point, &dig, &base_ulps, &base_bound, &st) != 8) {
       std::fprintf(stderr, "malformed baseline line %zu: %s", parsed + 1, line);
       structural = true; break;
     }
@@ -2272,27 +2226,56 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
       structural = true; break;
     }
 
-    // Round the fresh score through the same 2-decimal text the baseline stores,
-    // so an unchanged point compares exactly and a 0.01 move is still detectable.
-    // The epsilon below only absorbs the decimal round-trip.
-    char tmp[16];
-    std::snprintf(tmp, sizeof(tmp), "%.2f", r.digits);
-    const double fresh_dig = std::atof(tmp);
-    if (fresh_dig < dig - 1e-9) {
+    // THE MONOTONE GATE, in ulps. Larger is worse, so a regression is a point
+    // whose error GREW. Two things are deliberately not regressions:
+    //
+    //  * a move of less than kNoiseFactor. The oracle is libquadmath, whose own
+    //    last place moves under a compiler or glibc change, and re-running the
+    //    identical binary moves roughly twenty of the 428,592 rows in the last
+    //    place of the score. kNoiseFactor = 1.26 is 10^0.1, i.e. exactly the
+    //    "sub-0.1-digit" floor that scatter lives in, expressed multiplicatively
+    //    because ulps are a ratio. Choosing a tolerance over run-twice-and-
+    //    intersect is deliberate: intersecting doubles a four-second gate's
+    //    cost to suppress noise that a stated threshold suppresses for free,
+    //    and a stated threshold is auditable -- you can read 1.26 in this file.
+    //
+    //  * anything at or below kSubUlpFloor. Below one ulp the score is a
+    //    rounding coin-flip, and 0.2 -> 0.4 ulps is not a defect.
+    //
+    // A point that changes STATE is always reported: scored -> unresolved means
+    // the bound stopped being issuable, which is a real change even though no
+    // ulp count got worse.
+    const double kNoiseFactor = 1.2589254;   // 10^0.1: one tenth of a digit
+    const double kSubUlpFloor = 1.0;
+    const double fresh_ulps = r.ulps;
+    const bool both_scored = (st == 'S' && r.state == 'S');
+    if (both_scored && fresh_ulps > kSubUlpFloor &&
+        fresh_ulps > base_ulps * kNoiseFactor) {
       ++decreased;
-      const double drop = dig - fresh_dig;
+      const double drop = (base_ulps > 0.0)
+                        ? std::log10(fresh_ulps / base_ulps) : 0.0;
       if (drop > worst_drop) worst_drop = drop;
       if (worst_shown < 40) {
-        std::printf("  REGRESSION  %s %c %-9s point %-5d  %.2f -> %.2f  (-%.2f)\n",
-                    be, kind, op, point, dig, fresh_dig, drop);
+        std::printf("  REGRESSION  %s %c %-9s point %-5d  %.6g -> %.6g ulps "
+                    "(-%.2f digits)\n", be, kind, op, point,
+                    base_ulps, fresh_ulps, drop);
         ++worst_shown;
       }
-    } else if (fresh_dig > dig + 1e-9) {
+    } else if (st != r.state) {
+      ++state_moved;
+      if (state_shown < 20) {
+        std::printf("  STATE       %s %c %-9s point %-5d  %c -> %c\n",
+                    be, kind, op, point, st, r.state);
+        ++state_shown;
+      }
+      if (st == 'S' && r.state != 'S') ++decreased;   // lost a verdict
+    } else if (both_scored && fresh_ulps * kNoiseFactor < base_ulps) {
       ++increased;
     }
+    (void)dig; (void)base_bound;
     ++idx;
   }
-  std::fclose(f);
+  if (gz) pclose(f); else std::fclose(f);
 
   if (structural) return 2;
   if (idx != fresh.size()) {
@@ -2306,8 +2289,9 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
               decreased ? "   <-- MONOTONE GATE FAILED" : "");
   std::printf("  increased     : %ld\n", increased);
   std::printf("  unchanged     : %zu\n", idx - size_t(decreased) - size_t(increased));
+  std::printf("  state moved   : %ld\n", state_moved);
   if (decreased) {
-    std::printf("  worst drop    : %.2f digits\n", worst_drop);
+    std::printf("  worst drop    : %.2f digits equivalent\n", worst_drop);
     if (decreased > worst_shown)
       std::printf("  (%ld further regressions not listed)\n", decreased - worst_shown);
   }
@@ -2317,19 +2301,90 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
   else if (!fp_ok)
     std::printf("  note          : ORACLE FINGERPRINT MISMATCH — see the warning above; "
                 "hairline diffs are the reference moving\n");
-  std::printf("\nRESULT: %s\n", decreased ? "FAIL — accuracy decreased" : "PASS — no point decreased");
+  std::printf("\nRESULT: %s\n", decreased
+    ? "FAIL — a point got worse by more than a tenth of a digit"
+    : "PASS — no point above the 0.1-digit noise floor got worse");
   return decreased ? 1 : 0;
+}
+
+
+// ---------------------------------------------------------------------------
+// THE OPEN-DEFECT REGISTER
+// ---------------------------------------------------------------------------
+// The absolute gate says "no point above its derived bound". Some points ARE
+// above it -- those are the open defects, and the honest thing is to keep the
+// bound where the derivation puts it and carry the exceptions in a file you can
+// read, rather than to loosen the bound until they disappear. That is the whole
+// difference between this and the per-op tolerance tables it replaces: a
+// tolerance hides the count, a register prints it.
+//
+// The register is checked in BOTH directions. A point above bound that is not
+// listed fails the gate (a new defect). A listed point that is no longer above
+// bound also fails (the register has rotted and must be shrunk). So it can only
+// get smaller, and it cannot silently absorb a regression.
+//
+// Format: one "BACKEND kind op point" per line; '#' comments.
+bool region_is_gated(const char* r);
+
+
+int apply_register(const std::string& path, const std::vector<UlpFail>& fails) {
+  std::vector<std::string> listed, seen, unlisted, stale;
+  char key[96];
+  for (size_t i = 0; i < fails.size(); ++i) {
+    if (!region_is_gated(fails[i].region)) continue;
+    std::snprintf(key, sizeof(key), "%s %c %s %d", fails[i].backend,
+                  fails[i].kind, fails[i].op, fails[i].point);
+    seen.push_back(key);
+  }
+  std::sort(seen.begin(), seen.end());
+  if (path.empty()) {
+    std::printf("\nRESULT: %s — absolute gate (no register given)\n",
+                seen.empty() ? "PASS" : "FAIL");
+    return seen.empty() ? 0 : 4;
+  }
+  std::FILE* f = std::fopen(path.c_str(), "rb");
+  if (!f) { std::fprintf(stderr, "cannot open register %s\n", path.c_str()); return 2; }
+  char line[160];
+  while (std::fgets(line, sizeof(line), f)) {
+    char* h = std::strchr(line, '#'); if (h) *h = 0;
+    char be[16], op[32]; char kind = 0; int pt = 0;
+    if (std::sscanf(line, "%15s %c %31s %d", be, &kind, op, &pt) == 4) {
+      std::snprintf(key, sizeof(key), "%s %c %s %d", be, kind, op, pt);
+      listed.push_back(key);
+    }
+  }
+  std::fclose(f);
+  std::sort(listed.begin(), listed.end());
+  std::set_difference(seen.begin(), seen.end(), listed.begin(), listed.end(),
+                      std::back_inserter(unlisted));
+  std::set_difference(listed.begin(), listed.end(), seen.begin(), seen.end(),
+                      std::back_inserter(stale));
+  std::printf("\n  register      : %s\n", path.c_str());
+  std::printf("  above bound   : %zu point(s)\n", seen.size());
+  std::printf("  registered    : %zu\n", listed.size());
+  std::printf("  NEW (unlisted): %zu%s\n", unlisted.size(),
+              unlisted.empty() ? "" : "   <-- ABSOLUTE GATE FAILED");
+  for (size_t i = 0; i < unlisted.size() && i < 40; ++i)
+    std::printf("      + %s\n", unlisted[i].c_str());
+  std::printf("  STALE (fixed) : %zu%s\n", stale.size(),
+              stale.empty() ? "" : "   <-- shrink the register");
+  for (size_t i = 0; i < stale.size() && i < 40; ++i)
+    std::printf("      - %s\n", stale[i].c_str());
+  const bool ok = unlisted.empty() && stale.empty();
+  std::printf("\nRESULT: %s — absolute gate (every point at or below its "
+              "derived bound, except the %zu registered)\n",
+              ok ? "PASS" : "FAIL", listed.size());
+  return ok ? 0 : 4;
 }
 
 // ---------------------------------------------------------------------------
 // --ulp report. Worst point per (backend, op), then the failures grouped by
 // (backend, op, region). Returns the gated-failure count.
 // ---------------------------------------------------------------------------
-bool region_is_gated(const char* r) {
-  return std::strcmp(r, "UNDERFLOW") != 0 && std::strcmp(r, "OVERFLOW") != 0 &&
-         std::strcmp(r, kRegionSubnormalLimb) != 0 &&
-         std::strcmp(r, kRegionJumpUnresolved) != 0;
-}
+// Every row that reaches the failure list is ABOVE_BOUND: the unresolved
+// points never get there. Kept as a named predicate so the report reads the
+// same, but there is now exactly one gated region and no exemptions.
+bool region_is_gated(const char* r) { return std::strcmp(r, kRegionUnresolved) != 0; }
 
 long print_ulp_report(const std::vector<UlpCell>& cells,
                       const std::vector<UlpFail>& fails,
@@ -2401,52 +2456,57 @@ long print_ulp_report(const std::vector<UlpCell>& cells,
                 f.backend, f.kind, f.op, f.region, f.point, f.digits, f.ulps,
                 f.expected, f.ratio, g ? "GATED-FAIL" : "exempt (metric n/a)");
   }
-  std::printf("\n  failing points: %ld gated, %ld exempt "
-              "(UNDERFLOW/OVERFLOW/SUBNORMAL_LIMB/JUMP_UNRESOLVED)\n",
-              gated, exempt);
-  std::printf("  failing (backend,op,region) cells, gated: %ld\n", gated_fail_cells);
-  std::printf("\nRESULT: %s\n",
-              gated_fail_cells ? "FAIL — condition-aware ulp gate" : "PASS");
+  std::printf("\n  above bound   : %ld point(s) in %ld (backend,op) cells\n",
+              gated, gated_fail_cells);
+  std::printf("  unresolved    : %ld point(s) — the format cannot carry the "
+              "question, the answer, or the work\n", exempt);
+  // No verdict here: the verdict is apply_register's, which knows which of
+  // these are already-open defects. Printing a second RESULT line would be a
+  // second opinion, and one measurement means one verdict.
   return gated_fail_cells;
 }
 
 // ---------------------------------------------------------------------------
 void usage(const char* argv0) {
   std::fprintf(stderr,
-    "Usage: %s [--out PATH] [--grid-out PATH] [--seed N] [--summary]\n"
-    "       %s --baseline PATH\n"
+    "Usage: %s --ulp --register PATH          the ABSOLUTE gate\n"
+    "       %s --baseline PATH                the MONOTONE gate\n"
+    "       %s [--out PATH] [--grid-out PATH] [--seed N] [--summary]\n"
     "\n"
-    "  --out PATH        write the baseline CSV here (default %s)\n"
+    "  --out PATH        write the baseline CSV here. No default: without this\n"
+    "                    flag nothing is written.\n"
     "  --grid-out PATH   also write the grid manifest here\n"
     "  --seed N          RNG seed for the derived operands (default %llu)\n"
     "  --summary         print the per-(backend, op) table (implied unless --quiet)\n"
     "  --quiet           suppress the per-(backend, op) table\n"
-    "  --baseline PATH   MONOTONE GATE: re-run the sweep, diff against PATH and\n"
-    "                    exit 1 if ANY point's digits decreased. Writes nothing.\n"
-    "  --classify PATH   TRIAGE: classify every point scoring below --classify-frac\n"
-    "                    of its backend cap and write the evidence CSV to PATH.\n"
-    "                    Writes no baseline. Exits 3 if any point is UNEXPLAINED.\n"
-    "  --ulp-dump PATH   with --ulp, write EVERY failing point to PATH as CSV\n"
-    "  --classify-frac F fraction of cap below which a point is triaged "
-    "(default %.2f)\n"
-    "  --ulp             ULP GATE: score every point in ulps of the true value and\n"
-    "                    judge it against 1 + kappa(f,x), the condition-aware bound.\n"
-    "                    Worst point per (backend, op, region), never a mean.\n"
-    "                    Writes nothing. Exits 4 if any GATED region fails.\n"
+    "  --baseline PATH   MONOTONE GATE: re-run the sweep, diff against PATH (.gz\n"
+    "                    accepted) and exit 1 if any point's error GREW by more\n"
+    "                    than a tenth of a digit. Writes nothing.\n"
+    "  --ulp             score every point in ulps against the derived bound and\n"
+    "                    report the worst point per (backend, op). Never a mean.\n"
+    "  --register PATH   ABSOLUTE GATE: PATH lists the known above-bound points.\n"
+    "                    Checked both ways -- an unlisted point above bound and a\n"
+    "                    listed point no longer above it both exit 4.\n"
+    "  --ulp-dump PATH   with --ulp, write EVERY above-bound point to PATH as CSV\n"
     "  --ulp-allowance A slack multiplier on the bound (default %.1f)\n"
     "  --ulp-explain O:P print the full both-metric breakdown for real op O at grid\n"
     "                    point P on all four backends (implies --ulp)\n",
-    argv0, argv0, kDefaultOut, (unsigned long long)kDefaultSeed, kDefaultClassifyFrac,
-    kUlpAllowance);
+    argv0, argv0, argv0, (unsigned long long)kDefaultSeed, kUlpAllowance);
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-  std::string out = kDefaultOut, grid_out, baseline, classify, explain_op, ulp_dump;
+  // No default output path. Defaulting to the committed baseline meant that
+  // running the tool to LOOK at something silently rewrote the thing every
+  // monotone comparison is measured against -- and under ctest, whose working
+  // directory is the build tree, the same default made a passing gate exit 1
+  // because the relative path did not resolve. Writing the baseline is now an
+  // explicit --out.
+  std::string out, grid_out, baseline, explain_op, ulp_dump;
+  std::string ulp_register;
   uint64_t    seed = kDefaultSeed;
   bool        quiet = false, out_set = false, ulp_gate = false;
-  double      classify_frac = kDefaultClassifyFrac;
   double      ulp_allowance = kUlpAllowance;
   int         explain_point = -1;
 
@@ -2460,11 +2520,10 @@ int main(int argc, char** argv) {
     else if (s == "--out")       { out = need("--out"); out_set = true; }
     else if (s == "--grid-out")  { grid_out = need("--grid-out"); }
     else if (s == "--baseline")  { baseline = need("--baseline"); }
-    else if (s == "--classify")  { classify = need("--classify"); }
-    else if (s == "--classify-frac") { classify_frac = std::atof(need("--classify-frac")); }
     else if (s == "--ulp")       { ulp_gate = true; }
     else if (s == "--ulp-allowance") { ulp_allowance = std::atof(need("--ulp-allowance")); }
     else if (s == "--ulp-dump") { ulp_dump = need("--ulp-dump"); }
+    else if (s == "--register") { ulp_register = need("--register"); ulp_gate = true; }
     else if (s == "--ulp-explain") {
       const std::string v = need("--ulp-explain");
       const size_t colon = v.rfind(':');
@@ -2495,15 +2554,14 @@ int main(int argc, char** argv) {
 
   std::vector<Row>      rows;
   std::vector<Cell>     cells;
-  std::vector<ClassRow> class_rows;
-  ClassifyCtx           cx = {classify_frac, &class_rows};
   std::vector<UlpCell>  ulp_cells;
   std::vector<UlpFail>  ulp_fails, ulp_explains;
   UlpCtx                ux = {ulp_allowance, &ulp_cells, &ulp_fails,
                               explain_op.c_str(), explain_point,
                               explain_point >= 0 ? &ulp_explains : nullptr};
-  run_sweep(seed, rgrid, cgrid, rows, cells, classify.empty() ? nullptr : &cx,
-            ulp_gate ? &ux : nullptr);
+  // The ulp verdict is now THE measurement, not a mode: every run computes it,
+  // so the baseline it writes always carries it.
+  run_sweep(seed, rgrid, cgrid, rows, cells, &ux);
 
   if (!quiet) print_summary(cells);
 
@@ -2527,20 +2585,17 @@ int main(int argc, char** argv) {
       std::fclose(f);
       std::printf("wrote %s  (%zu rows)\n", ulp_dump.c_str(), ulp_fails.size());
     }
-    return bad ? 4 : 0;
+    const int rc = apply_register(ulp_register, ulp_fails);
+    if (!out.empty()) {
+      if (!write_baseline(out, rows, rgrid.size(), cgrid.size(), seed)) return 1;
+      std::printf("wrote %s  (%zu rows)\n", out.c_str(), rows.size());
+    }
+    (void)bad;
+    return rc;
   }
 
   if (!baseline.empty()) return compare_baseline(baseline, rows);
 
-  if (!classify.empty()) {
-    print_class_summary(class_rows, classify_frac);
-    if (!write_classification(classify, class_rows, classify_frac)) return 1;
-    std::printf("\nwrote %s  (%zu rows)\n", classify.c_str(), class_rows.size());
-    long unexplained = 0;
-    for (size_t i = 0; i < class_rows.size(); ++i)
-      if (class_rows[i].cls == 4) ++unexplained;
-    return unexplained ? 3 : 0;
-  }
 
   if (!write_baseline(out, rows, rgrid.size(), cgrid.size(), seed)) return 1;
   std::printf("\nwrote %s  (%zu rows)\n", out.c_str(), rows.size());

@@ -191,7 +191,7 @@ kokkos_ep_add_test(dd_property_test)
 # T1.4 differential accuracy vs quadmath: per-op digits-of-accuracy against the
 # __float128 oracle. Quadmath-gated (runtime-SKIPs without LIBQUADMATH). Plain
 # helper — NOT an EFT test, so no contraction flags.
-kokkos_ep_add_test(dd_accuracy_test)
+# RETIRED (mean-gated, see the note at the end of this file): kokkos_ep_add_test(dd_accuracy_test)
 # T1.6 end-to-end cancellation kernels: quadmath-oracle-gated, host-side. Plain
 # helper — NOT an EFT test, so no contraction flags (kernels are not EFT atoms).
 kokkos_ep_add_test(dd_e2e_test)
@@ -210,7 +210,7 @@ kokkos_ep_add_test(ff_property_test)
 # the __float128 oracle (runtime-SKIPs without LIBQUADMATH). FF analogue of
 # dd_accuracy_test. Plain helper — NOT an EFT test, so no contraction flags
 # (mirrors dd_accuracy_test's registration).
-kokkos_ep_add_test(ff_accuracy_test)
+# RETIRED (mean-gated, see the note at the end of this file): kokkos_ep_add_test(ff_accuracy_test)
 # T2.5 end-to-end cancellation kernels for FF: quadmath-oracle-gated, host-side.
 # FF analogue of dd_e2e_test (T1.6). Plain helper — NOT an EFT test, so no
 # contraction flags. NOTE ON CONTRACTION: unlike T1.6's dd_e2e_test (which also
@@ -279,7 +279,7 @@ kokkos_ep_add_test(qf_property_test)
 # tail, PORT_NOTES_QF §10), with low mins for §5-registry ops reported as
 # EXPECTED-MIN-DROP. Plain helper — NOT an EFT test, so no contraction flags
 # (mirrors dd_accuracy_test / ff_accuracy_test registration).
-kokkos_ep_add_test(qf_accuracy_test)
+# RETIRED (mean-gated, see the note at the end of this file): kokkos_ep_add_test(qf_accuracy_test)
 
 # T3.5 FMA-contraction guard for QF: QF analogue of T2.5's ff_fma_guard_test, same
 # source/two-postures dual-registration pattern (see qf_fma_guard_test.cpp). Reuses
@@ -313,7 +313,7 @@ kokkos_ep_add_test(qf_cancellation_test)
 kokkos_ep_add_eft_test(tf_eft_test)                    # -> tf_eft_test              (OFF, gates)
 kokkos_ep_add_eft_test_contract_on(tf_eft_test)        # -> tf_eft_test_contract_on  (ON, reports)
 kokkos_ep_add_test(tf_property_test)                   # algebraic identities (Group A/B/C)
-kokkos_ep_add_test(tf_accuracy_test)                   # per-op digits vs quadmath oracle
+# RETIRED (mean-gated, see the note at the end of this file): kokkos_ep_add_test(tf_accuracy_test)
 kokkos_ep_add_test(tf_cancellation_test)               # e2e cancellation kernels (K1-K4)
 kokkos_ep_add_eft_test(tf_fma_guard_test)              # -> tf_fma_guard_test              (OFF, gates)
 kokkos_ep_add_eft_test_contract_on(tf_fma_guard_test)  # -> tf_fma_guard_test_contract_on  (ON, reports)
@@ -323,7 +323,7 @@ kokkos_ep_add_eft_test_contract_on(tf_fma_guard_test)  # -> tf_fma_guard_test_co
 # and the complex headers were covered solely by the demos, which print a table
 # nobody diffs per-op against an oracle. That is how KI-1 (complex acosh returns
 # the wrong branch for Re(z) < 0, in ALL FOUR backends) survived from the
-# original DD port through FF, QF and TF. See docs/KNOWN_ISSUES.md.
+# original DD port through FF, QF and TF. See docs/history/KNOWN_ISSUES.md.
 #
 # Standalone helper, NOT kokkos_ep_add_test: these read precomputed binary128
 # references from tests/data/xp_corpus_complex.bin and therefore run on
@@ -332,7 +332,74 @@ kokkos_ep_add_eft_test_contract_on(tf_fma_guard_test)  # -> tf_fma_guard_test_co
 # atan sinh cosh tanh asinh acosh atanh pow polar), per-op tolerance table set
 # from measurement. NOT EFT tests, so no contraction flags — verified
 # insensitive to -O0/-O2/-O3 and -ffp-contract=off/fast.
-kokkos_ep_add_standalone_test(dd_complex_accuracy_test)
-kokkos_ep_add_standalone_test(ff_complex_accuracy_test)
-kokkos_ep_add_standalone_test(qf_complex_accuracy_test)
-kokkos_ep_add_standalone_test(tf_complex_accuracy_test)
+# RETIRED (mean-gated, see the note at the end of this file): kokkos_ep_add_standalone_test(dd_complex_accuracy_test)
+# RETIRED (mean-gated, see the note at the end of this file): kokkos_ep_add_standalone_test(ff_complex_accuracy_test)
+# RETIRED (mean-gated, see the note at the end of this file): kokkos_ep_add_standalone_test(qf_complex_accuracy_test)
+# RETIRED (mean-gated, see the note at the end of this file): kokkos_ep_add_standalone_test(tf_complex_accuracy_test)
+
+# ---------------------------------------------------------------------------
+# RETIRED: the eight mean-gated accuracy tests
+# ---------------------------------------------------------------------------
+# dd_accuracy_test, ff_accuracy_test, qf_accuracy_test, tf_accuracy_test and
+# dd/ff/qf/tf_complex_accuracy_test are no longer registered. Their sources are
+# kept on disk; only the ctest registration is gone.
+#
+# Every one of them scored a MEAN digit count per op against a per-op tolerance
+# table, and every entry in those tables was set by measuring the implementation
+# and rounding down. That makes the current behaviour the specification: a defect
+# that was present when the table was written is, by construction, a pass. It is
+# also why not one of the forty entries in the known-issues history was caught
+# here -- the tests could not fail for a reason they had not already been told
+# about. Averaging compounds it: one point at 0 digits inside a thousand at 31
+# moves the mean by 0.03.
+#
+# They are replaced by two gates over ONE measurement (ulps against the
+# binary128 oracle, per point, versus a bound derived from the format and the
+# condition number). The verdict is per point rather than per mean, and the
+# bound comes from the format rather than from the implementation. See
+# docs/CORRECTNESS.md.
+#
+# Nothing STRUCTURAL was retired. The bit-exact EFT tests (two_sum / two_prod /
+# two_sqr), the FMA-contraction guards in both postures, the representation
+# invariants, the QF/TF non-overlap tests, the property/identity tests and the
+# cancellation kernels all remain registered above.
+
+# ---------------------------------------------------------------------------
+# THE TWO GATES
+# ---------------------------------------------------------------------------
+# One measurement, one verdict per point, two gates over that single number:
+#
+#   sweep_absolute_gate   no point above its derived bound, except the points
+#                         named in validation/sweep/open_defects.txt. The
+#                         register is checked in BOTH directions, so a new
+#                         defect and a stale entry both fail.
+#   sweep_monotone_gate   no point worse than the committed baseline, past a
+#                         stated 0.1-digit noise floor.
+#
+# Both run the same binary over the same 428,592 points in about eight seconds,
+# so `ctest` alone is the whole correctness answer.
+#
+# sweep_accuracy is a host-only tool: it needs libquadmath for the oracle and it
+# has no Kokkos in it. It is built here rather than in scripts/ so that a stale
+# hand-compiled binary in the source tree can never be what the gate runs.
+add_executable(sweep_accuracy ${CMAKE_SOURCE_DIR}/scripts/sweep_accuracy.cpp)
+target_include_directories(sweep_accuracy PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_compile_features(sweep_accuracy PRIVATE cxx_std_17)
+target_compile_options(sweep_accuracy PRIVATE -fext-numeric-literals)
+target_link_libraries(sweep_accuracy PRIVATE quadmath)
+
+add_test(NAME sweep_absolute_gate
+         COMMAND sweep_accuracy --ulp
+                 --register ${CMAKE_SOURCE_DIR}/validation/sweep/open_defects.txt)
+
+add_test(NAME sweep_monotone_gate
+         COMMAND sweep_accuracy
+                 --baseline ${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline.csv.gz)
+
+# The generated domain document must be what the generator currently emits from
+# the committed baseline. Pure Python, well under a second, no build products.
+add_test(NAME domains_fresh
+         COMMAND ${CMAKE_SOURCE_DIR}/validation/check_domains_fresh.sh)
+
+set_tests_properties(sweep_absolute_gate sweep_monotone_gate
+                     PROPERTIES TIMEOUT 600)
