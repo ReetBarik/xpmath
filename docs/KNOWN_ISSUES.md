@@ -68,11 +68,18 @@ either currently resolved or currently open.
 | 36 | complex division rounds each cross product before differencing them, so the quotient loses `log10(C)` digits | **RESOLVED** | batch-13 ⁂⁂ — compensated 2×2 determinant on the direct branch in all four headers. Two further defects found *inside* the fix and closed with it (see the entry) |
 | 37 | the sweep oracle scores `round` with ties-away-from-zero, but KI-20 made the library ties-to-even | **RESOLVED** | batch-13 ⁂⁂ — oracle only; library rounding untouched |
 | 38 | real `fma` loses digits to cancellation in `a·b + c` | **RESOLVED** | batch-14 ⁂⁂⁂ — all four backends did `add(multiply(a,b), c)`, rounding `a·b` before `c` was seen. Exact expansion + Shewchuk COMPRESS; all 60 points to the full cap. Not conditioning: the operands are held exactly, so κ multiplies nothing |
-| 39 | the committed `sweep_classified.csv` is stale (1391 vs 298 UNEXPLAINED), and a 238-point UNEXPLAINED residue remains at `main` outside `fma` | **OPEN** | filed 2026-09-04 from the KI-38 measurement; needs a re-baseline session |
+| 39 | the committed `sweep_classified.csv` is stale (1391 vs 298 UNEXPLAINED), and a 238-point UNEXPLAINED residue remains at `main` outside `fma` | **RESOLVED** | batch-15 ⁂⁂⁂⁂ — artifacts regenerated (1391 → 238, fingerprint unchanged); residue attributed in full to two FP32 format limits, 207 + 31, by cross-backend control. No library change. Classifier gap split out as KI-40 |
+| 40 | the sweep classifier cannot see a format limit that lives in an INTERMEDIATE, so 238 inherent-format points file as UNEXPLAINED | **OPEN** | filed 2026-09-04 by the KI-39 triage; classifier only, no score is wrong |
 
-**38 resolved, 1 open (KI-39).** KI-29 was
+**39 resolved, 1 open (KI-40).** KI-29 was
 closed by batch-11; the measurement that closed it *filed* KI-34, which is the
-defect KI-29's residual actually belonged to, and batch-12 closes that.
+defect KI-29's residual actually belonged to, and batch-12 closes that. KI-39
+closed the same way: its triage *filed* KI-40, which is the defect KI-39's
+UNEXPLAINED count actually belonged to.
+
+⁂⁂⁂⁂ `batch-15` is the commit titled `validation: regenerate artifacts and
+resolve the UNEXPLAINED residue` — a commit cannot record its own sha and this
+table ships inside it.
 
 ⁂⁂⁂ `batch-14` is the commit titled `fix: KI-38 exact product in real fma` — a
 commit cannot record its own sha and this table ships inside it.
@@ -6913,7 +6920,7 @@ commit cannot record its own sha and this entry ships inside it.
 
 ---
 
-## KI-39 — the committed `sweep_classified.csv` is stale, and a 238-point UNEXPLAINED residue remains **[OPEN]**
+## KI-39 — the committed `sweep_classified.csv` is stale, and a 238-point UNEXPLAINED residue remains **[RESOLVED batch-15 ⁂⁂⁂⁂]**
 
 Filed 2026-09-04 from the KI-38 measurement, not folded into it.
 
@@ -6944,3 +6951,200 @@ Closing this means a re-baseline session: regenerate `sweep_baseline.csv` and
 `sweep_classified.csv` from a current binary, then triage the residue the way
 KI-12 … KI-20 were triaged. Deliberately **not** done inside the KI-38 commit,
 which was scoped to leave `validation/sweep/*.csv` untouched.
+
+---
+
+### Resolution (batch-15, 2026-09-04)
+
+**Fact 1 — the artifacts are regenerated.** Rebuilt in the documented order:
+baseline, then classification, then `docs/DOMAINS.md`.
+`validation/check_domains_fresh.sh` PASSES. The oracle fingerprint is unchanged
+at `578322f998a329c8`, so this is the same oracle that produced the previous
+baseline, not a different libquadmath.
+
+Class histogram, committed-before → regenerated-after:
+
+| class | before | after |
+|---|---|---|
+| OVERFLOW | 11169 | 11169 |
+| CONDITIONING | 9672 | 8918 |
+| UNDERFLOW | 4159 | 5849 |
+| ARG_RANGE | 332 | 332 |
+| **UNEXPLAINED** | **1391** | **238** |
+| total | 26723 | 26506 |
+
+The score movement is the expected shape of batch-13 and batch-14, at the
+expected magnitudes: 1158 points up, 385 down. `TF r fma` +7.27 over 183 points
+and `QF r fma` +7.57 over 171, both with zero decreases; `FF r fma` 134 up
+(+0.92) against 50 down (worst −6.17), the exposed input-storage floor KI-38
+already documents; complex `div` up on all four backends (`TF` +7.59 × 98,
+`FF` +5.53 × 25, `QF` +4.34 × 48); `round` +30.49/+28.49/+21.19/+13.49 on eight
+points per backend, which is KI-37's ties-even oracle. Complex `tan` moved both
+ways in the low hundredths-to-2-digit range on all four backends — it is built
+on the divide KI-36 changed. **Nothing dropped from cap to 0.00, and no
+cross-backend delta appeared that these three fixes do not explain.**
+
+**Fact 2 — the 238-point residue is two FP32 format limits, and neither is a
+library defect.** The composition measured (not estimated) is exactly the one
+filed: QF complex 191, QF `r asin/atan/sin/tan` 18, TF `c div` 9, TF `c mul` 6,
+DD `c div` 5, FF `c acos` 5, FF `r tan` 4. `fma` is entirely absent, as
+predicted.
+
+The discriminator is the **cross-backend control**: score the same grid point on
+all four backends and read the shape.
+
+**Mechanism A — the FP32 exponent floor. 207 of 238 points.** Signature: FF, TF
+and QF land on the *same absolute accuracy*, spread under 1 digit, while DD sits
+at its full cap. Adding limbs buys nothing, because the wall is FP32's exponent
+range (min normal 1.18e-38, min subnormal 1.4e-45), which all three share.
+
+```
+op            pt      DD      QF      TF      FF     gate = 50% of cap
+                   (31.00) (29.00) (21.70) (14.00)   DD 15.5 QF 14.5 TF 10.85 FF 7.0
+c exp         766   31.00   13.77   14.25   14.00    flagged: QF only
+c sin        1588   31.00   13.77   14.25   14.00    flagged: QF only
+c polar      1022   31.00   13.77   14.25   14.00    flagged: QF only
+c cosh       1022   31.00   13.77   14.25   14.00    flagged: QF only
+r sin           0   31.00   13.77   14.25   14.00    flagged: QF only
+```
+
+Every one of these points has an input or a result component at magnitude
+~1e-30, which leaves 14.85 decades of headroom above FP32's smallest subnormal.
+An achievable-floor probe — round the *exact* answer into QF, no arithmetic at
+all — gives 15.0–15.7 digits there. The ops deliver 13.77–14.25, within ~1.3
+digits of a ceiling no implementation can exceed. The residual 1.3 digits is
+arithmetic rounding *inside* the band: at 1e-30 a QF value's third limb is
+already subnormal (~2 bits) and its fourth is zero, so even an identity
+operation renormalises against 1.4e-45. **The value can be stored; it cannot be
+computed with.** FF, carrying 2 limbs instead of 4 and doing far less work,
+stops at the same wall — which is the proof that limb count is not the variable.
+
+Only QF is flagged, and the reason is arithmetic, not numerical: the
+classification gate is 50% of cap. At ~14 digits, FF (cap 14) reads as *at cap*,
+TF (cap 21.7, gate 10.85) clears comfortably, and QF (cap 29, gate 14.5) misses
+by 0.7 digits. DD never enters the band on this grid at all — its floor is
+2.0e-292, 262 decades below the grid's smallest point.
+
+Also in mechanism A: `c div` points 763/765/766/767/1271/1531/8, where FF, TF
+and QF are identical to two decimals (7.29, 7.59, 11.38, 10.44) and DD is at
+31.00. The intermediate cross products there are ~1e-39, i.e. at FP32's min
+normal — same floor, reached through the intermediate rather than the operand.
+
+**Mechanism B — cancellation against a 53-bit double input. 31 of 238 points.**
+Signature: a clean ladder in cap, ~7.2 digits per FP32 limb — one limb exactly.
+
+```
+op            pt      DD      QF      TF      FF
+c mul          92   31.00   15.28   10.67    0.00
+c mul         148   31.00   15.32    7.50    0.00
+c mul         260   31.00   16.11    9.07    0.00
+r tan         578   16.00   13.90    6.84    0.00
+r tan         579   16.03   13.72    6.75    0.00
+c acos        371   26.40   21.44   14.20    6.93
+```
+
+The grid feeds 53-bit doubles. Where the op's exact answer requires resolving a
+cancellation of *k* bits, the backend has `cap − 0.301·k` digits left, and the
+measurement is that ledger and nothing else:
+
+- `c mul` 92/148/204/260/372 — `ac − bd` with `a ≈ −b`, `c ≈ −d`; products
+  ~0.125, result ~1.18e-16, so 53 bits cancel. A product of two doubles needs
+  106 bits and **only DD has them**: DD's Dekker two-product is exact, so DD
+  differences two exact values and returns 31.00. QF holds 96 bits → error
+  2⁻⁹⁶·0.125 / 1.18e-16 ≈ 13.9 digits (measured 15.3). TF holds 72 → ≈ 6.6
+  (measured 8.6). FF holds 48 → the error exceeds the answer, 0.00 (measured
+  0.00).
+- `r tan` 578/579/586/587 — the argument is a double one ulp from π/2, so the
+  reduction `x − π/2` costs 53 bits. `cap − 16` predicts DD 15, QF 13, TF 5.7,
+  FF −2; measured 16.0, 13.9, 6.8, 0.00. FF has nothing left, and a reduced
+  argument that rounds to zero is why it returns `inf` rather than 1.98e15.
+- `c acos` 371–383 and `c div` 1/15/22/29/148/204/260/372 — same ledger at the
+  same grid inputs.
+
+This is the same statement KI-38 already makes about `FF r fma`, generalised:
+the grid's operands are 53-bit doubles, and a backend that cannot hold their
+exact product is exposed the moment a cancellation removes the leading digits.
+It is a property of the format against this grid, not of the algorithm.
+
+**Conclusion: no library change.** Both mechanisms are FP32 exponent range and
+FP32 limb width, each demonstrated by measurement — three independent
+implementations of different width converging on one absolute number
+(mechanism A), and a one-limb-per-rung ladder that matches `cap − 0.301·k`
+(mechanism B). Closing either would require changing FP32, not `xp/`.
+
+The classifier's inability to *say* so is a separate, real finding, filed as
+**KI-40**.
+
+⁂⁂⁂⁂ `batch-15` is the commit titled `validation: regenerate artifacts and
+resolve the UNEXPLAINED residue` — a commit cannot record its own sha and this
+entry ships inside it.
+
+---
+
+## KI-40 — the sweep classifier cannot see a format limit that lives in an INTERMEDIATE **[OPEN]**
+
+Filed 2026-09-04 by the KI-39 triage. Classifier only — **no library defect, and
+no score is wrong**. This is about the label the classifier attaches, not the
+number it measures.
+
+### What
+
+All 238 UNEXPLAINED rows at `batch-15` are inherent FP32 format limits (see
+KI-39's resolution for the derivation). The classifier files them as
+UNEXPLAINED — "a candidate defect" — because both of its excuse mechanisms look
+in the wrong place:
+
+- **`ach`** (`scripts/sweep_accuracy.cpp`, the `ach` block in
+  `classify_complex` / `classify_real`) perturbs each **input** by the relative
+  error that backend's storage actually carries, then re-evaluates the oracle.
+  At every point in the residue the inputs are 53-bit doubles that QF (96 bits)
+  and DD (106 bits) hold **exactly**, so `delta == 0`, `any_delta` is false and
+  `ach` short-circuits to `cap`. The probe reports "nothing is lost" precisely
+  because the loss is not in the input.
+- **`range_digits`** = `digits_at_magnitude(l10_lo, rg, cap)` reads the **final
+  result's** smaller component. It is *correct* — 14.85 digits at 1e-30 for QF —
+  but it is only consulted as `range_digits < thresh`, i.e. it can excuse a
+  point only when the format capacity itself falls below 50% of cap. QF's
+  capacity at 1e-30 is 14.85 and its threshold is 14.50, so a point measured at
+  13.77 — 1.1 digits under a ceiling the classifier has already computed — is
+  filed as unexplained by 0.35 digits of margin.
+
+Neither field models an **intermediate**: the cross products in `c mul`, the
+reduced argument in `r tan`, the renormalisation of a value whose third limb is
+already subnormal.
+
+### Evidence
+
+`QF c exp` point 766, from `validation/sweep/sweep_classified.csv`:
+
+```
+digits=13.77  cap=29.00  ach=28.90  repr=29.00  range=14.85  class=UNEXPLAINED
+```
+
+`ach` says 28.90 is reachable. It is not: FF and TF, given the same point, reach
+14.00 and 14.25. The two numbers that would have caught it are both present in
+the row and neither is wired to a rule that fires.
+
+### What closing it involves
+
+Two changes, both in `scripts/sweep_accuracy.cpp`, both classifier-side:
+
+1. A **format-ceiling rule** mirroring the existing achievable-ceiling rule.
+   Today: `if (digits >= ach - 1.0) → CONDITIONING, "at-the-achievable-ceiling"`.
+   There is no `if (digits >= range_digits - 1.0)` counterpart. Adding one, with
+   a reason like `at-the-subnormal-limb-ceiling`, retires all 207 mechanism-A
+   points. The 1.0-digit slack is the same slack the `ach` rule already uses.
+2. An **intermediate-width** term for the algebraic ops, so that a product of
+   two exactly-stored inputs is charged the `2·53 > limb_bits·limbs` shortfall
+   it actually incurs. That retires the 31 mechanism-B points. This is the
+   larger of the two and needs its own design — the honest bound depends on the
+   op's expression tree, not just its inputs.
+
+Until then, read UNEXPLAINED as "not excused by an input-side probe", not as
+"candidate defect". The residue is at 238 and every point in it has been
+attributed.
+
+**Deliberately not fixed here.** The KI-39 session was scoped to regenerate
+artifacts and diagnose; it was told not to edit `scripts/sweep_accuracy.cpp`,
+and a classifier change re-labels 238 rows in a file the same commit
+regenerates. It wants its own commit so the re-label is reviewable on its own.
