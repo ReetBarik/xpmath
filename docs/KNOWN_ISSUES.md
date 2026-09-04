@@ -2315,7 +2315,7 @@ tighten against.
 
 ---
 
-## KI-10 — `fmod` and `remainder` lose half their digits when the operands are many decades apart **[REOPENED 2026-09-03]**
+## KI-10 — `fmod` and `remainder` lose half their digits when the operands are many decades apart **[RESOLVED 2026-09-04]**
 
 **Severity: medium, all backends.**
 
@@ -2488,6 +2488,138 @@ half-away-from-zero; C99/IEEE-754 `remainder` requires half-to-EVEN, so the
 replacement carries the integral quotient's parity out of the reduction loop
 and breaks ties on it (see KI-20 — `round` staying half-even is CORRECT and was
 not "fixed" here).
+
+### RESOLVED 2026-09-04 — commit `fix: KI-10/KI-15 fmod and remainder under the ulp metric`, together with KI-15
+
+**No library code changed.** The 2026-09-03 reduction was already correct; what
+was wrong was the *bound* the ulp metric held it to. Both are settled by
+measurement below.
+
+#### What the first fix missed, and why its verification did not catch it
+
+The first fix's accepted-decreases section (above) derived a storage ceiling of
+`14 - log10|a/b|` digits. That derivation is **right, and it is not the whole
+story** — it is the first-order regime only. It models the storage error as a
+*perturbation* of a smooth function, and `fmod`/`remainder` are not smooth: they
+jump by `b` whenever the integral quotient `n` changes. The first verification
+scored **cell means over 200–300 random pairs per ratio**, and a mean cannot see
+a six-point discontinuity population. The ulp gate scores the **worst point per
+cell**, so it landed on exactly those six and reported the full `2^48` ulps.
+
+#### The storage-error ceiling, derived
+
+Let `p = sig_bits`. The backend never sees the double operands `(a,b)`; it sees
+`A = a(1+α)`, `B = b(1+β)` with `|α|,|β| <= 2^-p`. Only FF is affected: `p = 48
+< 53`, so a double does not survive storage. DD (106), QF (96) and TF (72) all
+hold a double exactly — `α = β = 0` — which is why all three score 21–31 digits
+at the very points FF scores 0.00.
+
+*Regime 1 — `n` unchanged.* With `n` locally constant,
+
+```
+R = A - nB = r + a·α - n·b·β        =>   |R - r| <= (|a| + |n b|)·2^-p
+```
+
+so the error is at most `(|a| + |n b|) / |r|` ulps of `r`. Since `|r| < |b|`,
+that is `~2|a/b|` when `|r| ~ |b|`, i.e. **`digits <= 14.4 - log10(|a|/|r|)`** —
+the first fix's ceiling, confirmed. It is also *exactly* `kappa_real`'s
+`(|a| + |bn|)/|f|`, so the ulp gate **already charges it** and regime 1 needs no
+exemption. Measured: every regime-1 point passes the gate.
+
+*Regime 2 — `n` changes.* `trunc`/`nearbyint` are discontinuous. When `a/b` lies
+within `2|a/b|·2^-p` of an integer, `trunc(A/B)` can differ from `trunc(a/b)` by
+one, and then
+
+```
+R - r = ∓b        regardless of how small the perturbation was
+```
+
+which is `2^p·|b/r|` ulps of `r`. Because `|r| <= |b|` always, that is **`>= 2^p`
+ulps — zero correct digits — and κ, a first-order quantity, does not bound it
+even in principle.** The op comment above `kappa_real` always said so ("at the
+jump the function is discontinuous and no first-order bound applies"); nothing
+made it testable until now.
+
+#### FF `fmod` at x = 40.84, before and after
+
+All six failing points are in the `i%7 == 1` *cancelling* family, where the
+sweep draws `b = a·(1+ε)` (`scripts/sweep_accuracy.cpp:557`):
+
+| grid pt | a | ε = b/a − 1 | 2^-48 | exact a/b → n | stored A/B → n |
+|---|---|---|---|---|---|
+| 708  | 40.8407044966673    | 2.22e-16 | 3.55e-15 | 0.999999999999999826 → 0 | **1 exactly** → 1 |
+| 743  | −50.265482457436704 | 4.44e-16 | 3.55e-15 | 0.999999999999999576 → 0 | **1 exactly** → 1 |
+| 883  | −94.247779607693815 | 2.22e-16 | 3.55e-15 | 0.999999999999999849 → 0 | **1 exactly** → 1 |
+| 995  | −128.80529879718151 | 2.22e-16 | 3.55e-15 | 0.999999999999999779 → 0 | **1 exactly** → 1 |
+| 1548 | 304.73448739820981  | 8.88e-16 | 3.55e-15 | 0.999999999999999067 → 0 | **1 exactly** → 1 |
+| 1590 | 1.1000000000000001  | 2.22e-16 | 3.55e-15 | 0.999999999999999798 → 0 | **1 exactly** → 1 |
+
+Every `ε` is **below `2^-48 = 3.55e-15`**, so `round48(a) == round48(b)`
+bit-for-bit: a 2×FP32 pair provably cannot hold `a` and `b` as different
+numbers. Exact `a/b < 1` gives `n = 0` and `fmod = a`; the stored quotient is
+exactly `1`, giving `n = 1` and `fmod = 0`.
+
+| | before (HEAD 7680809) | after |
+|---|---|---|
+| FF `fmod` at grid pt 708 | 1.40737e14 ulps, 0.00/14 digits, **GATED-FAIL** (region CONDITIONING) | 1.40737e14 ulps, 0.00/14 digits, **exempt** (region JUMP_UNRESOLVED) |
+| returned value | `0` | `0` (unchanged — no code changed) |
+| oracle at FF's own stored operands | `0` | `0` — **bit-identical** |
+| regime-2 ceiling `2^p·|b/r|` | `>= 2^48 = 2.815e14` | same |
+
+The measured error is `2^48` ulps and the ceiling is `>= 2^48` ulps: **the
+ceiling is attained, not exceeded.** DD/QF/TF at point 708 score 31.00 / 29.00 /
+21.70 digits, as the derivation requires.
+
+#### Nothing is below the ceiling — measured, all four backends
+
+The only defensible standard for an algebraic op is: *the returned value is the
+nearest value of the type to `f` evaluated at the backend's own stored
+operands.* Anything worse is algorithm, whatever the format is. Two independent
+sweeps:
+
+| probe | scope | result |
+|---|---|---|
+| every `fmod`/`remainder` pair on the sweep grid | 1652 pts × 2 ops × 4 backends = 13,216 | DD/QF/TF **bit-exact at every point**. FF bit-exact at 3,256 of 3,304; the other 48 are inexact **only because the true remainder is not representable as a `FloatFloat`** — for each one the returned value equals the correctly-rounded nearest `FloatFloat`, `self_ulps == repr_ulps` to every printed digit, worst **0.4711 ulp**. |
+| randomized stress, operands log-uniform over `1e-35..1e35`, both signs | 200,000 pairs × 2 ops × 4 backends = 1.6M evaluations | DD worst **0.0000** ulp, QF **0.0000**, TF **0.0000** (bit-exact); FF worst **0.5000** ulp (correctly rounded). **0 points over 0.5 ulp on any backend.** |
+
+`fmod`/`remainder` are therefore correctly rounded everywhere tested. There is
+no residue to fix and no accuracy-test tolerance to ratchet — no measured value
+moved, because no library code changed.
+
+#### The exemption
+
+`scripts/sweep_accuracy.cpp` gains a fourth format-derived region,
+**`JUMP_UNRESOLVED`**, alongside `UNDERFLOW`/`OVERFLOW`/`SUBNORMAL_LIMB`. It is
+not a distance heuristic: `jump_unresolved()` recomputes `n` at the exact
+operands and at the stored operands and fires only when they differ — i.e. only
+when the format provably cannot tell which side of the jump the point is on. It
+outranks the digit-shaped classifier's label for the same reason
+`SUBNORMAL_LIMB` does: it is a property of the FORMAT. The derivation and these
+measurements are in the comment above the function.
+
+It fires on **exactly 6 points**, all FF `fmod`, with no collateral: gated
+failing points 5451 → 5445, gated cells 62 → 61, and all eight
+`fmod`/`remainder` cells are now clean.
+
+#### Gates
+
+* `ctest` — see the KI-15 block (same commit).
+* **Monotone gate, read-only** against `validation/sweep/sweep_baseline.csv`:
+  1,226 increased, **18 decreased**, worst drop 0.56 digits. The 18 are
+  **byte-identical before and after this change** (verified by diffing the
+  `--baseline` output of a binary built from HEAD against one built from this
+  commit) and are all *complex* ops — `QF/TF/FF c asin/acos/acosh/asinh/pow`.
+  A classifier region label cannot move a score; **this batch contributes zero
+  decreases.** They are batch 1's already-accepted 18, documented under KI-8.
+* Both `--ulp` runs used `LD_LIBRARY_PATH=/soft/compilers/gcc/13.3.0/x86_64-suse-linux/lib64`
+  so the oracle fingerprint matches `578322f998a329c8`.
+
+#### QD 2.3.24
+
+Re-checked. `src/dd_real.cpp:802` and `src/qd_real.cpp:2598` are still
+`fmod(a,b) = a - b*aint(a/b)`, and `src/qd_real.cpp:2462` is
+`drem(a,b) = a - nint(a/b)*b`. Upstream QD **shares the original defect** and has
+no notion of the jump regime either. The divergence remains deliberate.
 
 ---
 
@@ -2893,7 +3025,7 @@ mechanism behind part of KI-15 — `fmod` calls `trunc(q)` and `remainder` calls
 
 ---
 
-## KI-15 — `fmod`/`remainder` do not merely lose digits: they return the WRONG SIGN, ZERO, or INFINITY **[REOPENED 2026-09-03]**
+## KI-15 — `fmod`/`remainder` do not merely lose digits: they return the WRONG SIGN, ZERO, or INFINITY **[RESOLVED 2026-09-04]**
 
 **Severity: high, all backends, 605 hard-failure points on top of the 2,285
 soft ones already recorded as KI-10.**
@@ -3014,6 +3146,59 @@ a NaN operand propagates. Half-even ties verified:
 `remainder(-3,2) = 1`.
 
 Total across the four backends: 0 failures on 41 probes each.
+
+### RESOLVED 2026-09-04 — commit `fix: KI-10/KI-15 fmod and remainder under the ulp metric`, together with KI-10
+
+**No library code changed.** The residue that reopened this entry is not a
+wrong value — it is the format's, and KI-10's resolution block carries the
+derivation, the ceiling and the measurements. This block records the
+hard-failure re-scan the reopen asked for.
+
+#### What the first fix missed, and why its verification did not catch it
+
+Nothing, on this entry's own terms: all three mechanisms stayed fixed. What the
+first *verification* could not do was tell "lost all precision" from "returned
+the wrong value" at 0.00 digits — which is precisely why the reopen bundled the
+two entries and asked for the hard-failure scan to be re-run rather than the
+ulp gate alone. It has been. The answer is that FF `fmod` at grid point 708
+returns `0` **and `0` is the correct `fmod` of the two operands FF actually
+holds**, bit-identically. It is a correct value for the wrong-by-storage inputs,
+not a wrong value.
+
+One further gap in the first verification, found and closed here: its evidence
+table checked `fmod(-7.5, 2.5)` for signed zero — which passes for the wrong
+reason, since the sign is re-applied from a *nonzero* `a` — but never checked a
+**zero dividend**. `fmod(±0, b)` and `remainder(±0, b)` are now tested directly
+and are correct on all four backends. (Watch the harness here: the sign of a
+zero result cannot be read off the summed limbs, because `-0.0 + 0.0 = +0.0` in
+IEEE. It must be read off the **leading word**. A first pass of this re-test
+reported four spurious failures for exactly that reason.)
+
+#### Re-test of every failure mode, all four backends
+
+Reference `fmodq`/`remainderq` at the backend's **own stored operands**;
+tolerance bit-exact, or `<= 0.5 ulp` where the true value is not representable
+in the type. **516 checks, 0 failures.**
+
+| mode | probes | result |
+|---|---|---|
+| **wrong sign** | full sign matrix `(±1e30, ±1e-30)`, both ops; `ratio ladder` `(±98.765, ±1.2345e-k)` for k over 11 decades `1e0…1e30`, both ops — 88 signed cases | PASS. `fmod` sign always `sign(a)`; `remainder` sign a property of the answer. |
+| **returned zero** | KI-15(b) reproducers verbatim (`TF fmod(316227.766…, 1.346e-20)`, `DD fmod(1e19, -5.5836e-30)`), `fmod(1e22,3)`, `fmod(1e5,1e-25)`, KI-10 rows r/94 and r/67 | PASS. No spurious zero; every true-nonzero result is nonzero and correctly rounded. |
+| **correct zero, correct sign** | `fmod(7.5,2.5) = +0`, `fmod(-7.5,2.5) = -0`, and **new:** `fmod(±0,3)`, `remainder(±0,3)` | PASS on all four backends (sign read off the leading word). |
+| **returned infinity** | the whole ladder plus the extreme-ratio cases; any non-finite result from finite operands is a failure | PASS. 0 infinities from finite operands across 1.6M stress evaluations. |
+| **(c) `divide` NaN (KI-19) propagating** | `fmod`/`remainder` at `(1e38, 1e-38)` and `(1e20, 1e-21)`, quotient ~1e41 (the case KI-9's grid never probed) | PASS on QF and TF. `divide` is still not on the path. |
+| **C99 / IEEE-754 conventions** | `f(a,0) → NaN`; `f(±inf,b) → NaN`; `f(a,±inf) = a`; NaN propagation; `\|fmod\| < \|b\|`; `sign(fmod) = sign(a)`; `\|remainder\| <= \|b\|/2` — asserted on **every** probe, not just the convention cases | PASS, 4 backends. |
+| **half-EVEN ties for `remainder`** | `1.5/1 → -0.5`, `2.5/1 → +0.5`, `0.5/1 → +0.5`, `3.5/1 → -0.5`, `7.5/5`; plus `remainder` sign not tied to `a` (`0.9/1 → -0.1`, `-0.9/1 → +0.1`) | PASS. Half-even is CORRECT here per IEEE 754-2019; **KI-20 (`round` half-even vs QD's half-away `nint`) is a separate open issue and was not touched.** |
+
+Plus the 1.6M-evaluation randomized correctly-rounded stress tabulated in
+KI-10's block: worst 0.0000 ulp on DD/QF/TF, 0.5000 ulp on FF, **0 points over
+0.5 ulp anywhere**.
+
+#### Gates
+
+`ctest` **34/34**. Monotone gate and the ulp gate before/after: see KI-10's
+block (same commit). QD 2.3.24 re-checked and still shares the original defect;
+see KI-10's block.
 
 ---
 
@@ -3686,3 +3871,8 @@ iterative fmod and remainder'` and `RESOLVED by commit 855292d`). A reader
 scanning headings would count nine resolved KIs, not twelve. KI-10 and KI-15
 are now reopened above; **KI-18 should be given a heading marker** the next time
 this file is edited for content.
+
+**Update 2026-09-04.** KI-10 and KI-15 are resolved again and now carry
+`**[RESOLVED 2026-09-04]**` in their headings, so the marker is consistent for
+them. **KI-18 still has no heading marker** and is still the one outstanding
+case; it was left alone here because this batch's scope was KI-10/KI-15 only.

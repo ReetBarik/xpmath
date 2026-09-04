@@ -1673,9 +1673,11 @@ struct Cell {
 // filed under its class. UNDERFLOW and OVERFLOW are REPORTED BUT NOT GATED: in
 // those bands |true| * 2^-p is not the backend's actual resolution (the trailing
 // limbs are subnormal, or the value is outside the leading word's range), so the
-// metric's own premise has failed and a verdict there would be noise. The other
-// classes — ARG_RANGE, CONDITIONING, UNEXPLAINED, and OK (the point was never
-// bad enough to classify) — are gated. Filing per region is what stops one
+// metric's own premise has failed and a verdict there would be noise. Since
+// 2026-09-04 JUMP_UNRESOLVED joins them, for the same reason: see
+// jump_unresolved(). The other classes — ARG_RANGE, CONDITIONING, UNEXPLAINED,
+// and OK (the point was never bad enough to classify) — are gated.
+// Filing per region is what stops one
 // legitimate conditioning loss from forcing the whole op's bound open.
 // ---------------------------------------------------------------------------
 const char* const kRegionOK = "OK";
@@ -1685,6 +1687,61 @@ const char* const kRegionOK = "OK";
 // be normal, so |true| * 2^-p is not the backend's actual resolution and the
 // metric's own premise has failed. See subnormal_floor_ulps().
 const char* const kRegionSubnormalLimb = "SUBNORMAL_LIMB";
+
+// KI-10/KI-15: the operands straddle a jump of fmod/remainder at a distance
+// the format cannot resolve. Derivation and measurements: jump_unresolved().
+const char* const kRegionJumpUnresolved = "JUMP_UNRESOLVED";
+
+// KI-10/KI-15, 2026-09-04: the fourth format-derived exemption, and the only
+// one that is a DISCONTINUITY rather than a resolution floor.
+//
+// DERIVATION. fmod/remainder are f(a,b) = a - n*b with n = trunc(a/b) (resp.
+// nearbyint). The backend does not see (a,b); it sees the stored pair
+// A = a(1+alpha), B = b(1+beta) with |alpha|,|beta| <= 2^-p, p = sig_bits.
+// Only FF is affected: p = 48 < 53, so a double operand does not survive
+// storage. DD (106), QF (96) and TF (72) all hold a double exactly, alpha =
+// beta = 0, and this predicate can never fire for them.
+//
+//   Regime 1 - n unchanged. R = A - nB = r + a*alpha - n*b*beta, so
+//     |R - r| <= (|a| + |n b|) 2^-p, i.e. at most (|a| + |n b|)/|r| = kappa
+//   ulps of r. This is EXACTLY the kappa already returned by kappa_real, so
+//   the ordinary bound covers regime 1 and no exemption is wanted. (Measured:
+//   every such point passes; the FF cell's worst regime-1 ratio is well under
+//   the allowance.)
+//
+//   Regime 2 - n changes. trunc/nearbyint are discontinuous. When a/b lies
+//   within 2|a/b|2^-p of an integer, trunc(A/B) can differ from trunc(a/b) by
+//   one, and then
+//     R - r = -/+ b     regardless of how small the perturbation was,
+//   which is 2^p |b/r| ulps of r. Since |r| <= |b| always, that is >= 2^p ulps
+//   -- ZERO correct digits -- and it is a JUMP, so the first-order kappa does
+//   not bound it even in principle. The op comment above kappa_real already
+//   states the caveat ("at the jump the function is discontinuous and no
+//   first-order bound applies"); this predicate is that caveat made testable.
+//
+// The test below is not a distance heuristic: it recomputes n at the exact
+// operands and at the stored operands and asks whether they differ. If they
+// do, the format provably cannot tell which side of the jump the point is on,
+// so the metric has no verdict to give and the point is exempt.
+//
+// MEASURED, 2026-09-04, all 6 points this fires on (FF fmod, grid points 708,
+// 743, 883, 995, 1548, 1590 -- all in the i%7==1 "cancelling" family, where
+// b = a(1+eps)): eps ranges 2.22e-16 .. 8.88e-16, every one BELOW 2^-48 =
+// 3.55e-15, so round48(a) == round48(b) bit-for-bit. Exact a/b < 1 gives n = 0
+// and f = a; stored A/B == 1 exactly gives n = 1 and f = 0. Measured error
+// 2.815e14 ulps = 2^48 at all six, i.e. the regime-2 ceiling is ATTAINED, not
+// exceeded. The returned value is bit-identical to fmodq evaluated at the
+// backend's own stored operands at all six. There is nothing to fix in the
+// implementation; a 2xFP32 pair cannot resolve the two operands apart.
+bool jump_unresolved(int id, const __float128* stored, const __float128* exact) {
+  if (id != R_Fmod && id != R_Remainder) return false;
+  if (stored[1] == 0 || exact[1] == 0) return false;
+  const __float128 qe = exact[0] / exact[1], qs = stored[0] / stored[1];
+  if (!finiteq(qe) || !finiteq(qs)) return false;
+  const __float128 ne = (id == R_Fmod) ? truncq(qe) : nearbyintq(qe);
+  const __float128 ns = (id == R_Fmod) ? truncq(qs) : nearbyintq(qs);
+  return ne != ns;
+}
 
 bool in_subnormal_limb_band(const Range& rg, const __float128* exact, int nops,
                             __float128 ref) {
@@ -1832,7 +1889,15 @@ void sweep_real(int id, const std::vector<GridPoint>& grid,
           // backstop for points the floor-widened bound under-predicts (a
           // multi-step algorithm can degrade worse than first order in the
           // band); the bound above, not this label, does most of the work.
-          const char* region = in_subnormal_limb_band(rg, exact, nops, ref[i])
+          // KI-10/KI-15. An unresolvable jump outranks every other label for
+          // the same reason SUBNORMAL_LIMB does: it is a property of the
+          // FORMAT, not of the algorithm. Checked first because such a point
+          // also reads as CONDITIONING to the digit-shaped classifier, which
+          // is the wrong story -- kappa is finite and small there, and the
+          // error is a discontinuity kappa never modelled.
+          const char* region =
+              jump_unresolved(id, stored, exact) ? kRegionJumpUnresolved
+              : in_subnormal_limb_band(rg, exact, nops, ref[i])
                                  ? kRegionSubnormalLimb : kClassName[cr.cls];
           ++ucell.n_fail;
           ux->fails->push_back({B::name(), 'r', kReal[id].name, int(i), region,
@@ -2208,7 +2273,8 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
 // ---------------------------------------------------------------------------
 bool region_is_gated(const char* r) {
   return std::strcmp(r, "UNDERFLOW") != 0 && std::strcmp(r, "OVERFLOW") != 0 &&
-         std::strcmp(r, kRegionSubnormalLimb) != 0;
+         std::strcmp(r, kRegionSubnormalLimb) != 0 &&
+         std::strcmp(r, kRegionJumpUnresolved) != 0;
 }
 
 long print_ulp_report(const std::vector<UlpCell>& cells,
@@ -2281,7 +2347,8 @@ long print_ulp_report(const std::vector<UlpCell>& cells,
                 f.backend, f.kind, f.op, f.region, f.point, f.digits, f.ulps,
                 f.expected, f.ratio, g ? "GATED-FAIL" : "exempt (metric n/a)");
   }
-  std::printf("\n  failing points: %ld gated, %ld exempt (UNDERFLOW/OVERFLOW/SUBNORMAL_LIMB)\n",
+  std::printf("\n  failing points: %ld gated, %ld exempt "
+              "(UNDERFLOW/OVERFLOW/SUBNORMAL_LIMB/JUMP_UNRESOLVED)\n",
               gated, exempt);
   std::printf("  failing (backend,op,region) cells, gated: %ld\n", gated_fail_cells);
   std::printf("\nRESULT: %s\n",
