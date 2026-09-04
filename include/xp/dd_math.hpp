@@ -208,8 +208,35 @@ XPMATH_INLINE_FUNCTION DoubleDouble subtract(DoubleDouble a, DoubleDouble b) {
     return DoubleDouble(hi, lo);
 }
 
+// KI-27.  Non-finite / degenerate signalling on the PRODUCT, the multiply-side
+// counterpart of the guard KI-19 put on divide().  The error-free transform
+// below is only meaningful while the hardware product is a finite non-zero
+// number; outside that, `p` is already the IEEE-correct answer and the residual
+// expression manufactures a NaN out of it (c11 = ±inf makes a1*b1 - c11 =
+// ∓inf and then e = t1 - c11 = NaN).  Measured before the fix:
+//   multiply(1e300, 1e300) -> NaN   (true 1e600, +inf is the answer)
+//   multiply(2.0,   inf)   -> NaN   (IEEE 754-2019 §6.1 requires +inf)
+// and, through the complex division formula which multiplies before it divides,
+//   (1e300+1e300i)/(1e-10+1e-10i) -> NaN
+// even after the KI-19 divide fix.  QF and TF already carry exactly this guard
+// at qf_two_prod/tf_two_prod ("the error term of an overflowed product carries
+// no information, so the only defensible value is 0"); this is the same rule at
+// DD's monolithic site.
+//
+// Three cases fold into one test on `p = a.hi * b.hi`:
+//   |p| = inf   the true product exceeds the format; ±inf with the IEEE sign.
+//   p   = NaN   a genuinely undefined form (0·inf, or a NaN operand); kept.
+//   p   = 0     |a| <= |a.hi|(1+2^-53) and likewise for b, so a product whose
+//               leading term underflows to zero is below the smallest subnormal
+//               and ±0 with the IEEE sign is the answer.  The low words cannot
+//               rescue it: |a.lo*b.hi| <= |a.hi*b.hi| * 2^-53.
+// The guard is placed BEFORE any splitter scaling so that it reads the true
+// hardware product, not a rescaled stand-in.
+//
 // TwoProduct (Dekker splitting)
 XPMATH_INLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b) {
+    const double p = a.hi * b.hi;                                   // KI-27
+    if (!detail::isfinite(p) || p == 0.0) return DoubleDouble(p, 0.0);
     const double split = 134217729.0;
     double cona = a.hi * split, conb = b.hi * split;
     double a1 = cona - (cona - a.hi), b1 = conb - (conb - b.hi);
@@ -297,6 +324,8 @@ XPMATH_INLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b) {
 }
 
 XPMATH_INLINE_FUNCTION DoubleDouble multiply_scalar(DoubleDouble a, double b) {
+    const double p = a.hi * b;                                      // KI-27, see multiply()
+    if (!detail::isfinite(p) || p == 0.0) return DoubleDouble(p, 0.0);
     const double split = 134217729.0;
     double cona = a.hi * split, conb = b * split;
     double a1   = cona - (cona - a.hi), b1 = conb - (conb - b);
@@ -344,6 +373,8 @@ XPMATH_INLINE_FUNCTION DoubleDouble divide_scalar(DoubleDouble a, double b) {
 
 // Exact product of two doubles
 XPMATH_INLINE_FUNCTION DoubleDouble two_prod(double da, double db) {
+    const double p = da * db;                                       // KI-27, see multiply()
+    if (!detail::isfinite(p) || p == 0.0) return DoubleDouble(p, 0.0);
     const double split = 134217729.0;
     double cona = da * split, conb = db * split;
     double a1   = cona - (cona - da), b1 = conb - (conb - db);
@@ -380,9 +411,19 @@ XPMATH_INLINE_FUNCTION DoubleDouble round_to_nearest_int(DoubleDouble a) {
     const double T105 = detail::ldexp(1.0, 105); // 2^105
     const double T52  = detail::ldexp(1.0, 52);  // 2^52
     DoubleDouble CON = DoubleDouble(T105, T52);
-    if (a.hi >= T105) {
-        XPMATH_PRINTF("DDNINT: argument too large\n");
-        return DoubleDouble(0.0);
+    // KI-14 (DD sibling audit — the KI was filed FF-only; DD has the SAME
+    // zero-returning bail, at 2^105 = 4.06e31 instead of 2^47, and it was
+    // additionally one-sided: `a.hi >= T105` let every large NEGATIVE argument
+    // through, so floor(-2^105) was right and floor(+2^105) was 0).
+    //
+    // Unlike FF's, this cap is real: the DDFUN magic constant genuinely stops
+    // discarding the fraction once |a| reaches 2^105.  Only the RETURN VALUE was
+    // wrong.  At |a.hi| >= 2^105, ulp(a.hi) >= 2^52, so a.hi is an exact even
+    // integer and all fractional content is in a.lo; nint(a) = a.hi + rint(a.lo),
+    // ties-to-even on the low word being ties-to-even on the whole value because
+    // a.hi is even.  `add` of two doubles is two_sum-exact.
+    if (detail::fabs(a.hi) >= T105) {
+        return add(DoubleDouble(a.hi), DoubleDouble(detail::rint(a.lo)));
     }
     if (a.hi > 0.0) return subtract(add(a, CON), CON);
     else            return add(subtract(a, CON), CON);
@@ -606,7 +647,20 @@ XPMATH_INLINE_FUNCTION void sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble
     const int itrmx = 1000, nq = 5;
     const double eps = 1.0e-32;
     if (a.hi == 0.0) { x = DoubleDouble(1.0); y = DoubleDouble(0.0); return; }
-    if (a.hi >= 1.0e60) {
+    // KI-12 residual.  Small-argument short circuit over the degenerate
+    // reduction band only; full derivation at ff_math.hpp:sincos.  DD's limbs
+    // are FP64, so the band is |a| < 2^nq * DBL_MIN: below it the leading word
+    // of r = s3/2^nq is subnormal and sheds bits before the first Taylor term.
+    // This strictly contains the r.hi == 0 guard further down (kept: it costs
+    // nothing and documents the same corner from the other side) and adds the
+    // shed-bits half of the band, which that guard misses.  A wider cut — at
+    // u = 2^-106, or at 2^-537 where a^2/2 stops being representable in the
+    // low word — was measured to cost complex-op digits; see ff_math.hpp.
+    if (detail::fabs(a.hi) < (double)(1 << nq) * 2.2250738585072014e-308) {
+        x = DoubleDouble(1.0); y = a; return;
+    }
+    // KI-12 audit: |a.hi|, not a.hi — see ff_math.hpp:sincos.
+    if (detail::fabs(a.hi) >= 1.0e60) {
         XPMATH_PRINTF("DDCSSNR: argument too large\n");
         // KI-26: (0, 0) is not a point on the unit circle.  See the
         // under-determined-reduction note below for why the identity point is

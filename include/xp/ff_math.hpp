@@ -217,6 +217,17 @@ XPMATH_INLINE_FUNCTION FloatFloat subtract(FloatFloat a, FloatFloat b) {
 
 // TwoProduct (Dekker splitting). Splitter = 2^13 + 1 for FP32 (24-bit mantissa).
 XPMATH_INLINE_FUNCTION FloatFloat multiply(FloatFloat a, FloatFloat b) {
+    // KI-27.  Non-finite / degenerate signalling on the PRODUCT — the
+    // multiply-side counterpart of the guard KI-19 put on divide(), and the
+    // exact rule qf_two_prod/tf_two_prod already carry.  Full derivation at
+    // dd_math.hpp:multiply.  This supersedes the "Scope" paragraph below, which
+    // recorded genuine product overflow as deliberately out of B9's scope: the
+    // hardware product IS the answer when it is inf, NaN or zero, and the
+    // error-free transform must not run on it.  Placed before the B9 scaling so
+    // that it sees the TRUE product rather than a rescaled stand-in.
+    //   was: multiply(1e30, 1e30) -> NaN;  now +inf.
+    const float p = a.hi * b.hi;
+    if (!detail::isfinite(p) || p == 0.0f) return FloatFloat(p, 0.0f);
     const float split = 8193.0f;
     // B9: scaled splitter — the same overflow B8 fixed in divide() below, at a
     // third site (see divide()'s comment for the full derivation). BOTH operands
@@ -392,6 +403,8 @@ XPMATH_INLINE_FUNCTION FloatFloat divide(FloatFloat a, FloatFloat b) {
 }
 
 XPMATH_INLINE_FUNCTION FloatFloat multiply_scalar(FloatFloat a, float b) {
+    const float p = a.hi * b;                                    // KI-27, see multiply()
+    if (!detail::isfinite(p) || p == 0.0f) return FloatFloat(p, 0.0f);
     const float split = 8193.0f;
     // B9: scaled splitter, identical in shape to multiply() above — both a.hi and
     // the scalar b are split, so both are guarded. Reachable from the public
@@ -482,6 +495,8 @@ XPMATH_INLINE_FUNCTION FloatFloat divide_scalar(FloatFloat a, float b) {
 
 // Exact product of two floats
 XPMATH_INLINE_FUNCTION FloatFloat two_prod(float fa, float fb) {
+    const float p = fa * fb;                                     // KI-27, see multiply()
+    if (!detail::isfinite(p) || p == 0.0f) return FloatFloat(p, 0.0f);
     const float split = 8193.0f;
     // B9: scaled splitter, multiply()'s guard at the bare-float site. sqrt() —
     // the only in-header caller — passes t2 ≈ sqrt(a.hi) ≤ 1.9e19, far below the
@@ -541,9 +556,26 @@ XPMATH_INLINE_FUNCTION FloatFloat abs(FloatFloat a) {
 XPMATH_INLINE_FUNCTION FloatFloat round_to_nearest_int(FloatFloat a) {
     if (a.hi == 0.0f) return FloatFloat(0.0f);
     double total = (double)a.hi + (double)a.lo;
+    // KI-14.  The 2^47 cap is NOT a cast to a 32/48-bit integer, and it is not a
+    // limit of the FP64 reduction either: it is a vestige of this routine's
+    // PREVIOUS body, the magic-constant form `(total + 2^52) - 2^52`, which
+    // stops rounding once |total| reaches 2^51 and was capped at 2^47 for
+    // margin.  The KI-2 rewrite to `detail::rint` — exact at EVERY magnitude —
+    // left the cap and its `return FloatFloat(0.0f)` in place, so every
+    // |x| >= 2^47 came back as 0 from floor/ceil/trunc/round even though the
+    // value was already an exact integer.
+    //
+    // Past the cap the answer is available for free, without the FP64 detour.
+    // |total| >= 2^47 forces |a.hi| >= 2^46 (|a.lo| <= ulp(a.hi)/2), so
+    // ulp(a.hi) >= 2^22 and a.hi is an exact EVEN integer; all fractional
+    // content lives in a.lo.  Hence nint(a) = a.hi + nint(a.lo), and because
+    // a.hi is even, ties-to-even on the low word is ties-to-even on the whole
+    // value — the shipped semantics are preserved.  `add` of two floats is
+    // two_sum-exact, so the reassembly loses nothing.  rint(a.lo) is
+    // representable as a float: either |a.lo| >= 2^23 and it is already an
+    // integer, or it is an integer below 2^23.
     if (detail::fabs(total) >= 1.40737488355328e14 /* 2^47 */) {
-        XPMATH_PRINTF("FFNINT: argument too large\n");
-        return FloatFloat(0.0f);
+        return add(FloatFloat(a.hi), FloatFloat((float)detail::rint((double)a.lo)));
     }
     double rounded = detail::rint(total);
     // Zero-sign restore, exactly as qf_nint/tf_nint do. rint(total) is -0.0 for
@@ -734,7 +766,45 @@ XPMATH_INLINE_FUNCTION void sincos(FloatFloat a, FloatFloat& x, FloatFloat& y) {
     const int itrmx = 100, nq = 4;
     const float eps = 1.0e-15f;
     if (a.hi == 0.0f) { x = FloatFloat(1.0f); y = FloatFloat(0.0f); return; }
-    if (a.hi >= 1.0e30f) {
+    // KI-12 residual.  SMALL-ARGUMENT SHORT CIRCUIT.  The threshold is the
+    // exact width of the DEGENERATE REDUCTION BAND, and nothing wider.
+    //
+    // The defect is not the series, it is the scaling in front of it: the
+    // reduction forms r = s3/2^nq, and once |s3| < 2^nq * FLT_MIN the leading
+    // word of r is SUBNORMAL, so r loses mantissa bits before the first Taylor
+    // term is ever computed; for subnormal |a| it underflows to 0 outright and
+    // the answer collapses.  Measured at HEAD~ : FF sin(1e-40) = 9.99967e-41
+    // for an argument of 9.99995e-41 (5 digits lost), FF sin(1e-44) = 0
+    // outright, and FF atan(1e-44) = 1.68e-44 against a true 9.81e-45.
+    // dd_math.hpp:sincos guards the r == 0 half of this corner already; this
+    // covers the shed-bits half too.
+    //
+    // ABOVE the band the series needs no help and must not get any.  Two wider
+    // cuts were tried and both were measured to COST accuracy:
+    //   * a cut at the unit roundoff u = 2^-48 -- wrong because a double-word
+    //     near 1 is not a 48-bit format.  FloatFloat(1.0f, -e) is a legal
+    //     normalized pair for any e down to FLT_TRUE_MIN, so cos(a) = 1 - a^2/2
+    //     is EXACT while a^2/2 >= 2^-149 and the series does return it.  A
+    //     2^-25 cut turned FF cos(1e-8) from 1 - 5e-17 into 1.
+    //   * a cut at 2^-75, where a^2/2 first falls under FLT_TRUE_MIN.  (1, a)
+    //     is indeed the correctly-rounded pair there, and for a REAL argument
+    //     the series returns exactly that anyway -- r^2 underflows to zero, so
+    //     sin_r = r, cos_r = 1, and the nq exact doublings reproduce (a, 1)
+    //     bit for bit.  It is not a no-op for the COMPLEX callers, though:
+    //     scored against the sweep grid it moved 132 complex points down by up
+    //     to 1.87 digits (worst QF c asin 1398/1399, 20.07 -> 18.20) and the
+    //     rest of this commit's gains stayed put.  A cut that can only ever
+    //     tie on its own domain, and loses money downstream, is not worth
+    //     taking; the band below is where the series genuinely cannot do
+    //     better, so that is where the cut goes.
+    if (detail::fabs(a.hi) < (float)(1 << nq) * 1.17549435e-38f /* 2^nq*FLT_MIN */) {
+        x = FloatFloat(1.0f); y = a; return;
+    }
+    // KI-12 audit: |a.hi|, not a.hi.  The bare `a.hi >= 1.0e30f` made this fast
+    // path fire for +1e30 and not for -1e30, which then took the full reduction
+    // and fell out at the codomain guard below with the same (1, 0) — same
+    // answer, two code paths, and nothing making them agree.
+    if (detail::fabs(a.hi) >= 1.0e30f) {
         XPMATH_PRINTF("FFCSSNR: argument too large\n");
         x = FloatFloat(1.0f); y = FloatFloat(0.0f); return;      // KI-26
     }

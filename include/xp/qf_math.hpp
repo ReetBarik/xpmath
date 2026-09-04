@@ -1106,6 +1106,17 @@ XPMATH_INLINE_FUNCTION void sincos(QuadFloat a, QuadFloat& sin_a, QuadFloat& cos
     const int   itrmx = 100, nq = 5;
     const float eps = 1.0e-28f;
     if (a.f0 == 0.0f) { sin_a = QuadFloat(0.0f); cos_a = QuadFloat(1.0f); return; }
+    // KI-12 residual.  Small-argument short circuit over the degenerate
+    // reduction band only; full derivation at ff_math.hpp:sincos.  QF's limbs
+    // are FP32 too, so the band is the same shape: below 2^nq * FLT_MIN the
+    // leading word of r = s3/2^nq is subnormal and sheds bits before the first
+    // Taylor term (and is 0 outright for subnormal |a|).  Measured before:
+    // QF sin(1e-40) = 9.99967e-41 for an argument of 9.99995e-41, and
+    // QF sin(1e-44) = 0.  Above the band the series is already correct and a
+    // wider cut was measured to cost complex-op digits -- see ff_math.hpp.
+    if (detail::fabs(a.f0) < (float)(1 << nq) * 1.17549435e-38f /* 2^nq*FLT_MIN */) {
+        sin_a = a; cos_a = QuadFloat(1.0f); return;
+    }
     if (detail::fabs(a.f0) >= 1.0e30f) {
         XPMATH_PRINTF("QFCSSNR: argument too large\n");
         sin_a = QuadFloat(0.0f); cos_a = QuadFloat(1.0f); return;   // KI-26

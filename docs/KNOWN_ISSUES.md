@@ -2783,7 +2783,7 @@ full width. Recorded, not silently taken.
 
 ---
 
-## KI-12 — FF `sincos` never converges below |x| ≈ 1e-20, and its bail-out returns WITHOUT writing its out-params
+## KI-12 — FF `sincos` never converges below |x| ≈ 1e-20, and its bail-out returns WITHOUT writing its out-params **[RESOLVED 2026-09-04]**
 
 **Severity: high (silent 0 and silent NaN from ordinary in-range inputs), FF
 only, 1,020 points — the single largest hard-failure root cause in the sweep.**
@@ -2858,6 +2858,101 @@ bail-out assign `x` and `y` before returning; and short-circuit `|a| < sqrt(u)`
 to `(cos, sin) = (1, a)`. Audit `qf_math.hpp`, `tf_math.hpp` and `dd_math.hpp`
 for the bare-`return` bail — only the FF `eps` is mis-scaled, but the
 uninitialised-out-param pattern should be checked in all four.
+
+### RESOLVED 2026-09-04 — commit `fix: KI-12 sincos out-params; KI-14 integer ops past 2^47; KI-27 multiply overflow`
+
+**Most of this entry was already closed by the PREVIOUS batch, commit `0ad44fe`
+(KI-19/KI-25/KI-26) — not by this one.** That was verified before anything was
+touched. `ff_math.hpp:sincos` already carried, under its KI-25 comment, both
+halves of the "Closing it" list above: the `itrmx` arm's bare `return` had
+already become `break`, and the vacuous `<` convergence test had already become
+`<=`. Measured at `0ad44fe`, the headline symptoms are clean:
+
+| x | FF `sin` @ `0ad44fe` | FF `cos` | FF `tan` | FF `atan` |
+|---|---|---|---|---|
+| 1e-20 | 9.999999682655225388968e-21 | 1 | 9.999999682655225388968e-21 | 9.999999682655225388968e-21 |
+| 1e-30 | 1.000000003171076850971e-30 | 1 | 1.000000003171076850971e-30 | 1.000000003171076850971e-30 |
+
+Both out-params written, both correct, no NaN. This batch adds nothing there.
+
+#### What was still broken: the degenerate reduction band
+
+Below the convergence problem sits a second, independent one that `0ad44fe` did
+not touch. `sincos` scales its reduced argument by `r = s3 / 2^nq` before the
+first Taylor term. Once `|s3| < 2^nq · FLT_MIN` the leading word of `r` is
+**subnormal**, so `r` sheds mantissa bits before the series ever runs; for
+subnormal `|a|` it underflows to 0 and the answer collapses. `dd_math.hpp`
+already guarded the `r.hi == 0` half of this (`if (r.hi == 0.0)`), which is why
+DD was correct here and FF/QF/TF were not.
+
+| x | quantity | `0ad44fe` | after | correct |
+|---|---|---|---|---|
+| 1e-40 | FF/QF/TF `sin` | 9.999665841421894618112e-41 | **9.999946101114759581526e-41** | exact — the FP32 operand for 1e-40 is 9.999946101114759581526e-41 and `sin` of it equals it far beyond FF/QF/TF resolution |
+| 1e-40 | FF `atan` | 1.000078688019335447177e-40 | **9.999946101114759581526e-41** | same |
+| 1e-44 | FF/QF/TF `sin` | **0** | **9.809089250273719496466e-45** | exact (subnormal operand) |
+| 1e-44 | FF `atan` | 1.681558157189780485108e-44 | **9.809089250273719496466e-45** | same |
+| 1e-40, 1e-44 | all four `cos` | 1 | 1 | exact — a²/2 is under FLT_TRUE_MIN |
+| 6e-08 | FF `cos` | 0.9999999999999982000001 | 0.9999999999999982000001 | unchanged (see below) |
+
+The fix is a short circuit to `(cos, sin) = (1, a)` over exactly that band —
+`|a| < 2^nq · FLT_MIN` for the FP32-limbed backends, `|a| < 2^nq · DBL_MIN` for
+DD — applied to all four `sincos` bodies. DD keeps its `r.hi == 0` guard as
+redundant documentation of the same corner.
+
+#### The threshold: two wider cuts were tried and both cost accuracy
+
+The entry above suggests short-circuiting at `|a| < sqrt(u)`. **That is wrong,
+and it was measured to be wrong** — recorded here because it is the natural
+first guess:
+
+1. **A cut at the unit roundoff** (2^-25 for FF, i.e. `sqrt(u)` for u = 2^-48).
+   A double-word near 1 is not a 48-bit format: `FloatFloat(1.0f, -e)` is a
+   legal normalized pair for any `e` down to FLT_TRUE_MIN, so `cos(a) = 1 - a²/2`
+   is representable EXACTLY while a²/2 ≥ 2^-149, and the series does return it.
+   Measured: this cut turned FF `cos(1e-8)` from 1 - 5e-17 into 1, and FF
+   `sin(1e-8)` from `a - a³/6` into `a`.
+2. **A cut at 2^-75**, where a²/2 first falls under FLT_TRUE_MIN. `(1, a)` is
+   genuinely the correctly-rounded pair there, and for a REAL argument the
+   series already returns exactly that anyway — `r²` underflows to zero, so
+   `sin_r = r`, `cos_r = 1`, and the nq exact doublings reproduce `(a, 1)` bit
+   for bit. It is **not** a no-op for the COMPLEX callers, though. Scored
+   against the sweep grid it moved **132 complex points down by up to 1.87
+   digits** (worst: QF `c asin` 1398/1399 and QF `c asinh` 566/567,
+   20.07 → 18.20; QF `c tan` 1274/1275, 17.64 → 16.01) while every gain from
+   this commit stayed put. A cut that can only tie on its own domain and loses
+   money downstream is not worth taking.
+
+The band actually shipped is the one where the series demonstrably cannot do
+better, and it produces **zero** sweep decreases (536 increases).
+
+#### The out-parameter audit
+
+Every early-return path in every multi-output function, all four backends —
+25 paths across 8 functions:
+
+| function | early-return paths | wrote both out-params @ `0ad44fe` | after |
+|---|---|---|---|
+| DD `sincos` | 6 (`a.hi==0`, small-arg, `\|a\|≥1e60`, `s3.hi==0`, `r.hi==0`, codomain) | yes, all 6 | yes |
+| FF `sincos` | 5 (`a.hi==0`, small-arg, `\|a\|≥1e30f`, `s3.hi==0`, codomain) | yes, all 5 — the `itrmx` bare `return` that made this a HIGH was already gone at `0ad44fe` | yes |
+| QF `sincos` | 5 (same shape) | yes, all 5 | yes |
+| TF `sincos` | 3 (`a.f0==0`, small-arg, codomain) | yes, all 3 | yes |
+| DD `sinhcosh` | 1 (saturate) | yes | yes |
+| FF `sinhcosh` | 2 (Taylor, saturate) | yes | yes |
+| QF `sinhcosh` | 2 (Taylor, saturate) | yes | yes |
+| TF `sinhcosh` | 1 (saturate) | yes | yes |
+
+Confirmed two ways: by reading every `return;` inside those bodies, and by a
+poison-seeded probe (out-params pre-set to −12345 and checked after each call)
+over x ∈ {0, 1e-44, 1e-40, 1e-30, 1e-20, 6e-8, 0.25, 1, 25, 400, ±1e30, ±1e300},
+both signs. No path leaves an out-param unwritten, before or after.
+
+#### One thing this batch changed that the entry did not ask for
+
+FF and DD `sincos` had ASYMMETRIC large-argument fast paths — `a.hi >= 1.0e30f`
+and `a.hi >= 1.0e60`, positive only — so `+1e30` took the fast path and `-1e30`
+fell all the way through the reduction to the codomain guard. Both produced
+`(1, 0)`, so this was never a wrong answer, but two code paths were reaching the
+same result with nothing making them agree. Both now test `fabs`.
 
 ---
 
@@ -2973,7 +3068,7 @@ squares, exactly as the fixed `hypot` now does.
 
 ---
 
-## KI-14 — FF `floor`, `ceil`, `trunc` and `round` return ZERO for every |x| ≥ 2^47
+## KI-14 — FF `floor`, `ceil`, `trunc` and `round` return ZERO for every |x| ≥ 2^47 **[RESOLVED 2026-09-04]**
 
 **Severity: high (returns 0 for an input that is already an exact integer),
 FF only, 194 points.**
@@ -3022,6 +3117,75 @@ this to the FF guard.
 Change the four bail-outs to `return a;`. Note that this guard is *also* the
 mechanism behind part of KI-15 — `fmod` calls `trunc(q)` and `remainder` calls
 `round_to_nearest_int(q)` on a quotient that routinely exceeds 2^47.
+
+### RESOLVED 2026-09-04 — commit `fix: KI-12 sincos out-params; KI-14 integer ops past 2^47; KI-27 multiply overflow`
+
+#### The mechanism — it is NOT a 32/48-bit integer cast
+
+The 2^47 number invites the guess that something is being cast to a 48-bit
+integer. It is not. **2^47 is a vestige of the routine's PREVIOUS body.**
+Before KI-2, `round_to_nearest_int` rounded with the FP64 magic-constant form
+`(total + 2^52) - 2^52`, which stops rounding at all once `|total|` reaches
+2^51; 2^47 was the margin someone picked below that, and the bail-out returned
+`FloatFloat(0.0f)` because there was no fallback to fall back to. The KI-2
+rewrite replaced the magic constant with `detail::rint`, which is exact at
+EVERY magnitude — and left the cap, and its `return FloatFloat(0.0f)`, sitting
+in front of it. The guard has been dead weight in front of a correct
+implementation ever since.
+
+#### The filed scope was incomplete: DD is affected too
+
+The entry says "FF only, 194 points". **DD has the same zero-returning bail**,
+at 2^105 = 4.06e31 instead of 2^47, and it is additionally **one-sided**:
+`a.hi >= T105` let every large NEGATIVE argument through, so `floor(-2^105)`
+was right while `floor(+2^105)` was 0 and `ceil(+2^105)` was 1. Unlike FF's,
+DD's cap is *real* — the DDFUN magic constant genuinely stops discarding the
+fraction there — so only the return value was wrong, not the cap.
+
+QF and TF are **correct** at every magnitude: both use QD's component-wise
+`nint`, which has no cap.
+
+#### Before / after
+
+`x` here is the FF/QF/TF operand (the nearest representable value), which is
+why the 1e15 and 1e30 rows do not read as round decimals.
+
+| x | backend | `floor` / `ceil` / `trunc` / `round` @ `0ad44fe` | after |
+|---|---|---|---|
+| 2^46 = 7.03687e13 | FF, QF, TF, DD | 70368744177664 (all four ops, correct) | unchanged |
+| 2^47 = 1.40737e14 | **FF** | **0 / 1 / 0 / 0** + `FFNINT: argument too large` | **140737488355328** (all four) |
+| 2^47 | QF, TF, DD | 140737488355328 (correct) | unchanged |
+| 2^48 = 2.81475e14 | **FF** | **0 / 1 / 0 / 0** | **281474976710656** |
+| 2^60 = 1.15292e18 | **FF** | **0 / 1 / 0 / 0** | **1152921504606846976** |
+| 2^60 | QF, TF, DD | correct | unchanged |
+| 1e15 | **FF** | **0 / 1 / 0 / 0** | **999999986991104** |
+| 1e30 | **FF** | **0 / 1 / 0 / 0** | **1.000000015047466219877e+30** |
+| 2^104 = 2.02824e31 | **FF** | **0 / 1 / 0 / 0** | **2.028240960365167042395e+31** |
+| 2^105 = 4.05648e31 | **FF** and **DD** | **0 / 1 / 0 / 0** + `DDNINT: argument too large` | **4.056481920730334084789e+31** |
+| 2^106 = 8.11296e31 | **FF** and **DD** | **0 / 1 / 0 / 0** | **8.112963841460668169579e+31** |
+| −2^47, −2^60, −2^105, −2^106 | **FF** | **−1 / 0 / 0 / 0** | correct, sign preserved |
+| −2^105, −2^106 | DD | already correct (the cap was one-sided) | unchanged |
+| 2^60 + 0.5 (non-integral, far-apart limbs) | **FF** | **0 / 1 / — / 0** | **1152921504606846976 / …977 / — / …976** |
+| 2^106 + 0.5 | **DD** | **0 / 1 / — / 0** | **8.112963841460668169579e+31** (all three) |
+
+Tie semantics are untouched: 0.5 → 0, 1.5 → 2, 2.5 → 2 on DD/FF (ties-to-even,
+KI-20), 0.5 → 1, 2.5 → 3 on QF/TF, and 0.49999997 → 0 everywhere, all identical
+before and after.
+
+#### The fix
+
+Both bails now return `a.hi + rint(a.lo)` instead of zero. That is **exact**,
+not a clamp: at those magnitudes `ulp(a.hi)` is at least 2, so `a.hi` is already
+an exact EVEN integer and every fractional bit lives in `a.lo`. Ties-to-even on
+the low word is therefore ties-to-even on the whole value, and adding the two
+limbs is a `two_sum` and loses nothing.
+
+#### Effect on the gates
+
+Sweep: FF `ceil`, `floor`, `round` and `trunc` each gain **64 points**, no
+decreases. ULP gate: the FF `ceil`, `floor` and `trunc` `UNEXPLAINED` cells go
+away entirely — 53 → 50 gated cells, 5,299 → 5,043 gated points. FF `round`
+remains a gated-fail cell for the separate half-to-even reason (KI-20).
 
 ---
 
@@ -4017,7 +4181,7 @@ finite; complex `sin`/`cos` are in codomain.
 
 ---
 
-## KI-27 — DD and FF `multiply` return NaN on genuine product overflow, where `±inf` is correct
+## KI-27 — DD and FF `multiply` return NaN on genuine product overflow, where `±inf` is correct **[RESOLVED 2026-09-04]**
 
 **Severity: high (wrong kind of non-finite value), DD and FF. Filed 2026-09-04
 while fixing KI-19; measured, not fixed — outside that batch's scope.**
@@ -4057,6 +4221,110 @@ already the IEEE-correct answer and the error-free transform must not run. Then
 extend the `mul` sweep grid to cover an overflowing product so the next
 re-baseline cannot miss it, exactly as KI-19 requires for `div`.
 
+### RESOLVED 2026-09-04 — commit `fix: KI-12 sincos out-params; KI-14 integer ops past 2^47; KI-27 multiply overflow`
+
+Fixed as prescribed, and as QF/TF already do it at `qf_two_prod`/`tf_two_prod`
+rather than by inventing a third approach: guard on the hardware product first,
+BEFORE any splitter or scaling runs, and return it as-is when it is non-finite
+or zero.
+
+```cpp
+const double p = a.hi * b.hi;                                   // KI-27
+if (!detail::isfinite(p) || p == 0.0) return DoubleDouble(p, 0.0);
+```
+
+Three cases, and `p` is already right in all three: `|p| = inf` → the true
+product overflows, `±inf` with the IEEE sign is correct; `p = NaN` → a genuinely
+undefined form (`0 · inf`), keep it; `p = 0` → the true product underflows,
+`±0` is correct because `|a.lo·b.hi|` and `|a.hi·b.lo|` are each at most
+`|a.hi·b.hi|·2^-53` and cannot lift a zero leading product back into range.
+
+Applied to `multiply`, `multiply_scalar` and `two_prod` on **both** DD and FF.
+DD and FF expose no `sqr` (only QF and TF do, and theirs were already correct);
+the DD/FF squaring path is `multiply(a, a)`, which the same guard covers.
+
+| probe | `0ad44fe` | after | correct |
+|---|---|---|---|
+| DD `multiply(1e300, 1e300)` | −nan | **inf** | inf |
+| DD `multiply(−1e300, 1e300)` | −nan | **−inf** | −inf |
+| DD `multiply(1e−300, 1e−300)` | 0 | 0 | 0 |
+| DD `multiply_scalar(1e300, 1e300)` | −nan | **inf** | inf |
+| DD `mul(2, inf)` | −nan | **inf** | inf |
+| DD `mul(0, inf)` | −nan | −nan | NaN — genuinely undefined, correctly kept |
+| DD `mul(0, −5)` | 0 | 0 | 0 |
+| FF `multiply(1e30, 1e30)` | −nan | **inf** | inf |
+| FF `multiply(−1e30, 1e30)` | −nan | **−inf** | −inf |
+| FF `multiply(1e−30, 1e−30)` | 0 | 0 | 0 |
+| FF `multiply_scalar(1e30, 1e30)` | −nan | **inf** | inf |
+| FF `two_prod(1e30, 1e30)` | −nan | **inf** | inf |
+| FF `mul(2, inf)` | −nan | **inf** | inf |
+| FF `mul(0, inf)` | −nan | −nan | NaN |
+| QF / TF `multiply`, `sqr`, `multiply_scalar` at ±overflow and underflow | inf / −inf / 0 | unchanged | already correct |
+
+Downstream, the consequence named in "Extent" is closed:
+`DD (1e300 + 1e300i) / (1e−10 + 1e−10i)` went **−nan → +inf** in the real part
+(imaginary part 0, unchanged), and the FF analogue with 1e30 likewise.
+
+`ff_math.hpp:multiply` previously carried a B9 "Scope" paragraph recording
+genuine product overflow as deliberately out of scope; that paragraph is now
+superseded in place.
+
+**Not done, and still owed:** the sweep `mul` grid still places no point at an
+overflowing product, so a re-baseline would not catch a regression here. That
+is a grid change, and this batch was told not to re-baseline; it stays on the
+same list as the KI-19 `div` grid extension.
+
+---
+
+## KI-28 — DD and FF complex SQUARING returns NaN where the true result is finite-or-infinite
+
+**Severity: medium (wrong kind of non-finite value), DD and FF complex. Filed
+2026-09-04 while fixing KI-27; measured, not fixed — outside that batch's
+scope.**
+
+### What
+
+KI-27 fixed the `multiply` PRIMITIVE. The complex multiply FORMULA has an
+independent instance of the same class of defect, and the primitive fix does
+not reach it:
+
+```
+DD (1e300 + 1e300i)^2  ->  (-nan, -nan)      true (0, +inf)
+FF (1e30  + 1e30i )^2  ->  (-nan, -nan)      true (0, +inf)
+```
+
+Measured at commit `0ad44fe` and again after the KI-27 fix — unchanged by it.
+
+### Mechanism
+
+The real part is formed as `re = a.re·b.re − a.im·b.im`. With `a = b` and both
+components at 1e300, each product now correctly overflows to `+inf` (that is
+KI-27 working), and the subtraction is then `inf − inf = NaN`. The imaginary
+part `2·a.re·a.im` is `+inf` and correct in isolation, but the same expression
+tree contaminates it.
+
+The true value is exact and unambiguous: for `z = c(1 + i)`, `z² = 2c²i`, so the
+real part is `0` and the imaginary part is `+inf` once `2c²` overflows. C99
+Annex G specifies exactly this recovery for complex multiplication — when the
+naive formula yields NaN and at least one operand is infinite, the result is
+directed-infinite, not NaN.
+
+### Extent
+
+Not surfaced by the sweep grid: the complex `mul`/`sqr` grid places no point
+where the componentwise products overflow. Found by direct probe. QF and TF
+were not probed at the corresponding magnitude and should be checked before
+scoping the fix.
+
+### Closing it
+
+Add the Annex G recovery to the complex multiply in `dd_complex.hpp` and
+`ff_complex.hpp` (and QF/TF if they share it): after computing the naive
+formula, if either output is NaN and either operand has an infinite component,
+recompute with the infinities normalized to ±1/±0 and the finite parts to their
+signs, then scale. Then extend the complex sweep grid to cover an overflowing
+componentwise product, alongside the KI-19 `div` and KI-27 `mul` grid gaps.
+
 ---
 
 ## Note on resolution markers
@@ -4077,3 +4345,8 @@ case; it was left alone here because this batch's scope was KI-10/KI-15 only.
 **Update 2026-09-04 (KI-19/25/26 batch).** KI-19, KI-25 and KI-26 now carry
 `**[RESOLVED]**` in their headings. **KI-18 is still the one outstanding case**
 — left alone again because this batch's scope was KI-19/KI-25/KI-26 only.
+
+**Update 2026-09-04 (KI-12/14/27 batch).** KI-12, KI-14 and KI-27 now carry
+`**[RESOLVED 2026-09-04]**` in their headings. **KI-18 is still the one
+outstanding case** — left alone a third time, same reason. KI-28 was filed by
+this batch and is open.

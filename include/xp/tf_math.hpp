@@ -919,6 +919,20 @@ XPMATH_INLINE_FUNCTION void sincos(TripleFloat a, TripleFloat& sin_a, TripleFloa
         cos_a = TripleFloat(1.0f);
         return;
     }
+    // KI-12 residual.  Small-argument short circuit over the degenerate
+    // reduction band only; full derivation at ff_math.hpp:sincos.  TF's limbs
+    // are FP32 too, so the band is the same shape: below 2^nq * FLT_MIN the
+    // leading word of r = s3/2^nq is subnormal and sheds bits before the first
+    // Taylor term (and is 0 outright for subnormal |a|).  Measured before:
+    // TF sin(1e-40) = 9.99967e-41 for an argument of 9.99995e-41, and
+    // TF sin(1e-44) = 0.  Above the band the series is already correct and a
+    // wider cut was measured to cost complex-op digits -- see ff_math.hpp.
+    // nq is declared below (== 4); the constant is 2^4 * FLT_MIN spelled out.
+    if (detail::fabs(a.f0) < 1.8807842e-37f /* 2^4 * FLT_MIN */) {
+        sin_a = a;
+        cos_a = TripleFloat(1.0f);
+        return;
+    }
 
     // Reduce mod 2π
     TripleFloat z = round_to_nearest_int(divide(a, k_2pi));
