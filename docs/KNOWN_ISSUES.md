@@ -10,7 +10,63 @@ This file is the backlog. It is not a status document — see
 
 ---
 
-## KI-1 — Complex `acosh` is wrong throughout the left half-plane, in ALL FOUR backends **[RESOLVED]**
+## STATUS TABLE
+
+Read this first. It is the authoritative status of every entry; the bodies below
+carry the evidence and the history.
+
+**Marker convention (adopted 2026-09-04).** Every `## KI-n` heading carries
+**exactly one** marker, and it is one of:
+
+- **`[RESOLVED <commit>]`** — fixed, verified. `<commit>` is the sha that carried
+  the fix. An entry that was fixed, reopened, and fixed again reads
+  `[RESOLVED <final-commit>]`; the reopen history lives in the body, never in the
+  heading. Where two shas were needed, both are listed, oldest first.
+- **`[OPEN]`** — not fixed, or only partially fixed. A partial fix is OPEN.
+
+No other marker is legal. `[REOPENED]` is not a heading state — an entry is
+either currently resolved or currently open.
+
+| KI | one-line summary | status | fixing commit |
+|---|---|---|---|
+| 1 | Complex `acosh` wrong throughout the left half-plane, all four backends | RESOLVED | `f421a0e` |
+| 2 | `nint` wrong for the one-ulp-below-a-tie class | RESOLVED | `650aa16` |
+| 3 | `build_with_kokkos.sh` passes C++17 to a Kokkos that requires C++20 | RESOLVED | `dd6d00a` |
+| 4 | DD `sin` returns the wrong sign near odd multiples of π | RESOLVED | `8135332` |
+| 5 | Four defects in the complex inverse family — (a) `asinh`, (b) `log1p`/`atanh`, (c) `acos`, (d) `asin` | RESOLVED | `650aa16` (a), `3968a9f` (b, c), `f421a0e` (d) |
+| 6 | `exp` flushes to zero outside a hard ±300 guard, losing ~170 decades | RESOLVED | `ad82f4f` |
+| 7 | `tanh` returns the wrong sign for \|x\| past the `exp` guard | RESOLVED | `ad82f4f` |
+| 8 | `hypot` and complex `abs` unscaled — overflow/underflow far inside range | RESOLVED | `4cd7dcb`, then `7680809` |
+| 9 | QF/TF `div` returns NaN when the quotient outruns the Dekker splitter | RESOLVED | `82427f6`, completed by `0ad44fe` (KI-19) |
+| 10 | `fmod`/`remainder` lose half their digits on far-apart operands | RESOLVED | `fc7b0fb`, then `58fda3b` |
+| 11 | Complex inverse family loses digits when one component ≪ the other | **OPEN** | partial: `855292d` (`atan`/`atanh` only) |
+| 12 | FF `sincos` never converges below \|x\| ≈ 1e-20 and skips its out-params | RESOLVED | `0ad44fe` (headline), then `2e810c2` (reduction band) |
+| 13 | `angle`/`asinh`/`acosh` form an unscaled sum of squares — NaN above 1.8e19 | RESOLVED | `7680809` |
+| 14 | FF `floor`/`ceil`/`trunc`/`round` return zero for every \|x\| ≥ 2^47 | RESOLVED | `2e810c2` |
+| 15 | `fmod`/`remainder` return the wrong sign, zero, or infinity | RESOLVED | `fc7b0fb`, then `58fda3b` |
+| 16 | `atanh`'s domain guard tests only the leading word | **OPEN** | — |
+| 17 | TF `asinh` has no odd-symmetry branch | **OPEN** | — |
+| 18 | Complex `tan`/`tanh`/`atan`/`atanh` have no asymptotic branch | RESOLVED | `855292d` |
+| 19 | QF/TF `divide` returns NaN where `inf` is correct, on quotient overflow | RESOLVED | `0ad44fe` |
+| 20 | `round` is half-to-even, not half-away-from-zero | **OPEN** | — |
+| 21 | Missing-complex-oracle path is a hard build failure, not degradation | **OPEN** | — |
+| 22 | DD `asinh`/`atanh`/`sinh` and TF `expm1` collapse to the leading word at small x | **OPEN** | — |
+| 23 | QF `log`/`log2`/`log10`/`log1p` lose ~11 digits above \|x\| ≈ 1e29 | **OPEN** | — |
+| 24 | FF `sinh`/`cosh` lose one full FP32 word near the `exp` range limit | **OPEN** | — |
+| 25 | QF and TF `atan` return a non-finite value at \|x\| ≈ 3.16e19 | RESOLVED | `0ad44fe` |
+| 26 | TF `sin`/`cos`/`tan` and QF `cos`/`tan` non-finite at very large arguments | RESOLVED | `0ad44fe` |
+| 27 | DD and FF `multiply` return NaN on genuine product overflow | RESOLVED | `2e810c2` |
+| 28 | DD and FF complex squaring returns NaN where the true result is finite-or-inf | **OPEN** | — |
+
+**19 resolved, 9 open** (11, 16, 17, 20, 21, 22, 23, 24, 28).
+
+Three sections that are not KI entries also live in this file and are neither
+resolved nor open: the classifier verdict (2026-09-03), the soft-failure map
+(2026-09-03), and the two "Findings from …" dividers.
+
+---
+
+## KI-1 — Complex `acosh` is wrong throughout the left half-plane, in ALL FOUR backends **[RESOLVED f421a0e]**
 
 > **Scope corrected 2026-09-02.** The title used to say "on the negative real
 > axis". The complex accuracy tests added on 2026-09-02 show the defect covers the
@@ -342,7 +398,7 @@ the other. Mean drop across all 2022 is 1.0-1.2 digits.
 
 ---
 
-## KI-2 — `nint` is wrong for the one-ulp-below-a-tie class **[RESOLVED]**
+## KI-2 — `nint` is wrong for the one-ulp-below-a-tie class **[RESOLVED 650aa16]**
 
 **Severity: low as filed — actually MEDIUM in TF, see the resolution. Scope:
 inherited from QD.**
@@ -435,7 +491,7 @@ KI-5(a)), 427,677 unchanged.
 
 ---
 
-## KI-3 — `scripts/build_with_kokkos.sh` cannot build Kokkos 5.1 **[RESOLVED]**
+## KI-3 — `scripts/build_with_kokkos.sh` cannot build Kokkos 5.1 **[RESOLVED dd6d00a]**
 
 **Severity: low (documented workaround), scope: pre-existing.**
 
@@ -454,7 +510,7 @@ configures this repo, not Kokkos). Fixed 2026-09-02, commit TBD.
 
 ---
 
-## KI-4 — DD `sin` returns the WRONG SIGN near odd multiples of π **[RESOLVED]**
+## KI-4 — DD `sin` returns the WRONG SIGN near odd multiples of π **[RESOLVED 8135332]**
 
 **Severity: high (silently wrong answers, sign flip), scope: DD only, pre-existing.**
 
@@ -660,7 +716,7 @@ flags but which buries the real diff in reference noise. Build the sweep with
 
 ---
 
-## KI-5 — Four more defects in the complex inverse-function family, in ALL FOUR backends **[RESOLVED]**
+## KI-5 — Four more defects in the complex inverse-function family, in ALL FOUR backends **[RESOLVED 650aa16 / 3968a9f / f421a0e]**
 
 > **All four are RESOLVED.** (a) and (d) 2026-09-02 commit `f421a0e`;
 > (b) and (c) 2026-09-02, commit `3968a9f` — see the two resolution blocks below.
@@ -1476,7 +1532,7 @@ match the current CSVs.
 
 ---
 
-## KI-6 — `exp` flushes to ZERO outside a hard ±300 argument guard, discarding ~170 representable decades **[RESOLVED]**
+## KI-6 — `exp` flushes to ZERO outside a hard ±300 argument guard, discarding ~170 representable decades **[RESOLVED ad82f4f]**
 
 **Severity: high (silently returns 0 for a large, ordinary result), all backends,
 worst on DD.**
@@ -1702,7 +1758,7 @@ that is a property of the format.
 
 ---
 
-## KI-7 — `tanh` returns the WRONG SIGN for |x| past the `exp` guard, in all four backends **[RESOLVED]**
+## KI-7 — `tanh` returns the WRONG SIGN for |x| past the `exp` guard, in all four backends **[RESOLVED ad82f4f]**
 
 **Severity: high (wrong sign is worse than no answer), all backends.**
 
@@ -1825,7 +1881,19 @@ ratcheted from `|x| < 300` / `uniform(-50,50)` to `isfinite(x)` /
 
 ---
 
-## KI-8 — `hypot` and complex `abs` have NO scaling, so they overflow and underflow far inside the representable range **[REOPENED 2026-09-03]**
+## KI-8 — `hypot` and complex `abs` have NO scaling, so they overflow and underflow far inside the representable range **[RESOLVED 7680809]**
+
+> **Heading history.** Fixed first at `4cd7dcb` (2026-09-02), **reopened
+> 2026-09-03** when the low edge of that fix was found to be set against the
+> wrong cliff, then fixed for good at `7680809` (2026-09-04). The heading read
+> `[REOPENED 2026-09-03]` until 2026-09-04 even though the body below had
+> recorded the second fix; under the marker convention at the top of this file a
+> reopened-then-fixed entry reads `[RESOLVED <final commit>]` and keeps the
+> reopen history here, in the body.
+>
+> Re-verified by measurement 2026-09-04: QF `hypot(1e-16, 1e-16)` = 1.4142135862e-16
+> (13.85 → 29.00 digits) and QF `hypot(1e30, 1e30)` = 1.4142135837e+30 — both ends
+> finite and correct.
 
 ### RESOLVED 2026-09-04 — commit `fix: KI-8 scale hypot/abs at BOTH ends; KI-13 remaining unscaled sums of squares`
 
@@ -2172,7 +2240,16 @@ standard 0.30 headroom and did not move.
 
 ---
 
-## KI-9 — QF/TF division returns NaN when the QUOTIENT exceeds the Dekker splitter's headroom **[RESOLVED]**
+## KI-9 — QF/TF division returns NaN when the QUOTIENT exceeds the Dekker splitter's headroom **[RESOLVED 82427f6]**
+
+> **Follow-up: [KI-19](#ki-19--qftf-divide-returns-nan-where-inf-is-correct-when-the-quotient-overflows-the-format-resolved-0ad44fe).**
+> `82427f6` closed the *splitter* ceiling described here — the one at ≈8.3e34. It
+> did not close the *format* ceiling above it: once the quotient itself overflows
+> the FP32 exponent range, `divide` still returned NaN where `±inf` is correct.
+> That residue was filed separately as **KI-19** and fixed at `0ad44fe`. KI-9 and
+> KI-19 are two distinct defects at two distinct magnitudes, not one entry
+> superseding the other; both are resolved, and KI-19 is the one that completed
+> the work.
 
 **Severity: medium, QF and TF only.** *(Re-rated to blocking once KI-8's scaled
 `hypot` was built on top of it — see the Resolution.)*
@@ -2315,7 +2392,7 @@ tighten against.
 
 ---
 
-## KI-10 — `fmod` and `remainder` lose half their digits when the operands are many decades apart **[RESOLVED 2026-09-04]**
+## KI-10 — `fmod` and `remainder` lose half their digits when the operands are many decades apart **[RESOLVED 58fda3b]**
 
 **Severity: medium, all backends.**
 
@@ -2623,7 +2700,7 @@ no notion of the jump regime either. The divergence remains deliberate.
 
 ---
 
-## KI-11 — The complex inverse family loses most of its digits when one component is far smaller than the other
+## KI-11 — The complex inverse family loses most of its digits when one component is far smaller than the other **[OPEN]**
 
 **Severity: medium, all backends, 4,759 points. PARTIALLY RESOLVED by commit
 `855292d` — `atan`/`atanh` fixed and measured; `asin`/`acos`/`asinh`/`acosh`/
@@ -2783,7 +2860,7 @@ full width. Recorded, not silently taken.
 
 ---
 
-## KI-12 — FF `sincos` never converges below |x| ≈ 1e-20, and its bail-out returns WITHOUT writing its out-params **[RESOLVED 2026-09-04]**
+## KI-12 — FF `sincos` never converges below |x| ≈ 1e-20, and its bail-out returns WITHOUT writing its out-params **[RESOLVED 0ad44fe / 2e810c2]**
 
 **Severity: high (silent 0 and silent NaN from ordinary in-range inputs), FF
 only, 1,020 points — the single largest hard-failure root cause in the sweep.**
@@ -2956,7 +3033,7 @@ same result with nothing making them agree. Both now test `fabs`.
 
 ---
 
-## KI-13 — `angle`, `asinh` and `acosh` still form an UNSCALED sum of squares, so they NaN at |x| ≳ 1.8e19
+## KI-13 — `angle`, `asinh` and `acosh` still form an UNSCALED sum of squares, so they NaN at |x| ≳ 1.8e19 **[RESOLVED 7680809]**
 
 ### RESOLVED 2026-09-04 — commit `fix: KI-8 scale hypot/abs at BOTH ends; KI-13 remaining unscaled sums of squares`
 
@@ -3068,7 +3145,7 @@ squares, exactly as the fixed `hypot` now does.
 
 ---
 
-## KI-14 — FF `floor`, `ceil`, `trunc` and `round` return ZERO for every |x| ≥ 2^47 **[RESOLVED 2026-09-04]**
+## KI-14 — FF `floor`, `ceil`, `trunc` and `round` return ZERO for every |x| ≥ 2^47 **[RESOLVED 2e810c2]**
 
 **Severity: high (returns 0 for an input that is already an exact integer),
 FF only, 194 points.**
@@ -3189,7 +3266,7 @@ remains a gated-fail cell for the separate half-to-even reason (KI-20).
 
 ---
 
-## KI-15 — `fmod`/`remainder` do not merely lose digits: they return the WRONG SIGN, ZERO, or INFINITY **[RESOLVED 2026-09-04]**
+## KI-15 — `fmod`/`remainder` do not merely lose digits: they return the WRONG SIGN, ZERO, or INFINITY **[RESOLVED 58fda3b]**
 
 **Severity: high, all backends, 605 hard-failure points on top of the 2,285
 soft ones already recorded as KI-10.**
@@ -3366,7 +3443,7 @@ see KI-10's block.
 
 ---
 
-## KI-16 — `atanh`'s domain guard tests only the LEADING word, so it rejects arguments that are strictly inside (−1, 1)
+## KI-16 — `atanh`'s domain guard tests only the LEADING word, so it rejects arguments that are strictly inside (−1, 1) **[OPEN]**
 
 **Severity: medium, FF and QF, 46 points.**
 
@@ -3410,7 +3487,7 @@ should be audited with it.
 
 ---
 
-## KI-17 — TF `asinh` has no odd-symmetry branch, so negative arguments cancel to a non-positive log
+## KI-17 — TF `asinh` has no odd-symmetry branch, so negative arguments cancel to a non-positive log **[OPEN]**
 
 **Severity: medium, TF only, 9 hard points plus the negative half of TF's soft
 `asinh` population.**
@@ -3452,7 +3529,7 @@ line.
 
 ---
 
-## KI-18 — Complex `tan`/`tanh` and complex `atan`/`atanh` have no asymptotic branch, so they NaN where the true result is bounded
+## KI-18 — Complex `tan`/`tanh` and complex `atan`/`atanh` have no asymptotic branch, so they NaN where the true result is bounded **[RESOLVED 855292d]**
 
 **Severity: medium, all backends, 172 + 96 points. RESOLVED by commit `855292d`.**
 
@@ -3579,7 +3656,16 @@ Totals across all four `tan`/`tanh` cells: 448 points decreased (worst −1.76),
 
 ---
 
-## KI-19 **[RESOLVED]** — KI-9 is NOT fully closed: QF `divide` still returns NaN once the quotient reaches ~1e41
+## KI-19 — QF/TF `divide` returns NaN where `inf` is correct when the quotient OVERFLOWS the format **[RESOLVED 0ad44fe]**
+
+> **Retitled 2026-09-04.** This entry used to be titled *"KI-9 is NOT fully
+> closed: QF `divide` still returns NaN once the quotient reaches ~1e41"*. With
+> both entries marked resolved, that title left a reader unable to tell which
+> superseded which — the answer being neither: they are two defects at two
+> different magnitudes. The title now names **this** entry's own defect, and
+> [KI-9](#ki-9--qftf-division-returns-nan-when-the-quotient-exceeds-the-dekker-splitters-headroom-resolved-82427f6)
+> carries a forward pointer here. No finding, measurement or scope below was
+> changed.
 
 **Severity: high (contradicts a RESOLVED entry), QF *and TF and DD* (scope
 corrected below), surfaced through `fmod`.**
@@ -3670,7 +3756,7 @@ component words and `-0.0f + 0.0f = +0.0` silently masked a correct `-0`.
 
 ---
 
-## KI-20 — `round` is half-to-even, not half-away-from-zero
+## KI-20 — `round` is half-to-even, not half-away-from-zero **[OPEN]**
 
 **Severity: low, DD/QF/TF, 4 points.**
 
@@ -3706,7 +3792,7 @@ is deliberately *not* KI-2, which was about `nint` one ulp below a tie.
 
 ---
 
-## KI-21 — The missing-complex-oracle path is documented as graceful degradation but is a hard build failure
+## KI-21 — The missing-complex-oracle path is documented as graceful degradation but is a hard build failure **[OPEN]**
 
 **Severity: medium (build/packaging, not numerics). Surfaced by S7 while
 standing up CI against a vanilla Kokkos install.**
@@ -3863,7 +3949,7 @@ has not been looked at.
 
 ---
 
-## KI-22 — DD `asinh`, `atanh`, `sinh` (and TF `expm1`) collapse to the leading word at small arguments
+## KI-22 — DD `asinh`, `atanh`, `sinh` (and TF `expm1`) collapse to the leading word at small arguments **[OPEN]**
 
 **Severity: medium. DD on three ops, TF on one. Filed 2026-09-03 by the step-1c
 ULP triage; measured, not fixed.**
@@ -3919,7 +4005,7 @@ the 8x allowance without any change to the metric.
 
 ---
 
-## KI-23 — QF `log`, `log2`, `log10`, `log1p` lose ~11 digits above |x| ≈ 1e29
+## KI-23 — QF `log`, `log2`, `log10`, `log1p` lose ~11 digits above |x| ≈ 1e29 **[OPEN]**
 
 **Severity: medium, QF only. Filed 2026-09-03 by the step-1c ULP triage;
 measured, not fixed.**
@@ -3960,7 +4046,7 @@ or the exponent extraction feeding Newton. Acceptance: the four cells drop under
 
 ---
 
-## KI-24 — FF `sinh` and `cosh` lose one full FP32 word near the `exp` range limit
+## KI-24 — FF `sinh` and `cosh` lose one full FP32 word near the `exp` range limit **[OPEN]**
 
 **Severity: low, FF only. Filed 2026-09-03 by the step-1c ULP triage;
 measured, not fixed.**
@@ -3993,7 +4079,7 @@ corresponding point in their own ranges.
 
 ---
 
-## KI-25 **[RESOLVED]** — QF and TF `atan` return a non-finite value at |x| ≈ 3.16e19
+## KI-25 — QF and TF `atan` return a non-finite value at |x| ≈ 3.16e19 **[RESOLVED 0ad44fe]**
 
 **Severity: high (wrong value, not lost digits), QF and TF. Filed 2026-09-03 by
 the step-1c ULP triage; measured, not fixed.**
@@ -4077,7 +4163,7 @@ Verified `|atan(x)| <= π/2` against a `__float128` π/2 on all four backends at
 
 ---
 
-## KI-26 **[RESOLVED]** — TF `sin`/`cos`/`tan` and QF `cos`/`tan` return non-finite values at very large arguments
+## KI-26 — TF `sin`/`cos`/`tan` and QF `cos`/`tan` return non-finite values at very large arguments **[RESOLVED 0ad44fe]**
 
 **Severity: high (wrong value, not lost digits), QF and TF. Filed 2026-09-03 by
 the step-1c ULP triage; measured, not fixed.**
@@ -4181,7 +4267,7 @@ finite; complex `sin`/`cos` are in codomain.
 
 ---
 
-## KI-27 — DD and FF `multiply` return NaN on genuine product overflow, where `±inf` is correct **[RESOLVED 2026-09-04]**
+## KI-27 — DD and FF `multiply` return NaN on genuine product overflow, where `±inf` is correct **[RESOLVED 2e810c2]**
 
 **Severity: high (wrong kind of non-finite value), DD and FF. Filed 2026-09-04
 while fixing KI-19; measured, not fixed — outside that batch's scope.**
@@ -4276,7 +4362,7 @@ same list as the KI-19 `div` grid extension.
 
 ---
 
-## KI-28 — DD and FF complex SQUARING returns NaN where the true result is finite-or-infinite
+## KI-28 — DD and FF complex SQUARING returns NaN where the true result is finite-or-infinite **[OPEN]**
 
 **Severity: medium (wrong kind of non-finite value), DD and FF complex. Filed
 2026-09-04 while fixing KI-27; measured, not fixed — outside that batch's
@@ -4327,26 +4413,41 @@ componentwise product, alongside the KI-19 `div` and KI-27 `mul` grid gaps.
 
 ---
 
-## Note on resolution markers
+## Note on resolution markers — CLOSED 2026-09-04
 
-Step 1c found the `**[RESOLVED]**` heading marker applied inconsistently:
-KI-1…KI-9 carry it in the heading, while **KI-10, KI-15 and KI-18 are resolved
-in body text only** (`### RESOLVED 2026-09-03 — commit 'fix: KI-10/KI-15
-iterative fmod and remainder'` and `RESOLVED by commit 855292d`). A reader
-scanning headings would count nine resolved KIs, not twelve. KI-10 and KI-15
-are now reopened above; **KI-18 should be given a heading marker** the next time
-this file is edited for content.
+This section used to track a drift between what the headings said and what the
+bodies said. That drift is now fixed and the convention is stated once, at the
+top of this file, in the **STATUS TABLE** section. Every `## KI-n` heading
+carries exactly one marker — `[RESOLVED <commit>]` or `[OPEN]` — and the status
+table is the authoritative index.
 
-**Update 2026-09-04.** KI-10 and KI-15 are resolved again and now carry
-`**[RESOLVED 2026-09-04]**` in their headings, so the marker is consistent for
-them. **KI-18 still has no heading marker** and is still the one outstanding
-case; it was left alone here because this batch's scope was KI-10/KI-15 only.
+### What the 2026-09-04 audit found
 
-**Update 2026-09-04 (KI-19/25/26 batch).** KI-19, KI-25 and KI-26 now carry
-`**[RESOLVED]**` in their headings. **KI-18 is still the one outstanding case**
-— left alone again because this batch's scope was KI-19/KI-25/KI-26 only.
+Four headings disagreed with their own bodies or with the measured behaviour of
+the library. Each was verified against git history **and** a measurement before
+being changed; none was taken on trust from the body text.
 
-**Update 2026-09-04 (KI-12/14/27 batch).** KI-12, KI-14 and KI-27 now carry
-`**[RESOLVED 2026-09-04]**` in their headings. **KI-18 is still the one
-outstanding case** — left alone a third time, same reason. KI-28 was filed by
-this batch and is open.
+| KI | heading was | heading is now | how it was verified |
+|---|---|---|---|
+| 8 | `[REOPENED 2026-09-03]` | `[RESOLVED 7680809]` | measured: QF `hypot(1e-16,1e-16)` = 1.4142135862e-16 and `hypot(1e30,1e30)` = 1.4142135837e+30, both ends finite and correct |
+| 13 | *(no marker — read as open)* | `[RESOLVED 7680809]` | measured: DD `asinh(1e30)` = `acosh(1e30)` = 69.7707, no NaN. Same commit and same root cause as KI-8 (unscaled sum of squares, different call sites) |
+| 18 | *(no marker — read as open)* | `[RESOLVED 855292d]` | measured: DD complex `tanh(x+1i)` saturates to ±1 with a vanishing imaginary part across x = ±30, ±100, ±700 — no NaN anywhere on the real axis |
+| 19 | `[RESOLVED]`, but titled *"KI-9 is NOT fully closed"* while KI-9 also read `[RESOLVED]` | retitled to name its own defect; KI-9 gained a forward pointer | git: `82427f6` fixed the splitter ceiling (KI-9), `0ad44fe` fixed the format ceiling above it (KI-19). Two defects, two magnitudes, neither supersedes the other |
+
+**A fifth mismatch was looked for and one was found, outside this file.** KI-3
+is correctly marked `[RESOLVED dd6d00a]` here and `scripts/build_with_kokkos.sh`
+lines 67 and 74 do now read `-DCMAKE_CXX_STANDARD=20`, but the repository's
+`CLAUDE.md` still documents the C++17 trap as *"Reported in the S1 STATUS block,
+not yet fixed"*. `CLAUDE.md` was outside this batch's edit scope, so it is
+recorded here rather than changed. Two lesser cases were also checked and are
+**not** mismatches: KI-11 is genuinely `[OPEN]` (`855292d` fixed `atan`/`atanh`
+only, leaving `asin`/`acos`/`asinh`/`acosh`/`sqrt`), and KI-12's body correctly
+credits `0ad44fe` with most of the fix and `2e810c2` with the rest.
+
+### Body-text shas that were left as written
+
+KI-2 and KI-5(a) carry the literal placeholder `TBD-FIX` in their Resolution
+subsections, and KI-3, KI-6, KI-7 and KI-9 date their Resolution without a sha —
+these are all commits that were being written at the time the text was. The
+status table above supplies the real sha for each; the body prose was left
+untouched so that the historical record of what each session knew stays intact.
