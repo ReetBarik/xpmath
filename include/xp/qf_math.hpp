@@ -1129,11 +1129,77 @@ XPMATH_INLINE_FUNCTION QuadFloat tan(QuadFloat a) {
 // with the FP32 std::atan2, then Newton-refine z += (y - sin z)/cos z (or the
 // cos variant when |x|>|y|), 3 iterations.  dd_math.hpp:497 uses the same
 // structure; the joint sincos above supplies (sin z, cos z) per iteration.
+namespace detail {
+// KI-8.  Exact power-of-two scale factor: returns s = 2^-e with |m|*s in [1,2),
+// so that s and 1/s are both exactly representable and scaling every word of an
+// expansion by either loses no bit.  Mirrors detail::ff_pow2_unit_scale in
+// ff_math.hpp, which carries the full argument.
+//
+// e is clamped to [-125, 125] so both s and 1/s stay NORMAL floats; at the
+// clamp the operand is not brought all the way to [1,2), but the square is
+// still inside the word range, which is all the caller needs.
+//
+// No frexp: config.hpp's scalar dispatch does not carry one, and a
+// dependency-free loop is portable to every device backend.  It runs only
+// outside the direct band, never on the hot path.
+XPMATH_INLINE_FUNCTION float qf_pow2_unit_scale(float m) {
+    float t = (m < 0.0f) ? -m : m;
+    if (!(t > 0.0f) || detail::isinf(t)) return 1.0f;   // 0/inf/nan: loop would not terminate
+    int e = 0;
+    while (t >= 16777216.0f)   { t *= 5.9604644775390625e-8f; e += 24; }
+    while (t <  5.9604644775390625e-8f) { t *= 16777216.0f;   e -= 24; }
+    while (t >= 2.0f) { t *= 0.5f; ++e; }
+    while (t <  1.0f) { t *= 2.0f;  --e; }
+    if (e > 125) e = 125;
+    if (e < -125) e = -125;
+    return ldexpf(1.0f, -e);
+}
+XPMATH_INLINE_FUNCTION QuadFloat qf_pow2_scale(QuadFloat a, float s) {
+    return QuadFloat(a.f0 * s, a.f1 * s, a.f2 * s, a.f3 * s);
+}
+}  // namespace detail
+
+// Band in which a sum of squares may be formed DIRECTLY, shared by every QF
+// site that forms one (hypot here; complex abs and complex operator/ in
+// qf_complex.hpp).  Low edge is 2^-25, one binade above the derived
+// 2^-27 word-underflow limit of KI-8 note (1) at ff_math.hpp's hypot; the
+// high edge is unchanged from the original fix.
+namespace detail {
+inline constexpr float kQFSqLo = 7.4505806e-9f;
+inline constexpr float kQFSqHi = 1.0e18f;
+}
+
 XPMATH_INLINE_FUNCTION QuadFloat angle(QuadFloat x, QuadFloat y) {
     QuadFloat pi = QuadFloat_pi();
     if (x.f0 == 0.0f && y.f0 == 0.0f) return QuadFloat(0.0f);
     if (x.f0 == 0.0f) return (y.f0 > 0.0f) ? mul_pwr2(pi, 0.5f) : mul_pwr2(pi, -0.5f);
     if (y.f0 == 0.0f) return (x.f0 > 0.0f) ? QuadFloat(0.0f) : pi;
+    // KI-13.  The r below is a sum of squares and has exactly hypot's exposure:
+    // it overflowed the word above |x| ~ 1.8e19 (atan(3.16e19) returned NaN, and
+    // atan2/asin/acos/complex arg inherited it) and shed low words below the
+    // derived 2^-27 (see the KI-8 note at ff_math.hpp's hypot).  angle is
+    // EXACTLY scale-invariant -- atan2(ys, xs) = atan2(y, x) for any s > 0 --
+    // so the remedy here is one power-of-two rescale of both operands, which
+    // changes no bit of the answer and puts the square back inside the word
+    // range.
+    {
+        const float mx = detail::fabs(x.f0), my = detail::fabs(y.f0);
+        const float mm = (mx > my) ? mx : my;
+        // HIGH side only.  The low side was tried and reverted: r is used only
+        // to normalise (x/r, y/r) before a 3-step Newton refinement on
+        // atan2, and that refinement re-evaluates sin/cos of the iterate, so
+        // low words shed from r do not survive into the answer -- rescaling
+        // there only perturbs the seed.  Measured on the 428,592-point sweep:
+        // a two-sided gate cost 45 regressions (worst 1.27 digits, QF c atan
+        // points 1254/1318) to buy 35 improvements.  The high side is a real
+        // fix -- without it the square OVERFLOWS and atan/atan2/asin/acos/arg
+        // return 0 or NaN outright.
+        if (mm > detail::kQFSqHi) {
+            const float s = detail::qf_pow2_unit_scale(mm);
+            x = detail::qf_pow2_scale(x, s);
+            y = detail::qf_pow2_scale(y, s);
+        }
+    }
     QuadFloat r  = sqrt(add(multiply(x, x), multiply(y, y)));
     QuadFloat nx = divide(x, r), ny = divide(y, r);
     QuadFloat a  = QuadFloat(detail::atan2(ny.f0, nx.f0));   // FP32 seed
@@ -1282,13 +1348,37 @@ XPMATH_INLINE_FUNCTION QuadFloat tanh(QuadFloat a) {
 
 // asinh(a) = log(a + sqrt(a^2 + 1)).  QD qd_real.cpp:2576.  Odd reflection
 // (ff_math.hpp:586) keeps the log argument >= 1 for negative a.
+// KI-13.  asinh and acosh both form a^2 +- 1, which leaves the word range at
+// |a| = sqrt(FLT_MAX) = 1.844e19 -- far short of what the format reaches -- and
+// sqrt(inf)/log(inf) then returned NaN.  Above the band the square is factored
+// out instead:
+//
+//     asinh(a) = log(|a|) + log(1 + sqrt(1 + 1/a^2)),  sign-reflected
+//     acosh(a) = log(a)   + log(1 + sqrt(1 - 1/a^2))
+//
+// u = 1/a^2 is formed as (1/a)^2 so nothing squares a; it is in (0,1], and for
+// |a| past 1/sqrt(smallest normal) it simply flushes to zero, which is the
+// correct limit (asinh(a) -> log(2a)).  No cancellation: log(|a|) dominates the
+// second term's log(2) ~ 0.69 by orders of magnitude, and both are computed to
+// full relative precision.  Below the band the original expression is kept
+// bit-for-bit.  Full argument at ff_math.hpp's asinh.
 XPMATH_INLINE_FUNCTION QuadFloat asinh(QuadFloat a) {
     if (a.f0 < 0.0f) return negate(asinh(negate(a)));
+    if (a.f0 > detail::kQFSqHi) {
+        QuadFloat u = divide(QuadFloat(1.0f), a);
+        u = multiply(u, u);
+        return add(log(a), log(add(QuadFloat(1.0f), sqrt(add(QuadFloat(1.0f), u)))));
+    }
     return log(add(a, sqrt(add(multiply(a, a), QuadFloat(1.0f)))));
 }
 // acosh(a) = log(a + sqrt(a^2 - 1)).  QD qd_real.cpp:2580.
 XPMATH_INLINE_FUNCTION QuadFloat acosh(QuadFloat a) {
     if (a.f0 < 1.0f) { XPMATH_PRINTF("QFACOSH: argument < 1\n"); return QuadFloat(0.0f); }
+    if (a.f0 > detail::kQFSqHi) {                                       // KI-13
+        QuadFloat u = divide(QuadFloat(1.0f), a);
+        u = multiply(u, u);
+        return add(log(a), log(add(QuadFloat(1.0f), sqrt(subtract(QuadFloat(1.0f), u)))));
+    }
     return log(add(a, sqrt(subtract(multiply(a, a), QuadFloat(1.0f)))));
 }
 // atanh(a).  QD qd_real.cpp:2589 is 0.5*log((1+a)/(1-a)) only; this port adds a
@@ -1365,7 +1455,7 @@ XPMATH_INLINE_FUNCTION QuadFloat hypot(QuadFloat a, QuadFloat b) {
     QuadFloat m = (x.f0 < y.f0) ? y : x;
     QuadFloat n = (x.f0 < y.f0) ? x : y;
     if (m.f0 == 0.0f) return QuadFloat(0.0f);
-    if (m.f0 <= 1.0e18f && m.f0 >= 1.0e-18f)
+    if (m.f0 <= detail::kQFSqHi && m.f0 >= detail::kQFSqLo)
         return sqrt(add(multiply(a, a), multiply(b, b)));
     QuadFloat t = divide(n, m);
     return multiply(m, sqrt(add(QuadFloat(1.0f), multiply(t, t))));

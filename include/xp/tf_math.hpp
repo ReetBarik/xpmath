@@ -1087,6 +1087,46 @@ XPMATH_INLINE_FUNCTION TripleFloat tanh(TripleFloat a) {
 // it is in QD (three straight-line repetitions, no residual test). The eps used
 // by exp/sincos (1e-21f, §3a) is not involved.
 // ============================================================
+namespace detail {
+// KI-8.  Exact power-of-two scale factor: returns s = 2^-e with |m|*s in [1,2),
+// so that s and 1/s are both exactly representable and scaling every word of an
+// expansion by either loses no bit.  Mirrors detail::ff_pow2_unit_scale in
+// ff_math.hpp, which carries the full argument.
+//
+// e is clamped to [-125, 125] so both s and 1/s stay NORMAL floats; at the
+// clamp the operand is not brought all the way to [1,2), but the square is
+// still inside the word range, which is all the caller needs.
+//
+// No frexp: config.hpp's scalar dispatch does not carry one, and a
+// dependency-free loop is portable to every device backend.  It runs only
+// outside the direct band, never on the hot path.
+XPMATH_INLINE_FUNCTION float tf_pow2_unit_scale(float m) {
+    float t = (m < 0.0f) ? -m : m;
+    if (!(t > 0.0f) || detail::isinf(t)) return 1.0f;   // 0/inf/nan: loop would not terminate
+    int e = 0;
+    while (t >= 16777216.0f)   { t *= 5.9604644775390625e-8f; e += 24; }
+    while (t <  5.9604644775390625e-8f) { t *= 16777216.0f;   e -= 24; }
+    while (t >= 2.0f) { t *= 0.5f; ++e; }
+    while (t <  1.0f) { t *= 2.0f;  --e; }
+    if (e > 125) e = 125;
+    if (e < -125) e = -125;
+    return ldexpf(1.0f, -e);
+}
+XPMATH_INLINE_FUNCTION TripleFloat tf_pow2_scale(TripleFloat a, float s) {
+    return TripleFloat(a.f0 * s, a.f1 * s, a.f2 * s);
+}
+}  // namespace detail
+
+// Band in which a sum of squares may be formed DIRECTLY, shared by every TF
+// site that forms one (hypot here; complex abs and complex operator/ in
+// tf_complex.hpp).  Low edge is 2^-37, one binade above the derived
+// 2^-39 word-underflow limit of KI-8 note (1) at ff_math.hpp's hypot; the
+// high edge is unchanged from the original fix.
+namespace detail {
+inline constexpr float kTFSqLo = 1.8189894e-12f;
+inline constexpr float kTFSqHi = 1.0e18f;
+}
+
 XPMATH_INLINE_FUNCTION TripleFloat angle(TripleFloat x, TripleFloat y) {
     const TripleFloat pi   = TripleFloat_pi();
     const TripleFloat pi_2 = mul_pwr2(pi, 0.5f);    // exact: power-of-2 scaling
@@ -1118,6 +1158,32 @@ XPMATH_INLINE_FUNCTION TripleFloat angle(TripleFloat x, TripleFloat y) {
     }
 
     // Normalize onto the unit circle.  QD qd_real.cpp:2432-2434.
+    // KI-13.  The r below is a sum of squares and has exactly hypot's exposure:
+    // it overflowed the word above |x| ~ 1.8e19 (atan(3.16e19) returned NaN, and
+    // atan2/asin/acos/complex arg inherited it) and shed low words below the
+    // derived 2^-39 (see the KI-8 note at ff_math.hpp's hypot).  angle is
+    // EXACTLY scale-invariant -- atan2(ys, xs) = atan2(y, x) for any s > 0 --
+    // so the remedy here is one power-of-two rescale of both operands, which
+    // changes no bit of the answer and puts the square back inside the word
+    // range.
+    {
+        const float mx = detail::fabs(x.f0), my = detail::fabs(y.f0);
+        const float mm = (mx > my) ? mx : my;
+        // HIGH side only.  The low side was tried and reverted: r is used only
+        // to normalise (x/r, y/r) before a 3-step Newton refinement on
+        // atan2, and that refinement re-evaluates sin/cos of the iterate, so
+        // low words shed from r do not survive into the answer -- rescaling
+        // there only perturbs the seed.  Measured on the 428,592-point sweep:
+        // a two-sided gate cost 45 regressions (worst 1.27 digits, QF c atan
+        // points 1254/1318) to buy 35 improvements.  The high side is a real
+        // fix -- without it the square OVERFLOWS and atan/atan2/asin/acos/arg
+        // return 0 or NaN outright.
+        if (mm > detail::kTFSqHi) {
+            const float s = detail::tf_pow2_unit_scale(mm);
+            x = detail::tf_pow2_scale(x, s);
+            y = detail::tf_pow2_scale(y, s);
+        }
+    }
     TripleFloat r  = sqrt(add(sqr(x), sqr(y)));
     TripleFloat xx = divide(x, r);
     TripleFloat yy = divide(y, r);
@@ -1185,11 +1251,39 @@ XPMATH_INLINE_FUNCTION TripleFloat acos(TripleFloat a) {
     return angle(a, sqrt(subtract(TripleFloat(1.0f), sqr(a))));
 }
 
+// KI-13.  asinh and acosh both form a^2 +- 1, which leaves the word range at
+// |a| = sqrt(FLT_MAX) = 1.844e19 -- far short of what the format reaches -- and
+// sqrt(inf)/log(inf) then returned NaN.  Above the band the square is factored
+// out instead:
+//
+//     asinh(a) = log(|a|) + log(1 + sqrt(1 + 1/a^2)),  sign-reflected
+//     acosh(a) = log(a)   + log(1 + sqrt(1 - 1/a^2))
+//
+// u = 1/a^2 is formed as (1/a)^2 so nothing squares a; it is in (0,1], and for
+// |a| past 1/sqrt(smallest normal) it simply flushes to zero, which is the
+// correct limit (asinh(a) -> log(2a)).  No cancellation: log(|a|) dominates the
+// second term's log(2) ~ 0.69 by orders of magnitude, and both are computed to
+// full relative precision.  Below the band the original expression is kept
+// bit-for-bit.  Full argument at ff_math.hpp's asinh.
+// TF's asinh carries no odd reflection (unlike DD/FF/QF), so the branch below
+// works on |a| and re-applies the sign itself.
 XPMATH_INLINE_FUNCTION TripleFloat asinh(TripleFloat a) {
+    if (detail::fabs(a.f0) > detail::kTFSqHi) {
+        TripleFloat aa = abs(a);
+        TripleFloat u  = divide(TripleFloat(1.0f), aa);
+        u = multiply(u, u);
+        TripleFloat r = add(log(aa), log(add(TripleFloat(1.0f), sqrt(add(TripleFloat(1.0f), u)))));
+        return (a.f0 < 0.0f) ? negate(r) : r;
+    }
     return log(add(a, sqrt(add(sqr(a), TripleFloat(1.0f)))));
 }
 
 XPMATH_INLINE_FUNCTION TripleFloat acosh(TripleFloat a) {
+    if (a.f0 > detail::kTFSqHi) {
+        TripleFloat u = divide(TripleFloat(1.0f), a);
+        u = multiply(u, u);
+        return add(log(a), log(add(TripleFloat(1.0f), sqrt(subtract(TripleFloat(1.0f), u)))));
+    }
     return log(add(a, sqrt(subtract(sqr(a), TripleFloat(1.0f)))));
 }
 
@@ -1434,7 +1528,7 @@ XPMATH_INLINE_FUNCTION TripleFloat hypot(TripleFloat a, TripleFloat b) {
     TripleFloat m = (x.f0 < y.f0) ? y : x;
     TripleFloat n = (x.f0 < y.f0) ? x : y;
     if (m.f0 == 0.0f) return TripleFloat(0.0f);
-    if (m.f0 <= 1.0e18f && m.f0 >= 1.0e-18f)
+    if (m.f0 <= detail::kTFSqHi && m.f0 >= detail::kTFSqLo)
         return sqrt(add(sqr(a), sqr(b)));
     TripleFloat t = divide(n, m);
     return multiply(m, sqrt(add(TripleFloat(1.0f), multiply(t, t))));

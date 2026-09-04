@@ -606,12 +606,78 @@ XPMATH_INLINE_FUNCTION DoubleDouble tan(DoubleDouble a) {
 
 // Angle of point (x, y) = atan2(y, x). Internal DDFUN primitive (DDANG); the
 // public STL-ordered wrapper is atan2(y, x) below.
+namespace detail {
+// KI-8.  Exact power-of-two scale factor: returns s = 2^-e with |m|*s in [1,2),
+// so that s and 1/s are both exactly representable and scaling every word of an
+// expansion by either loses no bit.  Mirrors detail::ff_pow2_unit_scale in
+// ff_math.hpp, which carries the full argument.
+//
+// e is clamped to [-1021, 1021] so both s and 1/s stay NORMAL doubles; at the
+// clamp the operand is not brought all the way to [1,2), but the square is
+// still inside the word range, which is all the caller needs.
+//
+// No frexp: config.hpp's scalar dispatch does not carry one, and a
+// dependency-free loop is portable to every device backend.  It runs only
+// outside the direct band, never on the hot path.
+XPMATH_INLINE_FUNCTION double dd_pow2_unit_scale(double m) {
+    double t = (m < 0.0) ? -m : m;
+    if (!(t > 0.0) || detail::isinf(t)) return 1.0;   // 0/inf/nan: loop would not terminate
+    int e = 0;
+    while (t >= 18014398509481984.0)   { t *= 5.5511151231257827e-17; e += 54; }
+    while (t <  5.5511151231257827e-17) { t *= 18014398509481984.0;   e -= 54; }
+    while (t >= 2.0) { t *= 0.5; ++e; }
+    while (t <  1.0) { t *= 2.0;  --e; }
+    if (e > 1021) e = 1021;
+    if (e < -1021) e = -1021;
+    return detail::ldexp(1.0, -e);
+}
+XPMATH_INLINE_FUNCTION DoubleDouble dd_pow2_scale(DoubleDouble a, double s) {
+    return DoubleDouble(a.hi * s, a.lo * s);
+}
+}  // namespace detail
+
+// Band in which a sum of squares may be formed DIRECTLY, shared by every DD
+// site that forms one (hypot here; complex abs and complex operator/ in
+// dd_complex.hpp).  Low edge is 2^-483, one binade above the derived
+// 2^-484.5 word-underflow limit of KI-8 note (1) at ff_math.hpp's hypot; the
+// high edge is unchanged from the original fix.
+namespace detail {
+inline constexpr double kDDSqLo = 4.0e-146;
+inline constexpr double kDDSqHi = 1.0e150;
+}
+
 XPMATH_INLINE_FUNCTION DoubleDouble angle(DoubleDouble x, DoubleDouble y) {
     DoubleDouble pi = DoubleDouble_pi();
     if (x.hi == 0.0 && y.hi == 0.0) return DoubleDouble(0.0);
     if (x.hi == 0.0) return (y.hi > 0.0) ? multiply_scalar(pi, 0.5) : multiply_scalar(pi, -0.5);
     if (y.hi == 0.0) return (x.hi > 0.0) ? DoubleDouble(0.0) : pi;
     // Normalize
+    // KI-13.  The r below is a sum of squares and has exactly hypot's exposure:
+    // it overflowed the word above |x| ~ 1.3e154 (atan(1e160) returned NaN, and
+    // atan2/asin/acos/complex arg inherited it) and shed low words below the
+    // derived 2^-484.5 (see the KI-8 note at ff_math.hpp's hypot).  angle is
+    // EXACTLY scale-invariant -- atan2(ys, xs) = atan2(y, x) for any s > 0 --
+    // so the remedy here is one power-of-two rescale of both operands, which
+    // changes no bit of the answer and puts the square back inside the word
+    // range.
+    {
+        const double mx = detail::fabs(x.hi), my = detail::fabs(y.hi);
+        const double mm = (mx > my) ? mx : my;
+        // HIGH side only.  The low side was tried and reverted: r is used only
+        // to normalise (x/r, y/r) before a 3-step Newton refinement on
+        // atan2, and that refinement re-evaluates sin/cos of the iterate, so
+        // low words shed from r do not survive into the answer -- rescaling
+        // there only perturbs the seed.  Measured on the 428,592-point sweep:
+        // a two-sided gate cost 45 regressions (worst 1.27 digits, QF c atan
+        // points 1254/1318) to buy 35 improvements.  The high side is a real
+        // fix -- without it the square OVERFLOWS and atan/atan2/asin/acos/arg
+        // return 0 or NaN outright.
+        if (mm > detail::kDDSqHi) {
+            const double s = detail::dd_pow2_unit_scale(mm);
+            x = detail::dd_pow2_scale(x, s);
+            y = detail::dd_pow2_scale(y, s);
+        }
+    }
     DoubleDouble r = sqrt(add(multiply(x,x), multiply(y,y)));
     DoubleDouble nx = divide(x, r), ny = divide(y, r);
     // Initial approximation
@@ -720,14 +786,38 @@ XPMATH_INLINE_FUNCTION DoubleDouble tanh(DoubleDouble a) {
     return divide(e, add(e, DoubleDouble(2.0)));
 }
 
+// KI-13.  asinh and acosh both form a^2 +- 1, which leaves the word range at
+// |a| = sqrt(DBL_MAX) = 1.34e154 -- far short of what the format reaches -- and
+// sqrt(inf)/log(inf) then returned NaN.  Above the band the square is factored
+// out instead:
+//
+//     asinh(a) = log(|a|) + log(1 + sqrt(1 + 1/a^2)),  sign-reflected
+//     acosh(a) = log(a)   + log(1 + sqrt(1 - 1/a^2))
+//
+// u = 1/a^2 is formed as (1/a)^2 so nothing squares a; it is in (0,1], and for
+// |a| past 1/sqrt(smallest normal) it simply flushes to zero, which is the
+// correct limit (asinh(a) -> log(2a)).  No cancellation: log(|a|) dominates the
+// second term's log(2) ~ 0.69 by orders of magnitude, and both are computed to
+// full relative precision.  Below the band the original expression is kept
+// bit-for-bit.  Full argument at ff_math.hpp's asinh.
 XPMATH_INLINE_FUNCTION DoubleDouble asinh(DoubleDouble a) {
     // Reflect: asinh(-a) = -asinh(a). For positive a, a + sqrt(a²+1) >= 1 always,
     // so log argument never causes cancellation.
     if (a.hi < 0.0) return negate(asinh(negate(a)));
+    if (a.hi > detail::kDDSqHi) {
+        DoubleDouble u = divide(DoubleDouble(1.0), a);
+        u = multiply(u, u);
+        return add(log(a), log(add(DoubleDouble(1.0), sqrt(add(DoubleDouble(1.0), u)))));
+    }
     return log(add(a, sqrt(add(multiply(a, a), DoubleDouble(1.0)))));
 }
 XPMATH_INLINE_FUNCTION DoubleDouble acosh(DoubleDouble a) {
     if (a.hi < 1.0) { XPMATH_PRINTF("DDACOSH: argument < 1\n"); return DoubleDouble(0.0); }
+    if (a.hi > detail::kDDSqHi) {
+        DoubleDouble u = divide(DoubleDouble(1.0), a);
+        u = multiply(u, u);
+        return add(log(a), log(add(DoubleDouble(1.0), sqrt(subtract(DoubleDouble(1.0), u)))));
+    }
     DoubleDouble t1 = subtract(multiply(a, a), DoubleDouble(1.0));
     return log(add(a, sqrt(t1)));
 }
@@ -789,7 +879,7 @@ XPMATH_INLINE_FUNCTION DoubleDouble hypot(DoubleDouble a, DoubleDouble b) {
     DoubleDouble m = (x.hi < y.hi) ? y : x;
     DoubleDouble n = (x.hi < y.hi) ? x : y;
     if (m.hi == 0.0) return DoubleDouble(0.0);
-    if (m.hi <= 1.0e150 && m.hi >= 1.0e-150)
+    if (m.hi <= detail::kDDSqHi && m.hi >= detail::kDDSqLo)
         return sqrt(add(multiply(a, a), multiply(b, b)));
     DoubleDouble t = divide(n, m);
     return multiply(m, sqrt(add(DoubleDouble(1.0), multiply(t, t))));

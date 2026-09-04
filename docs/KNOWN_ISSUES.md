@@ -1827,6 +1827,151 @@ ratcheted from `|x| < 300` / `uniform(-50,50)` to `isfinite(x)` /
 
 ## KI-8 — `hypot` and complex `abs` have NO scaling, so they overflow and underflow far inside the representable range **[REOPENED 2026-09-03]**
 
+### RESOLVED 2026-09-04 — commit `fix: KI-8 scale hypot/abs at BOTH ends; KI-13 remaining unscaled sums of squares`
+
+(Referenced by subject, not sha: this doc ships INSIDE that commit, so its own
+sha is not knowable while it is being written, and the session was constrained
+to a single commit.)
+
+**What the 2026-09-02 fix missed.** It added the gate, and it picked the gate's
+LOW edge (`1.0e-18f`, `1.0e-150` on DD) against the wrong cliff: the point at
+which the *square* stops being a normal **float**. For an expansion the binding
+constraint is the point at which the square's LAST WORD stops being a normal
+float. A W-word FP32 expansion of magnitude `v` carries its last word at
+`~v·2^-24(W-1)`, so `m²` keeps all its words only while `m²·2^-24(W-1) ≥ FLT_MIN`:
+
+| backend | words | derived low limit | old gate edge | width of the hole |
+|---|---|---|---|---|
+| FF | 2×FP32 | 2^-51 = 4.44e-16 | 1.0e-18f | ~2.4 decades |
+| TF | 3×FP32 | 2^-39 = 1.82e-12 | 1.0e-18f | ~5.7 decades |
+| QF | 4×FP32 | 2^-27 = 7.45e-9 | 1.0e-18f | ~9.1 decades |
+| DD | 2×FP64 | 2^-484.5 = 1.5e-146 | 1.0e-150 | ~3.8 decades |
+
+Inside that hole the direct form ran and silently shed low words. **DD was
+genuinely exposed**, not merely in principle: `hypot(1e-150, 1e-150)` and the
+matching complex `abs` scored 23.52 of 31 digits.
+
+**Why the verification did not catch it.** The 2026-09-02 probes went
+1e19…1e38 (above the gate) and 1e-25/1e-38 (below it, where the scaled tail
+already ran and was already at the format limit). Neither ladder has a rung in
+[1e-18, 4.4e-16] for FF or in [1e-18, 7.5e-9] for QF — the probe stepped
+straight over the band the gate itself had created.
+
+**The fix.** The gate's low edge is now the derived limit itself, to the bit
+(`kFFSqLo = 2^-51`, `kTFSqLo = 2^-39`, `kQFSqLo = 2^-27`, `kDDSqLo = 4.0e-146`),
+shared by `hypot`, complex `abs` and complex `operator/` in each backend. The
+TAIL is unchanged — see below.
+
+**Genuine floor (format limit, documented not fixed).** Below the point where
+the expansion's own LAST WORD goes subnormal, precision is gone before any
+arithmetic happens: FF 2^-102 ≈ 1.97e-31, TF 2^-78 ≈ 3.31e-24,
+QF 2^-54 ≈ 5.55e-17, DD 2^-969 ≈ 5.6e-292. Everything ABOVE those now delivers
+full precision; measurements below them (e.g. QF `hypot(1e-20)` at 25.50 of 29)
+sit at the format limit and are correct as they stand.
+
+**Rejected alternative, with measurements.** Replacing the divide-based
+`m·sqrt(1+t²)` tail with an exact-power-of-two rescale plus a direct square
+looks free — scaling every word by `s = 2^-e` loses no bit and `s² = 2^-2e` is
+also a power of two, so the expression is scale-equivariant on paper. It is
+not free in practice: `sqrt()` of a square does not round-trip, and when the
+smaller operand is exactly ZERO the min/max tail returns `m` bit-for-bit while
+the squared form returns `sqrt(m²)`, a couple of ulps off. Complex `asin`
+amplifies that by `|z|²`. Measured on the 428,592-point sweep, the pow2-squared
+tail cost:
+
+| point | z | before | after (rejected) |
+|---|---|---|---|
+| QF c asin 1628/1630 | ±1e10 + 0i | 24.45 | 11.91 (−12.54) |
+| QF c asin 1632/1634 | ±1e11 + 0i | 16.68 | 9.97 (−6.71) |
+| QF c asin 1648/1650 | ±1e15 + 0i | 16.08 | 2.04 (−14.04) |
+
+(`asin` routes through complex `sqrt`, whose `abs` sees `(-1e20, ±0)` — exactly
+the zero-component case.) The tail therefore keeps the min/max form and only
+the GATE moved, which is also the smaller change. A one-binade safety margin on
+the low edge was likewise tried and reverted: it cost 0.13–0.74 digits at six
+sweep points that landed inside the margin (QF c abs 7/17, c pow 13/25, c div
+1/510) for no measured gain.
+
+**Before/after, small magnitudes** (`hypot(x,x)` and complex `abs(x+xi)`,
+digits vs the `__float128` oracle; identical for both call sites unless noted):
+
+| backend | 1e-3 | 1e-8 | 1e-12 | 1e-14 | 1e-16 | 1e-17 | 1e-18 | 1e-20 |
+|---|---|---|---|---|---|---|---|---|
+| FF before | 14.00 | 14.00 | 14.00 | 14.00 | 13.88 | 11.38 | 9.01 | (cliff) |
+| FF after | 14.00 | 14.00 | 14.00 | 14.00 | **14.00** | **14.00** | **14.00** | (cliff) |
+| TF before | 21.70 | 21.70 | 21.27 | 18.92 | 13.88 | 11.32 | 9.14/10.51 | 14.55 |
+| TF after | 21.70 | 21.70 | **21.70** | **21.70** | **21.70** | **21.70** | **21.70** | 14.55 |
+| QF before | 29.00 | 29.00 | 22.14 | 17.61 | 13.88 | 11.32 | 9.14 | 25.50 |
+| QF after | 29.00 | 29.00 | **29.00** | **29.00** | **29.00** | **28.42** | **26.99** | 25.50 |
+
+DD, on its own ladder: `hypot`/`cabs` at 1e-150 went **23.52 → 31.00**; 1e-146,
+1e-160, 1e-200, 1e-290 and 1e-300 were already at cap and are unchanged.
+
+Just below each backend's representation cliff the numbers stay where they
+were, as they must: QF 1e-20 → 25.50, TF 1e-24 → 21.21, FF 1e-32 → 13.42, all
+identical before and after.
+
+**Before/after, large magnitudes** — unchanged, i.e. the half that already
+worked is intact: FF/TF/QF `hypot` and complex `abs` at 1e19, 1e20, 1e24, 1e30,
+1e35, 1e38 all still sit at their caps (14.00 / 21.70 / 29.00), and DD at 1e30
+through 1e300 all still 31.00.
+
+**Family audit — recheck 2026-09-04.** The 2026-09-02 table below still stands;
+the low-edge move changes three verdicts from "fixed at the top end" to "fixed
+at both": `hypot`, complex `abs`, complex `operator/`. `operator/` is the one
+that needed a judgement call — widening its low edge routes more denominators
+through Smith's algorithm, which forms no square at all. Measured, that is a
+net win by a wide margin: **+143 improved points against 2 newly decreased**,
+so it stayed widened. Everything else in the table was re-read and its verdict
+is unchanged: complex `sqrt` inherits the fixed `abs`; `log`/`log10`/`pow`
+inherit it in turn; `norm` is unfixable by construction (|z|² overflows exactly
+when its own answer does); `arg`, `polar`, `tan`/`tanh` and the gated `atanh`
+branch form no exposed magnitude.
+
+**Accepted decreases — monotone gate, 2026-09-04.** The read-only gate
+(`sweep_accuracy --baseline validation/sweep/sweep_baseline.csv`) reports
+**1,226 increased, 18 decreased, worst 0.56 digits** and therefore exits 1. The
+18 are accepted, not fixed, and this is the record of that decision. Every one
+sits in a complex chain whose intermediate magnitude falls just below the new
+low edge, so the value now takes the min/max tail where it used to take the
+direct square; the tail costs a fraction of a digit there because the intermediate
+is close enough to the edge that the direct form had not yet shed a whole word.
+All 18 are already 5–15 digits below their backend's cap for reasons of
+conditioning, so the fraction of a digit is not the binding constraint at any
+of them.
+
+| op | points | grid coordinates | before → after |
+|---|---|---|---|
+| QF c asin | 602, 858 | cut-re, `-1 + 1e-12i` | 22.15 → 21.73 (−0.42) |
+| QF c acos | 602 | cut-re, `-1 + 1e-12i` | 22.15 → 21.73 (−0.42) |
+| QF c asinh | 1243, 1307 | cut-im | 22.15 → 21.73 (−0.42) |
+| QF c acosh | 856, 857 | cut-im | 22.71 → 22.63 (−0.08) |
+| QF c acosh | 598, 599 | cut-re | 22.49 → 22.48 (−0.01) |
+| QF c pow | 20 | polar, `-7.07e-9 - 7.07e-9i` | 27.40 → 26.84 (−0.56) |
+| QF c pow | 1505 | — | 27.47 → 27.36 (−0.11) |
+| TF c asin | 610, 866 | cut-re | 15.19 → 15.17 (−0.02) |
+| TF c acos | 610 | cut-re | 15.19 → 15.17 (−0.02) |
+| TF c asinh | 1251, 1315 | cut-im | 15.19 → 15.17 (−0.02) |
+| FF c pow | 740, 1533 | — | 13.50 → 13.34, 13.11 → 13.05 |
+
+Mechanism, concretely, for the largest of them: `asin(-1 + 1e-12i)` forms
+`1 - z² ≈ 2e-12`, and complex `sqrt` calls `abs` on that. `2e-12` is below
+QF's new low edge `2^-27 = 7.45e-9`, so `abs` now takes the tail. The direct
+square at that magnitude has `m²·2^-72 ≈ 8.5e-46`, i.e. it HAS lost its two
+bottom words — the tail is the more defensible code path even though it scores
+0.42 digits lower at this particular point, because the point's own answer is
+conditioning-limited to ~22 digits either way.
+
+**ULP gate** (`sweep_accuracy --ulp`): failing gated cells **67 → 62**, failing
+gated points **5,787 → 5,451**. The three `hypot` UNEXPLAINED cells that
+motivated the reopen are GONE (FF 5.76e3×, TF 6.88e10×, QF 7.26e14× over bound
+→ no longer failing). `QF r atan` went from `inf` to 14.31× over bound;
+`FF r acosh` from `inf` to 11.04×; `TF r atan`, `TF r acosh` and `QF r acosh`'s
+`inf` cells cleared. `QF r asinh`/`acosh` improved from `inf` to 2.01e11× —
+still failing, for the QF-`log` reason recorded under KI-13's residuals.
+
+
+
 **Severity: high, FP32-word backends (FF, QF, TF); DD unaffected.**
 
 ### REOPENED 2026-09-03 — the underflow half was never fixed
@@ -2585,6 +2730,60 @@ uninitialised-out-param pattern should be checked in all four.
 ---
 
 ## KI-13 — `angle`, `asinh` and `acosh` still form an UNSCALED sum of squares, so they NaN at |x| ≳ 1.8e19
+
+### RESOLVED 2026-09-04 — commit `fix: KI-8 scale hypot/abs at BOTH ends; KI-13 remaining unscaled sums of squares`
+
+(Referenced by subject, not sha: this doc ships INSIDE that commit, so its own
+sha is not knowable while it is being written, and the session was constrained
+to a single commit.)
+
+Same root cause as KI-8, three different call sites. All three now rescale by
+an EXACT power of two (`*_pow2_unit_scale` / `*_pow2_scale` in each
+`*_math.hpp`), which changes no bit of an operand.
+
+- **`angle`** — `atan2` is exactly scale-invariant, `atan2(ys, xs) = atan2(y, x)`
+  for any `s > 0`, so one rescale of both operands is a free fix. Applied on the
+  **HIGH side only**, and that asymmetry is deliberate: `r` is used only to
+  normalise `(x/r, y/r)` before a 3-step Newton refinement that re-evaluates
+  `sin`/`cos` of the iterate, so low words shed from `r` do not survive into the
+  answer — rescaling at the low end only perturbs the seed. Measured: a
+  two-sided gate cost **45 regressions** (worst 1.27 digits, QF c atan points
+  1254/1318) to buy **35 improvements**. The high side is a real fix; without it
+  the square OVERFLOWS and `atan`/`atan2`/`asin`/`acos`/complex `arg` return 0
+  or NaN outright.
+- **`asinh`** — above the gate, `asinh(a) = log(a) + log(1 + sqrt(1 + 1/a²))`,
+  which forms `1/a²` (tiny, harmless) instead of `a²` (overflowing). TF's
+  `asinh` has no odd reflection, so its branch works on `abs(a)` and re-applies
+  the sign.
+- **`acosh`** — likewise `acosh(a) = log(a) + log(1 + sqrt(1 - 1/a²))`.
+
+**Before/after** (digits vs the `__float128` oracle; `atan` is the `angle`
+call site):
+
+| backend | op | 1e19 | 1e20 | 1e24 | 1e30 | 1e35 | 1e38 |
+|---|---|---|---|---|---|---|---|
+| FF | atan / asinh / acosh | 14.00 | **0.00 → 14.00** | **0.00 → 14.00** | **0.00 → 14.00** | **0.00 → 14.00** | **0.00 → 14.00** |
+| TF | atan / asinh / acosh | 21.70 | **0.00 → 21.70** | **0.00 → 21.70** | **0.00 → 21.70** | **0.00 → 21.70** | **0.00 → 21.70** |
+| QF | atan | 29.00 | **0.00 → 29.00** | **0.00 → 29.00** | **0.00 → 29.00** | **0.00 → 29.00** | **0.00 → 29.00** |
+| QF | asinh / acosh | 27.51 → **28.93** | **0.00 → 27.18** | **0.00 → 23.37** | **0.00 → 17.97** | **0.00 → 12.36** | **0.00 → 8.93** |
+
+DD, on its own ladder: `atan`, `asinh` and `acosh` at 1e160, 1e200 and 1e300 all
+went **0.00 → 31.00**. Small magnitudes are unchanged for every backend.
+
+**Residual, NOT closed by this commit and NOT started (out of scope — one KI at
+a time).** Three separate defects surfaced while probing; each has a different
+mechanism from KI-13's premature squaring, and each is a strict improvement over
+the pre-fix 0.00/NaN:
+
+1. **QF `asinh`/`acosh` decay above the band** — 27.18 at 1e20 falling to 8.93
+   at 1e38. The reformulated branch is `log(a) + log(1 + sqrt(1 - 1/a²))`, whose
+   second term is fine; the loss tracks QF `log()` at large argument. Not
+   diagnosed further.
+2. **FF `atan` returns 0.00 for x ≤ 1e-30** — small-argument path, not a sum of
+   squares.
+3. **FF `asinh` holds only ~7–8 of 14 digits for tiny x** — classic `log(1+a)`
+   cancellation at the LOW end; KI-13's mechanism is at the high end.
+
 
 **Severity: high, FF/QF/TF (the float-word backends), 402 real points.**
 

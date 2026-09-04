@@ -104,7 +104,12 @@ struct FloatFloatComplex {
             float mre = detail::fabs(b.re.hi);
             float mim = detail::fabs(b.im.hi);
             float mb  = (mre > mim) ? mre : mim;
-            if (!(mb <= 1.0e18f && mb >= 1.0e-18f)) {
+            // KI-8 REOPENED: low edge widened from 1e-18f to the derived
+            // word-underflow limit kFFSqLo -- the denominator's square shed low
+            // words all the way up to 4.4e-16, not just below 1e-18f.  Smith's
+            // algorithm forms no square at all, so it is correct across the
+            // whole widened band.
+            if (!(mb <= detail::kFFSqHi && mb >= detail::kFFSqLo)) {
                 if (mre >= mim) {
                     FloatFloat rr = divide(b.im, b.re);
                     FloatFloat dd = add(b.re, multiply(b.im, rr));
@@ -185,13 +190,30 @@ XPMATH_INLINE_FUNCTION FloatFloatComplex operator/(float b, FloatFloatComplex z)
 // used, and on TF that is sqr() where this one is multiply().  Swapping them
 // costs up to 3.04 digits at four grid points (measured on the 428,592-point
 // sweep, TF c abs points 736/737/1528..1531), so the two call sites keep their
-// own primitives and share only the scaled tail.
+// own primitives.
+//
+// KI-8 REOPENED: the band's low edge is now the derived word-underflow limit
+// (ff_math.hpp's kFFSqLo, four decades above the old 1e-18f), and the out-of-
+// band path scales by an EXACT power of two and then runs THIS site's own
+// primitive rather than deferring to hypot.  Both changes are argued at
+// ff_math.hpp's hypot; the second is what lets the band widen for free, since
+// power-of-two scaling makes the direct expression exactly scale-equivariant.
 XPMATH_INLINE_FUNCTION FloatFloat abs(FloatFloatComplex z) {
     float mr = detail::fabs(z.re.hi);
     float mi = detail::fabs(z.im.hi);
     float m  = (mr > mi) ? mr : mi;
-    if (!(m <= 1.0e18f && m >= 1.0e-18f)) return hypot(z.re, z.im);
-    return sqrt(add(multiply(z.re, z.re), multiply(z.im, z.im)));
+    if (m == 0.0f) return FloatFloat(0.0f);
+    if (m <= detail::kFFSqHi && m >= detail::kFFSqLo)
+        return sqrt(add(multiply(z.re, z.re), multiply(z.im, z.im)));
+    // Out of band -- and that includes inf/nan, whose C99 F.9.4.3 convention
+    // hypot owns -- defer to hypot's min/max tail, which forms no square at
+    // all.  KI-8 REOPENED: an earlier revision of this fix scaled by an exact
+    // power of two and squared anyway; that is exact for the SCALING but the
+    // square still round-trips through sqrt, and complex asin amplifies the
+    // resulting few ulps by |z|^2 (measured: QF c asin lost up to 14.04 digits
+    // at sweep points 1628..1650).  The min/max tail is exact when one
+    // component is zero, which is precisely those points.
+    return hypot(z.re, z.im);
 }
 XPMATH_INLINE_FUNCTION FloatFloatComplex conj(FloatFloatComplex z) {
     return FloatFloatComplex(z.re, negate(z.im));

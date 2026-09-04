@@ -783,11 +783,78 @@ XPMATH_INLINE_FUNCTION FloatFloat tan(FloatFloat a) {
 }
 
 // Angle of point (x, y) = atan2(y, x)
+namespace detail {
+// KI-8.  Exact power-of-two scale factor: returns s = 2^-e with |m|*s in [1,2),
+// so that s and 1/s are both exactly representable and scaling every word of an
+// expansion by either loses no bit.
+//
+// e is clamped to [-125, 125] so both s and 1/s stay NORMAL floats.  At the
+// clamp the operand is not brought all the way to [1,2), but it does not need
+// to be: |m| <= 2^-125 scaled up by 2^125 lands at >= 2^-24, whose square's
+// fourth FP32 word is 2^-120 -- still normal, which is all the caller needs;
+// and |m| >= 2^125 scaled down by 2^-125 lands in [1,8), whose square is at
+// most 64.
+//
+// No frexp: config.hpp's scalar dispatch does not carry one, and a
+// dependency-free loop is portable to every device backend.  It runs only
+// outside the direct band, never on the hot path.
+XPMATH_INLINE_FUNCTION float ff_pow2_unit_scale(float m) {
+    float t = (m < 0.0f) ? -m : m;
+    if (!(t > 0.0f) || detail::isinf(t)) return 1.0f;   // 0/inf/nan: loop would not terminate
+    int e = 0;
+    while (t >= 16777216.0f)            { t *= 5.9604644775390625e-8f; e += 24; }
+    while (t <  5.9604644775390625e-8f) { t *= 16777216.0f;            e -= 24; }
+    while (t >= 2.0f) { t *= 0.5f; ++e; }
+    while (t <  1.0f) { t *= 2.0f; --e; }
+    if (e >  125) e =  125;
+    if (e < -125) e = -125;
+    return ldexpf(1.0f, -e);
+}
+XPMATH_INLINE_FUNCTION FloatFloat ff_pow2_scale(FloatFloat a, float s) {
+    return FloatFloat(a.hi * s, a.lo * s);
+}
+}  // namespace detail
+
+// Band in which a sum of squares may be formed DIRECTLY, shared by every FF
+// site that forms one (hypot here; complex abs and complex operator/ in
+// ff_complex.hpp).  Low edge is 2^-49, one binade above the derived 2^-51
+// word-underflow limit of KI-8 note (1); the high edge is unchanged from the
+// original fix and sits below sqrt(FLT_MAX) = 1.84e19.
+namespace detail {
+inline constexpr float kFFSqLo = 4.4408921e-16f;
+inline constexpr float kFFSqHi = 1.0e18f;
+}
+
 XPMATH_INLINE_FUNCTION FloatFloat angle(FloatFloat x, FloatFloat y) {
     FloatFloat pi = FloatFloat_pi();
     if (x.hi == 0.0f && y.hi == 0.0f) return FloatFloat(0.0f);
     if (x.hi == 0.0f) return (y.hi > 0.0f) ? multiply_scalar(pi, 0.5f) : multiply_scalar(pi, -0.5f);
     if (y.hi == 0.0f) return (x.hi > 0.0f) ? FloatFloat(0.0f) : pi;
+    // KI-13.  The r below is a sum of squares and has exactly hypot's exposure:
+    // it overflowed the FP32 word above |x| ~ 1.8e19 (atan(3.16e19) returned
+    // NaN, and atan2/asin/acos/complex arg inherited it) and shed low words
+    // below the derived 2^-51 (see the KI-8 note at hypot).  angle is EXACTLY
+    // scale-invariant -- atan2(ys, xs) = atan2(y, x) for any s > 0 -- so the
+    // remedy here is one power-of-two rescale of both operands, which changes
+    // no bit of the answer and puts the square back inside the word range.
+    {
+        const float mx = detail::fabs(x.hi), my = detail::fabs(y.hi);
+        const float mm = (mx > my) ? mx : my;
+        // HIGH side only.  The low side was tried and reverted: r is used only
+        // to normalise (x/r, y/r) before a 3-step Newton refinement on
+        // atan2, and that refinement re-evaluates sin/cos of the iterate, so
+        // low words shed from r do not survive into the answer -- rescaling
+        // there only perturbs the seed.  Measured on the 428,592-point sweep:
+        // a two-sided gate cost 45 regressions (worst 1.27 digits, QF c atan
+        // points 1254/1318) to buy 35 improvements.  The high side is a real
+        // fix -- without it the square OVERFLOWS and atan/atan2/asin/acos/arg
+        // return 0 or NaN outright.
+        if (mm > detail::kFFSqHi) {
+            const float s = detail::ff_pow2_unit_scale(mm);
+            x = detail::ff_pow2_scale(x, s);
+            y = detail::ff_pow2_scale(y, s);
+        }
+    }
     FloatFloat r = sqrt(add(multiply(x,x), multiply(y,y)));
     FloatFloat nx = divide(x, r), ny = divide(y, r);
     FloatFloat a = FloatFloat(detail::atan2(ny.hi, nx.hi));
@@ -891,12 +958,35 @@ XPMATH_INLINE_FUNCTION FloatFloat tanh(FloatFloat a) {
     return divide(e, add(e, FloatFloat(2.0f)));
 }
 
+// KI-13.  asinh and acosh both form a^2 +- 1, which leaves the FP32 word at
+// |a| = sqrt(FLT_MAX) = 1.844e19 -- five decades short of the 3.4e38 the format
+// reaches -- and sqrt(inf)/log(inf) then returned NaN.  Above the band the
+// square is factored out instead:
+//
+//     asinh(a) = log(|a|) + log(1 + sqrt(1 + 1/a^2)),  sign-reflected
+//     acosh(a) = log(a)   + log(1 + sqrt(1 - 1/a^2))
+//
+// u = 1/a^2 is formed as (1/a)^2 so nothing squares a; it is in (0,1], and for
+// |a| past 1/sqrt(FLT_MIN) it simply flushes to zero, which is the correct
+// limit (asinh(a) -> log(2a)).  No cancellation: log(|a|) >= 41 dominates the
+// second term's log(2) ~ 0.69, and both are computed to full relative
+// precision.  Below the band the original expression is kept bit-for-bit.
 XPMATH_INLINE_FUNCTION FloatFloat asinh(FloatFloat a) {
     if (a.hi < 0.0f) return negate(asinh(negate(a)));
+    if (a.hi > detail::kFFSqHi) {
+        FloatFloat u = divide(FloatFloat(1.0f), a);
+        u = multiply(u, u);
+        return add(log(a), log(add(FloatFloat(1.0f), sqrt(add(FloatFloat(1.0f), u)))));
+    }
     return log(add(a, sqrt(add(multiply(a, a), FloatFloat(1.0f)))));
 }
 XPMATH_INLINE_FUNCTION FloatFloat acosh(FloatFloat a) {
     if (a.hi < 1.0f) { XPMATH_PRINTF("FFACOSH: argument < 1\n"); return FloatFloat(0.0f); }
+    if (a.hi > detail::kFFSqHi) {
+        FloatFloat u = divide(FloatFloat(1.0f), a);
+        u = multiply(u, u);
+        return add(log(a), log(add(FloatFloat(1.0f), sqrt(subtract(FloatFloat(1.0f), u)))));
+    }
     FloatFloat t1 = subtract(multiply(a, a), FloatFloat(1.0f));
     return log(add(a, sqrt(t1)));
 }
@@ -952,18 +1042,59 @@ XPMATH_INLINE_FUNCTION FloatFloat pow(FloatFloat a, FloatFloat b) {
 // genuinely unrepresentable answer still reports inf rather than a wrong finite
 // value.
 //
-// The scaled form is NOT used unconditionally.  It costs a divide and is a
-// touch less accurate than the direct one (divide + square + sqrt + multiply
-// versus square + add + sqrt), so it is gated to the range where the direct
-// form actually breaks: for m inside [1.0e-18f, 1.0e18f] the old expression is
-// evaluated exactly as before and the added cost is two compares, not a divide.
-// Same reasoning as the atanh threshold in ff_complex.hpp -- fix the interval
-// that is broken, do not churn the one that is not.
+// The scaled form is NOT used unconditionally: it is gated to the range where
+// the direct form actually breaks, and inside the gate the original expression
+// is evaluated bit-for-bit.  Same reasoning as the atanh threshold in
+// ff_complex.hpp -- fix the interval that is broken, do not churn the one that
+// is not.
+//
+// KI-8, REOPENED 2026-09-03 -- TWO CHANGES.
+//
+// (1) THE GATE WAS ONE-SIDED IN PRACTICE.  Its low edge was 1.0e-18f, chosen
+//     against the point where the SQUARE stops being a normal FLOAT.  That is
+//     the wrong cliff for an expansion.  A W-word FP32 expansion of magnitude
+//     v carries its last word at ~v*2^-24(W-1), so the square m^2 keeps all its
+//     words only while m^2*2^-24(W-1) >= FLT_MIN = 2^-126, i.e.
+//
+//         m >= 2^-(126 - 24(W-1))/2  ->  FF (W=2): 2^-51 = 4.44e-16
+//                                        TF (W=3): 2^-39 = 1.82e-12
+//                                        QF (W=4): 2^-27 = 7.45e-9
+//                                        DD (W=2, FP64): 2^-484.5 = 1.5e-146
+//
+//     Between that limit and the old 1.0e-18f edge the direct form ran and
+//     silently shed the low words: measured QF hypot(1e-16, 1e-16) held 13.88
+//     of 29 digits -- 51 bits, two whole FP32 words -- while the ANSWER
+//     1.41e-16 sits comfortably above QF's own representation cliff of 2^-54.
+//     The 2026-09-02 verification only probed 1e19..1e38 and 1e-25/1e-38, i.e.
+//     above the old gate and far below it, and stepped straight over the band
+//     the gate itself created.  The low edge is now the derived limit itself,
+//     to the bit.  A binade of margin was tried first and cost 0.13-0.74 digits
+//     at six sweep points whose magnitude landed inside the margin (QF c abs
+//     7/17, c pow 13/25, c div 1/510) for no measured gain, so the margin came
+//     back out.
+//
+// (2) THE TAIL IS UNCHANGED -- deliberately.  Scaling every word by an exact
+//     power of two s = 2^-e loses no bit, and since s^2 = 2^-2e is also a power
+//     of two, sqrt((as)^2 + (bs)^2) = s*sqrt(a^2 + b^2) is scale-equivariant on
+//     paper, so replacing the divide-based tail with a pow2-scaled direct square
+//     looks free.  It is not.  sqrt() of a square does not round-trip: when the
+//     SMALLER operand is exactly zero the min/max tail returns m bit-for-bit
+//     (t = 0, sqrt(1) = 1, m*1 = m) while the squared form returns sqrt(m^2),
+//     which is a couple of ulps off.  Complex asin amplifies that by |z|^2.
+//     Measured on the 428,592-point sweep: the pow2-squared tail cost 12.54
+//     digits at QF c asin points 1628/1630 (z = +-1e10 + 0i) and 14.04 at
+//     1648/1650 (z = +-1e15 + 0i), because asin routes through complex sqrt,
+//     whose abs() sees (-1e20, +-0) -- exactly the zero-component case.  So the
+//     tail keeps the min/max form and only the GATE moves, which is also the
+//     smaller change.  Complex abs() likewise keeps its OWN squaring primitive
+//     in band (multiply(); TF's hypot uses sqr()) and defers to this tail out
+//     of band, exactly as before.
 //
 // inf/nan convention (C99 F.9.4.3): hypot(+-inf, y) is +inf for ANY y, NaN
 // included, so the inf test comes first.  Otherwise a NaN operand propagates to
 // NaN through the arithmetic.  Both operands are taken through abs() first, so
 // the returned infinity is always +inf.
+
 XPMATH_INLINE_FUNCTION FloatFloat hypot(FloatFloat a, FloatFloat b) {
     FloatFloat x = abs(a);
     FloatFloat y = abs(b);
@@ -972,7 +1103,7 @@ XPMATH_INLINE_FUNCTION FloatFloat hypot(FloatFloat a, FloatFloat b) {
     FloatFloat m = (x.hi < y.hi) ? y : x;
     FloatFloat n = (x.hi < y.hi) ? x : y;
     if (m.hi == 0.0f) return FloatFloat(0.0f);
-    if (m.hi <= 1.0e18f && m.hi >= 1.0e-18f)
+    if (m.hi <= detail::kFFSqHi && m.hi >= detail::kFFSqLo)
         return sqrt(add(multiply(a, a), multiply(b, b)));
     FloatFloat t = divide(n, m);
     return multiply(m, sqrt(add(FloatFloat(1.0f), multiply(t, t))));
