@@ -113,10 +113,10 @@ columns unchanged. Run the affected demos before and after with identical
 arguments, strip timing with **`validation/strip_timing.sh`**, and diff. Timing
 columns are exempt; accuracy columns are not.
 
-Use `validation/strip_timing.sh`, *not* the older `validation/s3/strip_timing.sh`
-— that one hard-codes the DD table shape and silently strips nothing from FF/QF
-layouts, producing diffs full of wall-clock jitter. Captures for each sub-plan
-live under `validation/s2/`, `s3/`, `s5/`, `s5p3/`, `s5p4/`, `s5p5/`.
+Use `validation/strip_timing.sh`. (An older `validation/s3/strip_timing.sh`
+hard-coded the DD table shape and silently stripped nothing from FF/QF layouts,
+producing diffs full of wall-clock jitter; it and the rest of the per-sub-plan
+capture directories were pruned once `validation/sweep/` became the record.)
 
 **Shared corpus (branch `corpus-generator`, unmerged).**
 `scripts/gen_corpus.cpp` emits one shared set of inputs plus a `__float128`

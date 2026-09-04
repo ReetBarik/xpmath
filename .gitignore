@@ -2,6 +2,7 @@
 /build_opt/
 /README_PARKED.md
 /build_logs/
+/build_t00/
 /kokkos/
 /setup.sh
 *.cobaltlog
@@ -20,3 +21,19 @@ scripts/sweep_accuracy
 # Shared cross-backend validation corpus emitted by scripts/gen_corpus
 # (multi-GB at the default --n; the generator is committed, its output is not).
 scripts/xp_corpus.bin
+
+# Per-sub-plan validation scratch. These were captures taken to prove one
+# restructure byte-identical, then never read again; the numbers of record are
+# validation/sweep/ and docs/DOMAINS.md.
+/validation/a100/
+/validation/s2/
+/validation/s3/
+/validation/s5/
+/validation/s5p3/
+/validation/s5p4/
+/validation/s5p5/
+
+# Uncompressed sweep baselines. The committed one is sweep_baseline.csv.gz;
+# an 8.7 MB text copy next to it is how the two diverge.
+/validation/sweep/sweep_baseline.csv
+/validation/sweep/sweep_classified.csv
