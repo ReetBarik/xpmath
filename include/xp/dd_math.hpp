@@ -1569,8 +1569,118 @@ XPMATH_INLINE_FUNCTION DoubleDouble fmin(DoubleDouble a, DoubleDouble b) {
 XPMATH_INLINE_FUNCTION DoubleDouble fdim(DoubleDouble a, DoubleDouble b) {
     return (a > b) ? subtract(a, b) : DoubleDouble(0.0);
 }
+// ---- KI-38: fma with an EXACT product ----------------------------------
+//
+// The old body was `add(multiply(a, b), c)` -- a multiply FOLLOWED BY an add,
+// which is precisely the thing a fused multiply-add exists not to be.
+// multiply() rounds a*b to two words before c is ever looked at, so the
+// dropped tail is ~2^-106|a*b| in ABSOLUTE terms.  When c ~ -a*b the leading
+// digits cancel and that dropped tail is what survives:
+//
+//     rel err of the result  ~  2^-106 * |a*b| / |a*b + c|
+//
+// i.e. the loss is log10(|a*b|/|a*b+c|) digits, unbounded as c -> -a*b.
+//
+// That is NOT a conditioning floor.  A condition number multiplies the error
+// already present in the INPUTS, and here the inputs are exactly-held
+// DoubleDouble values with zero error -- a*b + c has one exact answer and it
+// is representable.  Measured (KI-38 probe, oracle at the stored operands):
+// the achievable score is the full cap at every one of the 60 sweep points
+// that were failing, and the failure was entirely in this line.
+//
+// DD escaped the sweep only because its grid feeds plain doubles, for which
+// two_prod(a.hi, b.hi) is already exact and a.lo = b.lo = 0.  With genuinely
+// wide operands the same defect is total: fma(1/3, sqrt(3), c) with
+// c = -(1/3)*sqrt(3)*(1-2^-60) scored 0.00 digits before this change, 31.00
+// after.
+//
+// The fix forms a*b as an EXACT expansion of scalars -- every partial product
+// a_i*b_j contributes both words of its two_prod -- appends c's words, and
+// only then rounds.  Shewchuk (1997) GROW-EXPANSION keeps the running total
+// exact and nonoverlapping; COMPRESS then repacks it so each retained
+// component carries a full 53 bits, which is what makes truncating to the
+// leading words safe.  Truncating the UNcompressed expansion is not: its
+// components can each carry only a few bits, so the leading three can span
+// far less than 106 bits (measured: four TF points stalled at ~17.5 digits
+// that way).
+//
+// Cost is ~10 two_sums for double operands (the a.lo = b.lo = 0 terms are
+// skipped) and at most ~50 for fully wide ones. fma has no in-header callers,
+// so nothing hot pays for this.
+XPMATH_INLINE_FUNCTION double dd_two_sum(double a, double b, double& err) {
+    const double s  = a + b;
+    const double bb = s - a;
+    err = (a - (s - bb)) + (b - bb);
+    return s;
+}
+XPMATH_INLINE_FUNCTION double dd_quick_two_sum(double a, double b, double& err) {
+    const double s = a + b;
+    err = b - (s - a);
+    return s;
+}
+// GROW-EXPANSION: e stays nonoverlapping and increasing, sum(e) exact.
+XPMATH_INLINE_FUNCTION void dd_expansion_push(double* e, int& m, double t) {
+    if (t == 0.0) return;
+    double q = t;
+    for (int i = 0; i < m; ++i) {
+        double err;
+        const double s = dd_two_sum(q, e[i], err);
+        e[i] = err;
+        q    = s;
+    }
+    e[m++] = q;
+}
+// COMPRESS: repack so every component is full-width, then emit the leading
+// `n` in DESCENDING order (the input order renorm cascades expect).
+XPMATH_INLINE_FUNCTION void dd_expansion_compress(const double* e, int m,
+                                                  double* out, int n) {
+    double g[10], h[10];
+    int    bottom = m - 1;
+    double q = e[m - 1];
+    for (int i = m - 2; i >= 0; --i) {
+        double r;
+        q = dd_quick_two_sum(q, e[i], r);
+        if (r != 0.0) { g[bottom--] = q; q = r; }
+    }
+    g[bottom] = q;
+    int top = 0;
+    for (int i = bottom + 1; i < m; ++i) {
+        double r;
+        q = dd_quick_two_sum(g[i], q, r);
+        if (r != 0.0) h[top++] = r;
+    }
+    h[top++] = q;
+    for (int k = 0; k < n; ++k) out[k] = (top - 1 - k >= 0) ? h[top - 1 - k] : 0.0;
+}
 XPMATH_INLINE_FUNCTION DoubleDouble fma(DoubleDouble a, DoubleDouble b, DoubleDouble c) {
-    return add(multiply(a, b), c);
+    // Non-finite operands, and products that overflow, keep the old path so
+    // that the KI-19/25/26/27 inf/NaN behaviour is untouched.
+    const double p0 = a.hi * b.hi;
+    if (!detail::isfinite(p0) || !detail::isfinite(c.hi))
+        return add(multiply(a, b), c);
+
+    const double aw[2] = {a.hi, a.lo};
+    const double bw[2] = {b.hi, b.lo};
+    double e[10];                       // 4 two_prods (8 words) + c's 2 words
+    int    m = 0;
+    for (int i = 0; i < 2; ++i)
+        for (int j = 0; j < 2; ++j) {
+            if (aw[i] == 0.0 || bw[j] == 0.0) continue;
+            const DoubleDouble p = two_prod(aw[i], bw[j]);
+            dd_expansion_push(e, m, p.hi);
+            dd_expansion_push(e, m, p.lo);
+        }
+    dd_expansion_push(e, m, c.hi);
+    dd_expansion_push(e, m, c.lo);
+    if (m == 0) return add(multiply(a, b), c);   // all-zero: keep the old sign
+
+    double d[3];
+    dd_expansion_compress(e, m, d, 3);
+    double t, s = dd_quick_two_sum(d[1], d[2], t);
+    double lo, hi = dd_quick_two_sum(d[0], s, lo);
+    lo += t;
+    hi = dd_quick_two_sum(hi, lo, lo);
+    return DoubleDouble(hi, lo);
 }
 
 // ============================================================

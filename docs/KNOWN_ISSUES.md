@@ -67,11 +67,15 @@ either currently resolved or currently open.
 | 35 | the sweep classifier judges a COMPLEX point's representability by its LARGER component while the scorer scores each component against ITSELF | **RESOLVED** | batch-13 ⁂⁂ — classifier only; UNEXPLAINED 1391 → 420 with not one digit score moved |
 | 36 | complex division rounds each cross product before differencing them, so the quotient loses `log10(C)` digits | **RESOLVED** | batch-13 ⁂⁂ — compensated 2×2 determinant on the direct branch in all four headers. Two further defects found *inside* the fix and closed with it (see the entry) |
 | 37 | the sweep oracle scores `round` with ties-away-from-zero, but KI-20 made the library ties-to-even | **RESOLVED** | batch-13 ⁂⁂ — oracle only; library rounding untouched |
-| 38 | real `fma` loses digits to cancellation in `a·b + c` | **OPEN** | filed 2026-09-04, undiagnosed; explicitly NOT assumed to share KI-36's mechanism |
+| 38 | real `fma` loses digits to cancellation in `a·b + c` | **RESOLVED** | batch-14 ⁂⁂⁂ — all four backends did `add(multiply(a,b), c)`, rounding `a·b` before `c` was seen. Exact expansion + Shewchuk COMPRESS; all 60 points to the full cap. Not conditioning: the operands are held exactly, so κ multiplies nothing |
+| 39 | the committed `sweep_classified.csv` is stale (1391 vs 298 UNEXPLAINED), and a 238-point UNEXPLAINED residue remains at `main` outside `fma` | **OPEN** | filed 2026-09-04 from the KI-38 measurement; needs a re-baseline session |
 
-**37 resolved, 1 open (KI-38).** KI-29 was
+**38 resolved, 1 open (KI-39).** KI-29 was
 closed by batch-11; the measurement that closed it *filed* KI-34, which is the
 defect KI-29's residual actually belonged to, and batch-12 closes that.
+
+⁂⁂⁂ `batch-14` is the commit titled `fix: KI-38 exact product in real fma` — a
+commit cannot record its own sha and this table ships inside it.
 
 ⁂⁂ `batch-13` is the commit titled `fix: KI-36 compensated complex division;
 KI-35/KI-37 classifier and oracle` — a commit cannot record its own sha and
@@ -6708,24 +6712,235 @@ That is expected and is the point of the fingerprint.
 
 ---
 
-## KI-38 — real `fma` loses digits to cancellation in `a·b + c` **[OPEN — 59 points, undiagnosed]**
+## KI-38 — real `fma` loses digits to cancellation in `a·b + c` **[RESOLVED batch-14 ⁂⁂⁂]**
 
-**Severity: unknown, TF 44 / QF 11 / FF 4.** Filed 2026-09-04 as the remaining
-un-attacked cell of the UNEXPLAINED residue, so that it is not lost.
+**Fixed, not inherent.** All four backends computed `fma(a,b,c)` as
+`add(multiply(a,b), c)` — a multiply *then* an add, never a fused operation.
+`multiply()` rounds `a·b` to the format's `p` significant bits before `c` is
+ever seen, so a tail of absolute size ~`2⁻ᵖ·|a·b|` is discarded. When `c ≈ −a·b`
+the leading digits cancel and that discarded tail is all that is left, giving
 
-Examples (TF, `log` and `linear` families, `partial-digit-loss`):
+```
+    rel err  ≈  2⁻ᵖ · |a·b| / |a·b + c|  =  2⁻ᵖ · κ ,     κ = |a·b| / |a·b + c|
+```
 
-| ref | got | digits |
-|---|---|---|
-| `-7.5672974830798267e-19` | `-7.5672974822817267e-19` | 9.98 |
-| `-4.5757950238323323e+19` | `-4.5757948802642215e+19` | 7.50 |
-| `-2.1696766505040289e+22` | `-2.169676674480147e+22` | 7.96 |
-| `-4.3073100641781306e-13` | `-4.3073100645165405e-13` | 10.10 |
+which is exactly the half-cap shape the filing noted. The mechanism *is* the
+same round-then-cancel family as KI-36 — but that was established by
+measurement here, not carried over: KI-36 rounds two cross products before
+differencing them, KI-38 rounds one product before adding a third operand, and
+the fixes are different (compensated 2×2 determinant there, exact expansion
+here).
 
-These are *not* KI-35: the results are single real values, well inside the
-format's normal range, so the componentwise story does not apply and the
-classifier's verdict stands unchallenged. The shape — roughly half the cap,
-across two unrelated input families — is consistent with the same
-round-then-cancel mechanism as KI-36 (`a·b` rounded before `c` is added, where
-`a·b ≈ -c`), but **this has not been measured** and no achievable-floor probe
-has been run against it. Do not assume the KI-36 diagnosis transfers.
+### Why κ is not a floor
+
+`κ` multiplies the error already present *in the inputs*. At every one of the
+60 points the operands are held **exactly** by their own backend — verified
+directly, `q(a) == (__float128)a` for all three of `a`, `b`, `c` — so the input
+error is zero and κ multiplies nothing. `cap − log₁₀κ` (0.15 … 13.92 below)
+is therefore the wrong bound; it applies to perturbed inputs only.
+
+The measured achievable floor confirms it. Scoring the quad oracle evaluated at
+the backend's own stored operands against the oracle at the exact doubles gives
+**the full cap at all 60 points** (the `achievable` column). Nothing here was
+inherent. Six points are the sharpest form of the argument: `a·b + c` rounds to
+exactly zero in double, so κ is literally infinite and `cap − log₁₀κ` is −∞ —
+and the fixed code still returns the full cap, because the *exact* product does
+not cancel `c` and the expansion never rounds it.
+
+### The fix
+
+Each header now forms the complete exact expansion and only rounds once, at the
+end. For a backend with `n` words:
+
+1. `two_prod` each of the `n²` word pairs `aᵢ·bⱼ` — every partial product is an
+   exact hi/lo pair, nothing is discarded.
+2. Push all `2n²` product words plus `c`'s `n` words through Shewchuk (1997)
+   GROW-EXPANSION, which keeps the running expansion nonoverlapping and
+   increasing and whose sum is bit-exact.
+3. **COMPRESS** (Shewchuk again) before truncating. This is the step the first
+   prototype was missing and the reason it stalled at 17.3–18.4 digits on TF
+   points 736 / 806 / 841 / 974 / 1583: a nonoverlapping expansion's components
+   need not be *full-width*, so its leading four floats can span far fewer than
+   72 bits and the dropped fifth component is not negligible. COMPRESS repacks
+   so each retained component is full-width, which is what makes truncation to
+   the leading words safe.
+4. Emit the leading `n+1` components in **descending** magnitude order and hand
+   them to the existing renormalisation cascade (`renorm_3` for TF, `renorm_4`
+   for QF, a `quick_two_sum` pair for DD/FF). Descending is required — the same
+   input-order constraint recorded in KI-36.
+
+Non-finite operands and overflowing products fall through to the old
+`add(multiply(a,b), c)` path, so the KI-19 / KI-25 / KI-26 / KI-27 inf/NaN
+behaviour is untouched.
+
+| backend | fma | words | expansion size |
+|---|---|---|---|
+| DD | `include/xp/dd_math.hpp:1655` | 2 | 8 product + 2 c |
+| FF | `include/xp/ff_math.hpp:1515` | 2 | 8 product + 2 c |
+| TF | `include/xp/tf_math.hpp:1691` | 3 | 18 product + 3 c |
+| QF | `include/xp/qf_math.hpp:1726` | 4 | 32 product + 4 c |
+
+There was **no asymmetry between backends** — all four had the identical
+`add(multiply(a, b), c)` body, so the control the filing hoped for did not
+exist. `fma` has no in-header callers in any of the four, so the added cost is
+paid only by direct users.
+
+### DD's clean sweep score was a grid artifact
+
+DD scores 31.00 at all 1652 `fma` points both before and after, which looks
+like immunity. It is not. The sweep grid feeds plain `double`s, so `a.lo` and
+`b.lo` are zero and `two_prod(a.hi, b.hi)` is already exact — the rounding step
+never fires. Fed genuinely wide operands the defect is total: `fma(DD(1)/3,
+sqrt(DD(3)), c)` with `c = −(a·b)·(1+2⁻⁵³)` scored **0.00 digits before and
+31.00 after**. The same holds for any backend whose grid inputs happen to be
+narrow; the sweep under-reports this defect by construction.
+
+### Measured, before → after
+
+All 60 points go to the full cap.
+
+| bk | pt | family | a | b | c | before | κ = \|a·b\|/\|a·b+c\| | cap−log₁₀κ | achievable | after |
+|---|---|---|---|---|---|---|---|---|---|---|
+| FF | 148 | log | `10000000` | `9999999.9999999981` | `-100000000000001.41` | 2.05 | 7.03e+13 | 0.15 | 14.00 | **14.00** |
+| FF | 820 | ulp | `75.398223686155035` | `75.398223686155021` | `-5684.8921350481505` | 4.67 | 2.75e+11 | 2.56 | 14.00 | **14.00** |
+| FF | 1618 | near1 | `1.0000000099999999` | `1.0000000100000568` | `-1.000000020465718` | 6.67 | 2.15e+09 | 4.67 | 14.00 | **14.00** |
+| FF | 1625 | near1 | `-0.99999999989999999` | `-1.0000001191092895` | `-1.000000119009318` | 4.16 | 3.52e+13 | 0.45 | 14.00 | **14.00** |
+| QF | 190 | log | `3.1622776601683795e+17` | `3.1869829543884448e+17` | `-1.0078125000000005e+35` | 14.34 | 2.73e+15 | 13.56 | 29.00 | **29.00** |
+| QF | 379 | linear | `-1.1499999999999999` | `-1.1499999999999346` | `-1.3224999999999258` | 14.25 | 1.19e+15 | 13.92 | 29.00 | **29.00** |
+| QF | 603 | ulp | `-6.283185307179588` | `-6.28318531303126` | `-39.478417641124608` | 14.39 | 2.78e+15 | 13.56 | 29.00 | **29.00** |
+| QF | 988 | ulp | `128.80529879718145` | `128.805544473792` | `-16590.836642680428` | 14.34 | 2.28e+15 | 13.64 | 29.00 | **29.00** |
+| QF | 1030 | ulp | `141.37166941154069` | `141.3716694125693` | `-19985.948912351374` | 13.60 | 2.75e+15 | 13.56 | 29.00 | **29.00** |
+| QF | 1317 | ulp | `-229.33626371205483` | `-229.33626371205463` | `-52595.121853405115` | 13.60 | ∞ | −∞ | 29.00 | **29.00** |
+| QF | 1366 | ulp | `-245.04422698000383` | `-245.04416855690741` | `-60046.658859985138` | 13.57 | ∞ | −∞ | 29.00 | **29.00** |
+| QF | 1415 | ulp | `-260.75219024795285` | `-228.15816646695873` | `-59492.741629216536` | 13.76 | 4.09e+15 | 13.39 | 29.00 | **29.00** |
+| QF | 1513 | ulp | `-292.16811678385085` | `-292.16811678385085` | `-85362.208465021904` | 13.08 | ∞ | −∞ | 29.00 | **29.00** |
+| QF | 1520 | ulp | `295.30970943744057` | `295.27366088892524` | `-87197.17900163788` | 13.25 | 5.99e+15 | 13.22 | 29.00 | **29.00** |
+| QF | 1548 | ulp | `304.73448739820981` | `304.73448739820975` | `-92863.10780984968` | 12.93 | ∞ | −∞ | 29.00 | **29.00** |
+| QF | 1604 | near1 | `0.99999000000000005` | `1.0002341381835937` | `-1.0002241358422119` | 14.31 | ∞ | −∞ | 29.00 | **29.00** |
+| TF | 113 | log | `-0.01` | `-0.010625000000000001` | `-0.00010625000000000077` | 9.98 | 1.40e+14 | 7.55 | 21.70 | **21.70** |
+| TF | 190 | log | `3.1622776601683795e+17` | `3.1869829543884448e+17` | `-1.0078125000000005e+35` | 7.50 | 2.73e+15 | 6.26 | 21.70 | **21.70** |
+| TF | 197 | log | `-1e+19` | `-1.0000000000001137e+19` | `-1.0000000000001139e+38` | 7.96 | 5.29e+15 | 5.98 | 21.70 | **21.70** |
+| TF | 246 | linear | `-7.7999999999999998` | `-7.8000000002270093` | `-60.840000001771102` | 10.10 | 1.40e+14 | 7.55 | 21.70 | **21.70** |
+| TF | 274 | linear | `-6.4000000000000004` | `-6.4000001907348638` | `-40.960001220703141` | 9.09 | 5.76e+15 | 5.94 | 21.70 | **21.70** |
+| TF | 316 | linear | `-4.2999999999999998` | `-4.3000656127929684` | `-18.49028213501029` | 10.55 | 3.52e+13 | 8.15 | 21.70 | **21.70** |
+| TF | 379 | linear | `-1.1499999999999999` | `-1.1499999999999346` | `-1.3224999999999258` | 7.95 | 1.19e+15 | 6.62 | 21.70 | **21.70** |
+| TF | 491 | linear | `4.4500000000000002` | `4.4497283935546879` | `-19.801291351318504` | 9.32 | 1.39e+14 | 7.56 | 21.70 | **21.70** |
+| TF | 505 | linear | `5.1500000000000004` | `5.1500000191852457` | `-26.522500098804205` | 9.59 | 1.41e+14 | 7.55 | 21.70 | **21.70** |
+| TF | 603 | ulp | `-6.283185307179588` | `-6.28318531303126` | `-39.478417641124608` | 7.50 | 2.78e+15 | 6.26 | 21.70 | **21.70** |
+| TF | 638 | ulp | `18.849555921538752` | `23.561944901923439` | `-444.13219804902093` | 7.56 | 2.60e+15 | 6.28 | 21.70 | **21.70** |
+| TF | 673 | ulp | `-28.274333882308145` | `-28.274334092968349` | `-799.43796244451664` | 8.96 | 5.86e+14 | 6.93 | 21.70 | **21.70** |
+| TF | 715 | ulp | `-40.840704496667314` | `-40.840704496662674` | `-1667.9631437839241` | 9.60 | 1.41e+14 | 7.55 | 21.70 | **21.70** |
+| TF | 722 | ulp | `43.982297150257118` | `43.98229698641029` | `-1934.4424554071572` | 8.70 | 1.06e+15 | 6.67 | 21.70 | **21.70** |
+| TF | 736 | ulp | `-47.123889803846886` | `-47.123889825790656` | `-2220.6609912796853` | 9.79 | 4.40e+12 | 9.06 | 21.70 | **21.70** |
+| TF | 764 | ulp | `-56.548667764616283` | `-56.521056110434344` | `-3196.1904236942096` | 10.46 | 1.41e+14 | 7.55 | 21.70 | **21.70** |
+| TF | 806 | ulp | `-69.115038378975427` | `-69.13191216764217` | `-4778.0547626786147` | 9.54 | 7.00e+13 | 7.85 | 21.70 | **21.70** |
+| TF | 841 | ulp | `81.681408993334642` | `61.261056745000985` | `-5003.8894313545825` | 10.35 | 2.20e+12 | 9.36 | 21.70 | **21.70** |
+| TF | 890 | ulp | `97.389372261283583` | `97.199158643585761` | `-9466.1650446237418` | 10.17 | 1.04e+15 | 6.68 | 21.70 | **21.70** |
+| TF | 974 | ulp | `-122.52211349000194` | `-122.52211348821901` | `-15011.668293838895` | 9.48 | 3.51e+13 | 8.15 | 21.70 | **21.70** |
+| TF | 988 | ulp | `128.80529879718145` | `128.805544473792` | `-16590.836642680428` | 7.58 | 2.28e+15 | 6.34 | 21.70 | **21.70** |
+| TF | 1002 | ulp | `131.94689145077137` | `131.94689144981135` | `-17409.982163395096` | 8.77 | 1.41e+14 | 7.55 | 21.70 | **21.70** |
+| TF | 1030 | ulp | `141.37166941154069` | `141.3716694125693` | `-19985.948912351374` | 7.89 | 2.75e+15 | 6.26 | 21.70 | **21.70** |
+| TF | 1037 | ulp | `-141.37166941154064` | `-141.3716862643569` | `-19985.95129471672` | 8.49 | 1.10e+15 | 6.66 | 21.70 | **21.70** |
+| TF | 1044 | ulp | `-144.5132620651305` | `-144.51326206513872` | `-20884.082912706286` | 7.74 | 1.91e+15 | 6.42 | 21.70 | **21.70** |
+| TF | 1128 | ulp | `172.78759594743858` | `172.7875959474386` | `-29855.553313296143` | 10.27 | 3.52e+13 | 8.15 | 21.70 | **21.70** |
+| TF | 1163 | ulp | `-182.21237390820806` | `-182.21237390818735` | `-33201.349205264625` | 9.96 | 8.79e+12 | 8.76 | 21.70 | **21.70** |
+| TF | 1177 | ulp | `-185.35396656179773` | `-185.35396656177667` | `-34356.09292021938` | 10.63 | 1.10e+12 | 9.66 | 21.70 | **21.70** |
+| TF | 1212 | ulp | `197.92033717615703` | `197.91958216998799` | `-39172.310436865955` | 10.42 | 2.20e+12 | 9.36 | 21.70 | **21.70** |
+| TF | 1317 | ulp | `-229.33626371205483` | `-229.33626371205463` | `-52595.121853405115` | 6.93 | ∞ | −∞ | 21.70 | **21.70** |
+| TF | 1331 | ulp | `235.61944901923451` | `235.61944901923619` | `-55516.524756178536` | 10.47 | 1.10e+12 | 9.66 | 21.70 | **21.70** |
+| TF | 1366 | ulp | `-245.04422698000383` | `-245.04416855690741` | `-60046.658859985138` | 6.51 | ∞ | −∞ | 21.70 | **21.70** |
+| TF | 1394 | ulp | `-254.46900494077326` | `-258.44508314297286` | `-65766.263139231451` | 9.06 | 1.76e+13 | 8.45 | 21.70 | **21.70** |
+| TF | 1408 | ulp | `260.75219024795274` | `260.75219801897356` | `-67991.706745416202` | 9.39 | 7.08e+13 | 7.85 | 21.70 | **21.70** |
+| TF | 1415 | ulp | `-260.75219024795285` | `-228.15816646695873` | `-59492.741629216536` | 7.56 | 4.09e+15 | 6.09 | 21.70 | **21.70** |
+| TF | 1436 | ulp | `-267.03537555513236` | `-267.03537456034809` | `-71307.891532228503` | 9.12 | 1.40e+14 | 7.55 | 21.70 | **21.70** |
+| TF | 1457 | ulp | `-273.31856086231187` | `-273.31856086131756` | `-74703.035711573641` | 7.73 | 5.70e+14 | 6.94 | 21.70 | **21.70** |
+| TF | 1513 | ulp | `-292.16811678385085` | `-292.16811678385085` | `-85362.208465021904` | 6.07 | ∞ | −∞ | 21.70 | **21.70** |
+| TF | 1520 | ulp | `295.30970943744057` | `295.27366088892524` | `-87197.17900163788` | 7.12 | 5.99e+15 | 5.92 | 21.70 | **21.70** |
+| TF | 1541 | ulp | `301.5928947446202` | `299.23670025442783` | `-90247.662643561271` | 8.56 | 5.64e+14 | 6.95 | 21.70 | **21.70** |
+| TF | 1548 | ulp | `304.73448739820981` | `304.73448739820975` | `-92863.10780984968` | 7.49 | ∞ | −∞ | 21.70 | **21.70** |
+| TF | 1555 | ulp | `-304.73448739820992` | `-304.73448738934098` | `-92863.107807148408` | 10.18 | 7.01e+13 | 7.85 | 21.70 | **21.70** |
+| TF | 1583 | ulp | `-314.15926535897944` | `-314.15926535897495` | `-98696.044010982019` | 10.81 | 1.10e+12 | 9.66 | 21.70 | **21.70** |
+| TF | 1604 | near1 | `0.99999000000000005` | `1.0002341381835937` | `-1.0002241358422119` | 6.52 | ∞ | −∞ | 21.70 | **21.70** |
+
+Per-cell sweep deltas against a HEAD-built binary (both binaries run twice; **0
+rows of noise this session**, against a ~20-row historical noise floor):
+
+| cell | points up | mean Δ | points down | mean Δ |
+|---|---|---|---|---|
+| FF `r fma` | 134 | +0.92 | 50 | −0.51 |
+| TF `r fma` | 183 | +7.27 | 0 | — |
+| QF `r fma` | 171 | +7.57 | 0 | — |
+| DD `r fma` | 0 | — | 0 | — |
+
+**The 50 FF decreases are the correctly-rounded answer, not a regression.**
+FF holds 48 bits and the sweep grid feeds 53-bit doubles, so FF alone cannot
+store the inputs exactly. Measured over all 207 sub-cap FF `fma` points, 49 of
+the 50 decreases greater than 0.005 digits land **exactly on `achievable`** —
+the score of the quad oracle evaluated at FF's own stored operands. The old
+higher scores were accidental cancellation between the algorithm's rounding
+error and the input-storage error; removing the former exposes the latter.
+The one exception, point 1499, sits 0.03 digits under achievable, well inside
+one ulp. No other backend shows a decrease because DD, TF and QF all hold the
+grid's doubles exactly.
+
+The ULP gate is **unchanged**: 948 gated failing points, 17 gated cells, 8947
+exempt, before and after.
+
+### Siblings checked
+
+- `multiply_scalar` and `pow_int` form a product with no subsequent addition,
+  so the cancellation shape cannot arise. Not affected.
+- The `subtract(a, multiply_scalar(b, q))` residual inside QF/TF `divide` is
+  structurally the same round-then-cancel shape. It carries **no** UNEXPLAINED
+  points for real `div` on either backend in a fresh classification, so there is
+  no measured defect to act on; left alone rather than changed speculatively.
+
+### Judgement calls recorded
+
+- The filing says 59 points, TF 44 / QF 11 / FF 4. A fresh classification gives
+  **60** — TF 44 / QF **12** / FF 4. The QF count in the filing was one short.
+  Worked from the measured 60.
+- `tests/test_utils.hpp` carried `{"fma", "near-cancellation loses leading
+  digits (matches FP64)", 0.0}` in the expected-min-drop registry — a rationale
+  now wrong on both counts. **Ratcheted 0.0 → 7.5**, following the acos/KI-4
+  precedent of a 5-digit margin under the worst backend. Measured min after the
+  fix: DD **31.00**, TF **21.70**, QF **29.00** — all at cap — and FF
+  **12.69**. FF is the only backend that drops, and the drop is the
+  input-storage floor described above, not algorithm error.
+
+⁂⁂⁂ `batch-14` is the commit titled `fix: KI-38 exact product in real fma` — a
+commit cannot record its own sha and this entry ships inside it.
+
+---
+
+## KI-39 — the committed `sweep_classified.csv` is stale, and a 238-point UNEXPLAINED residue remains **[OPEN]**
+
+Filed 2026-09-04 from the KI-38 measurement, not folded into it.
+
+**Two separate facts.**
+
+1. `validation/sweep/sweep_classified.csv` as committed reports **1391**
+   UNEXPLAINED rows. A binary built from `main` at `a6e01e1` and run on the same
+   grid reports **298**. The committed file predates KI-35 (the classifier fix
+   that took 1391 → 420) and several fixes after it. It is a stale artifact, not
+   a description of `main`.
+
+2. With KI-38's `fma` points removed, a **238-point** UNEXPLAINED residue
+   remains at `main`, across ops that have not been attacked:
+
+   | cell | points |
+   |---|---|
+   | QF complex family | ~200 |
+   | QF `r` asin / atan / sin / tan | 18 |
+   | TF `c div` | 9 |
+   | TF `c mul` | 6 |
+   | DD `c div` | 5 |
+   | FF `c acos` | 5 |
+   | FF `r tan` | 4 |
+
+   `fma` itself is entirely gone from the residue.
+
+Closing this means a re-baseline session: regenerate `sweep_baseline.csv` and
+`sweep_classified.csv` from a current binary, then triage the residue the way
+KI-12 … KI-20 were triaged. Deliberately **not** done inside the KI-38 commit,
+which was scoped to leave `validation/sweep/*.csv` untouched.

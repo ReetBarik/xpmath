@@ -1644,8 +1644,76 @@ XPMATH_INLINE_FUNCTION TripleFloat fmin(TripleFloat a, TripleFloat b) {
     return (a < b) ? a : b;
 }
 
+// ---- KI-38: fma with an EXACT product ----------------------------------
+// See dd_math.hpp:fma for the derivation. TF carried 44 of the 60 failing
+// sweep points, scoring 6.07-10.81 digits against a 21.70 cap; all 44 reach
+// the cap with the exact product. The operands at every one of those points
+// are held EXACTLY by TripleFloat, so there was no conditioning floor to
+// appeal to -- cap - log10(kappa) is the bound on PERTURBED inputs and the
+// inputs here carry no perturbation.
+//
+// TF is also where the truncation subtlety showed up: taking the leading four
+// components of the UNcompressed expansion stalled points 736/806/841/974/1583
+// at 17.3-18.4 digits, because a nonoverlapping expansion's components need
+// not be full-width and four of them can span fewer than 72 bits. COMPRESS
+// repacks them first; then four components always suffice.
+XPMATH_INLINE_FUNCTION void tf_expansion_push(float* e, int& m, float t) {
+    if (t == 0.0f) return;
+    float q = t;
+    for (int i = 0; i < m; ++i) {
+        float err;
+        const float s = tf_two_sum(q, e[i], err);
+        e[i] = err;
+        q    = s;
+    }
+    e[m++] = q;
+}
+XPMATH_INLINE_FUNCTION void tf_expansion_compress(const float* e, int m,
+                                                  float* out, int n) {
+    float g[21], h[21];
+    int   bottom = m - 1;
+    float q = e[m - 1];
+    for (int i = m - 2; i >= 0; --i) {
+        float r;
+        q = tf_quick_two_sum(q, e[i], r);
+        if (r != 0.0f) { g[bottom--] = q; q = r; }
+    }
+    g[bottom] = q;
+    int top = 0;
+    for (int i = bottom + 1; i < m; ++i) {
+        float r;
+        q = tf_quick_two_sum(g[i], q, r);
+        if (r != 0.0f) h[top++] = r;
+    }
+    h[top++] = q;
+    for (int k = 0; k < n; ++k) out[k] = (top - 1 - k >= 0) ? h[top - 1 - k] : 0.0f;
+}
 XPMATH_INLINE_FUNCTION TripleFloat fma(TripleFloat a, TripleFloat b, TripleFloat c) {
-    return add(multiply(a, b), c);
+    const float p0 = a.f0 * b.f0;
+    if (!detail::isfinite(p0) || !detail::isfinite(c.f0))
+        return add(multiply(a, b), c);
+
+    const float aw[3] = {a.f0, a.f1, a.f2};
+    const float bw[3] = {b.f0, b.f1, b.f2};
+    float e[21];                        // 9 two_prods (18 words) + c's 3 words
+    int   m = 0;
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) {
+            if (aw[i] == 0.0f || bw[j] == 0.0f) continue;
+            float err;
+            const float hi = tf_two_prod(aw[i], bw[j], err);
+            tf_expansion_push(e, m, hi);
+            tf_expansion_push(e, m, err);
+        }
+    tf_expansion_push(e, m, c.f0);
+    tf_expansion_push(e, m, c.f1);
+    tf_expansion_push(e, m, c.f2);
+    if (m == 0) return add(multiply(a, b), c);
+
+    float d[4];
+    tf_expansion_compress(e, m, d, 4);
+    renorm_3(d[0], d[1], d[2], d[3]);
+    return TripleFloat(d[0], d[1], d[2]);
 }
 
 // hypot(a, b) = sqrt(a^2 + b^2), SCALED.  KI-8.

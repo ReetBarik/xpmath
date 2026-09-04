@@ -355,7 +355,15 @@ inline const ExpectedMinDropAnnotation* lookup_expected_min_drop(const char* op_
   static const ExpectedMinDropAnnotation kTable[] = {
     {"sub",       "near-cancellation loses leading digits (matches FP64); PORT_NOTES §5", 0.0},
     {"fdim",      "near-cancellation loses leading digits (matches FP64); PORT_NOTES §5", 0.0},
-    {"fma",       "near-cancellation loses leading digits (matches FP64); PORT_NOTES §5", 0.0},
+    // Ratcheted from 0.0 with KI-38 (exact product expansion in fma). fma no
+    // longer loses digits to near-cancellation, so the old "matches FP64"
+    // rationale was wrong on both counts. Observed min is now the cap on three
+    // backends -- DD 31.00 / TF 21.70 / QF 29.00 -- and FF 12.69. FF is the
+    // only one that drops, and not from algorithm error: FF's 48 bits cannot
+    // hold the 53-bit test inputs, so its min is the input-storage floor.
+    // 7.5 keeps a 5-digit margin under FF, matching the acos precedent below,
+    // while no longer sanctioning a total loss.
+    {"fma",       "min is FF's input-storage floor, not algorithm error (KI-38)",         7.5},
     {"asin",      "derivative 1/sqrt(1-a^2) -> inf near |a|=1; PORT_NOTES §5",            0.0},
     // Ratcheted from 0.0 with KI-4 (joint-doubling sincos). acos runs through
     // angle()->sincos, and the observed min rose to DD 29.96 / FF 10.08 / QF 25.91;

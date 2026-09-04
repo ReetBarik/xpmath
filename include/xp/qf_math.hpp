@@ -1685,8 +1685,69 @@ XPMATH_INLINE_FUNCTION QuadFloat fmin(QuadFloat a, QuadFloat b) { return (a < b)
 XPMATH_INLINE_FUNCTION QuadFloat fdim(QuadFloat a, QuadFloat b) {
     return (a > b) ? subtract(a, b) : QuadFloat(0.0f);
 }
+// ---- KI-38: fma with an EXACT product ----------------------------------
+// See dd_math.hpp:fma for the derivation. QF carried 12 of the 60 failing
+// sweep points, scoring 12.93-14.39 digits against a 29.00 cap -- almost
+// exactly half, which is the signature of a product rounded to 96 bits and
+// then cancelled against c to ~2^-53 of its own magnitude. All 12 reach the
+// cap with the exact product; the operands are held exactly, so there was no
+// conditioning floor.
+XPMATH_INLINE_FUNCTION void qf_expansion_push(float* e, int& m, float t) {
+    if (t == 0.0f) return;
+    float q = t;
+    for (int i = 0; i < m; ++i) {
+        float err;
+        const float s = qf_two_sum(q, e[i], err);
+        e[i] = err;
+        q    = s;
+    }
+    e[m++] = q;
+}
+XPMATH_INLINE_FUNCTION void qf_expansion_compress(const float* e, int m,
+                                                  float* out, int n) {
+    float g[36], h[36];
+    int   bottom = m - 1;
+    float q = e[m - 1];
+    for (int i = m - 2; i >= 0; --i) {
+        float r;
+        q = qf_quick_two_sum(q, e[i], r);
+        if (r != 0.0f) { g[bottom--] = q; q = r; }
+    }
+    g[bottom] = q;
+    int top = 0;
+    for (int i = bottom + 1; i < m; ++i) {
+        float r;
+        q = qf_quick_two_sum(g[i], q, r);
+        if (r != 0.0f) h[top++] = r;
+    }
+    h[top++] = q;
+    for (int k = 0; k < n; ++k) out[k] = (top - 1 - k >= 0) ? h[top - 1 - k] : 0.0f;
+}
 XPMATH_INLINE_FUNCTION QuadFloat fma(QuadFloat a, QuadFloat b, QuadFloat c) {
-    return add(multiply(a, b), c);
+    const float p0 = a.f0 * b.f0;
+    if (!detail::isfinite(p0) || !detail::isfinite(c.f0))
+        return add(multiply(a, b), c);
+
+    const float aw[4] = {a.f0, a.f1, a.f2, a.f3};
+    const float bw[4] = {b.f0, b.f1, b.f2, b.f3};
+    float e[36];                       // 16 two_prods (32 words) + c's 4 words
+    int   m = 0;
+    for (int i = 0; i < 4; ++i)
+        for (int j = 0; j < 4; ++j) {
+            if (aw[i] == 0.0f || bw[j] == 0.0f) continue;
+            float err;
+            const float hi = qf_two_prod(aw[i], bw[j], err);
+            qf_expansion_push(e, m, hi);
+            qf_expansion_push(e, m, err);
+        }
+    const float cw[4] = {c.f0, c.f1, c.f2, c.f3};
+    for (int i = 0; i < 4; ++i) qf_expansion_push(e, m, cw[i]);
+    if (m == 0) return add(multiply(a, b), c);
+
+    float d[5];
+    qf_expansion_compress(e, m, d, 5);
+    renorm_4(d[0], d[1], d[2], d[3], d[4]);
+    return QuadFloat(d[0], d[1], d[2], d[3]);
 }
 
 // ============================================================

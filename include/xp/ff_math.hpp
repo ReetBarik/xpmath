@@ -1462,8 +1462,83 @@ XPMATH_INLINE_FUNCTION FloatFloat fmin(FloatFloat a, FloatFloat b) {
 XPMATH_INLINE_FUNCTION FloatFloat fdim(FloatFloat a, FloatFloat b) {
     return (a > b) ? subtract(a, b) : FloatFloat(0.0f);
 }
+// ---- KI-38: fma with an EXACT product ----------------------------------
+// See dd_math.hpp:fma for the derivation. Same defect, same fix, at 2xFP32:
+// multiply() rounded a*b to 48 bits before c was added, so a cancelling c
+// left only the product's ROUNDING behind. Measured on the four failing FF
+// sweep points (148/820/1618/1625): 2.05/4.67/6.67/4.16 digits before,
+// 14.00 (the cap) after, with the oracle evaluated at the backend's own
+// stored operands -- which for these points hold a, b and c EXACTLY, so no
+// conditioning argument was ever available.
+XPMATH_INLINE_FUNCTION float ff_two_sum(float a, float b, float& err) {
+    const float s  = a + b;
+    const float bb = s - a;
+    err = (a - (s - bb)) + (b - bb);
+    return s;
+}
+XPMATH_INLINE_FUNCTION float ff_quick_two_sum(float a, float b, float& err) {
+    const float s = a + b;
+    err = b - (s - a);
+    return s;
+}
+XPMATH_INLINE_FUNCTION void ff_expansion_push(float* e, int& m, float t) {
+    if (t == 0.0f) return;
+    float q = t;
+    for (int i = 0; i < m; ++i) {
+        float err;
+        const float s = ff_two_sum(q, e[i], err);
+        e[i] = err;
+        q    = s;
+    }
+    e[m++] = q;
+}
+XPMATH_INLINE_FUNCTION void ff_expansion_compress(const float* e, int m,
+                                                  float* out, int n) {
+    float g[10], h[10];
+    int   bottom = m - 1;
+    float q = e[m - 1];
+    for (int i = m - 2; i >= 0; --i) {
+        float r;
+        q = ff_quick_two_sum(q, e[i], r);
+        if (r != 0.0f) { g[bottom--] = q; q = r; }
+    }
+    g[bottom] = q;
+    int top = 0;
+    for (int i = bottom + 1; i < m; ++i) {
+        float r;
+        q = ff_quick_two_sum(g[i], q, r);
+        if (r != 0.0f) h[top++] = r;
+    }
+    h[top++] = q;
+    for (int k = 0; k < n; ++k) out[k] = (top - 1 - k >= 0) ? h[top - 1 - k] : 0.0f;
+}
 XPMATH_INLINE_FUNCTION FloatFloat fma(FloatFloat a, FloatFloat b, FloatFloat c) {
-    return add(multiply(a, b), c);
+    const float p0 = a.hi * b.hi;
+    if (!detail::isfinite(p0) || !detail::isfinite(c.hi))
+        return add(multiply(a, b), c);
+
+    const float aw[2] = {a.hi, a.lo};
+    const float bw[2] = {b.hi, b.lo};
+    float e[10];
+    int   m = 0;
+    for (int i = 0; i < 2; ++i)
+        for (int j = 0; j < 2; ++j) {
+            if (aw[i] == 0.0f || bw[j] == 0.0f) continue;
+            const FloatFloat p = two_prod(aw[i], bw[j]);
+            ff_expansion_push(e, m, p.hi);
+            ff_expansion_push(e, m, p.lo);
+        }
+    ff_expansion_push(e, m, c.hi);
+    ff_expansion_push(e, m, c.lo);
+    if (m == 0) return add(multiply(a, b), c);
+
+    float d[3];
+    ff_expansion_compress(e, m, d, 3);
+    float t, s = ff_quick_two_sum(d[1], d[2], t);
+    float lo, hi = ff_quick_two_sum(d[0], s, lo);
+    lo += t;
+    hi = ff_quick_two_sum(hi, lo, lo);
+    return FloatFloat(hi, lo);
 }
 
 // ============================================================
