@@ -63,11 +63,15 @@ either currently resolved or currently open.
 | 32 | complex `asin` loses its REAL part on the far real axis — `iz + sqrt(1-z^2)` cancels to (0,0), and NaNs above 1e19 on FF/QF/TF | **RESOLVED** | batch-9 ‖ — HFT `atan2(x, sqrt((a-x)(a+x)))`; the sum is never formed |
 | 33 | QF complex inverse family loses up to 9.49 digits at large \|z\| — the shared `v = (1/d1 + 1/d2)/2` has magnitude ~1/\|z\| and the FP32 subnormal floor strips its fourth word | **RESOLVED** | batch-10 — `y^2*v` reassociated so the tiny `v` is never formed |
 
-| 34 | `log`'s error is constant in ABSOLUTE terms (DD 40·2⁻¹⁰⁶, FF 8.0·2⁻⁴⁸, TF 5.4·2⁻⁷², QF 9.4·2⁻⁹⁶), so its relative error grows like 1/\|ln v\| — `exp`'s relative error entering the Newton step | **OPEN** | — |
+| 34 | `log`'s error is constant in ABSOLUTE terms (DD 40·2⁻¹⁰⁶, FF 8.0·2⁻⁴⁸, TF 5.4·2⁻⁷², QF 9.4·2⁻⁹⁶), so its relative error grows like 1/\|ln v\| — `exp`'s relative error entering the Newton step | **RESOLVED** | batch-12 ⁑ — `exp` carried the leading `1` through its `nq` squarings, which DOUBLE relative error; tracking `e^r − 1` and squaring as `s·(s+2)` preserves it |
 
-**32 resolved, 1 open** (34). KI-29 closed by batch-11; the measurement that
-closed it *filed* KI-34, which is the defect KI-29's residual actually belongs
-to. Every entry filed up to KI-33 is now resolved.
+**33 resolved, 0 open.** Every entry ever filed is now resolved. KI-29 was
+closed by batch-11; the measurement that closed it *filed* KI-34, which is the
+defect KI-29's residual actually belonged to, and batch-12 closes that.
+
+⁑ `batch-12` is the commit titled `fix: KI-34 log absolute-error floor and the
+exp error behind it` — a commit cannot record its own sha and this table ships
+inside it.
 
 ⁂ `batch-11` is the commit titled `fix: KI-29 asinh odd reflection exact in the
 Sterbenz band` — same reason as the footnotes below: a commit cannot record its
@@ -6027,12 +6031,23 @@ than as a separate entry so the two do not drift apart.
 
 ---
 
-## KI-34 — `log`'s error is constant in ABSOLUTE terms, so its relative error grows like 1/|ln v| **[OPEN]**
+## KI-34 — `log`'s error is constant in ABSOLUTE terms, so its relative error grows like 1/|ln v| **[RESOLVED batch-12]**
 
 **Severity: LOW–MEDIUM, all four backends.** Filed 2026-09-04 by the batch-11
-measurement that closed KI-29. Not a wrong answer anywhere — a systematic
-accuracy shortfall that is worst where `|ln v|` is small, and that every caller
-of `log` inherits.
+measurement that closed KI-29; fixed 2026-09-04 by batch-12. Not a wrong answer
+anywhere — a systematic accuracy shortfall that is worst where `|ln v|` is
+small, and that every caller of `log` inherits.
+
+**The cause was neither of the two the entry proposed.** It was not the stored
+`ln 2` and it was not the number of Newton steps. It was that `exp` carried the
+leading `1` of its Taylor sum through the `nq` squarings of its
+argument reduction, and **squaring doubles relative error**. `log` is
+Newton-on-`exp` with an *additive* correction, so `exp`'s `2^nq`-amplified
+relative error arrived whole as `log`'s absolute error. Tracking `e^r − 1`
+instead of `e^r`, and doubling with `(1+s)² − 1 = s·(s+2)`, removes the
+amplification: measured, `log`'s absolute error falls by **60× (DD)** and its
+error in ulps of the result by **101×** at the worst band. See §5 below for the
+before/after tables and §6 for what is genuinely inherent.
 
 ### What
 
@@ -6078,16 +6093,217 @@ belongs to this entry** — batch-11 halved `asinh`'s share of `ε_log` by handi
 `log` the squared argument `t² = 1 + 2at`, but the constant itself is untouched
 and no expression written inside `asinh` can remove it.
 
-### What closing it involves
+### What closing it involved
 
-Fixing `exp`, not `log`. The candidates, none yet measured: a final compensated
-Newton step in `exp` that keeps the correction's low word; a wider stored `ln 2`
-in `exp`'s argument reduction; or an extra Newton iteration in `log` itself,
-which would square `exp`'s relative error into the correction and buy roughly a
-factor of `ε_log` at the cost of one more `exp` per `log` call. Deliberately not
-attempted in batch-11: `exp` and `log` are on the hot path of a large fraction of
-the op inventory, so the change needs its own before/after sweep and its own
-budget, and it must not be bundled with an `asinh`-scoped fix.
+Fixing `exp`, not `log` — the entry got that much right. But the mechanism was
+one the entry did not list, and the three candidates it *did* list are all
+worthless here. The derivation follows.
+
+#### 1. Confirming the shape, and separating the two regimes
+
+Re-measured independently of batch-11, 40,000 log-uniform points over
+`2⁻⁴⁰ ≤ v ≤ 2⁴⁰`, oracle `logq` evaluated at the **exact value the backend
+holds** (`hi+lo`, or the 3-/4-word sum) so that no part of the score is the
+probe's own input rounding. `log`'s absolute error, in units of `2⁻ᵖ`:
+
+| \|ln v\| octave | 2⁻² | 2⁻¹ | 2⁰ | 2¹ | 2² | 2³ | 2⁴ |
+|---|---|---|---|---|---|---|---|
+| DD | 38.94 | 37.33 | 36.72 | 37.70 | 38.43 | 38.55 | 39.76 |
+| FF | 8.67 | 7.76 | 8.11 | 7.63 | 7.82 | 8.48 | 9.98 |
+| TF | 4.83 | 5.35 | 5.31 | 5.40 | 5.38 | 5.49 | 5.72 |
+| QF | 9.30 | 8.88 | 9.34 | 9.37 | 9.33 | 9.26 | 9.36 |
+
+**Flat**, as filed — a factor of 64 in `|ln v|` moves DD by 8%. The same data in
+ulps of the result is the reciprocal ramp: DD 77.9 → 37.3 → 18.4 → 9.43 → 4.80 →
+2.41 → 1.24.
+
+The two regimes have to be kept apart, because only one of them has a
+conditioning excuse:
+
+- **`|ln v| ≳ ¼` — the flat floor.** `κ_log = 1/|ln v| ≤ 4` here, i.e. at most
+  0.6 digits. A flat absolute error has *no* conditioning explanation in this
+  regime and it is the whole of KI-34.
+- **`v → 1`** — `κ_log` diverges. Genuinely ill-conditioned; treated in §6.
+
+#### 2. Tracing it to `exp`, quantitatively
+
+The Newton step is `b ← b + (v − e^b)/e^b`. If `exp` returns `e^b(1+δ)`, the
+iteration's fixed point is the `b` satisfying `e^b(1+δ) = v`, i.e.
+`b = ln v − ln(1+δ) ≈ ln v − δ`. So
+
+> **`log`'s absolute error = `exp`'s relative error, one-for-one.**
+
+Not by analogy — measured side by side, over `|a| < 0.35` where the argument
+reduction contributes nothing:
+
+| | `exp` rel. err. (median, `2⁻ᵖ`) | `log` abs. err. (mean, `2⁻ᵖ`) |
+|---|---|---|
+| DD | 33.5 | 36.7–39.8 |
+| FF | 5.86 | 7.6–10.0 |
+| TF | 3.33 | 4.8–5.7 |
+| QF | 5.23 | 8.9–9.4 |
+
+Same number in every backend. The entry's attribution is correct.
+
+#### 3. Where `exp`'s relative error comes from — the actual defect
+
+`exp` reduces `a = n·ln2 + s₀` with `|s₀| ≤ ln2/2`, scales `r = s₀/2^nq`, sums
+the Taylor series for **`e^r`**, and then squares `nq` times. `nq` is 6 (DD), 4
+(FF), 5 (TF), 6 (QF).
+
+Squaring propagates *relative* error by **doubling** it: `y = e^r(1+d)` gives
+`y² = e^{2r}(1+2d+d²)`. So `nq` squarings multiply the series' relative error by
+`2^nq` — 64, 16, 32, 64. Against the series' own error of order a few `u`, that
+predicts tens of units of `2⁻ᵖ`, and that is exactly the size of the measured
+floor. `2^nq` versus the measured `exp` medians: DD 64 vs 33.5, FF 16 vs 5.9,
+TF 32 vs 3.3, QF 64 vs 5.2 — the same ordering, within the O(1) factor that the
+series' own accuracy supplies.
+
+**The fix is to not carry the `1`.** Track `s = e^r − 1`. The doubling step
+becomes
+
+    (1+s)² − 1 = s² + 2s = s·(s+2)
+
+whose relative error is `[s(2+2s)/(s(2+s))]` times the input's, i.e.
+`1 + s/(2+s)`. With `s ≤ 2^{1/2} − 1 = 0.414` the growth over **all** `nq` steps
+is a bounded factor of ≈1.4, not `2^nq`. Two further gains come free:
+
+- the series' partial sums are now `O(r) = O(2^{-nq})` rather than `O(1)`, so
+  each `add` rounds at `ulp(r)` instead of `ulp(1)` — another `2^nq` off the
+  series' own absolute error;
+- the closing `1 + s` cannot cancel, since `s ∈ [2^{-1/2}−1, 2^{1/2}−1]` keeps
+  `1+s ≥ 0.707`, so `s`'s absolute error enters the result as a relative error
+  scaled by at most 0.59.
+
+Cost: the convergence test is unchanged in form but now relative to a sum of
+size `|r|`, hence ~185× stricter on DD — **one** extra term (12, was 11). No
+other cost; the squaring loop does one `add` more per step.
+
+#### 4. Every candidate, with its score
+
+DD, `exp` relative error and the `log` built on it, 20,000 points each. The
+entry's own three proposals are the last three rows.
+
+| candidate | `exp` rel err (med, `2⁻¹⁰⁶`) | `log` abs err (mean, `2⁻¹⁰⁶`) | `log` ulps | verdict |
+|---|---|---|---|---|
+| shipped, `nq=6` | 61.75 | 41.64 | 12.17 | baseline |
+| **`e^r−1` form, `nq=6` — ADOPTED** | **42.50** | **4.38** | **0.26** | **9.5× on `log`** |
+| `e^r−1` form, `nq=4` | 42.45 | — | — | identical |
+| `e^r−1` form, `nq=8` | 42.46 | — | — | identical |
+| shipped form, `nq=3` | 43.95 | — | — | control |
+| shipped form, `nq=0` (no squaring at all) | 42.60 | 4.51 | 0.36 | confirms the mechanism |
+| 4 Newton steps in `log` (was 3) | — | 42.48 | 11.10 | **no change** — see below |
+| 5 Newton steps in `log` | — | 42.15 | 12.80 | no change |
+| 8 Newton steps in `log` | — | 42.80 | 13.27 | no change |
+| wider stored `ln 2` | — | — | — | **not the term** — see §6 |
+| compensated final Newton step in `exp` | — | — | — | **not the term** — see §6 |
+
+Three rows are the **mechanism check**, and they are why this is a derivation
+and not a tuning. `nq` = 4, 6 and 8 all land on 42.5 once the `1` is dropped —
+the squaring count stops mattering, which is precisely what "the squarings no
+longer amplify" predicts. And `nq = 0` in the *shipped* form scores the same
+42.6: removing the squarings by hand and removing their amplification by algebra
+buy the identical amount. `nq = 0` is not shipped because it needs ~27 Taylor
+terms instead of 12.
+
+**Extra Newton steps buy exactly nothing**, and the entry's suggestion that they
+would "square `exp`'s relative error into the correction" is wrong. The
+iteration is already *at* its fixed point after three steps; iterating further
+converges harder onto the `b` where the *computed* `exp` equals `v`, which is
+the displaced root, not the true one. Measured at 3/4/5/8 steps against the
+pre-change `exp`: 41.64 / 42.48 / 42.15 / 42.80 units of `2⁻¹⁰⁶` — flat, and if
+anything very slightly worse, which is what converging harder onto a displaced
+root should look like.
+
+#### 5. Result
+
+`log`'s absolute error, same probe as §1, after:
+
+| \|ln v\| octave | 2⁻² | 2⁻¹ | 2⁰ | 2¹ | 2² | 2³ | 2⁴ |
+|---|---|---|---|---|---|---|---|
+| DD | 0.39 | 0.26 | 0.54 | 0.97 | 1.72 | 3.35 | 7.21 |
+| FF | 0.32 | 0.22 | 0.35 | 0.55 | 0.95 | 3.54 | 6.22 |
+| TF | 0.10 | 0.06 | 0.09 | 0.15 | 0.29 | 0.57 | 1.28 |
+| QF | 0.15 | 0.11 | 0.14 | 0.15 | 0.20 | 0.31 | 0.54 |
+
+**It is no longer flat.** It now rises in proportion to `|ln v|`, which is the
+signature of a purely *relative* error — and the relative error is what is flat
+now: DD 0.35, 0.35, 0.33, 0.30, 0.29, 0.33 units of `2⁻¹⁰⁶` across those same
+octaves, i.e. **0.21–0.27 ulps of the result**, down from 1.24–77.9. The defect
+that KI-34 names has been removed, not reduced.
+
+`exp` in ulps, median, over `|a| < 0.35`: DD 33.5 → 0.19, FF 5.86 → 0.17,
+TF 3.33 → 0.04, QF 5.23 → 0.05.
+
+#### 6. What is inherent, and stays
+
+**(a) `exp` at large `|a|`.** `κ_exp = |a|`: a DD holding `a = 700` specifies it
+only to `700·2⁻¹⁰⁶`, so `e^a` cannot be known to better than 700 units of
+`2⁻¹⁰⁶` relative. Measured at `a = 700`: 82 units — an eighth of the bound.
+The residual is the rounding of `a − n·ln2`, whose operands are `O(|a|)` while
+the result is `O(1)`; DD's `add` captures the leading cancellation exactly via
+two-sum and then rounds at `ulp(lo) ≈ |a|·2⁻¹⁰⁶`. **This is why "a wider stored
+`ln 2`" is not the fix**: `ln 2` is already carried to the full width of every
+backend, and widening it further cannot beat the rounding of the *subtraction*,
+which is itself already at the conditioning bound. It is also why this term is
+harmless for `log`: an `|a|`-proportional relative error in `exp` is a
+`|ln v|`-proportional absolute error in `log`, i.e. a **constant relative**
+error — full accuracy. That is the rise in the §5 table.
+
+**(b) `exp` where the result is subnormal.** TF/QF below `a ≈ −88` and DD below
+`a ≈ −690` push the trailing limb under the format's subnormal floor. Already
+classified `SUBNORMAL_LIMB` and exempt in the ulp gate; format, not algorithm.
+
+**(c) `log` as `v → 1`.** `κ_log = 1/|ln v|` diverges, and the Newton step's
+`v − e^b` cancels two quantities that are both ≈1, so the correction carries an
+absolute error `2⁻ᵖ` and `ln v` inherits relative error `2⁻ᵖ/|ln v| = κ·u`. That
+is *at* the bound, not past it. Measured against `cap − log₁₀(κ)`, all four
+backends, `v = 1 ± 2⁻ᵏ`:
+
+| `v−1` | κ | DD digits / bound | FF | TF | QF |
+|---|---|---|---|---|---|
+| 2⁻² | 4.5 | 31.81 / 31.26 | 14.38 / 13.80 | 21.67 / 21.02 | 28.88 / 28.25 |
+| 2⁻¹⁰ | 1.0e3 | 30.29 / 28.90 | 12.80 / 11.44 | 20.65 / 18.66 | 27.41 / 25.89 |
+| 2⁻¹⁸ | 2.6e5 | 27.97 / 26.49 | 10.57 / 9.03 | 18.39 / 16.26 | 25.12 / 23.48 |
+| 2⁻²⁶ | 6.7e7 | 25.63 / 24.08 | 7.96 / 6.62 | 16.00 / 13.85 | 22.64 / 21.07 |
+| 2⁻³⁸ | 2.8e11 | 22.34 / 20.47 | 11.57 / 3.01 | 15.84 / 10.24 | 23.15 / 17.46 |
+
+Every measured value sits **above** its condition-aware bound, in every backend
+and at every row. Nothing to recover. And the library already ships the
+well-conditioned entry point for callers who have the increment rather than the
+value: `log1p` runs its own `2·atanh(a/(2+a))` series below `|a| < ¼` (KI-5(b))
+and never calls `log` there at all.
+
+#### 7. Blast radius — what moved
+
+428,592 sweep cells, pre-change binary vs post-change binary, both rebuilt from
+source in the same shell (the batch-10 stale-binary trap). Baseline CSVs not
+touched; both runs went to `/tmp` via explicit `--out`.
+
+**73,580 increases, 5,443 decreases.** All four backend means rise: DD
+30.1521→30.3011, FF 12.5537→12.6106, TF 19.8529→19.9799, QF 26.3664→26.4955.
+
+Twenty-one ops moved and **every one is net-positive**: `pow` +7706 digits
+(9755 up / 1221 down), `log` +4986 (4953/35), `log10` +4975, `exp` +3464,
+`sinh` +3447, `cosh` +3224, `acosh` +2831, `asinh` +2668, `log2` +2322,
+`asin` +1456, `atanh` +1370, `acos` +1355, `exp2` +1355, `sin` +1277,
+`cos` +1266, `atan` +1070, `tan` +1045, `exp10` +1000, `tanh` +955,
+`expm1` +866, `log1p` +856. (`sin`/`cos`/`tan` move on their *complex* points,
+which route through `sinh`/`cosh`.) That list is KI-34's own "who inherits it"
+paragraph, confirmed by measurement.
+
+The 5,443 decreases average −0.212 digits and the worst is −1.66. **1,252 (23%)
+started at the backend cap**, i.e. the cell was saturated and had been
+lucky-exact. Only 10 of 5,443 land below 60% of their cap and **none** falls
+below 1 digit. They concentrate in `pow`, `exp10`, `exp`, `exp2`, `cosh`,
+`sinh` — the ops where the leading `1` used to be reconstructed by a different
+rounding sequence. This is the ordinary price of changing a rounding path, and
+it is bought at better than 13 increases per decrease.
+
+Condition-aware ulp gate: **1958 → 980** gated failing points (−978), failing
+cells **42 → 21**. The 21 that disappeared are `asinh`, `acosh`, `atanh` and
+`pow` across all four backends — again exactly the inheritor list. **Zero new
+failing cells.** `ctest` 34/34.
 
 ### Not to be confused with
 

@@ -859,7 +859,13 @@ XPMATH_INLINE_FUNCTION TripleFloat exp(TripleFloat a) {
     const int nq = 5;
     r = divide_scalar(r, float(1 << nq));
 
-    TripleFloat s = add(TripleFloat(1.0f), r);
+    // KI-34: track s = e^r - 1, not e^r. The leading 1 is added back only after
+    // the squarings, because squaring DOUBLES relative error while the
+    // equivalent step on s, (1+s)^2 - 1 = s*(s+2), PRESERVES it. See
+    // dd_math.hpp's exp for the derivation. nq = 5 here, so the shipped form
+    // multiplied the series error by 32 and left `log` an absolute floor of
+    // ~5.4 units of 2^-72, flat in |ln v|.
+    TripleFloat s = r;
     TripleFloat t = sqr(r);
     TripleFloat term = t;
     int k = 2;
@@ -871,10 +877,11 @@ XPMATH_INLINE_FUNCTION TripleFloat exp(TripleFloat a) {
         k++;
     }
 
-    // nq squarings: e^r → e^(2r) → e^(4r) → ... → e^(2^nq·r)
+    // nq doublings on e^x - 1: s ← s*(s+2), then restore the leading 1.
     for (int i = 0; i < nq; i++) {
-        s = multiply(s, s);
+        s = multiply(s, add(s, TripleFloat(2.0f)));
     }
+    s = add(TripleFloat(1.0f), s);
 
     // Final scaling by 2^m through the EXPONENT, component-wise
     // (PORT_NOTES_QF.md §10). KI-6: materialising `2^m` as a float first is

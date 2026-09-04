@@ -658,10 +658,19 @@ XPMATH_INLINE_FUNCTION FloatFloat exp(FloatFloat a) {
     if (s0.hi == 0.0f) {
         return FloatFloat(ldexpf(1.0f, nz));
     }
-    // Scale down by 2^nq then square nq times
+    // Scale down by 2^nq, Taylor, then square nq times.
+    // KI-34: the series and the squarings track e^r - 1, not e^r, so the
+    // squaring step is (1+s)^2 - 1 = s*(s+2), which PRESERVES relative error
+    // instead of doubling it. See dd_math.hpp's exp for the derivation. Here
+    // nq = 4, so the shipped form multiplied the series error by 16; measured
+    // FF exp 5.3 -> and log's absolute floor 7.6-10 units of 2^-48.
+    // Convergence is now relative to a sum of size |r| <= 0.0217, ~46x
+    // stricter, and reached in 7 terms; the terms fall by r/k each step so the
+    // FF exp-eps stall (eps = 1e-15 finer than FF's 3.55e-15 resolution) is not
+    // reachable by tightening this way.
     s1 = multiply_scalar(s0, ldexpf(1.0f, -nq));
-    FloatFloat s2 = FloatFloat(1.0f), s3 = FloatFloat(1.0f);
-    for (int l1 = 1; l1 <= 60; ++l1) {
+    FloatFloat s2 = s1, s3 = s1;                  // term = r, sum = e^r - 1
+    for (int l1 = 2; l1 <= 60; ++l1) {
         s0 = multiply(s2, s1);
         s2 = divide_scalar(s0, (float)l1);
         s0 = add(s3, s2);
@@ -672,7 +681,8 @@ XPMATH_INLINE_FUNCTION FloatFloat exp(FloatFloat a) {
         // (Matches qf_math.hpp, which dropped the same return when eps was
         // retuned there.)
     }
-    for (int i = 0; i < nq; ++i) s3 = multiply(s3, s3);
+    for (int i = 0; i < nq; ++i) s3 = multiply(s3, add(s3, FloatFloat(2.0f)));
+    s3 = add(FloatFloat(1.0f), s3);
 
     // KI-6: scale by 2^nz through the EXPONENT, component-wise. Forming the
     // factor as `ldexpf(1.0f, nz)` first is +inf for nz >= 128 and 0 for

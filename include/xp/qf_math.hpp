@@ -992,16 +992,22 @@ XPMATH_INLINE_FUNCTION QuadFloat exp(QuadFloat a) {
     }
     // Scale down by 2^nq (exact via mul_pwr2, no Dekker splitter), Taylor, then
     // square nq times: e^r squared nq times = e^(2^nq r) = e^s0.
+    // KI-34: the series and the squarings track e^r - 1, not e^r, so the
+    // squaring step is (1+s)^2 - 1 = s*(s+2), which PRESERVES relative error
+    // instead of doubling it. See dd_math.hpp's exp for the derivation. nq = 6
+    // here, so the shipped form multiplied the series error by 64 and left
+    // `log` an absolute floor of ~9.3 units of 2^-96, flat in |ln v|.
     s1 = mul_pwr2(s0, ldexpf(1.0f, -nq));           // r = s0 / 2^nq
-    QuadFloat s2 = QuadFloat(1.0f), s3 = QuadFloat(1.0f);  // s2 = term, s3 = sum
-    for (int l1 = 1; l1 <= 60; ++l1) {
+    QuadFloat s2 = s1, s3 = s1;                     // term = r, sum = e^r - 1
+    for (int l1 = 2; l1 <= 60; ++l1) {
         s0 = multiply(s2, s1);
         s2 = divide_scalar(s0, (float)l1);      // term = r^l1 / l1!
         s3 = add(s3, s2);
         if (detail::fabs(s2.f0) <= eps * detail::fabs(s3.f0)) break;
         // NOTE: no return-0 on l1 == 60 (see header comment); fall through with s3.
     }
-    for (int i = 0; i < nq; ++i) s3 = multiply(s3, s3);
+    for (int i = 0; i < nq; ++i) s3 = multiply(s3, add(s3, QuadFloat(2.0f)));
+    s3 = add(QuadFloat(1.0f), s3);
 
     // Final scaling by 2^nz.  PORT_NOTES §4a: power-of-2 multiplication is exact
     // in FP32 and must NOT go through multiply_scalar (which would compute
