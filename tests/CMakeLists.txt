@@ -396,6 +396,25 @@ add_test(NAME sweep_monotone_gate
          COMMAND sweep_accuracy
                  --baseline ${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline.csv.gz)
 
+# ---------------------------------------------------------------------------
+# THE GATES' OWN SELF-TESTS
+# ---------------------------------------------------------------------------
+# Both gates are negative assertions, and a negative assertion observed only
+# passing is indistinguishable from one that cannot fail. The monotone gate WAS
+# one of those: `digits` and `bound`, two of the four value columns of every
+# baseline row, were parsed and discarded, so a baseline with its last numeric
+# column rewritten to zero still reported all 428,592 points unchanged and
+# exited 0. These two tests poison the gates' inputs in the build directory and
+# require a NONZERO exit -- and require a clean PASS on the real inputs, so a
+# gate wired to fail unconditionally does not satisfy them either.
+add_test(NAME sweep_monotone_gate_selftest
+         COMMAND ${CMAKE_SOURCE_DIR}/validation/gate_selftest.sh
+                 $<TARGET_FILE:sweep_accuracy> monotone ${CMAKE_CURRENT_BINARY_DIR})
+
+add_test(NAME sweep_absolute_gate_selftest
+         COMMAND ${CMAKE_SOURCE_DIR}/validation/gate_selftest.sh
+                 $<TARGET_FILE:sweep_accuracy> absolute ${CMAKE_CURRENT_BINARY_DIR})
+
 # The generated domain document must be what the generator currently emits from
 # the committed baseline. Pure Python, well under a second, no build products.
 add_test(NAME domains_fresh
@@ -403,3 +422,5 @@ add_test(NAME domains_fresh
 
 set_tests_properties(sweep_absolute_gate sweep_monotone_gate
                      PROPERTIES TIMEOUT 600)
+set_tests_properties(sweep_absolute_gate_selftest sweep_monotone_gate_selftest
+                     PROPERTIES TIMEOUT 1200)

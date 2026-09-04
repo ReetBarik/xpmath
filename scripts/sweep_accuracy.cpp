@@ -25,8 +25,10 @@
 //
 //   This tool records the score at every individual grid point, once, before any
 //   numerical fix lands. `--baseline` then re-runs the sweep and reports every
-//   point whose digits DECREASED. That is the monotone gate, and it is the only
-//   thing in the repo that can catch a silent trade.
+//   point whose ERROR GREW. That is the monotone gate, and it is the only thing
+//   in the repo that can catch a silent trade. `validation/gate_selftest.sh`
+//   poisons a copy of the baseline and requires the gate to fail, because a
+//   gate nobody has seen fail is a gate nobody has tested.
 //
 //   It is NOT a replacement for the tolerance tables. Those say "this op is this
 //   accurate"; this says "this op is no less accurate than it was".
@@ -2149,7 +2151,7 @@ void print_summary(const std::vector<Cell>& cells) {
 // Compare mode — THE MONOTONE GATE.
 //
 // A fresh sweep is run in memory and diffed against a recorded baseline. Any
-// point whose digits DECREASED is a regression and the tool exits nonzero.
+// point whose ULP COUNT GREW is a regression and the tool exits nonzero.
 // Increases are counted and reported but never fail: getting better is the
 // point of the fixes this gate exists to protect.
 //
@@ -2157,7 +2159,43 @@ void print_summary(const std::vector<Cell>& cells) {
 // by the same deterministic emission order, so a key mismatch means the grid or
 // the op inventory changed, which invalidates the comparison outright and is
 // reported as an error rather than silently skipped.
+//
+// EVERY RECORDED FIELD IS READ.
+//   A baseline row is `backend,kind,op,point,digits,ulps,bound,state`. The four
+//   key fields are matched positionally. Of the remaining four, `ulps` carries
+//   the verdict -- it is the measurement of record and the only thing this gate
+//   issues a PASS/FAIL on. `digits`, `bound` and `state` used to be parsed and
+//   thrown away, which meant a baseline could be edited in three of its four
+//   value columns and the gate would still report every point unchanged. That
+//   is what it means for a gate to be blind, and it was demonstrated by
+//   rewriting the LAST numeric column -- `bound`, not `ulps` -- of all 428,592
+//   rows to zero and watching the gate print PASS.
+//
+//   `digits` and `bound` are now checked as RECORD INTEGRITY, which is not a
+//   second verdict on the library: it is the question of whether this file is a
+//   record of THIS code at all. `bound` is the standard the absolute gate
+//   judges against, and `digits` is the same error projected onto a log scale;
+//   both are reproduced exactly by a rerun under the toolchain of record (the
+//   fresh CSV is byte-identical to the committed baseline). A row whose
+//   recorded standard is not the standard this build derives is not a row this
+//   gate can compare, in either direction, so drift fails with exit 3 and asks
+//   for a re-baseline rather than quietly comparing against a different rule.
+//   The tolerances are the same stated floors the ulp check uses -- 0.1 digits
+//   absolute, 10^0.1 relative -- so ordinary last-place toolchain scatter still
+//   passes, and both are reported with their own counter and their own line.
 // ---------------------------------------------------------------------------
+
+// Relative agreement, sign- and zero-safe. Used for `bound`, which is -1 on
+// unscorable rows and legitimately 0 on exactly-correct ones, so neither a
+// ratio test nor a signed inequality can be written directly.
+static bool within_rel(double a, double b, double rel) {
+  if (a == b) return true;                            // covers -1 vs -1, 0 vs 0
+  if (std::isnan(a) || std::isnan(b)) return std::isnan(a) && std::isnan(b);
+  if (std::isinf(a) || std::isinf(b)) return false;   // a==b already handled
+  const double m = std::fabs(a) > std::fabs(b) ? std::fabs(a) : std::fabs(b);
+  return std::fabs(a - b) <= rel * m;
+}
+
 int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
   // The committed baseline is gzipped -- 428,592 rows is 8.7 MB of text and
   // 2.6 MB compressed, and it is rewritten on every accepted change, so the
@@ -2177,6 +2215,8 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
   size_t idx = 0, parsed = 0;
   long   decreased = 0, increased = 0, worst_shown = 0;
   long   state_moved = 0, state_shown = 0;
+  long   drift_bound = 0, drift_digits = 0, drift_shown = 0;
+  long   unchanged = 0;
   double worst_drop = 0.0;
   bool   saw_header = false, structural = false;
 
@@ -2246,23 +2286,61 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
     // the bound stopped being issuable, which is a real change even though no
     // ulp count got worse.
     const double kNoiseFactor = 1.2589254;   // 10^0.1: one tenth of a digit
+    const double kDigitFloor  = 0.1;         // the same floor, stated additively
     const double kSubUlpFloor = 1.0;
     const double fresh_ulps = r.ulps;
     const bool both_scored = (st == 'S' && r.state == 'S');
+
+    // RECORD INTEGRITY, checked on every row whose state did not move (a state
+    // move already invalidates the bound and the digit count, and is reported
+    // on its own line below). Either direction fails: a bound this build
+    // derives LOOSER than the record is a weakened standard, and one it derives
+    // TIGHTER means the record is stale. Both want a re-baseline, not a silent
+    // comparison against a rule that is no longer the rule.
+    bool row_moved = false;
+    if (st == r.state) {
+      const bool bound_ok = within_rel(base_bound, r.bound, kNoiseFactor - 1.0);
+      const bool dig_ok   = std::fabs(dig - r.digits) <= kDigitFloor;
+      if (!bound_ok) ++drift_bound;
+      if (!dig_ok)   ++drift_digits;
+      if (!bound_ok || !dig_ok) row_moved = true;
+      if ((!bound_ok || !dig_ok) && drift_shown < 20) {
+        std::printf("  RECORD      %s %c %-9s point %-5d  ", be, kind, op, point);
+        if (!dig_ok)   std::printf("digits %.2f -> %.2f  ", dig, r.digits);
+        if (!bound_ok) std::printf("bound %.6g -> %.6g", base_bound, r.bound);
+        std::printf("\n");
+        ++drift_shown;
+      }
+    }
+
     if (both_scored && fresh_ulps > kSubUlpFloor &&
         fresh_ulps > base_ulps * kNoiseFactor) {
-      ++decreased;
-      const double drop = (base_ulps > 0.0)
-                        ? std::log10(fresh_ulps / base_ulps) : 0.0;
+      ++decreased; row_moved = true;
+      // With base_ulps == 0 the recorded point was exact and the ratio is
+      // infinite. Reporting log10(inf) as 0.00 -- which is what the old
+      // `: 0.0` fallback printed -- made the worst-drop line read 0.00 digits
+      // under a total loss of accuracy. Measure such a point against the
+      // one-ulp floor instead, which is the weakest error this branch can see.
+      const double ref_ulps = base_ulps > 0.0 ? base_ulps : kSubUlpFloor;
+      const double drop     = std::log10(fresh_ulps / ref_ulps);
       if (drop > worst_drop) worst_drop = drop;
       if (worst_shown < 40) {
         std::printf("  REGRESSION  %s %c %-9s point %-5d  %.6g -> %.6g ulps "
-                    "(-%.2f digits)\n", be, kind, op, point,
-                    base_ulps, fresh_ulps, drop);
+                    "(-%.2f digits%s)\n", be, kind, op, point,
+                    base_ulps, fresh_ulps, drop,
+                    base_ulps > 0.0 ? "" : ", was exact");
         ++worst_shown;
       }
     } else if (st != r.state) {
-      ++state_moved;
+      // A state move is never "unchanged". Losing a verdict (S -> anything) is
+      // a regression outright. GAINING one is not -- but it is still a row
+      // whose recorded state is not the state this build derives, so it is
+      // record drift for the same reason a moved bound is: the file is no
+      // longer a record of this code and a PASS from it would be a PASS
+      // against something else. Rewriting the state column of all 428,592 rows
+      // to 'U' used to print "unchanged: 428592 / RESULT: PASS", because only
+      // the losing direction was counted.
+      ++state_moved; row_moved = true;
       if (state_shown < 20) {
         std::printf("  STATE       %s %c %-9s point %-5d  %c -> %c\n",
                     be, kind, op, point, st, r.state);
@@ -2270,9 +2348,9 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
       }
       if (st == 'S' && r.state != 'S') ++decreased;   // lost a verdict
     } else if (both_scored && fresh_ulps * kNoiseFactor < base_ulps) {
-      ++increased;
+      ++increased; row_moved = true;
     }
-    (void)dig; (void)base_bound;
+    if (!row_moved) ++unchanged;
     ++idx;
   }
   if (gz) pclose(f); else std::fclose(f);
@@ -2288,8 +2366,17 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
   std::printf("  decreased     : %ld%s\n", decreased,
               decreased ? "   <-- MONOTONE GATE FAILED" : "");
   std::printf("  increased     : %ld\n", increased);
-  std::printf("  unchanged     : %zu\n", idx - size_t(decreased) - size_t(increased));
-  std::printf("  state moved   : %ld\n", state_moved);
+  // `unchanged` is what is LEFT, counted directly. Deriving it as
+  // idx - decreased - increased let a row that moved in some other way -- a
+  // state flip, a rewritten bound -- be reported as unchanged, which is
+  // precisely the sentence a blind gate prints.
+  std::printf("  unchanged     : %ld\n", unchanged);
+  std::printf("  state moved   : %ld%s\n", state_moved,
+              state_moved ? "   <-- the recorded verdicts are not this build's" : "");
+  std::printf("  record drift  : %ld bound, %ld digits%s\n",
+              drift_bound, drift_digits,
+              (drift_bound || drift_digits) ? "   <-- BASELINE IS NOT A RECORD "
+                                              "OF THIS BUILD" : "");
   if (decreased) {
     std::printf("  worst drop    : %.2f digits equivalent\n", worst_drop);
     if (decreased > worst_shown)
@@ -2301,10 +2388,20 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
   else if (!fp_ok)
     std::printf("  note          : ORACLE FINGERPRINT MISMATCH — see the warning above; "
                 "hairline diffs are the reference moving\n");
-  std::printf("\nRESULT: %s\n", decreased
-    ? "FAIL — a point got worse by more than a tenth of a digit"
-    : "PASS — no point above the 0.1-digit noise floor got worse");
-  return decreased ? 1 : 0;
+  const bool drifted = (drift_bound || drift_digits || state_moved);
+  if (decreased)
+    std::printf("\nRESULT: FAIL — a point got worse by more than a tenth of a digit\n");
+  else if (drifted)
+    std::printf("\nRESULT: FAIL — no point got worse, but %ld row(s) do not carry the "
+                "bound,\n        %ld the digit count and %ld the state this build "
+                "derives. The baseline\n        is stale or edited, so it is not a "
+                "record of this code; re-record it\n        under the toolchain of "
+                "record before trusting a PASS from it.\n",
+                drift_bound, drift_digits, state_moved);
+  else
+    std::printf("\nRESULT: PASS — no point above the 0.1-digit noise floor got worse\n");
+  if (decreased) return 1;
+  return drifted ? 3 : 0;
 }
 
 
@@ -2481,7 +2578,11 @@ void usage(const char* argv0) {
     "  --quiet           suppress the per-(backend, op) table\n"
     "  --baseline PATH   MONOTONE GATE: re-run the sweep, diff against PATH (.gz\n"
     "                    accepted) and exit 1 if any point's error GREW by more\n"
-    "                    than a tenth of a digit. Writes nothing.\n"
+    "                    than a tenth of a digit. Exits 3 if the recorded bound\n"
+    "                    or digit count is not the one this build derives -- the\n"
+    "                    baseline is then stale or edited, not a record of this\n"
+    "                    code, and a PASS from it would mean nothing. Exits 2 on\n"
+    "                    a grid or op-inventory change. Writes nothing.\n"
     "  --ulp             score every point in ulps against the derived bound and\n"
     "                    report the worst point per (backend, op). Never a mean.\n"
     "  --register PATH   ABSOLUTE GATE: PATH lists the known above-bound points.\n"

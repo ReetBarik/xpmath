@@ -30,9 +30,10 @@ these paths, which keeps the wrapper layer continuously validated.
 Validation: **one** measurement — error in ulps against a `__float128` /
 `__complex128` host oracle — with **one** verdict per point against a bound
 derived from the format and the condition number, and **two** ctest gates over
-that number (`sweep_absolute_gate`, `sweep_monotone_gate`). Read
+that number (`sweep_absolute_gate`, `sweep_monotone_gate`), each with a self-test
+target (`*_selftest`) that poisons its input and requires it to fail. Read
 **docs/CORRECTNESS.md** before adding anything that judges correctness; the whole
-point is that nothing else issues a competing verdict. 29 ctest targets, all
+point is that nothing else issues a competing verdict. 31 ctest targets, all
 passing on `main`.
 
 ## Executables
