@@ -62,10 +62,9 @@ either currently resolved or currently open.
 | 31 | DD `divide_scalar` returns a quotient 2^64 too large above 1.339e300 | RESOLVED | batch-7 § |
 | 32 | complex `asin` loses its REAL part on the far real axis — `iz + sqrt(1-z^2)` cancels to (0,0), and NaNs above 1e19 on FF/QF/TF | **RESOLVED** | batch-9 ‖ — HFT `atan2(x, sqrt((a-x)(a+x)))`; the sum is never formed |
 | 33 | QF complex inverse family loses up to 9.49 digits at large \|z\| — the shared `v = (1/d1 + 1/d2)/2` has magnitude ~1/\|z\| and the FP32 subnormal floor strips its fourth word | **RESOLVED** | batch-10 — `y^2*v` reassociated so the tiny `v` is never formed |
-
 | 34 | `log`'s error is constant in ABSOLUTE terms (DD 40·2⁻¹⁰⁶, FF 8.0·2⁻⁴⁸, TF 5.4·2⁻⁷², QF 9.4·2⁻⁹⁶), so its relative error grows like 1/\|ln v\| — `exp`'s relative error entering the Newton step | **RESOLVED** | batch-12 ⁑ — `exp` carried the leading `1` through its `nq` squarings, which DOUBLE relative error; tracking `e^r − 1` and squaring as `s·(s+2)` preserves it |
 
-**33 resolved, 0 open.** Every entry ever filed is now resolved. KI-29 was
+**34 resolved, 0 open.** Every entry ever filed is now resolved. KI-29 was
 closed by batch-11; the measurement that closed it *filed* KI-34, which is the
 defect KI-29's residual actually belonged to, and batch-12 closes that.
 

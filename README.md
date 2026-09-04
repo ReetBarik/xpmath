@@ -19,9 +19,9 @@ the `__float128` type. That path does not travel: libquadmath is host-only and
 x86_64-only, so code needing extra precision *inside* a portable compute kernel
 has had nowhere to go.
 
-This repository provides three portable, software-emulated extended-precision
+This repository provides four portable, software-emulated extended-precision
 backends usable in plain C++, CUDA, HIP, SYCL, and Kokkos — **DD** (double-double), **FF**
-(float-float), and **QF** (quad-float). All three are written against Kokkos
+(float-float), **QF** (quad-float), and **TF** (triple-float). All four are written against Kokkos
 alone, carry no hardware dependency, and compile for any Kokkos execution space:
 CPU, GPU, and everything else Kokkos targets. Each is validated for accuracy
 against a `__float128` (libquadmath) host oracle.
@@ -35,18 +35,19 @@ against a `__float128` (libquadmath) host oracle.
 | DD (double-double, 2×FP64) | `Kokkos::Experimental::DoubleDouble` | ~31 | `third_party/include/dd_math.hpp` |
 | FF (float-float, 2×FP32) | `Kokkos::Experimental::FloatFloat` | ~14 | `third_party/include/ff_math.hpp` |
 | QF (quad-float, 4×FP32) | `Kokkos::Experimental::QuadFloat` | ~29 | `third_party/include/qf_math.hpp` |
+| TF (triple-float, 3×FP32) | `Kokkos::Experimental::TripleFloat` | ~21.7 | `third_party/include/tf_math.hpp` |
 
 Every operation is documented in the header where it is defined; read the source
 for algorithm choices, coefficient sources, and citations to the underlying DDFUN
 / QD references.
 
-Complex layers are provided for all three backends — `DoubleDoubleComplex`,
-`FloatFloatComplex`, `QuadFloatComplex` — mirroring the real-side type surface.
-See the corresponding `*_complex.hpp` header for each.
+Complex layers are provided for all four backends — `DoubleDoubleComplex`,
+`FloatFloatComplex`, `QuadFloatComplex`, `TripleFloatComplex` — mirroring the
+real-side type surface. See the corresponding `*_complex.hpp` header for each.
 
 ### Operation inventory
 
-All three backends expose the same 39 real operations:
+All four backends expose the same 39 real operations:
 
 | Category | Operations |
 |---|---|
@@ -65,7 +66,7 @@ IEEE 754 `roundToIntegralTiesToEven`, so `round(0.5) == 0`, `round(1.5) == 2`,
 `+infinity`); see KI-20 in `docs/KNOWN_ISSUES.md` for the reasoning. `remainder`
 is half-even too, as IEEE 754 requires of it.
 
-All three complex layers expose the same 24 complex operations:
+All four complex layers expose the same 24 complex operations:
 
 | Category | Operations |
 |---|---|
@@ -95,14 +96,14 @@ comfortable range. They do not tell you where an operation *fails*, and every
 backend has such ranges. `docs/DOMAINS.md` covers all 4 backends x 63 operations,
 generated from a 428,592-point sweep: for each cell it gives the input band where
 the operation holds 90% of its cap, the measured digit count at the boundary
-where it degrades, and a classification of the cause. The headline limits: the
-three FP32-word backends (FF, QF, TF) bottom out near 1e-31 and top out at 3.4e38
-where DD reaches ~2e-292 and 1.8e308; `hypot` and complex `abs` on those three
-backends overflow above |x| ≈ 1.8e19 because they never scale; and `exp` on every
-backend flushes to zero past |x| ≈ 300, discarding ~170 decades DD could
-otherwise represent. Of the 44,911 points scoring below half their cap, most are
-format or conditioning limits, but 16,164 are neither — those are filed as KI-6
-through KI-11 in [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md).
+where it degrades, and a classification of the cause. The headline limits are now
+mostly format limits: the three FP32-word backends (FF, QF, TF) bottom out near
+1e-31 and top out at 3.4e38 where DD reaches ~2e-292 and 1.8e308, and on the FP32
+backends the trailing limbs go subnormal well before the leading word does. Of
+the 26,723 points scoring below half their cap, 15,660 are format range
+(UNDERFLOW / OVERFLOW / ARG_RANGE), 9,672 are measured ill-conditioning, and
+1,391 are neither — see [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md), whose 34
+entries are all resolved as of `85eea13`.
 
 **Accuracy only — no cost figures are reported here.** How to present the cost
 of each backend is still an open question and is deliberately left out rather
@@ -110,7 +111,7 @@ than stated badly. The measurements below come from a single-threaded Serial
 build.
 
 These figures are optimization-invariant, and that was checked rather than
-assumed: for each of the three backends the full 39-operation sweep was re-run
+assumed: for each of the three backends tabulated below the full 39-operation sweep was re-run
 at `-O0` and at `-O3 -DNDEBUG`, and all 39 rows are identical across both
 builds in every statistic. `CMAKE_CXX_EXTENSIONS OFF` means the backends
 compile as strict ISO `-std=c++20`, where GCC leaves `-ffp-contract` off, so no
@@ -124,6 +125,14 @@ computed, and for an accuracy metric (where higher is better) the 99th
 percentile reads the *best* tail, which sits at the clamp ceiling for nearly
 every operation. `Min` is the worst observed element across the batch and is
 the column to read for worst-case behaviour.
+
+**Staleness warning — the three tables below predate the 34-issue fix arc.** They
+are demo output (`kokkos_ep_demo*`), each run costs hours of kernel time, and they
+were not regenerated when the artifacts were re-baselined at `85eea13`. Every
+figure in them is therefore a lower bound on what the current code does, and no
+table is given for TF at all. The current measured numbers, on all four backends
+and regenerated with the library, are in
+[`docs/DOMAINS.md`](docs/DOMAINS.md) and `validation/sweep/sweep_baseline.csv`.
 
 #### DD (double-double) — ceiling 31.00 digits
 
@@ -271,6 +280,8 @@ third_party/include/
     ff_complex.hpp     FF complex layer (FloatFloatComplex)
     qf_math.hpp        QF (4×FP32) real type + math — port of QD 2.3.24 quad-double
     qf_complex.hpp     QF complex layer (QuadFloatComplex)
+    tf_math.hpp        TF (3×FP32) real type + math — 3-limb reduction of the QF port
+    tf_complex.hpp     TF complex layer (TripleFloatComplex)
 
 patches/
     kokkos_complex_quad_math.hpp   Kokkos-style companion to Kokkos_QuadPrecisionMath.hpp
@@ -284,7 +295,7 @@ src/
     demo_qf_complex.cpp    QF complex-operation demo   -> kokkos_ep_demo_qf_complex
     bench_cost.cpp         cost benchmark harness      -> kokkos_ep_bench_cost
 
-tests/                 23-test ctest suite covering all three backends
+tests/                 34-test ctest suite covering all four backends
 docs/                  TEST_SUITE_PLAN.md, PORT_NOTES_QF.md
 scripts/               build helpers, coefficient generators, run-all scripts
 PORT_NOTES.md          port-specific fixes and design lessons
@@ -293,25 +304,31 @@ LICENSE, NOTICE.md, LICENSES/   licensing — see Section 6
 
 ## Section 4 — Tests
 
-The suite is 23 ctest tests spanning all three backends:
+The suite is 34 ctest tests spanning all four backends:
 
-- **Accuracy** — per-backend differential accuracy against the `__float128`
-  oracle: `dd_accuracy_test`, `ff_accuracy_test`, `qf_accuracy_test`.
+- **Accuracy, real** — per-backend differential accuracy against the `__float128`
+  oracle: `dd_accuracy_test`, `ff_accuracy_test`, `qf_accuracy_test`,
+  `tf_accuracy_test`.
+- **Accuracy, complex** — the same against the `__complex128` oracle:
+  `dd_complex_accuracy_test`, `ff_complex_accuracy_test`,
+  `qf_complex_accuracy_test`, `tf_complex_accuracy_test`.
 - **Property / identity** — algebraic identities that must hold for the type:
-  `dd_property_test`, `ff_property_test`, `qf_property_test`.
+  `dd_property_test`, `ff_property_test`, `qf_property_test`,
+  `tf_property_test`.
 - **Invariant** — non-overlap of the component words in the multi-word
   representation: `dd_invariant_test`, `ff_invariant_test`, `qf_nonoverlap_test`.
 - **Error-free transforms** — the `two_sum` / `two_product` primitives the
-  arithmetic is built on: `dd_eft_test`, `ff_eft_test`, `qf_eft_test`.
+  arithmetic is built on: `dd_eft_test`, `ff_eft_test`, `qf_eft_test`,
+  `tf_eft_test` (plus `tf_eft_test_contract_on`).
 - **FMA-contraction guards** — two postures each, one compiled with contraction
   off and one with it on: `dd_fma_guard_test`, `ff_fma_guard_test`,
-  `qf_fma_guard_test`, plus their `_contract_on` variants.
+  `qf_fma_guard_test`, `tf_fma_guard_test`, plus their `_contract_on` variants.
 - **End-to-end kernels** — cancellation-heavy kernels exercising the types in
   realistic reductions: `dd_e2e_test`, `ff_cancellation_test`,
-  `qf_cancellation_test`.
+  `qf_cancellation_test`, `tf_cancellation_test`.
 - **Foundational** — `hello_test`, `corpus_test`.
 
-All 23 tests pass on `main`.
+All 34 tests pass on `main`.
 
 Tests are exercised on the Serial Kokkos execution space; the type headers are
 `KOKKOS_INLINE_FUNCTION` throughout so they compile for device execution spaces
@@ -356,7 +373,7 @@ platform requirement.
 
 ### Templated kernel
 
-The three backends share a type surface, so one templated kernel body serves all
+The backends share a type surface, so one templated kernel body serves all
 of them with no per-backend specialization:
 
 ```cpp

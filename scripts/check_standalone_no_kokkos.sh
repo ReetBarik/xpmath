@@ -48,80 +48,80 @@ echo "includes : ${REPO_ROOT#"${HOME}/"}/include   (and nothing else)"
 echo
 
 # ---------------------------------------------------------------- 1. compile DD
-echo "[1/15] compile + link DD ..."
+echo "[1/16] compile + link DD ..."
 "${CXX}" "${STD[@]}" -Wall -Wextra -O2 "${INCLUDES[@]}" \
   "${SRC_DD}" -o "${WORK}/dd_no_kokkos_smoke"
 echo "      ok"
 
 # ------------------------------------------------------------------- 2. run DD
-echo "[2/15] run DD ..."
+echo "[2/16] run DD ..."
 "${WORK}/dd_no_kokkos_smoke"
 
 # -------------------------------------------------------- 3. compile DD complex
-echo "[3/15] compile + link DD complex ..."
+echo "[3/16] compile + link DD complex ..."
 "${CXX}" "${STD[@]}" -Wall -Wextra -O2 "${INCLUDES[@]}" \
   "${SRC_DD_COMPLEX}" -o "${WORK}/dd_complex_no_kokkos_smoke"
 echo "      ok"
 
 # ----------------------------------------------------------- 4. run DD complex
-echo "[4/15] run DD complex ..."
+echo "[4/16] run DD complex ..."
 "${WORK}/dd_complex_no_kokkos_smoke"
 
 # ---------------------------------------------------------------- 5. compile FF
-echo "[5/15] compile + link FF ..."
+echo "[5/16] compile + link FF ..."
 "${CXX}" "${STD[@]}" -Wall -Wextra -O2 "${INCLUDES[@]}" \
   "${SRC_FF}" -o "${WORK}/ff_no_kokkos_smoke"
 echo "      ok"
 
 # ------------------------------------------------------------------- 6. run FF
-echo "[6/15] run FF ..."
+echo "[6/16] run FF ..."
 "${WORK}/ff_no_kokkos_smoke"
 
 # -------------------------------------------------------- 7. compile FF complex
-echo "[7/15] compile + link FF complex ..."
+echo "[7/16] compile + link FF complex ..."
 "${CXX}" "${STD[@]}" -Wall -Wextra -O2 "${INCLUDES[@]}" \
   "${SRC_FF_COMPLEX}" -o "${WORK}/ff_complex_no_kokkos_smoke"
 echo "      ok"
 
 # ----------------------------------------------------------- 8. run FF complex
-echo "[8/15] run FF complex ..."
+echo "[8/16] run FF complex ..."
 "${WORK}/ff_complex_no_kokkos_smoke"
 
 # ---------------------------------------------------------------- 9. compile QF
-echo "[9/15] compile + link QF ..."
+echo "[9/16] compile + link QF ..."
 "${CXX}" "${STD[@]}" -Wall -Wextra -O2 "${INCLUDES[@]}" \
   "${SRC_QF}" -o "${WORK}/qf_no_kokkos_smoke"
 echo "      ok"
 
 # ------------------------------------------------------------------ 10. run QF
-echo "[10/15] run QF ..."
+echo "[10/16] run QF ..."
 "${WORK}/qf_no_kokkos_smoke"
 
 # -------------------------------------------------------- 11. compile QF complex
-echo "[11/15] compile + link QF complex ..."
+echo "[11/16] compile + link QF complex ..."
 "${CXX}" "${STD[@]}" -Wall -Wextra -O2 "${INCLUDES[@]}" \
   "${SRC_QF_COMPLEX}" -o "${WORK}/qf_complex_no_kokkos_smoke"
 echo "      ok"
 
 # ----------------------------------------------------------- 12. run QF complex
-echo "[12/15] run QF complex ..."
+echo "[12/16] run QF complex ..."
 "${WORK}/qf_complex_no_kokkos_smoke"
 
 # -------------------------------------------------------- 13. compile TF complex
-echo "[13/15] compile + link TF complex ..."
+echo "[13/16] compile + link TF complex ..."
 "${CXX}" "${STD[@]}" -Wall -Wextra -O2 "${INCLUDES[@]}" \
   "${SRC_TF_COMPLEX}" -o "${WORK}/tf_complex_no_kokkos_smoke"
 echo "      ok"
 
 # ----------------------------------------------------------- 14. run TF complex
-echo "[14/15] run TF complex ..."
+echo "[14/16] run TF complex ..."
 "${WORK}/tf_complex_no_kokkos_smoke"
 
 # --------------------------------------------- 15. no Kokkos in the preprocess
 # Preprocess a MINIMAL TU rather than the smoke test itself: the smoke test's
 # own diagnostic strings say the word "Kokkos", which would trip the grep for
 # the wrong reason. This TU contains nothing but all eight includes.
-echo "[15/15] preprocessed output contains no Kokkos ..."
+echo "[15/16] preprocessed output contains no Kokkos ..."
 printf '#include <xp/dd_math.hpp>\n#include <xp/dd_complex.hpp>\n#include <xp/ff_math.hpp>\n#include <xp/ff_complex.hpp>\n#include <xp/qf_math.hpp>\n#include <xp/qf_complex.hpp>\n#include <xp/tf_math.hpp>\n#include <xp/tf_complex.hpp>\nint main() { return 0; }\n' > "${WORK}/only_include.cpp"
 "${CXX}" "${STD[@]}" -E "${INCLUDES[@]}" "${WORK}/only_include.cpp" > "${WORK}/pp.ii"
 if grep -n "Kokkos\|KOKKOS_" "${WORK}/pp.ii" > "${WORK}/hits.txt"; then
