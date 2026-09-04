@@ -678,11 +678,37 @@ XPMATH_INLINE_FUNCTION QuadFloat sqr(QuadFloat a) {
 // QuadFloat width; the accurate variant adds a fifth digit + length-5 renorm.
 // This header ports QD's actual routine and cites it; the discrepancy with the
 // task text is recorded in PORT_NOTES_QF and the T3.0a report.
+// KI-19.  Non-finite signalling.  The long division below is only meaningful
+// when the QUOTIENT is a representable QuadFloat.  q0 = a.f0 / b.f0 is the
+// leading quotient digit AND, to within one FP32 rounding, the whole answer, so
+// classifying on q0 is both overflow-safe (IEEE division never traps) and
+// exact about which of the three non-finite outcomes applies:
+//
+//   q0 = ±inf   the true quotient exceeds FLT_MAX (genuine overflow), or b = 0.
+//               No finite QuadFloat exists — |value| of a QuadFloat is bounded
+//               by |f0|(1+2^-24) — so ±inf IS the answer.  The old code carried
+//               on: multiply_scalar(b, inf) = inf, subtract(a, inf) = -inf, and
+//               renorm(inf, -inf, …) collapsed to NaN.  That is the whole of
+//               KI-19: an isinf() branch downstream took the wrong path and the
+//               caller never learned the magnitude had overflowed.
+//   q0 = ±0     the true quotient is below the smallest FP32 subnormal (~7e-46;
+//               anything above it divides to a subnormal, not to zero).  ±0 is
+//               the answer, and IEEE's division sign rules give the right zero
+//               — the long division used to lose it in renorm, which folds
+//               -0.0 + 0.0 to +0.0.
+//   q0 = NaN    0/0, inf/inf, or a NaN operand — genuinely undefined.  Only
+//               these three reach NaN now.
+//
+// The one boundary case: a true quotient inside the top rounding interval
+// [FLT_MAX, (2-2^-24)·2^127) rounds q0 up to inf and is reported as overflow.
+// That band is 2^-24 relative wide at the very top of the format; a QuadFloat
+// whose leading word is FLT_MAX cannot carry a meaningful tail anyway.
 XPMATH_INLINE_FUNCTION QuadFloat divide(QuadFloat a, QuadFloat b) {
     float q0, q1, q2, q3;
     QuadFloat r;
 
     q0 = a.f0 / b.f0;
+    if (!detail::isfinite(q0) || q0 == 0.0f) return QuadFloat(q0);
     r = subtract(a, multiply_scalar(b, q0));
 
     q1 = r.f0 / b.f0;
@@ -716,7 +742,9 @@ XPMATH_INLINE_FUNCTION QuadFloat divide_scalar(QuadFloat a, float b) {
     float q0, q1, q2, q3, p, e;
     QuadFloat r;
 
-    q0 = a.f0 / b;  p = qf_two_prod(q0, b, e);  r = subtract(a, QuadFloat(p, e, 0.0f, 0.0f));
+    q0 = a.f0 / b;
+    if (!detail::isfinite(q0) || q0 == 0.0f) return QuadFloat(q0);   // KI-19; see divide()
+    p = qf_two_prod(q0, b, e);  r = subtract(a, QuadFloat(p, e, 0.0f, 0.0f));
     q1 = r.f0 / b;  p = qf_two_prod(q1, b, e);  r = subtract(r, QuadFloat(p, e, 0.0f, 0.0f));
     q2 = r.f0 / b;  p = qf_two_prod(q2, b, e);  r = subtract(r, QuadFloat(p, e, 0.0f, 0.0f));
 
@@ -733,7 +761,9 @@ XPMATH_INLINE_FUNCTION QuadFloat divide_accurate(QuadFloat a, QuadFloat b) {
     float q0, q1, q2, q3, q4;
     QuadFloat r;
 
-    q0 = a.f0 / b.f0;  r = subtract(a, multiply_scalar(b, q0));
+    q0 = a.f0 / b.f0;
+    if (!detail::isfinite(q0) || q0 == 0.0f) return QuadFloat(q0);   // KI-19; see divide()
+    r = subtract(a, multiply_scalar(b, q0));
     q1 = r.f0 / b.f0;  r = subtract(r, multiply_scalar(b, q1));
     q2 = r.f0 / b.f0;  r = subtract(r, multiply_scalar(b, q2));
     q3 = r.f0 / b.f0;  r = subtract(r, multiply_scalar(b, q3));
@@ -1078,7 +1108,7 @@ XPMATH_INLINE_FUNCTION void sincos(QuadFloat a, QuadFloat& sin_a, QuadFloat& cos
     if (a.f0 == 0.0f) { sin_a = QuadFloat(0.0f); cos_a = QuadFloat(1.0f); return; }
     if (detail::fabs(a.f0) >= 1.0e30f) {
         XPMATH_PRINTF("QFCSSNR: argument too large\n");
-        sin_a = QuadFloat(0.0f); cos_a = QuadFloat(0.0f); return;
+        sin_a = QuadFloat(0.0f); cos_a = QuadFloat(1.0f); return;   // KI-26
     }
     // Reduce mod 2pi (QD qd_real.cpp:2306-2308: z = nint(a/2pi); t = a - 2pi*z).
     QuadFloat pi2 = mul_pwr2(QuadFloat_pi(), 2.0f);   // 2pi, exact from 4-word pi
@@ -1110,6 +1140,21 @@ XPMATH_INLINE_FUNCTION void sincos(QuadFloat a, QuadFloat& sin_a, QuadFloat& cos
         sin_r = new_sin;
         cos_r = new_cos;
     }
+
+    // KI-26 codomain guard: outside the slack band -> identity point
+    // (sin, cos) = (0, 1), inside it -> clamp, so |sin| <= 1 and |cos| <= 1 hold
+    // exactly for every finite input.  Full rationale at dd_math.hpp:sincos.
+    // Note the out-param order here is (sin, cos), the reverse of dd/ff.
+    const float kSlack = 1.0009765625f;   // 1 + 2^-10
+    if (!(detail::fabs(sin_r.f0) <= kSlack) || !(detail::fabs(cos_r.f0) <= kSlack)) {
+        XPMATH_PRINTF("QFCSSNR: argument reduction under-determined\n");
+        sin_a = QuadFloat(0.0f); cos_a = QuadFloat(1.0f); return;
+    }
+    if (sin_r.f0 >  1.0f || (sin_r.f0 ==  1.0f && sin_r.f1 > 0.0f)) sin_r = QuadFloat( 1.0f);
+    if (sin_r.f0 < -1.0f || (sin_r.f0 == -1.0f && sin_r.f1 < 0.0f)) sin_r = QuadFloat(-1.0f);
+    if (cos_r.f0 >  1.0f || (cos_r.f0 ==  1.0f && cos_r.f1 > 0.0f)) cos_r = QuadFloat( 1.0f);
+    if (cos_r.f0 < -1.0f || (cos_r.f0 == -1.0f && cos_r.f1 < 0.0f)) cos_r = QuadFloat(-1.0f);
+
     sin_a = sin_r; cos_a = cos_r;
 }
 
@@ -1237,8 +1282,17 @@ XPMATH_INLINE_FUNCTION QuadFloat acos(QuadFloat a) {
     return angle(a, t);
 }
 // atan(a) = atan2(a, 1).  QD qd_real.cpp:2389.
+// KI-25 codomain clamp -- rationale in dd_math.hpp atan().  QF is the backend
+// where the overshoot was actually measured (+4.73e-30 at a = 3.4e38).  atan2
+// is not clamped; its range is (-pi, pi].
 XPMATH_INLINE_FUNCTION QuadFloat atan(QuadFloat a) {
-    return angle(QuadFloat(1.0f), a);
+    QuadFloat r = angle(QuadFloat(1.0f), a);
+    const QuadFloat p = QuadFloat_pi();
+    const QuadFloat h(p.f0 * 0.5f, p.f1 * 0.5f, p.f2 * 0.5f, p.f3 * 0.5f);
+    const QuadFloat ar = (r.f0 < 0.0f) ? QuadFloat(-r.f0, -r.f1, -r.f2, -r.f3) : r;
+    if (subtract(ar, h).f0 > 0.0f)
+        return (r.f0 < 0.0f) ? QuadFloat(-h.f0, -h.f1, -h.f2, -h.f3) : h;
+    return r;
 }
 // atan2(y, x) = angle(x, y).  QD qd_real.cpp:2393 (STL argument order).
 XPMATH_INLINE_FUNCTION QuadFloat atan2(QuadFloat y, QuadFloat x) {

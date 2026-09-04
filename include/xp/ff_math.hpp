@@ -736,7 +736,7 @@ XPMATH_INLINE_FUNCTION void sincos(FloatFloat a, FloatFloat& x, FloatFloat& y) {
     if (a.hi == 0.0f) { x = FloatFloat(1.0f); y = FloatFloat(0.0f); return; }
     if (a.hi >= 1.0e30f) {
         XPMATH_PRINTF("FFCSSNR: argument too large\n");
-        x = FloatFloat(0.0f); y = FloatFloat(0.0f); return;
+        x = FloatFloat(1.0f); y = FloatFloat(0.0f); return;      // KI-26
     }
     FloatFloat pi2 = multiply_scalar(FloatFloat_pi(), 2.0f);
     FloatFloat s1  = divide(a, pi2);
@@ -756,9 +756,26 @@ XPMATH_INLINE_FUNCTION void sincos(FloatFloat a, FloatFloat& x, FloatFloat& y) {
         sin_r = add(sin_r, sterm);
         cterm = divide_scalar(multiply(cterm, r2), -(float)((2*k - 1) * (2*k)));
         cos_r = add(cos_r, cterm);
-        if (detail::fabs(sterm.hi) < eps * detail::fabs(sin_r.hi) &&
-            detail::fabs(cterm.hi) < eps) break;
-        if (k == itrmx) { XPMATH_PRINTF("FFCSSNR: iteration limit\n"); return; }
+        // KI-25 (FF exposure, low end).  Two defects in these three lines.
+        //
+        // (1) `<` made the test vacuous once the series had already converged to
+        //     the last bit.  For |a| <~ 1e-19 the scaled residual r is small
+        //     enough that r^2 UNDERFLOWS FP32 to zero, so sterm is exactly 0 —
+        //     and eps * |sin_r.hi| underflows to zero as well, making `0 < 0`
+        //     false forever.  The loop then ran to itrmx on a series that had
+        //     nothing left to add.  `<=` breaks on the first such iteration and
+        //     changes no other outcome: the only newly-accepted case has
+        //     sterm == 0 == threshold, where every remaining term is also zero.
+        // (2) the itrmx arm `return`ed with x and y NEVER WRITTEN, so the caller
+        //     read uninitialised storage.  That is what made FF atan(1e-30)
+        //     come back NaN — angle()'s Newton step calls sincos on a tiny
+        //     iterate — a codomain violation for a function bounded by pi/2.
+        //     `break` falls through to the doublings and the assignments, which
+        //     is what dd_math.hpp already does and what qf_math.hpp's
+        //     "no return on itrmx" comment describes.
+        if (detail::fabs(sterm.hi) <= eps * detail::fabs(sin_r.hi) &&
+            detail::fabs(cterm.hi) <= eps) break;
+        if (k == itrmx) { XPMATH_PRINTF("FFCSSNR: iteration limit\n"); break; }
     }
 
     // Doubling: sin(2x) = 2 sin x cos x, cos(2x) = cos^2 x - sin^2 x
@@ -768,6 +785,19 @@ XPMATH_INLINE_FUNCTION void sincos(FloatFloat a, FloatFloat& x, FloatFloat& y) {
         sin_r = new_sin;
         cos_r = new_cos;
     }
+
+    // KI-26 codomain guard: outside the slack band -> identity point, inside it
+    // -> clamp, so |sin| <= 1 and |cos| <= 1 hold exactly for every finite
+    // input.  Full rationale at dd_math.hpp:sincos.
+    const float kSlack = 1.0009765625f;   // 1 + 2^-10
+    if (!(detail::fabs(sin_r.hi) <= kSlack) || !(detail::fabs(cos_r.hi) <= kSlack)) {
+        XPMATH_PRINTF("FFCSSNR: argument reduction under-determined\n");
+        x = FloatFloat(1.0f); y = FloatFloat(0.0f); return;
+    }
+    if (sin_r.hi >  1.0f || (sin_r.hi ==  1.0f && sin_r.lo > 0.0f)) sin_r = FloatFloat( 1.0f);
+    if (sin_r.hi < -1.0f || (sin_r.hi == -1.0f && sin_r.lo < 0.0f)) sin_r = FloatFloat(-1.0f);
+    if (cos_r.hi >  1.0f || (cos_r.hi ==  1.0f && cos_r.lo > 0.0f)) cos_r = FloatFloat( 1.0f);
+    if (cos_r.hi < -1.0f || (cos_r.hi == -1.0f && cos_r.lo < 0.0f)) cos_r = FloatFloat(-1.0f);
 
     x = cos_r; y = sin_r;
 }
@@ -891,8 +921,16 @@ XPMATH_INLINE_FUNCTION FloatFloat acos(FloatFloat a) {
     FloatFloat t = sqrt(subtract(FloatFloat(1.0f), multiply(a, a)));
     return angle(a, t);
 }
+// KI-25 codomain clamp -- rationale in dd_math.hpp atan().  atan2 is not
+// clamped; its range is (-pi, pi].
 XPMATH_INLINE_FUNCTION FloatFloat atan(FloatFloat a) {
-    return angle(FloatFloat(1.0f), a);
+    FloatFloat r = angle(FloatFloat(1.0f), a);
+    const FloatFloat p = FloatFloat_pi();
+    const FloatFloat h(p.hi * 0.5f, p.lo * 0.5f);
+    const FloatFloat ar = (r.hi < 0.0f) ? FloatFloat(-r.hi, -r.lo) : r;
+    if (subtract(ar, h).hi > 0.0f)
+        return (r.hi < 0.0f) ? FloatFloat(-h.hi, -h.lo) : h;
+    return r;
 }
 XPMATH_INLINE_FUNCTION FloatFloat atan2(FloatFloat y, FloatFloat x) {
     return angle(x, y);

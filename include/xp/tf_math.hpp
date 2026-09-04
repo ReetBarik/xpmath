@@ -653,11 +653,20 @@ XPMATH_INLINE_FUNCTION TripleFloat sqr(TripleFloat a) {
 // LENGTH-4 renorm (qd_real.cpp:775, `::renorm(q0,q1,q2,q3)`) — not the length-5
 // one; the digits themselves are the expansion. The k=3 reduction is therefore
 // three digits closed by the length-3 renorm.
+// KI-19.  Non-finite signalling — identical defect and identical fix to
+// qf_math.hpp:divide; the full derivation is there.  In short, q0 = a.f0 / b.f0
+// is the leading quotient digit and, to within one FP32 rounding, the whole
+// answer, so it classifies the three non-finite outcomes exactly: ±inf when the
+// true quotient leaves FP32's range (or b = 0), ±0 when it falls below the
+// smallest subnormal, NaN only for 0/0, inf/inf and NaN operands.  Without the
+// branch, q0 = inf propagated into subtract(a, inf) = -inf and renorm collapsed
+// the pair to NaN.
 XPMATH_INLINE_FUNCTION TripleFloat divide(TripleFloat a, TripleFloat b) {
     float q0, q1, q2;
     TripleFloat r;
 
     q0 = a.f0 / b.f0;
+    if (!detail::isfinite(q0) || q0 == 0.0f) return TripleFloat(q0);
     r = subtract(a, multiply_scalar(b, q0));
 
     q1 = r.f0 / b.f0;
@@ -676,7 +685,9 @@ XPMATH_INLINE_FUNCTION TripleFloat divide_scalar(TripleFloat a, float b) {
     float q0, q1, q2, p, e;
     TripleFloat r;
 
-    q0 = a.f0 / b;  p = tf_two_prod(q0, b, e);  r = subtract(a, TripleFloat(p, e, 0.0f));
+    q0 = a.f0 / b;
+    if (!detail::isfinite(q0) || q0 == 0.0f) return TripleFloat(q0);   // KI-19; see divide()
+    p = tf_two_prod(q0, b, e);  r = subtract(a, TripleFloat(p, e, 0.0f));
     q1 = r.f0 / b;  p = tf_two_prod(q1, b, e);  r = subtract(r, TripleFloat(p, e, 0.0f));
 
     q2 = r.f0 / b;
@@ -942,6 +953,23 @@ XPMATH_INLINE_FUNCTION void sincos(TripleFloat a, TripleFloat& sin_a, TripleFloa
         sin_r = s;
         cos_r = c;
     }
+
+    // KI-26 codomain guard: outside the slack band -> identity point
+    // (sin, cos) = (0, 1), inside it -> clamp, so |sin| <= 1 and |cos| <= 1 hold
+    // exactly for every finite input.  Full rationale at dd_math.hpp:sincos.
+    // TF had no guard of any kind and returned NaN from 3.16e25 upward; its
+    // exactly-representable-integer ceiling is 2^72, so a/2pi stops resolving
+    // around |a| ~ 3e22.  Note the out-param order here is (sin, cos).
+    const float kSlack = 1.0009765625f;   // 1 + 2^-10
+    if (!(detail::fabs(sin_r.f0) <= kSlack) || !(detail::fabs(cos_r.f0) <= kSlack)) {
+        XPMATH_PRINTF("TFCSSNR: argument reduction under-determined\n");
+        sin_a = TripleFloat(0.0f); cos_a = TripleFloat(1.0f);
+        return;
+    }
+    if (sin_r.f0 >  1.0f || (sin_r.f0 ==  1.0f && sin_r.f1 > 0.0f)) sin_r = TripleFloat( 1.0f);
+    if (sin_r.f0 < -1.0f || (sin_r.f0 == -1.0f && sin_r.f1 < 0.0f)) sin_r = TripleFloat(-1.0f);
+    if (cos_r.f0 >  1.0f || (cos_r.f0 ==  1.0f && cos_r.f1 > 0.0f)) cos_r = TripleFloat( 1.0f);
+    if (cos_r.f0 < -1.0f || (cos_r.f0 == -1.0f && cos_r.f1 < 0.0f)) cos_r = TripleFloat(-1.0f);
 
     sin_a = sin_r;
     cos_a = cos_r;
@@ -1216,8 +1244,16 @@ XPMATH_INLINE_FUNCTION TripleFloat atan2(TripleFloat y, TripleFloat x) {
 }
 
 // atan(a) = atan2(a, 1).  QD qd_real.cpp:2389-2391.
+// KI-25 codomain clamp -- rationale in dd_math.hpp atan().  atan2 is not
+// clamped; its range is (-pi, pi].
 XPMATH_INLINE_FUNCTION TripleFloat atan(TripleFloat a) {
-    return angle(TripleFloat(1.0f), a);
+    TripleFloat r = angle(TripleFloat(1.0f), a);
+    const TripleFloat p = TripleFloat_pi();
+    const TripleFloat h(p.f0 * 0.5f, p.f1 * 0.5f, p.f2 * 0.5f);
+    const TripleFloat ar = (r.f0 < 0.0f) ? TripleFloat(-r.f0, -r.f1, -r.f2) : r;
+    if (subtract(ar, h).f0 > 0.0f)
+        return (r.f0 < 0.0f) ? TripleFloat(-h.f0, -h.f1, -h.f2) : h;
+    return r;
 }
 
 // asin(a) = atan2(a, sqrt(1 - a^2)).  QD qd_real.cpp:2479-2491.

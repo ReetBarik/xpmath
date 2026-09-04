@@ -225,9 +225,54 @@ XPMATH_INLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b) {
     return DoubleDouble(hi, lo);
 }
 
+// KI-19 (DD sibling audit — the KI was filed QF-only; the same three-zone
+// defect is present here at FP64 scale and is fixed with the same structure
+// ff_math.hpp:divide already carries as B8/B10).  Measured before the fix:
+//   1e301/1.0    -> NaN   (quotient 1e301 IS representable)
+//   1e300/1e-10  -> NaN   (quotient 1e310, should be +inf)
+//   1.0/0.0      -> NaN   (should be +inf)
+//   1.0/inf      -> NaN   (IEEE 754-2019 §6.1 requires +0)
+//
+//   guard 1  non-finite DIVISOR.  conb = b.hi * split is inf and
+//            b1 = conb - (conb - b.hi) = inf - inf = NaN, poisoning a quotient
+//            IEEE defines exactly.  The bare double quotient IS the answer:
+//            finite/±inf -> correctly-signed ±0, ±inf/±inf -> NaN (kept as NaN
+//            precisely because the quotient is returned rather than a
+//            copysign form), anything/NaN -> NaN.
+//   Zone A   |s1| <= thresh.  Untouched, bit-identical to before.
+//   Zone B   thresh < |s1| < inf.  The splitter overflows on the QUOTIENT
+//            ESTIMATE with both operands well inside range, yet the true
+//            quotient is representable.  Pre-scale the NUMERATOR by the exact
+//            power of two 2^-64 and multiply the result back by 2^64; every
+//            Dekker intermediate scales with it, so the recovery is exact.
+//   Zone C   |s1| = inf.  No finite DoubleDouble exists (|value| is bounded by
+//            |hi|(1+2^-53)), so ±inf IS the answer — this is the KI-19 case.
+//            Includes x/0, where IEEE already requires ±inf.
+//   |s1| = 0 the true quotient is below the smallest subnormal; ±0 is the
+//            answer and IEEE's sign rules already give the right zero.
+//   s1 = NaN 0/0 and inf/inf only; falls through unchanged and stays NaN.
+//
+// Zone B's 2^-64 has ample headroom at both ends: |s1| <= 2^1024 maps to 2^960
+// and 2^960 * split ~ 2^987 << DBL_MAX, while the smallest a.lo that can reach
+// Zone B (b.hi subnormal) is ~7e-40, i.e. ~4e-59 after scaling — 249 binades
+// clear of the subnormal floor.  B8 and B10 remain mutually exclusive for the
+// reason ff_math.hpp gives: the divisor guard forces |s1| <= split+1.
 XPMATH_INLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b) {
     const double split = 134217729.0;
+    if (!detail::isfinite(b.hi)) return DoubleDouble(a.hi / b.hi, 0.0);
+    const double kSplitOverflowThresh = 1.3393857e300;   // DBL_MAX / (split + 1)
+    const double sd = (detail::fabs(b.hi) > kSplitOverflowThresh)
+                          ? ldexp(1.0, -64) : 1.0;
+    b = DoubleDouble(b.hi * sd, b.lo * sd);
     double s1  = a.hi / b.hi;
+    double un  = 1.0;                                    // Zone B numerator unscale
+    if (detail::fabs(s1) > kSplitOverflowThresh) {       // not Zone A
+        if (detail::isinf(s1)) return DoubleDouble(s1, 0.0);       // Zone C
+        const double sn = ldexp(1.0, -64);                         // Zone B
+        un = ldexp(1.0, 64);
+        a  = DoubleDouble(a.hi * sn, a.lo * sn);
+        s1 = s1 * sn;   // exact, and identical to recomputing (a.hi*sn) / b.hi
+    }
     double cona = s1 * split, conb = b.hi * split;
     double a1  = cona - (cona - s1), b1 = conb - (conb - b.hi);
     double a2  = s1 - a1,            b2 = b.hi - b1;
@@ -245,7 +290,10 @@ XPMATH_INLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b) {
     double s2  = (t11 + t21) / b.hi;
     double hi  = s1 + s2;
     double lo  = s2 - (hi - s1);
-    return DoubleDouble(hi, lo);
+    // KI-19: unscale — recover a/b from (a·sn)/(b·sd) by multiplying by sd and
+    // by un, as two separate exact powers of two.  Both are 1.0 on the
+    // non-hazard path, where `hi * 1.0 * 1.0 == hi` bit-for-bit.
+    return DoubleDouble(hi * sd * un, lo * sd * un);
 }
 
 XPMATH_INLINE_FUNCTION DoubleDouble multiply_scalar(DoubleDouble a, double b) {
@@ -264,9 +312,22 @@ XPMATH_INLINE_FUNCTION DoubleDouble multiply_scalar(DoubleDouble a, double b) {
     return DoubleDouble(hi, lo);
 }
 
+// KI-19: same three zones as divide() above, with the divisor a bare double.
 XPMATH_INLINE_FUNCTION DoubleDouble divide_scalar(DoubleDouble a, double b) {
     const double split = 134217729.0;
+    if (!detail::isfinite(b)) return DoubleDouble(a.hi / b, 0.0);
+    const double kSplitOverflowThresh = 1.3393857e300;   // DBL_MAX / (split + 1)
+    const double sd = (detail::fabs(b) > kSplitOverflowThresh) ? ldexp(1.0, -64) : 1.0;
+    b = b * sd;
     double t1  = a.hi / b;
+    double un  = 1.0;
+    if (detail::fabs(t1) > kSplitOverflowThresh) {
+        if (detail::isinf(t1)) return DoubleDouble(t1, 0.0);
+        const double sn = ldexp(1.0, -64);
+        un = ldexp(1.0, 64);
+        a  = DoubleDouble(a.hi * sn, a.lo * sn);
+        t1 = t1 * sn;
+    }
     double cona = t1 * split, conb = b * split;
     double a1  = cona - (cona - t1), b1 = conb - (conb - b);
     double a2  = t1 - a1,            b2 = b - b1;
@@ -547,7 +608,10 @@ XPMATH_INLINE_FUNCTION void sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble
     if (a.hi == 0.0) { x = DoubleDouble(1.0); y = DoubleDouble(0.0); return; }
     if (a.hi >= 1.0e60) {
         XPMATH_PRINTF("DDCSSNR: argument too large\n");
-        x = DoubleDouble(0.0); y = DoubleDouble(0.0); return;
+        // KI-26: (0, 0) is not a point on the unit circle.  See the
+        // under-determined-reduction note below for why the identity point is
+        // the fallback everywhere in this family.
+        x = DoubleDouble(1.0); y = DoubleDouble(0.0); return;
     }
     DoubleDouble pi2 = multiply_scalar(DoubleDouble_pi(), 2.0);
     DoubleDouble s1  = divide(a, pi2);
@@ -590,6 +654,44 @@ XPMATH_INLINE_FUNCTION void sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble
         sin_r = new_sin;
         cos_r = new_cos;
     }
+
+    // KI-26.  CODOMAIN GUARD.  sin and cos are bounded by 1 for every finite
+    // input; a value outside [-1, 1] — and above all inf or NaN — is wrong under
+    // any error model, at any argument, and a caller cannot defend against it.
+    // Argument reduction is only meaningful while nint(a/2pi) is an exactly
+    // representable integer of the format.  Past that the integer part needs
+    // more bits than the expansion carries, the per-word nint saturates
+    // ("DDNINT: argument too large"), and the Taylor series ran on a garbage
+    // residual: DD returned NaN at 1e35 and 3.4e38, TF from 3.16e25 upward.
+    //
+    // The ACCURACY loss at those arguments is legitimate and is deliberately NOT
+    // addressed here — reduction against a finite-precision pi cannot do better,
+    // and the sweep's in_delta = |x| bound (docs/ULP_METRIC.md) accounts for it.
+    // Only the codomain violation is fixed.
+    //
+    // Testing the RESULT rather than the reduced argument is deliberate, and
+    // measured: a first attempt gated on |s3| <= 4 and cost DD sin/cos/tan at
+    // ±1e27 seven digits apiece, because nint's residual there is 4.317 — past
+    // pi, yet the doublings still recover ~7 correct digits from it.  The result
+    // test cannot make that mistake: it fires only where the answer is already
+    // unusable.  Its `!(… <= …)` spelling catches inf and NaN too.
+    //
+    // Two tiers.  Outside the slack band the answer carries no information, so
+    // return the identity point (cos, sin) = (1, 0): in codomain, on the unit
+    // circle, and it keeps tan = sin/cos finite (0) rather than the 0/0 NaN that
+    // a (0, 0) fallback produces.  Inside it — an ordinary last-bit overshoot
+    // past 1 — clamp, so |result| <= 1 holds exactly, with no slack, always.
+    const double kSlack = 1.0009765625;   // 1 + 2^-10
+    if (!(detail::fabs(sin_r.hi) <= kSlack) || !(detail::fabs(cos_r.hi) <= kSlack)) {
+        XPMATH_PRINTF("DDCSSNR: argument reduction under-determined\n");
+        x = DoubleDouble(1.0); y = DoubleDouble(0.0); return;
+    }
+    // The clamp compares the PAIR, not just the leading word: hi == 1.0 with
+    // lo > 0 is a value above 1 too.
+    if (sin_r.hi >  1.0 || (sin_r.hi ==  1.0 && sin_r.lo > 0.0)) sin_r = DoubleDouble( 1.0);
+    if (sin_r.hi < -1.0 || (sin_r.hi == -1.0 && sin_r.lo < 0.0)) sin_r = DoubleDouble(-1.0);
+    if (cos_r.hi >  1.0 || (cos_r.hi ==  1.0 && cos_r.lo > 0.0)) cos_r = DoubleDouble( 1.0);
+    if (cos_r.hi < -1.0 || (cos_r.hi == -1.0 && cos_r.lo < 0.0)) cos_r = DoubleDouble(-1.0);
 
     x = cos_r; y = sin_r;
 }
@@ -715,8 +817,24 @@ XPMATH_INLINE_FUNCTION DoubleDouble acos(DoubleDouble a) {
     DoubleDouble t = sqrt(subtract(DoubleDouble(1.0), multiply(a, a)));
     return angle(a, t); // atan2(sqrt(1-a^2), a)
 }
+// KI-25.  atan is bounded by pi/2 for EVERY finite argument -- the bound is a
+// property of the function, not of the algorithm, so no input may produce a
+// result outside it.  angle()'s Newton refinement can land a couple of ulp past
+// pi/2 at the format extremes (measured on QF: +4.73e-30 at 3.4e38, ~1.9 ulp).
+// Out there the true atan differs from pi/2 by less than the format can resolve
+// -- atan(3.4e38) = pi/2 - 2.9e-39 -- so the stored pi/2 IS the correctly
+// rounded answer, and clamping to it makes the codomain bound hold by
+// construction at no accuracy cost.  Halving pi is exact (binary exponent
+// decrement), so the clamp target is the format's own nearest value to pi/2.
+// atan2 is deliberately NOT clamped: its range is (-pi, pi].
 XPMATH_INLINE_FUNCTION DoubleDouble atan(DoubleDouble a) {
-    return angle(DoubleDouble(1.0), a); // atan2(a, 1)
+    DoubleDouble r = angle(DoubleDouble(1.0), a); // atan2(a, 1)
+    const DoubleDouble p = DoubleDouble_pi();
+    const DoubleDouble h(p.hi * 0.5, p.lo * 0.5);
+    const DoubleDouble ar = (r.hi < 0.0) ? DoubleDouble(-r.hi, -r.lo) : r;
+    if (subtract(ar, h).hi > 0.0)
+        return (r.hi < 0.0) ? DoubleDouble(-h.hi, -h.lo) : h;
+    return r;
 }
 XPMATH_INLINE_FUNCTION DoubleDouble atan2(DoubleDouble y, DoubleDouble x) {
     return angle(x, y);

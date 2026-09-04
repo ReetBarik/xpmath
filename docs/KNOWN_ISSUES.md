@@ -3415,9 +3415,10 @@ Totals across all four `tan`/`tanh` cells: 448 points decreased (worst −1.76),
 
 ---
 
-## KI-19 — KI-9 is NOT fully closed: QF `divide` still returns NaN once the quotient reaches ~1e41
+## KI-19 **[RESOLVED]** — KI-9 is NOT fully closed: QF `divide` still returns NaN once the quotient reaches ~1e41
 
-**Severity: high (contradicts a RESOLVED entry), QF, surfaced through `fmod`.**
+**Severity: high (contradicts a RESOLVED entry), QF *and TF and DD* (scope
+corrected below), surfaced through `fmod`.**
 
 ### What
 
@@ -3449,6 +3450,59 @@ this region for `div`**, so the residual escaped the KI-9 re-baseline.
 Re-open KI-9. Establish the exact quotient at which the fixed path still
 saturates, then extend the sweep's `div` grid to cover it so the next
 re-baseline cannot miss it again.
+
+### Resolution — commit `fix: KI-19/KI-25/KI-26 correct non-finite signalling in div, atan and trig` (2026-09-04)
+
+**Why KI-9's verification missed this.** KI-9 scaled division past the Dekker
+splitter limit and was verified with `divide(x, x)`, where the quotient is
+always 1. That exercise varies *operand* magnitude across the whole range and
+holds *quotient* magnitude fixed at a single value. The defect lives entirely in
+quotient magnitude, so the verification could not have caught it no matter how
+wide the operand sweep was. **The earlier KI-9 verification tested operand
+magnitude but never quotient magnitude.**
+
+**Scope correction.** Filed as QF-only. Re-verification shows the defect on
+**QF, TF and DD**. DD was the worst of the three and was not previously
+suspected — it lost *representable* quotients, not merely overflowing ones:
+
+```
+DD divide(1e301, 1.0)    = NaN     true 1e301, representable
+DD divide(1e300, 1e-10)  = NaN     true 1e310, overflow -> should be +inf
+DD divide(1.0,   0.0)    = NaN     should be +inf
+DD divide(1.0,   inf)    = NaN     should be +0
+```
+
+FF already carried the correct three-zone structure from B8/B9/B10 and needed no
+change; it is the model the other three now follow.
+
+**The fix.** Two shapes, chosen per backend by what its division algorithm can
+support.
+
+- *DD* gets the full FF three-zone treatment in `divide` and `divide_scalar`: a
+  non-finite-divisor guard; Zone A (quotient inside the splitter's reach) left
+  bit-for-bit untouched; Zone B, where the quotient is representable but exceeds
+  the splitter threshold `DBL_MAX/(split+1) = 1.3393857e300`, prescaled by an
+  exact power of two (`2^-64`) and unscaled at the end, which recovers cases
+  like `1e301/1.0`; Zone C, genuine overflow, returns the correctly signed
+  `±inf` that the hardware `a.hi/b.hi` already produced.
+- *QF* and *TF* use QD long division, whose first quotient digit `q0 = a.f0/b.f0`
+  is already the IEEE-correct answer for every special case. A three-line guard
+  short-circuits on it before the splitter is ever reached:
+
+  ```cpp
+  q0 = a.f0 / b.f0;
+  if (!detail::isfinite(q0) || q0 == 0.0f) return QuadFloat(q0);
+  ```
+
+  This is deliberately *not* a scaling fix: once `q0` is `±inf` or `±0`, no
+  amount of refinement can produce anything else, and the remaining digits would
+  only manufacture the `inf - inf = NaN` that caused the original symptom.
+
+**Contract now honoured on all four backends**: quotient overflow gives `±inf`
+with the correct sign; quotient underflow gives `±0` with the correct sign;
+`x/0` gives `±inf`; `NaN` appears only for `0/0` and `inf/inf`. The signed zero
+was verified on the *leading word's* sign bit — an earlier probe summed all
+component words and `-0.0f + 0.0f = +0.0` silently masked a correct `-0`.
 
 ---
 
@@ -3775,7 +3829,7 @@ corresponding point in their own ranges.
 
 ---
 
-## KI-25 — QF and TF `atan` return a non-finite value at |x| ≈ 3.16e19
+## KI-25 **[RESOLVED]** — QF and TF `atan` return a non-finite value at |x| ≈ 3.16e19
 
 **Severity: high (wrong value, not lost digits), QF and TF. Filed 2026-09-03 by
 the step-1c ULP triage; measured, not fixed.**
@@ -3811,9 +3865,55 @@ at the opposite end of the range.
 /tmp/sweep --ulp --ulp-explain atan:57
 ```
 
+### Resolution — commit `fix: KI-19/KI-25/KI-26 correct non-finite signalling in div, atan and trig` (2026-09-04)
+
+**Yes, KI-25 does share KI-13's mechanism, and was already closed by the KI-13
+fix at `7680809`.** The tracing that this entry asked for and did not do:
+`atan(a)` is `angle(1, a)`, and `angle()` forms `x² + y²` — the same unscaled
+sum of squares KI-13 was about. Commit `7680809` ("scale hypot/abs at BOTH ends;
+remaining unscaled sums of squares") added the high-side rescale at
+`qf_math.hpp` `angle()` (`kQFSqHi = 1.0e18f`) and the TF counterpart. Measured
+against the current tree, QF and TF `atan(3.162e19)` are finite and correct. The
+`atan`-is-not-in-KI-13's-op-list objection was right about the *entry* and wrong
+about the *code*: the op list was incomplete, not the diagnosis. **Merge this
+entry's mechanism into KI-13's the next time the file is reorganised.**
+
+Two things were nevertheless found and fixed here, neither of them the filed
+symptom.
+
+**(a) A separate FF exposure at the LOW end.** `FF atan(1e-30)` returned NaN.
+Unrelated to sums of squares: `ff_math.hpp` `sincos` tested convergence with a
+strict `<` and, on hitting `itrmx`, executed a bare `return` that left the `x`
+and `y` out-parameters *never written*. The caller then read uninitialised
+storage. Changed to `<=` plus `break`, so the partial result is always
+published. `FF atan(1e-30)` now returns `1e-30`. Filed here rather than as a new
+KI because it is the same op and the same reported symptom class (`atan`
+non-finite), just at the opposite end of the range.
+
+**(b) A codomain violation at the top of the range, on QF.** `atan` is bounded
+by π/2 for every finite argument — that is a property of the function, so no
+input may exceed it. `angle()`'s Newton refinement lands slightly past:
+
+```
+QF atan(3.4e38) - (true pi/2) = +4.73e-30      about +1.9 ulp
+```
+
+DD, FF and TF measured inside the bound at the same inputs, but the margin is
+incidental rather than structural. All four now clamp `atan`'s magnitude to the
+stored π/2. The clamp costs nothing in accuracy and in fact *gains*: the true
+`atan(3.4e38)` is `π/2 - 2.9e-39`, far below QF's resolution, so the stored π/2
+is the correctly-rounded answer and the excess drops from `+4.73e-30` to
+`-8.47e-32` — which is the constant's own distance from π/2, i.e. the best the
+format can do. Halving π is exact, so the clamp target is the format's nearest
+value to π/2 and not a re-rounded approximation of it. **`atan2` is deliberately
+not clamped**: its range is (−π, π], not [−π/2, π/2].
+
+Verified `|atan(x)| <= π/2` against a `__float128` π/2 on all four backends at
+3.162e19, 1e30, ±3.4e38, 1.7e308 (DD), and at 1e-30, −1e-30, 1e-45.
+
 ---
 
-## KI-26 — TF `sin`/`cos`/`tan` and QF `cos`/`tan` return non-finite values at very large arguments
+## KI-26 **[RESOLVED]** — TF `sin`/`cos`/`tan` and QF `cos`/`tan` return non-finite values at very large arguments
 
 **Severity: high (wrong value, not lost digits), QF and TF. Filed 2026-09-03 by
 the step-1c ULP triage; measured, not fixed.**
@@ -3860,6 +3960,103 @@ in-codomain result. Acceptance: no `sin`/`cos` point on any backend returns a
 value outside [−1, 1] or non-finite. The *accuracy* at these arguments is out of
 scope for this KI and is covered by the deferred `in_delta = |x|` bound term.
 
+### Resolution — commit `fix: KI-19/KI-25/KI-26 correct non-finite signalling in div, atan and trig` (2026-09-04)
+
+**Which half is fixed and which is deliberately not.** Fixed: the **range
+violation** — no `sin` or `cos` on any backend now returns a non-finite value or
+a value outside [−1, 1], at any finite argument. Not fixed, and not attempted:
+the **accuracy loss** at huge arguments. Argument reduction mod 2π against a
+finite-precision π cannot do better than the number of π bits the format
+carries, and no amount of code changes that. These are separate claims and the
+fix addresses only the first.
+
+**Scope correction.** Filed for QF and TF. DD was also affected and was not
+listed: `DD sin(1e35)` and `DD sin(3.4e38)` returned NaN. FF's pre-guard existed
+but returned the wrong constant. All four backends were changed.
+
+**The fix — a post-computation codomain guard, not a pre-computation one.** At
+the end of `sincos`, on the *computed result*:
+
+1. If either `|sin|` or `|cos|` exceeds `1 + 2^-10`, the reduction is
+   under-determined by a margin no rounding can explain. Emit the diagnostic and
+   return the identity point `(sin, cos) = (0, 1)` — in range, and the honest
+   statement that the phase is unknown.
+2. Otherwise clamp any result whose magnitude sits marginally above 1 (leading
+   word `> 1`, or `== 1` with a same-signed tail) to exactly ±1.
+
+Two pre-guards that already existed also returned the wrong values and were
+corrected: DD's `a.hi >= 1e60` and FF/QF's `|a| >= 1e30` arms returned
+`(sin, cos) = (0, 0)`, which is not a point on the unit circle. They now return
+`(0, 1)`.
+
+**Why the guard is on the result and not on the reduced argument.** The first
+design tested the reduced argument (`!(|s3| <= 4)`) and **regressed the monotone
+gate by 30 points, worst −7.06 digits**. Diagnosed: at DD `sin`/`cos`/`tan`
+around ±1e27 the `nint` residual is 4.317 — over the threshold — yet roughly
+seven correct digits are still recoverable there. Testing the reduced argument
+throws away answers that are degraded but useful. Testing the *result* fires
+only where the answer is already outside the codomain and therefore already
+unusable. With the second design the gate shows **18 decreases, worst 0.56
+digits** — bit-for-bit batch 1's already-accepted set under KI-8, i.e. **this
+change adds zero decreases** and adds 2,022 improvements.
+
+**tan convention.** `tan` is deliberately **not** clamped. Unlike `sin` and
+`cos`, `tan` has no bounded codomain — it is genuinely unbounded at its poles,
+and returning `±inf` near an odd multiple of π/2 is the correct IEEE
+signalling, not a defect. `tan` is computed as `sin/cos` and inherits the
+in-range `sin`/`cos` from the guard above, so it can no longer produce a
+non-finite value from a *reduction* failure while still producing one from a
+genuine pole. That is the intended and deliberate distinction.
+
+**Siblings audited.** `asin`, `acos`, `atan2`, `sinh`, `cosh`, `tanh`, `asinh`,
+`acosh` were probed at 3.162e19, 1e30, 1e35 and 3.4e38 on all four backends and
+are **sound**. `sinh`/`cosh` returning `±inf` at these arguments is correct —
+the true value genuinely overflows the format. Complex counterparts: complex
+divide now returns `±inf` on QF/TF/FF via the KI-19 fix; complex `arg` is
+finite; complex `sin`/`cos` are in codomain.
+
+---
+
+## KI-27 — DD and FF `multiply` return NaN on genuine product overflow, where `±inf` is correct
+
+**Severity: high (wrong kind of non-finite value), DD and FF. Filed 2026-09-04
+while fixing KI-19; measured, not fixed — outside that batch's scope.**
+
+### What
+
+The same contract KI-19 restored for `divide` is violated by `multiply` on two
+backends. When the true product overflows the format, `inf` is correct and `NaN`
+is wrong: downstream code branching on `isinf()` takes the wrong path and never
+learns the magnitude overflowed.
+
+```
+DD multiply(1e300, 1e300).hi = -nan     true 1e600, should be +inf
+FF multiply(1e30,  1e30 ).hi = -nan     true 1e60,  should be +inf
+QF multiply(1e30,  1e30 )    = inf      correct
+```
+
+QF gets it right, which shows the correct behaviour is reachable and this is a
+defect rather than a format limit.
+
+### Extent
+
+Not surfaced by the sweep grid — like KI-19's quotient region, the `mul` grid
+does not place a point at an overflowing product. Found by direct probe.
+
+It has at least one visible downstream consequence: `DD` complex
+`(1e300 + 1e300i) / (1e-10 + 1e-10i)` still returns NaN after the KI-19 divide
+fix, because the complex division formula multiplies before it divides and the
+NaN is manufactured in the `multiply`.
+
+### Closing it
+
+Same shape as the KI-19 DD fix. The Dekker `two_prod` splitter overflows before
+the hardware product does, turning an `inf` into `inf - inf = NaN`. Guard on the
+hardware product `a.hi * b.hi` first: if it is non-finite or zero, that is
+already the IEEE-correct answer and the error-free transform must not run. Then
+extend the `mul` sweep grid to cover an overflowing product so the next
+re-baseline cannot miss it, exactly as KI-19 requires for `div`.
+
 ---
 
 ## Note on resolution markers
@@ -3876,3 +4073,7 @@ this file is edited for content.
 `**[RESOLVED 2026-09-04]**` in their headings, so the marker is consistent for
 them. **KI-18 still has no heading marker** and is still the one outstanding
 case; it was left alone here because this batch's scope was KI-10/KI-15 only.
+
+**Update 2026-09-04 (KI-19/25/26 batch).** KI-19, KI-25 and KI-26 now carry
+`**[RESOLVED]**` in their headings. **KI-18 is still the one outstanding case**
+— left alone again because this batch's scope was KI-19/KI-25/KI-26 only.
