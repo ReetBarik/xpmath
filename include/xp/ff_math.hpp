@@ -1165,7 +1165,12 @@ XPMATH_INLINE_FUNCTION FloatFloat asinh(FloatFloat a) {
     if (a.hi < 0.5f) {
         return log1p(add(a, divide(a2, add(FloatFloat(1.0f), s))));
     }
-    return log(add(a, s));
+    // KI-29: 1/2 log1p(2a(a+s)) rather than log(a+s).  Halves the share of
+    // log's constant absolute error that asinh inherits; the mid-band residual
+    // KI-29 recorded is that constant, not Sterbenz.  Derived at dd_math.hpp.
+    const FloatFloat t = add(a, s);
+    const FloatFloat z = multiply(a, t);
+    return multiply_scalar(log1p(add(z, z)), 0.5f);
 }
 XPMATH_INLINE_FUNCTION FloatFloat acosh(FloatFloat a) {
     if (ff_cmp_one(a) < 0) {                                            // KI-16

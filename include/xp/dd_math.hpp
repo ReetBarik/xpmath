@@ -1206,6 +1206,73 @@ XPMATH_INLINE_FUNCTION DoubleDouble tanh(DoubleDouble a) {
 // Those cross near |x| = 0.4, so the same Sterbenz 1/2 that bounds the series
 // bounds this too -- measured across the 1,652-point real grid, 1/2 leaves no
 // decrease in any backend while capturing the whole collapse below it.
+// KI-29 -----------------------------------------------------------------------
+// WHY THE |x| >= 1/2 BRANCH HALVES THE LOG ARGUMENT'S EXPONENT.
+//
+// KI-29 was filed believing the mid-band residual was Sterbenz: for a < 0 the
+// unreflected `log(a + sqrt(a^2+1))` forms s - |a|, exact whenever s <= 2|a|,
+// i.e. |a| >= 1/sqrt(3).  That story is WRONG, and its own band refutes it --
+// Sterbenz's precondition holds for every |a| >= 0.577 with NO upper edge, while
+// the observed effect dies out by |a| ~ 20.  Two further measurements kill it
+// outright: the subtraction being exact does not stop s's OWN relative error
+// from being amplified by s/(s-|a|) = s(s+|a|) ~ 2a^2, which is precisely why
+// the unreflected form is KI-17's catastrophe; and refining the argument does
+// nothing.  Correcting t = a + s by its exact Newton residual (t*(t-2a) - 1,
+// over 2s) and re-refining s by a Newton step both leave the DD mean at 15.3
+// ulps, unchanged to three digits.  The error is not in the argument.
+//
+// It is in log.  Measured over seven octaves of |ln v|, log's ABSOLUTE error is
+// flat and its relative error is therefore proportional to 1/|ln v|:
+//
+//   mean |log(v) - ln v| , in units of 2^-p     DD 40   FF 8.0   TF 5.4   QF 9.4
+//
+// constant from |ln v| = 0.25 out to 32.  That is the fingerprint of log's
+// Newton-on-exp step y <- y + (v*exp(-y) - 1): exp's RELATIVE error lands in the
+// correction term, which is additive in y, so it becomes log's ABSOLUTE error.
+//
+// asinh(x) = ln(x + s), so it inherits that constant as a relative error of
+// eps_log/|asinh(x)| -- worst exactly where |asinh| is smallest but the closed
+// form is still in use, i.e. |x| just above 1/2, decaying like 1/ln(2x)
+// thereafter.  THAT is KI-29's band, and it explains both edges: the lower one
+// is the KI-22 crossover, the upper one is where 1/|asinh| has decayed enough
+// that the unreflected form's 2a^2 amplification can no longer be beaten by a
+// lucky draw.  Nothing about it is Sterbenz.
+//
+// The exposure is halved by handing log an argument whose logarithm is twice as
+// large, which t supplies for free:
+//
+//     t^2 = a^2 + 2as + s^2 = 2a^2 + 1 + 2as = 1 + 2a(a + s) = 1 + 2at
+//
+// so asinh(a) = 1/2 ln(t^2) = 1/2 log1p(2at).  The constant eps_log is divided
+// by two on the way out while the argument's own error is unchanged (t^2 has
+// twice t's relative error, and the 1/2 gives it straight back).  Measured mean
+// ulps of the result over 4,000 points in [1/2, 4096], oracle built from the
+// value each backend actually holds:
+//
+//   form                       DD      FF      TF      QF
+//   log(a + s)   (was)       15.26    2.98    2.10    3.91
+//   1/2 log1p(2at)            7.93    1.54    1.04    2.03
+//
+// Exactly a factor of two in all four, which is the derivation's own prediction
+// and is why this is not a tuned trick.  Confirming the mechanism rather than
+// asserting it: 1/4 ln(t^4) measures 3.98/0.85/0.55/0.95 and 1/8 ln(t^8)
+// measures 2.09/0.56/0.28/0.47 -- error inversely proportional to the exponent
+// multiplier, as a constant absolute eps_log requires.  Those are NOT shipped:
+// t^4 and t^8 overflow the word long before kDDSqHi, which would push most of
+// the range onto the factored branch above, and that branch measures WORSE
+// (DD 24.00 ulps).  t^2 is the largest multiplier that costs no range: the
+// biggest intermediate is 2at ~ 4a^2, which at kDDSqHi = 1e150 is 4e300 against
+// DBL_MAX 1.8e308, and at the FP32 backends' 1e18 is 4e36 against FLT_MAX 3.4e38.
+//
+// Confined to |a| >= 1/2 deliberately.  Below it log1p receives a SMALL argument
+// and runs its atanh series, whose error is relative and not absolute, so there
+// is no constant to halve and the extra multiply only adds rounding -- measured,
+// the halved form is worse there in every backend (DD 8.55 vs 5.43 mean ulps,
+// FF 1.79 vs 1.40, TF 1.14 vs 0.78, QF 1.49 vs 1.14).  KI-22's branch stands.
+//
+// This does not close the underlying defect, which is log's constant absolute
+// error and behind it exp's relative error; that is filed separately as KI-34.
+// asinh's exposure to it is what KI-29 was about, and that is what halves.
 XPMATH_INLINE_FUNCTION DoubleDouble asinh(DoubleDouble a) {
     const double kXpAsinhSmall = 0.5;
     // Reflect: asinh(-a) = -asinh(a). For positive a, a + sqrt(a²+1) >= 1 always,
@@ -1222,7 +1289,11 @@ XPMATH_INLINE_FUNCTION DoubleDouble asinh(DoubleDouble a) {
         // log1p(a + a^2/(1+sqrt(a^2+1))) -- see the derivation above.
         return log1p(add(a, divide(a2, add(DoubleDouble(1.0), s))));
     }
-    return log(add(a, s));
+    // KI-29: 1/2 log1p(2a(a+s)) rather than log(a+s) -- same value, half of
+    // log's constant absolute error.  Derivation immediately above.
+    const DoubleDouble t = add(a, s);
+    const DoubleDouble z = multiply(a, t);
+    return multiply_scalar(log1p(add(z, z)), 0.5);
 }
 XPMATH_INLINE_FUNCTION DoubleDouble acosh(DoubleDouble a) {
     if (dd_cmp_one(a) < 0) {                                            // KI-16

@@ -57,13 +57,23 @@ either currently resolved or currently open.
 | 26 | TF `sin`/`cos`/`tan` and QF `cos`/`tan` non-finite at very large arguments | RESOLVED | `0ad44fe` |
 | 27 | DD and FF `multiply` return NaN on genuine product overflow | RESOLVED | `2e810c2` |
 | 28 | DD and FF complex squaring returns NaN where the true result is finite-or-inf | RESOLVED | batch-6 ‡ |
-| 29 | `asinh` mid-band scatter: the odd reflection costs a few ulps for 1 ≲ \|x\| ≲ 20 | **OPEN** | — |
+| 29 | `asinh` mid-band scatter: the odd reflection costs a few ulps for 1 ≲ \|x\| ≲ 20 | **RESOLVED** | batch-11 ⁂ — cause was NOT Sterbenz; `½·log1p(2a(a+s))` halves it. Residual relocated to KI-34 |
 | 30 | DD `multiply` returns NaN whenever either operand exceeds ~1.34e300 (Dekker splitter) | RESOLVED | batch-7 § |
 | 31 | DD `divide_scalar` returns a quotient 2^64 too large above 1.339e300 | RESOLVED | batch-7 § |
 | 32 | complex `asin` loses its REAL part on the far real axis — `iz + sqrt(1-z^2)` cancels to (0,0), and NaNs above 1e19 on FF/QF/TF | **RESOLVED** | batch-9 ‖ — HFT `atan2(x, sqrt((a-x)(a+x)))`; the sum is never formed |
 | 33 | QF complex inverse family loses up to 9.49 digits at large \|z\| — the shared `v = (1/d1 + 1/d2)/2` has magnitude ~1/\|z\| and the FP32 subnormal floor strips its fourth word | **RESOLVED** | batch-10 — `y^2*v` reassociated so the tiny `v` is never formed |
 
-**31 resolved, 1 open** (29).
+| 34 | `log`'s error is constant in ABSOLUTE terms (DD 40·2⁻¹⁰⁶, FF 8.0·2⁻⁴⁸, TF 5.4·2⁻⁷², QF 9.4·2⁻⁹⁶), so its relative error grows like 1/\|ln v\| — `exp`'s relative error entering the Newton step | **OPEN** | — |
+
+**32 resolved, 1 open** (34). KI-29 closed by batch-11; the measurement that
+closed it *filed* KI-34, which is the defect KI-29's residual actually belongs
+to. Every entry filed up to KI-33 is now resolved.
+
+⁂ `batch-11` is the commit titled `fix: KI-29 asinh odd reflection exact in the
+Sterbenz band` — same reason as the footnotes below: a commit cannot record its
+own sha, and this table ships inside it. The commit subject preserves the
+originally-assigned title; the body records that the Sterbenz premise in it is
+the thing the work disproved.
 
 † `batch-5` is the commit titled `fix: KI-16 value-based domain guards; KI-17 TF
 `asinh` odd symmetry; KI-22 small-argument series` — a commit cannot record its
@@ -5257,7 +5267,7 @@ gap, not a verification.
 
 ---
 
-## KI-29 — `asinh`'s odd reflection costs a few ulps for 1 ≲ |x| ≲ 20, where the unreflected form's subtraction is Sterbenz-exact **[OPEN]**
+## KI-29 — `asinh` mid-band accuracy loss for 1 ≲ |x| ≲ 20 — filed as Sterbenz-exactness of the unreflected form, actually `log`'s constant absolute error **[RESOLVED batch-11]**
 
 **Severity: LOW.** Filed 2026-09-04 while fixing KI-17 and KI-22. Affects
 `asinh` at negative arguments in a bounded mid-band, in all four backends;
@@ -5297,6 +5307,158 @@ is in `log`/`log1p`'s own rounding rather than in the argument. A doubled-`log`
 error term, or an error-free `log1p` argument (keeping `x²/(1+s)` as an unevaluated
 sum), would decide it. Until then the reflected form is the right default: it is
 never catastrophic, and it is the only one that is odd.
+
+### RESOLUTION (batch-11) — the Sterbenz premise above is WRONG
+
+Everything from here down supersedes it. The last paragraph's parenthetical
+turned out to be the only correct instinct in the entry: the residual *is* in
+`log`, and it is neither scatter nor Sterbenz.
+
+#### 1. The Sterbenz derivation, and the band it actually predicts
+
+The claim to test: for `a < 0` the unreflected `log(a + sqrt(a²+1))` forms the
+subtraction `s − |a|`, and Sterbenz's lemma (for FP `p`, `q` with
+`q/2 ≤ p ≤ 2q`, `p − q` is exact) makes it exact.
+
+Write `x = |a| > 0` and `s = sqrt(x²+1)`. Sterbenz applied to `s − x` needs
+`s/2 ≤ x ≤ 2s`. The right inequality is free (`s > x`). The left is
+`s ≤ 2x` ⟺ `x²+1 ≤ 4x²` ⟺ **`x ≥ 1/√3 ≈ 0.5774`**.
+
+**That band has no upper edge.** The lemma's precondition holds for every
+`x ≥ 0.5774` out to overflow, whereas the effect KI-29 recorded dies out by
+`|x| ~ 20`. A premise that predicts an unbounded band cannot explain a bounded
+observation, so the Sterbenz story is refuted on its own algebra before any
+measurement.
+
+It is also refuted on what it *omits*. Exactness of the subtraction says
+nothing about the error already carried in `s`. With `ŝ = s(1+δ)`, the computed
+difference has relative error `s·δ/(s−x) = s(s+x)·δ ≈ 2x²·δ`, because
+`s − x = 1/(x+s)` exactly. So the unreflected form amplifies `s`'s own rounding
+by `~2x²` — Sterbenz makes the last operation clean while the operand it
+consumes is already ruined. That amplification *is* KI-17, and it is why the
+unreflected form loses 5–7 digits at large `|a|` in the table above. Measured
+mean ulps of the result, unreflected vs shipped, by octave (DD, 4,000 points):
+
+| octave | 2⁻¹ | 2⁰ | 2¹ | 2² | 2³ | 2⁴ | 2⁵ | 2⁷ | 2⁹ | 2¹¹ |
+|---|---|---|---|---|---|---|---|---|---|---|
+| shipped | 51.8 | 35.3 | 23.6 | 16.5 | 14.7 | 10.5 | 9.4 | 6.4 | 5.5 | 4.8 |
+| unreflected | 71.5 | 37.7 | 24.5 | 26.2 | 64.5 | 179 | 694 | 7497 | 102004 | 1536269 |
+
+The unreflected column grows as `x²`, exactly as derived.
+
+#### 2. Where the error really is — the argument is innocent
+
+Two experiments, each a direct test that the error lives in `x + s`:
+
+- **Exact Newton residual on `t = x + s`.** `t` satisfies `t² − 2xt − 1 = 0`,
+  and `t − 2x` is *itself* Sterbenz-exact (`t ∈ [2x, 3x]` for `x ≥ 1/√3`, so
+  `x ≤ t ≤ 4x`), giving `f(t̂) = t̂·(t̂−2x) − 1` and `Δ = −f/(2s)`; feed it back as
+  `log(t̂) + Δ/t̂`.
+- **An extra Newton step on `s`** before `t` is formed.
+
+Both leave DD's mean at **15.3 ulps against the shipped 15.26** — unchanged to
+three significant figures, in all four backends. Refining the argument buys
+nothing, so the argument is not where the error is.
+
+#### 3. The real mechanism — `log`'s error is constant in ABSOLUTE terms
+
+Measured over seven octaves of `|ln v|`, `2⁻⁴⁰ ≤ v ≤ 2⁴⁰`, mean
+`|log(v) − ln v|` in units of `2⁻ᵖ`:
+
+| \|ln v\| | 0.25–0.5 | 0.5–1 | 1–2 | 2–4 | 4–8 | 8–16 | 16–32 |
+|---|---|---|---|---|---|---|---|
+| DD | 42.7 | 39.1 | 39.7 | 39.8 | 40.6 | 40.6 | 41.6 |
+| FF | 8.35 | 7.57 | 7.66 | 7.76 | 7.45 | 8.33 | 9.87 |
+| TF | 5.07 | 5.55 | 5.38 | 5.42 | 5.45 | 5.36 | 5.67 |
+| QF | 10.7 | 9.81 | 8.85 | 9.53 | 9.37 | 9.41 | 9.31 |
+
+Flat — a factor of 128 in `|ln v|` moves it by a few percent. `log`'s error is
+therefore an **absolute** constant `ε_log`, and its *relative* error is
+`ε_log/|ln v|`. That is the fingerprint of the Newton-on-`exp` step
+`y ← y + (v·exp(−y) − 1)`: `exp`'s **relative** error lands in a correction term
+that is **additive** in `y`, so it arrives as `log`'s absolute error. Filed
+separately as **KI-34**.
+
+`asinh(x) = ln(x+s)` inherits `ε_log` whole, as a relative error of
+`ε_log/|asinh(x)|`. **That is KI-29's band, and it explains both edges.** The
+lower edge is KI-22's crossover at 1/2, below which the closed form is not used.
+Above it `1/|asinh(x)|` is largest and decays like `1/ln(2x)`, so the damage is
+worst just above 1/2 and fades — by `|x| ~ 20` it has fallen enough that the
+unreflected form's `2x²` amplification can no longer be beaten by a lucky draw.
+Nothing in any of this is Sterbenz, and nothing in it is "pure rounding scatter":
+the effect is systematic and its shape was derivable.
+
+#### 4. The bound, and beating it
+
+The exposure is halved by handing `log` an argument whose logarithm is twice as
+large. `t` supplies one for free:
+
+    t² = a² + 2as + s² = 2a² + 1 + 2as = 1 + 2a(a+s) = 1 + 2at
+
+so `asinh(a) = ½·ln(t²) = ½·log1p(2at)`. `ε_log` is divided by two on the way
+out, while the argument's own error is untouched (`t²` has twice `t`'s relative
+error and the `½` hands it straight back). **Every alternative tried**, mean
+ulps of the result over 4,000 points in `[½, 4096]`, oracle built from the value
+each backend actually holds:
+
+| form | DD | FF | TF | QF | verdict |
+|---|---|---|---|---|---|
+| `log(a+s)` — shipped before | 15.26 | 2.98 | 2.10 | 3.91 | baseline |
+| `−log(s−a)` — unreflected | 158509 | 131683 | 33934 | 21979 | KI-17; not odd |
+| `log1p(a + a²/(1+s))` — KI-22 form extended up | 15.19 | 2.99 | 2.10 | 3.89 | no change |
+| resid-corrected `log(t)` (§2) | 15.27 | 2.99 | 2.10 | 3.90 | no change |
+| sqrt-Newton-refined `s` (§2) | 15.21 | 2.97 | 2.11 | 3.90 | no change |
+| `log a + log(1+sqrt(1+1/a²))` — factored | 24.00 | 4.70 | 3.35 | 4.70 | **worse** |
+| Newton on `sinh`: `y − (sinh y − a)/cosh y` | 4.7e28 | 3.3e13 | 1.99 | 3.40 | diverges on DD/FF |
+| **`½·log1p(2at)` — ADOPTED** | **7.93** | **1.54** | **1.04** | **2.03** | **halves it** |
+| `½·log(1+2at)` (plain `log`) | 7.93 | 1.54 | 1.04 | 2.03 | identical; `log1p` safer |
+| `¼·log(t⁴)` | 3.98 | 0.85 | 0.55 | 0.95 | overflows the range |
+| `⅛·log(t⁸)` | 2.09 | 0.56 | 0.28 | 0.47 | overflows the range |
+
+Exactly a factor of two in all four backends, which is the derivation's own
+prediction and is why this is not a tuned constant. The `t⁴`/`t⁸` rows are the
+**mechanism check**: error inversely proportional to the exponent multiplier is
+what a constant absolute `ε_log` requires, and it is what they show. They are
+not shipped — `t⁴` and `t⁸` overflow the word far below `kDDSqHi`, which would
+push most of the range onto the factored branch, and that branch is worse.
+`t²` is the largest multiplier that costs no range: the biggest intermediate is
+`2at ≈ 4a²`, which at `kDDSqHi = 1e150` is 4e300 against `DBL_MAX` 1.8e308, and
+at the FP32 backends' `1e18` is 4e36 against `FLT_MAX` 3.4e38. Verified
+non-finite-free over `2⁻⁴⁰ … 2¹⁶⁰` on all four backends, both signs.
+
+Confined to `|a| ≥ ½`. Below it `log1p` gets a small argument and runs its
+`atanh` series, whose error is *relative*, so there is no constant to halve and
+the extra multiply only adds rounding — measured, the halved form is worse there
+in every backend (DD 8.55 vs 5.43 mean ulps, FF 1.79 vs 1.40, TF 1.14 vs 0.78,
+QF 1.49 vs 1.14). KI-22's branch stands unchanged.
+
+#### 5. What the fix costs, and what remains
+
+Still bit-exactly odd: `asinh(−x) == −asinh(x)` at all 19,999 probe points per
+backend, 0 violations. `ctest` 34/34. Condition-aware ulp gate **2348 → 1958**
+gated failing points (−390), failing cells unchanged at 42.
+
+Against a pre-change sweep of the same 428,592 cells, the change adds **2,218
+increases and 852 decreases**, every one of them in `asinh`, and lifts all four
+means: DD 30.7277→30.7711, FF 13.8099→13.8345, TF 21.1210→21.1720, QF
+27.7924→27.8490. Worst single decrease 1.52 digits (QF at `|a| = 1`), worst
+increase +1.43; mean decrease 0.286. **524 of the 852 started at the backend
+cap**, i.e. the metric was saturated and the cell had been lucky-exact. The
+decrease rate falls monotonically with the argument — 32.1% of moved cells in
+octave 2⁻¹, 23.9% in 2⁰, 16.0% in 2⁵, 5.5% in 2⁸ — and the worst sit at
+`|a| ≈ 0.7–1`. That is the derivation's own shape: `ε_log/|asinh(x)|` is largest
+where `|asinh|` is smallest, so halving a systematic term leaves the most
+residual scatter exactly there.
+
+Those 852 are honest and they are the price. They are not a smaller copy of the
+original complaint, because the thing that produced them is now *named and
+measured* rather than attributed to luck: what is left is `ε_log` itself, which
+no expression written inside `asinh` can remove. Closing that means fixing
+`exp`'s relative error and hence `log`'s absolute error — **KI-34** — and it
+would improve `asinh`, `acosh`, `atanh`, `pow` and the complex log family
+together. KI-29 is closed because its stated cause was wrong, its real cause is
+identified, and asinh's exposure to that cause is halved by a change derived
+rather than fitted.
 
 ## KI-30 — DD `multiply` returns NaN whenever either operand exceeds ~1.34e300, because Dekker's splitter overflows **[RESOLVED batch-7]**
 
@@ -5862,3 +6024,73 @@ reads short. **That is a calibration accident, not a clean bill of health**: the
 mechanism is present in `include/xp/tf_complex.hpp:546` and `:624` in exactly the
 same two lines, and the same three-line change would close it. Filed here rather
 than as a separate entry so the two do not drift apart.
+
+---
+
+## KI-34 — `log`'s error is constant in ABSOLUTE terms, so its relative error grows like 1/|ln v| **[OPEN]**
+
+**Severity: LOW–MEDIUM, all four backends.** Filed 2026-09-04 by the batch-11
+measurement that closed KI-29. Not a wrong answer anywhere — a systematic
+accuracy shortfall that is worst where `|ln v|` is small, and that every caller
+of `log` inherits.
+
+### What
+
+`log(v)`'s error does not scale with its own output. Measured over seven
+octaves of `|ln v|`, `2⁻⁴⁰ ≤ v ≤ 2⁴⁰`, ~20,000 points, oracle `logq`; mean
+`|log(v) − ln v|` in units of `2⁻ᵖ` (`p` = 106/48/72/96):
+
+| \|ln v\| | 0.25–0.5 | 0.5–1 | 1–2 | 2–4 | 4–8 | 8–16 | 16–32 |
+|---|---|---|---|---|---|---|---|
+| DD | 42.7 | 39.1 | 39.7 | 39.8 | 40.6 | 40.6 | 41.6 |
+| FF | 8.35 | 7.57 | 7.66 | 7.76 | 7.45 | 8.33 | 9.87 |
+| TF | 5.07 | 5.55 | 5.38 | 5.42 | 5.45 | 5.36 | 5.67 |
+| QF | 10.7 | 9.81 | 8.85 | 9.53 | 9.37 | 9.41 | 9.31 |
+
+Flat to within a few percent across a factor of 128. Expressed the usual way —
+ulps of the result — the same data reads as a clean `1/|ln v|` ramp, DD going
+119 → 54.1 → 27.9 → 13.7 → 7.00 → 3.52 → 1.95 across those same bands. So
+`log` is ~2 ulps where its answer is large and ~119 ulps where its answer is
+near 1/4, and the product of the two is the invariant.
+
+### Why
+
+`log` is Newton-on-`exp`: `y ← y + (v·exp(−y) − 1)`. The correction term is
+**additive** in `y`, and it is computed from `exp`, whose error is
+**relative**. A relative error `c·u` in `exp` therefore arrives in `y` as an
+**absolute** error `c·u`, independent of `|y|`. The measured constants say
+`exp` carries roughly 40 (DD), 8 (FF), 5.4 (TF), 9.4 (QF) units of `2⁻ᵖ`
+relative error, which is consistent with the table-free `exp` these backends
+ship.
+
+This is the same quantity the ULP-metric triage recorded as "log is Newton-on-exp
+so the floor is `2^nq/|ln x|`" (`docs/ULP_METRIC.md` step 1c). It is now measured
+across the range rather than inferred at a point, and attributed to `exp`.
+
+### Who inherits it
+
+Everything whose result *is* a logarithm and whose argument is `O(1)`:
+`asinh`, `acosh`, `atanh`, `log10`, `log2`, `pow` (through `exp(b·log a)`), and
+the complex `log`/`asinh`/`acosh`/`atanh` family. KI-29 was one instance of it,
+found because `asinh`'s closed form hands `log` an argument whose logarithm is
+smallest exactly where the closed form starts being used. **KI-29's residual
+belongs to this entry** — batch-11 halved `asinh`'s share of `ε_log` by handing
+`log` the squared argument `t² = 1 + 2at`, but the constant itself is untouched
+and no expression written inside `asinh` can remove it.
+
+### What closing it involves
+
+Fixing `exp`, not `log`. The candidates, none yet measured: a final compensated
+Newton step in `exp` that keeps the correction's low word; a wider stored `ln 2`
+in `exp`'s argument reduction; or an extra Newton iteration in `log` itself,
+which would square `exp`'s relative error into the correction and buy roughly a
+factor of `ε_log` at the cost of one more `exp` per `log` call. Deliberately not
+attempted in batch-11: `exp` and `log` are on the hot path of a large fraction of
+the op inventory, so the change needs its own before/after sweep and its own
+budget, and it must not be bundled with an `asinh`-scoped fix.
+
+### Not to be confused with
+
+KI-23 (QF `log` family losing digits at *large* argument, resolved batch-6) —
+that was argument reduction, was QF-only, and was a large-`|ln v|` effect. This
+one is all four backends, is worst at *small* `|ln v|`, and survives KI-23's fix.

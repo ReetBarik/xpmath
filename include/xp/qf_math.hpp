@@ -1490,7 +1490,11 @@ XPMATH_INLINE_FUNCTION QuadFloat asinh(QuadFloat a) {
     if (a.f0 < 0.5f) {
         return log1p(add(a, divide(a2, add(QuadFloat(1.0f), s))));
     }
-    return log(add(a, s));
+    // KI-29: 1/2 log1p(2a(a+s)) rather than log(a+s).  Halves the share of
+    // log's constant absolute error that asinh inherits.  Derived at
+    // dd_math.hpp's asinh.
+    const QuadFloat t = add(a, s);
+    return mul_pwr2(log1p(mul_pwr2(multiply(a, t), 2.0f)), 0.5f);
 }
 // acosh(a) = log(a + sqrt(a^2 - 1)).  QD qd_real.cpp:2580.
 XPMATH_INLINE_FUNCTION QuadFloat acosh(QuadFloat a) {

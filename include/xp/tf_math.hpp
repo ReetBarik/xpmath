@@ -1377,7 +1377,11 @@ XPMATH_INLINE_FUNCTION TripleFloat asinh(TripleFloat a) {
     if (a.f0 < 0.5f) {
         return log1p(add(a, divide(a2, add(TripleFloat(1.0f), s))));
     }
-    return log(add(a, s));
+    // KI-29: 1/2 log1p(2a(a+s)) rather than log(a+s).  TF is the backend that
+    // FILED KI-29 (92 of its 140 decreases); the residual is log's constant
+    // absolute error, not Sterbenz.  Derived at dd_math.hpp's asinh.
+    const TripleFloat t = add(a, s);
+    return mul_pwr2(log1p(mul_pwr2(multiply(a, t), 2.0f)), 0.5f);
 }
 
 XPMATH_INLINE_FUNCTION TripleFloat acosh(TripleFloat a) {
