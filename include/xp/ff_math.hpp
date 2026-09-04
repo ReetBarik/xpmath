@@ -1468,6 +1468,11 @@ XPMATH_INLINE_FUNCTION FloatFloat ceil(FloatFloat a) {
 XPMATH_INLINE_FUNCTION FloatFloat trunc(FloatFloat a) {
     return (a.hi >= 0.0f) ? floor(a) : ceil(a);
 }
+// round(a) — nearest integer, TIES TO EVEN (IEEE 754 roundToIntegralTiesToEven).
+// KI-20 (2026-09-04); the convention and its divergence from C99 `round` and
+// QD's `nint` are written out at dd_math.hpp's `round`. FF's
+// round_to_nearest_int is `rint` on an exact FP64 reassembly and is already
+// half-even, so no tie correction is needed here either.
 XPMATH_INLINE_FUNCTION FloatFloat round(FloatFloat a) {
     return round_to_nearest_int(a);
 }

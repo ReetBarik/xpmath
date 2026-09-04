@@ -58,6 +58,13 @@ All three backends expose the same 39 real operations:
 | 3-input | `fma` |
 | Rounding | `ceil floor round trunc` |
 
+**Tie convention.** `round` breaks halfway cases **to even** on every backend —
+IEEE 754 `roundToIntegralTiesToEven`, so `round(0.5) == 0`, `round(1.5) == 2`,
+`round(2.5) == 2`. This is a deliberate divergence from C99 `round`/libquadmath
+`roundq` (ties away from zero) and from QD 2.3.24's `nint` (ties toward
+`+infinity`); see KI-20 in `docs/KNOWN_ISSUES.md` for the reasoning. `remainder`
+is half-even too, as IEEE 754 requires of it.
+
 All three complex layers expose the same 24 complex operations:
 
 | Category | Operations |

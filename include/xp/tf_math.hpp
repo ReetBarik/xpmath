@@ -730,7 +730,10 @@ XPMATH_INLINE_FUNCTION TripleFloat sqrt(TripleFloat a) {
     return r;
 }
 
-// Nearest FP32-int of a single float, ties toward +infinity. Mirrors
+// Nearest FP32-int of a single float, ties toward +infinity. INTERNAL: KI-20
+// made `tf::round` IEEE 754 half-even, and this routine deliberately did not
+// follow — see qf_math.hpp's qf_nint for both reasons (the multi-word correction
+// needs a fixed lean; the argument reductions do not care which). Mirrors
 // qf_math.hpp's qf_nint exactly, including the KI-2 fix — see the long comment
 // there for why this is `rint` plus a tie-direction restore and not QD's
 // literal `floor(d + 0.5)`. In one line: 0.49999997f + 0.5f rounds up to 1.0f
@@ -1513,8 +1516,21 @@ XPMATH_INLINE_FUNCTION TripleFloat trunc(TripleFloat a) {
     return (a.f0 >= 0.0f) ? floor(a) : ceil(a);
 }
 
+// round(a) — nearest integer, TIES TO EVEN (IEEE 754 roundToIntegralTiesToEven).
+// KI-20 (2026-09-04); the reasoning, and why round_to_nearest_int keeps QD's
+// ties-toward-+infinity, is written out once in qf_math.hpp's `round`. In one
+// line: this is the library's single user-visible tie convention, it diverges
+// from both QD's `nint` and C99's `round`, and halving turns a tie into a
+// non-tie whose nearest integer is the even neighbour.
 XPMATH_INLINE_FUNCTION TripleFloat round(TripleFloat a) {
-    return round_to_nearest_int(a);
+    const TripleFloat n = round_to_nearest_int(a);
+    if (n.f0 == a.f0 && n.f1 == a.f1 && n.f2 == a.f2)
+        return n;                                   // already integral: no tie
+    const TripleFloat t  = mul_pwr2(a, 2.0f);       // exact
+    const TripleFloat nt = round_to_nearest_int(t);
+    if (!(nt.f0 == t.f0 && nt.f1 == t.f1 && nt.f2 == t.f2))
+        return n;                                   // 2a not integral: no tie
+    return mul_pwr2(round_to_nearest_int(mul_pwr2(a, 0.5f)), 2.0f);
 }
 
 // fmod(a, b) = a - b*aint(a/b), where aint TRUNCATES toward zero. Port of

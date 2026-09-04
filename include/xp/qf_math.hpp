@@ -839,6 +839,16 @@ XPMATH_INLINE_FUNCTION QuadFloat sqrt(QuadFloat a) {
 // rounded UP. KI-2 is the near-tie wrong answer; the tie direction is a
 // convention, and changing it is not part of closing KI-2.
 //
+// KI-20 (2026-09-04) settled that convention, and it is NOT this one.
+// `qf::round` is IEEE 754 half-even; this routine and its multi-word caller
+// `round_to_nearest_int` stay ties-toward-+infinity, DELIBERATELY, and are
+// internal. Two reasons, both about correctness rather than taste: the
+// correction below is only valid for a fixed lean (half-even on a limb needs the
+// parity of the accumulated integer, which no single limb carries), and the only
+// other callers are the sincos/exp argument reductions, where a tie is
+// measure-zero and either neighbour reduces equally well. `round` supplies the
+// half-even step on top; see its comment. Do not merge the two names.
+//
 // Exactness of `d - r`: r is an integer and |d - r| <= 0.5, so for |d| < 2^23
 // the difference is exact (both operands are multiples of ulp(d) <= 0.5), and
 // for |d| >= 2^23 there are no non-integers at all, so r == d and the test is
@@ -1710,9 +1720,36 @@ XPMATH_INLINE_FUNCTION QuadFloat ceil(QuadFloat a) {
 XPMATH_INLINE_FUNCTION QuadFloat trunc(QuadFloat a) {
     return (a.f0 >= 0.0f) ? floor(a) : ceil(a);
 }
-// round(a) = round_to_nearest_int(a) (QD nint, qd_real.cpp:96, T3.0a).
+// round(a) — nearest integer, TIES TO EVEN (IEEE 754 roundToIntegralTiesToEven).
+//
+// KI-20 (2026-09-04). This is the library's ONE tie convention, chosen
+// deliberately and applied to `round` on all four backends. It DIVERGES FROM QD
+// 2.3.24, whose `nint` (qd_real.cpp:48-86, reached here through
+// round_to_nearest_int) breaks ties toward +infinity, and from C99 `round`,
+// which breaks them away from zero. See docs/KNOWN_ISSUES.md, KI-20.
+//
+// round_to_nearest_int is deliberately NOT changed. It is the internal argument
+// reducer for sincos/exp, where the tie direction is unobservable (ties are
+// measure-zero and either neighbour is an equally valid reduction), and its
+// multi-word correction `|x0 - a.f0| == 0.5 && a.f1 < 0 -> x0 -= 1` is only
+// valid because qf_nint leans one fixed way — making it half-even would require
+// the parity of the accumulated integer, which no single limb carries. The two
+// names therefore mean two different things and say so in both places.
+//
+// The correction below costs nothing off a tie and needs no parity test.
+// A tie is exactly `2a is an odd integer`; at a tie, HALVING first destroys the
+// tie (k + 1/2 -> k/2 + 1/4 for even k, m + 3/4 for odd k = 2m+1), its nearest
+// integer is the even neighbour halved either way, and doubling back is exact
+// because mul_pwr2 only touches exponents.
 XPMATH_INLINE_FUNCTION QuadFloat round(QuadFloat a) {
-    return round_to_nearest_int(a);
+    const QuadFloat n = round_to_nearest_int(a);
+    if (n.f0 == a.f0 && n.f1 == a.f1 && n.f2 == a.f2 && n.f3 == a.f3)
+        return n;                                   // already integral: no tie
+    const QuadFloat t  = mul_pwr2(a, 2.0f);         // exact
+    const QuadFloat nt = round_to_nearest_int(t);
+    if (!(nt.f0 == t.f0 && nt.f1 == t.f1 && nt.f2 == t.f2 && nt.f3 == t.f3))
+        return n;                                   // 2a not integral: no tie
+    return mul_pwr2(round_to_nearest_int(mul_pwr2(a, 0.5f)), 2.0f);
 }
 
 

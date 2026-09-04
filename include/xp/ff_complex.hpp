@@ -527,32 +527,92 @@ XPMATH_INLINE_FUNCTION FloatFloat xp_asin_imag_mag(FloatFloat x, FloatFloat y) {
     // form ships.
     return log1p(add(m, multiply(sm, sqrt(add(m, FloatFloat(2.0f))))));
 }
+// KI-32. |Re asin(z)| -- the OTHER component of the same Hull, Fairgrove & Tang
+// (1997) parametrisation, and the one the `atan2(iz + sqrt(1-z^2))` form used to
+// destroy on the far real axis.
+//
+// The old body built w = iz + sqrt(1 - z^2) explicitly and read Re asin = arg(w).
+// At z = 1e8 + 1e-8i the root is (1e-8, -1e8) and iz is (-1e-8, +1e8), so BOTH
+// components of w are a subtraction of two equal quantities: the true w is
+// ~1e-24, twenty orders below FF's resolution at 1e-8, and both words cancel to
+// exactly zero. atan2(0, 0) is 0, so the whole component came back as 0.00 of
+// 14 digits with no NaN to warn anyone. Above |z| ~ 1e19 it is worse still --
+// z^2 overflows a 2xFP32 word, and FF, QF and TF ALL returned NaN there (the
+// entry was filed FF-only; the sibling audit found the other two).
+//
+// THAT IS NOT CONDITIONING. Re asin is pi/2 to within 1e-16 at that point and
+// |z f'/f| is 1.0; the format permits every digit it has. The gap was the
+// formulation's, exactly as it was for the imaginary half.
+//
+// The cure needs no new machinery. Writing asin(z) = u + iv, z = sin(u+iv) gives
+// x = sin(u) cosh(v) and 1 - z^2 = cos^2(u+iv), so with the SAME
+//     r = hypot(x+1, y),  s = hypot(|x-1|, y),  a = (r+s)/2 = cosh(v)
+// that xp_asin_imag_mag() already forms,
+//     Re sqrt(1 - z^2) = cos(u) cosh(v) = sqrt(a^2 - x^2)  and  u = atan2(x, that).
+// a^2 - x^2 = (a-x)(a+x) factors the cancellation into ONE difference, a - x,
+// and the same exact hypot identities that gave a - 1 give
+//     a - x = (max(1,x) - x) + (1/2) y^2 [ 1/(r+(x+1)) + 1/(s+|x-1|) ]
+//           = (max(1,x) - x) + y^2 * v,
+// a sum of NON-NEGATIVE terms at every x -- no cancellation left anywhere. (Note
+// a - 1 and a - x differ only in which of 1 and x is subtracted, so the two
+// helpers share the whole r/s/v derivation; see xp_asin_imag_mag above for it.)
+//
+// sqrt(a-x)*sqrt(a+x) rather than sqrt((a-x)(a+x)), for the same reason the
+// imaginary half splits its roots: a+x is O(|z|) and the product would overflow
+// an FP32 word above |z| ~ 1.8e19 while each factor separately cannot.
+//
+// Nothing squares z, so the 1e19 NaN goes with it. On the real cut (y = +-0,
+// |x| > 1) a - x is exactly 0, atan2(x, 0) is pi/2, and Re asin is +-pi/2 by the
+// sign of x on BOTH sides -- which is what C99 Annex G asks for, so the KI-5(d)
+// sheet-selection block the old body needed is not merely unnecessary here, it
+// has nothing left to select.
+XPMATH_INLINE_FUNCTION FloatFloat xp_asin_real_mag(FloatFloat x, FloatFloat y) {
+    const FloatFloat one(1.0f);
+    const FloatFloat xp1  = add(x, one);
+    const FloatFloat xm1s = subtract(x, one);            // signed, for the max(1,x) term
+    FloatFloat xm1 = xm1s;
+    if (xm1.hi < 0.0f) xm1 = negate(xm1);      // |x - 1|
+    const FloatFloat r  = hypot(xp1, y);
+    const FloatFloat s_ = hypot(xm1, y);
+    const FloatFloat d1 = add(r,  xp1);
+    const FloatFloat d2 = add(s_, xm1);
+    FloatFloat v(FloatFloat(0.0f));
+    if (d1.hi != 0.0f) v = add(v, divide(one, d1));
+    if (d2.hi != 0.0f) v = add(v, divide(one, d2));
+    v = multiply_scalar(v, 0.5f);
+    // a - x, both terms >= 0.  y is never squared on its own (y*(y*v)), for the
+    // subnormal reason spelled out in xp_asin_imag_mag.
+    FloatFloat amx = multiply(y, multiply(y, v));
+    // + (max(1,x) - x) = (1 - x) when x < 1, nothing when x >= 1.  Tested on the
+    // SIGNED difference, not on x's leading word (the KI-16 value-based rule).
+    const bool xlt1 = (xm1s.hi < 0.0f);
+    if (xlt1) amx = subtract(amx, xm1s);
+    // sqrt(a-x).  Where the (1-x) term is absent, a-x is exactly y^2*v and the
+    // root is y*sqrt(v) -- y is never squared, the same guard xp_asin_imag_mag
+    // uses on sqrt(a-1) and for the same reason.  MEASURED, not assumed: y^2*v
+    // is 1.9e-41 at z = 3 + 1e-20i, subnormal in an FP32 word, and taking the
+    // root of it cost QF 3.58 digits (29.00 -> 25.42) before this line existed.
+    const FloatFloat sax = xlt1 ? sqrt(amx) : multiply(y, sqrt(v));
+    const FloatFloat apx = add(multiply_scalar(add(r, s_), 0.5f), x);   // a + x
+    return atan2(x, multiply(sax, sqrt(apx)));
+}
 // |Re z| and |Im z|, the two arguments xp_asin_imag_mag() wants. Split out so
 // asin/acosh/asinh cannot disagree about them.
 XPMATH_INLINE_FUNCTION FloatFloat xp_abs_word(FloatFloat v) {
     return (v.hi < 0.0f) ? negate(v) : v;
 }
 XPMATH_INLINE_FUNCTION FloatFloatComplex asin(FloatFloatComplex z) {
-    // asin(z) = -i * log(iz + sqrt(1 - z^2))
-    FloatFloatComplex iz  = FloatFloatComplex(negate(z.im), z.re);
-    FloatFloatComplex z2  = z * z;
-    FloatFloatComplex one_minus_z2 = FloatFloatComplex(FloatFloat(1.0f)) - z2;
-    FloatFloatComplex root = sqrt(one_minus_z2);
-    if (z.im.hi == 0.0f && detail::fabs(z.re.hi) > 1.0f) {
-        const bool want_neg = (detail::copysign(1.0f, z.re.hi) ==
-                               detail::copysign(1.0f, z.im.hi));
-        const bool have_neg = (detail::copysign(1.0f, root.im.hi) < 0.0f);
-        if (want_neg != have_neg) root.im = negate(root.im);
-    }
-    FloatFloatComplex sum = iz + root;
-    // Re asin(z) = arg(sum) -- this component was never the problem, and
-    // atan2(sum.im, sum.re) is exactly what log(sum).im was returning.
-    const FloatFloat re = atan2(sum.im, sum.re);
-    // Im asin(z) = sign(Im z) * acosh(a); see xp_asin_imag_mag above. The sign is
-    // read off copysign so a signed zero on the real cuts picks the C99 Annex G
-    // side -- the same convention the KI-5(d) block above enforces for the root
-    // that feeds the real part.
-    FloatFloat im = xp_asin_imag_mag(xp_abs_word(z.re), xp_abs_word(z.im));
+    // Both components from the Hull/Fairgrove/Tang r-s-a parametrisation, on the
+    // first-quadrant magnitudes, with the signs put back by copysign so a signed
+    // zero on either cut picks the C99 Annex G side. Re asin is odd in x and Im
+    // asin is odd in y, so that is the whole of the sign logic.
+    // KI-32: this used to be -i*log(iz + sqrt(1 - z^2)) for the real part; see
+    // xp_asin_real_mag above for why that sum cannot be formed.
+    const FloatFloat x = xp_abs_word(z.re);
+    const FloatFloat y = xp_abs_word(z.im);
+    FloatFloat re = xp_asin_real_mag(x, y);
+    if (detail::copysign(1.0f, z.re.hi) < 0.0f) re = negate(re);
+    FloatFloat im = xp_asin_imag_mag(x, y);
     if (detail::copysign(1.0f, z.im.hi) < 0.0f) im = negate(im);
     return FloatFloatComplex(re, im);
 }

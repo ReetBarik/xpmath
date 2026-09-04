@@ -1492,6 +1492,18 @@ XPMATH_INLINE_FUNCTION DoubleDouble ceil(DoubleDouble a) {
 XPMATH_INLINE_FUNCTION DoubleDouble trunc(DoubleDouble a) {
     return (a.hi >= 0.0) ? floor(a) : ceil(a);
 }
+// round(a) — nearest integer, TIES TO EVEN (IEEE 754 roundToIntegralTiesToEven).
+//
+// KI-20 (2026-09-04). Half-even is the library's ONE tie convention, on all four
+// backends, chosen deliberately. It DIVERGES FROM C99 `round`, which breaks ties
+// away from zero (`roundq(0.5) = 1`, this returns 0), and from QD 2.3.24's
+// `nint`, which breaks them toward +infinity. See docs/KNOWN_ISSUES.md, KI-20.
+//
+// No tie correction is needed here: DD's round_to_nearest_int is the DDFUN
+// magic-constant form and is ALREADY half-even at every tie (measured:
+// 0.5 -> 0, 1.5 -> 2, 2.5 -> 2, -0.5 -> 0, -1.5 -> -2, -2.5 -> -2). QF and TF
+// inherit QD's toward-+infinity `nint` and carry an explicit correction in their
+// own `round`; see qf_math.hpp for it.
 XPMATH_INLINE_FUNCTION DoubleDouble round(DoubleDouble a) {
     return round_to_nearest_int(a);
 }

@@ -345,7 +345,7 @@ static const OpTol kOpTols[kOpCount] = {
     {"sin",     12.66},  //  12.96    0.00  1535   zeros of sin/cos near k*pi
     {"cos",     12.59},  //  12.89    0.00  1264   zeros of sin/cos near k*pi
     {"tan",    13.03},  //  13.33    0.00  1486   KI-18 asymptotic branch: ratcheted, was 12.26
-    {"asin",    10.82},  //  11.12    0.00  1563   conditioning-limited; KI-5(d) fixed: on-cut sheet
+    {"asin",    12.08},  //  12.38    0.00  1563   KI-32 (HFT Re asin): ratcheted, was 10.82
     {"acos",    10.69},  //  11.03    0.00  1572   KI-5(c) fixed (Kahan Re + exact Im)
     {"atan",   13.61},  //  13.91   12.63  1540   KI-11/KI-18 component form: ratcheted, was 9.28
     {"sinh",    12.68},  //  12.98    0.00  1539   zeros of sin/cos near k*pi

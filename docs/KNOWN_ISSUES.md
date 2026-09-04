@@ -48,7 +48,7 @@ either currently resolved or currently open.
 | 17 | TF `asinh` has no odd-symmetry branch | RESOLVED | batch-5 † |
 | 18 | Complex `tan`/`tanh`/`atan`/`atanh` have no asymptotic branch | RESOLVED | `855292d` |
 | 19 | QF/TF `divide` returns NaN where `inf` is correct, on quotient overflow | RESOLVED | `0ad44fe` |
-| 20 | `round` is half-to-even, not half-away-from-zero | **OPEN** | — |
+| 20 | `round` tie convention was inconsistent (DD/FF half-even, QF/TF toward +inf) | **RESOLVED** | batch-9 ‖ — IEEE 754 half-even adopted on all four; diverges from C99 `round` and QD `nint` |
 | 21 | Missing-complex-oracle path is a hard build failure, not degradation | RESOLVED | batch-8 ¶ |
 | 22 | DD `asinh`/`atanh`/`sinh` and TF `expm1` collapse to the leading word at small x | RESOLVED | batch-5 † |
 | 23 | QF `log`/`log2`/`log10`/`log1p` lose ~11 digits above \|x\| ≈ 1e29 | RESOLVED | batch-6 ‡ |
@@ -60,9 +60,9 @@ either currently resolved or currently open.
 | 29 | `asinh` mid-band scatter: the odd reflection costs a few ulps for 1 ≲ \|x\| ≲ 20 | **OPEN** | — |
 | 30 | DD `multiply` returns NaN whenever either operand exceeds ~1.34e300 (Dekker splitter) | RESOLVED | batch-7 § |
 | 31 | DD `divide_scalar` returns a quotient 2^64 too large above 1.339e300 | RESOLVED | batch-7 § |
-| 32 | FF complex `asin` returns 0 for its REAL part on the far real axis — `iz + sqrt(1-z^2)` cancels to (0,0) | **OPEN** | — |
+| 32 | complex `asin` loses its REAL part on the far real axis — `iz + sqrt(1-z^2)` cancels to (0,0), and NaNs above 1e19 on FF/QF/TF | **RESOLVED** | batch-9 ‖ — HFT `atan2(x, sqrt((a-x)(a+x)))`; the sum is never formed |
 
-**29 resolved, 3 open** (20, 29, 32).
+**31 resolved, 1 open** (29).
 
 † `batch-5` is the commit titled `fix: KI-16 value-based domain guards; KI-17 TF
 `asinh` odd symmetry; KI-22 small-argument series` — a commit cannot record its
@@ -77,6 +77,9 @@ splitter limit; KI-24 fixed` — same reason.
 
 ¶ `batch-8` is the commit titled `fix: KI-11 complex inverse small-component;
 KI-21 vanilla-Kokkos degradation` — same reason.
+
+‖ `batch-9` is the commit titled `fix: KI-20 adopt IEEE half-even for round;
+KI-32 FF complex asin far real axis` — same reason.
 
 Three sections that are not KI entries also live in this file and are neither
 resolved nor open: the classifier verdict (2026-09-03), the soft-failure map
@@ -2582,7 +2585,8 @@ the same ratios. Diverging from the source here is deliberate and is recorded
 in each header's comment. QD's `drem` additionally uses `nint`, which is
 half-away-from-zero; C99/IEEE-754 `remainder` requires half-to-EVEN, so the
 replacement carries the integral quotient's parity out of the reduction loop
-and breaks ties on it (see KI-20 — `round` staying half-even is CORRECT and was
+and breaks ties on it (see KI-20 — `round` staying half-even is CORRECT and is now the library's
+adopted convention on all four backends; it was
 not "fixed" here).
 
 ### RESOLVED 2026-09-04 — commit `fix: KI-10/KI-15 fmod and remainder under the ulp metric`, together with KI-15
@@ -3412,7 +3416,8 @@ limbs is a `two_sum` and loses nothing.
 Sweep: FF `ceil`, `floor`, `round` and `trunc` each gain **64 points**, no
 decreases. ULP gate: the FF `ceil`, `floor` and `trunc` `UNEXPLAINED` cells go
 away entirely — 53 → 50 gated cells, 5,299 → 5,043 gated points. FF `round`
-remains a gated-fail cell for the separate half-to-even reason (KI-20).
+remains a gated-fail cell for the separate half-even-vs-`roundq` reason (KI-20,
+now a documented deliberate divergence rather than an open issue).
 
 ---
 
@@ -3579,7 +3584,7 @@ in the type. **516 checks, 0 failures.**
 | **returned infinity** | the whole ladder plus the extreme-ratio cases; any non-finite result from finite operands is a failure | PASS. 0 infinities from finite operands across 1.6M stress evaluations. |
 | **(c) `divide` NaN (KI-19) propagating** | `fmod`/`remainder` at `(1e38, 1e-38)` and `(1e20, 1e-21)`, quotient ~1e41 (the case KI-9's grid never probed) | PASS on QF and TF. `divide` is still not on the path. |
 | **C99 / IEEE-754 conventions** | `f(a,0) → NaN`; `f(±inf,b) → NaN`; `f(a,±inf) = a`; NaN propagation; `\|fmod\| < \|b\|`; `sign(fmod) = sign(a)`; `\|remainder\| <= \|b\|/2` — asserted on **every** probe, not just the convention cases | PASS, 4 backends. |
-| **half-EVEN ties for `remainder`** | `1.5/1 → -0.5`, `2.5/1 → +0.5`, `0.5/1 → +0.5`, `3.5/1 → -0.5`, `7.5/5`; plus `remainder` sign not tied to `a` (`0.9/1 → -0.1`, `-0.9/1 → +0.1`) | PASS. Half-even is CORRECT here per IEEE 754-2019; **KI-20 (`round` half-even vs QD's half-away `nint`) is a separate open issue and was not touched.** |
+| **half-EVEN ties for `remainder`** | `1.5/1 → -0.5`, `2.5/1 → +0.5`, `0.5/1 → +0.5`, `3.5/1 → -0.5`, `7.5/5`; plus `remainder` sign not tied to `a` (`0.9/1 → -0.1`, `-0.9/1 → +0.1`) | PASS. Half-even is CORRECT here per IEEE 754-2019; **KI-20 (the `round` tie convention) is a separate entry, since RESOLVED by adopting half-even everywhere; `remainder` was re-measured after that change and is unchanged.** |
 
 Plus the 1.6M-evaluation randomized correctly-rounded stress tabulated in
 KI-10's block: worst 0.0000 ulp on DD/QF/TF, 0.5000 ulp on FF, **0 points over
@@ -4032,41 +4037,115 @@ component words and `-0.0f + 0.0f = +0.0` silently masked a correct `-0`.
 
 ---
 
-## KI-20 — `round` is half-to-even, not half-away-from-zero **[OPEN]**
+## KI-20 — `round`'s tie convention was inconsistent across backends **[RESOLVED batch-9 ‖]**
 
-**Severity: low, DD/QF/TF, 4 points.**
+**Severity: low, all four backends, 8 grid points changed.**
 
-### What
+### What the audit actually found
 
-`round(x)` is specified by C99 as round-half-*away-from-zero*. All four
-backends implement it as `round_to_nearest_int`, which on DD is the
-magic-constant form
+The entry as filed said `round` was half-to-even on DD/QF/TF and should become
+half-away-from-zero (C99). **Both halves of that were wrong.** Measured on
+`main` @ `dd910f2`:
+
+| backend | `round` before | `round_to_nearest_int` before | note |
+|---|---|---|---|
+| DD | ties to **EVEN** | ties to **EVEN** | DDFUN magic constant `2^105 + 2^52`; the DD add rounds the low word to even |
+| FF | ties to **EVEN** | ties to **EVEN** | `detail::rint` on an exact FP64 reassembly |
+| QF | ties toward **+INFINITY** | ties toward **+INFINITY** | `qf_nint` = `rint` + `if (d - r == 0.5f) r += 1.0f`, restoring QD's `floor(d + 0.5)` lean |
+| TF | ties toward **+INFINITY** | ties toward **+INFINITY** | `tf_nint`, identical to `qf_nint` |
+
+So there were **three** conventions in play, not two, and none of the four was
+half-away-from-zero. Toward-+infinity is not half-away: `floor(-2.5 + 0.5) = -2`,
+not -3. `round(-1.5)` returned **-1** on QF and TF.
+
+Nothing else in the library breaks a tie. `floor`/`ceil`/`trunc` do not tie;
+`fmod` truncates; `remainder` carries its own explicit half-even rule
+(`two_r > B || (two_r == B && q_odd)`) and never calls `nint`; the complex
+headers contain no tie site at all. The four `round`/`nint` pairs above are the
+complete set.
+
+### Resolution — IEEE 754 half-even, deliberately, on all four
+
+Reet's decision: the library's one convention is **IEEE 754
+`roundToIntegralTiesToEven`**, on the grounds that it is what a Kokkos reviewer
+expects. DD and FF already were; QF and TF now are.
+
+| backend | `round` after | `round_to_nearest_int` after |
+|---|---|---|
+| DD | ties to EVEN (unchanged) | ties to EVEN (unchanged) |
+| FF | ties to EVEN (unchanged) | ties to EVEN (unchanged) |
+| QF | ties to **EVEN** (changed) | ties toward +infinity (unchanged, internal) |
+| TF | ties to **EVEN** (changed) | ties toward +infinity (unchanged, internal) |
+
+```
+        round(0.5) round(1.5) round(2.5) round(-0.5) round(-1.5) round(-2.5)
+DD           0          2          2          0           -2          -2
+FF           0          2          2          0           -2          -2
+QF           0          2          2          0           -2          -2     (was 1, 2, 3, 0, -1, -2)
+TF           0          2          2          0           -2          -2     (was 1, 2, 3, 0, -1, -2)
+```
+
+**This DIVERGES FROM QD 2.3.24 and from C99.** QD's `nint` (`qd_real.cpp:48-86`)
+leans toward +infinity; C99 `round` — and therefore libquadmath's `roundq`, which
+is the oracle in `scripts/sweep_accuracy.cpp` — leans away from zero. Half-even
+disagrees with C99 on exactly the ties whose away-from-zero neighbour is odd
+(0.5, 2.5, 4.5, …) and agrees on the rest (-1.5, -3.5, …). The divergence is
+recorded here, in each backend's `round` doc comment, and in README.md's
+operation inventory; it is a convention, not a defect, and it is not silently
+mixed with any other — `round_to_nearest_int` keeps its own name and its own
+documented lean.
+
+**Why `round_to_nearest_int` was NOT converted.** Two reasons, both correctness
+rather than taste. (a) QD's multi-word algorithm corrects the leading limb with
+`|x0 - a.f0| == 0.5f && a.f1 < 0 -> x0 -= 1`, which is only valid when the
+scalar `nint` leans one fixed way; half-even on a limb needs the parity of the
+*accumulated* integer, which no single limb carries. (b) Its only other callers
+are the sincos/exp argument reductions, where a tie is measure-zero and either
+neighbour reduces equally well — so converting it would buy nothing and cost
+three extra `nint` calls on a hot path. `round` supplies the half-even step on
+top, at zero cost off a tie:
 
 ```cpp
-if (a.hi > 0.0) return subtract(add(a, CON), CON);   // dd_math.hpp, round_to_nearest_int
+QuadFloat round(QuadFloat a) {
+    n = round_to_nearest_int(a);
+    if (n == a) return n;                 // already integral
+    if (round_to_nearest_int(2a) != 2a) return n;   // 2a not integral: no tie
+    return 2 * round_to_nearest_int(a/2); // halving destroys the tie; the
+}                                         // nearest integer of a/2 is the even
+                                          // neighbour, halved
 ```
 
-— i.e. round-half-to-**even**, inherited from the hardware rounding mode.
+No parity test is needed: at a tie `k + 1/2`, halving gives `k/2 + 1/4` for even
+`k` and `m + 3/4` for odd `k = 2m+1`, whose nearest integers are `k/2` and
+`m+1`; doubling back gives `k` and `k+1`, the even neighbour in both cases.
+`mul_pwr2` only touches exponents, so both steps are exact.
+
+### `remainder` was NOT disturbed — confirmed by measurement
+
+IEEE 754 requires half-even for `remainder` specifically, and all four already
+had it through an explicit rule that never calls `nint`. Re-measured after the
+change, unchanged on all four:
 
 ```
-DD round( 0.5) = 0    true  1
-DD round(-0.5) = 0    true -1
+remainder(1.5,1) = -0.5   remainder(2.5,1) = +0.5
+remainder(0.5,1) = +0.5   remainder(3.5,1) = -0.5
 ```
 
-### Extent
+### What it cost and what it bought, in the sweep
 
-4 UNEXPLAINED points: DD 2, QF 1, TF 1, all at exactly ±0.5. The population is
-tiny only because ±0.5 is the sole tie the sweep grid happens to land on; every
-half-integer tie behaves the same way.
+Measured against a same-session `sweep_accuracy` baseline (the committed
+`validation/sweep/sweep_baseline.csv` was NOT regenerated). `round` changed at
+**18 grid points, 8 down and 10 up**:
 
-### Closing it
+| what | points | change |
+|---|---|---|
+| QF/TF at +0.5, +2.5, +4.5, +6.5 | 8 | 29.00/21.70 → 0.00–0.85. **Deliberate**: the sweep's oracle is `roundq`, C99 half-away, and half-even disagrees there by design |
+| QF/TF at -7.5, -5.5, -3.5, -1.5 | 8 | 0.30–0.90 → 29.00/21.70. Half-even and half-away agree at these, and toward-+infinity did not |
+| QF/TF at -3162277660168379.5 | 2 | 15.50 → 29.00 / 21.70. A genuine wrong answer at a large half-integer, off by one whole unit |
 
-Give `round` its own implementation — `trunc(x) + copysign(1, x)` when the
-fractional part is exactly ±0.5 — and leave `round_to_nearest_int` (which is
-correctly half-to-even, and is what the argument reductions want) alone. This
-is deliberately *not* KI-2, which was about `nint` one ulp below a tie.
-
----
+The last row is the one that is not a convention shift: toward-+infinity was
+returning the wrong integer there and half-even returns the right one, so this
+change fixed a real defect on the way past.
 
 ## KI-21 — The missing-complex-oracle path is documented as graceful degradation but is a hard build failure **[RESOLVED batch-8]**
 
@@ -5435,43 +5514,123 @@ grids should be extended above 1e300 to cover it.
 
 ---
 
-## KI-32 — FF complex `asin` returns ZERO for its real part on the far real axis **[OPEN]**
+## KI-32 — complex `asin` loses its REAL part on the far real axis **[RESOLVED batch-9 ‖]**
 
-**Severity: medium (a full component lost, no NaN to warn you). FF only, found
-while closing KI-11 in batch-8. Not caused by that change — the pre-fix code
-had the identical cancellation.**
+**Severity: medium (a full component lost, no NaN to warn you). Filed FF-only;
+the sibling audit found QF and TF fail the same way one decade further out, and
+DD is exposed by the same mechanism further out again.**
 
 ### What
 
 ```
-FF asin(1e8 + 1e-8i)   ref = (1.570796e+00, 1.911383e+01)
-                       got = (0.000000e+00, 1.911383e+01)     0.00 digits on Re
+FF asin(1e8 + 1e-8i)    ref = (1.570796e+00, 1.911383e+01)
+                        got = (0.000000e+00, 1.911383e+01)     0.00 digits on Re
+
+FF asin(1e30 + 1e-30i)  got = (nan,          6.977070e+01)
+QF asin(1e30 + 1e-30i)  got = (nan,          6.977070e+01)     <- not in the filed scope
+TF asin(1e30 + 1e-30i)  got = (nan,          6.977070e+01)     <- not in the filed scope
 ```
 
 `Re asin(z) = arg(iz + sqrt(1 - z^2))`. At `z = 1e8 + 1e-8i` the root is
 `(1e-8, -1e8)` and `iz` is `(-1e-8, 1e8)`, so **both** components of the sum are
-a subtraction of two equal quantities. In FF's two FP32 words the real parts
-cancel to exactly 0 (their true difference is ~1e-24, twenty orders below FF's
-resolution at 1e-8) and the imaginary parts likewise, leaving `atan2(0, 0) = 0`.
-DD, QF and TF have enough words to survive it and score 31.00 / 29.00 / 21.70 at
-the same point.
+a subtraction of two equal quantities; in FF's two FP32 words each cancels to
+exactly 0 (their true difference is ~1e-24) and `atan2(0, 0)` is 0. Above
+|z| ~ 1e19, `z*z` overflows an FP32 word outright and every backend with FP32
+limbs returns NaN instead.
 
-### Why it is a separate entry from KI-11
+### Extent, and the two probes that nearly missed it
 
-KI-11 is the *small component* being destroyed by a modulus. This is the *large*
-component being destroyed by a cancellation in the argument of `atan2`, it is
-FF-only, and it is unchanged by the KI-11 fix (the old `log(sum).im` and the new
-`atan2(sum.im, sum.re)` read the same `sum`). Conflating them would have made
-the KI-11 close look conditional when it is not.
+**One-sided in the sign of Im z**, exactly like KI-5(d). For `y < 0` the root
+lands on the other sheet and `iz + root` does not cancel at all:
 
-### Closing it
+```
+FF asin(+1e8 + 1e-8i)   0.00 digits        FF asin(+1e8 - 1e-8i)   14.00 digits
+FF asin(-1e8 + 1e-8i)   0.00 digits        FF asin(-1e8 - 1e-8i)   14.00 digits
+```
 
-Compute `Re asin` from a form that does not build `iz + sqrt(1-z^2)`
-explicitly — Hull, Fairgrove & Tang give
-`Re asin(z) = atan2(x, Re sqrt(1-z^2))` with the same `r`/`s` machinery
-`xp_asin_imag_mag()` already carries, which never forms the cancelling sum. The
-helper is in place in all four headers, so this is a small change; it was left
-out of batch-8 to keep that change's measurement clean.
+so the **negative real axis behaves identically to the positive one** — the
+split is on `Im z`, not on `Re z`. A probe that sampled only `y > 0` would have
+called it two-sided; one that sampled only `y < 0` would have found nothing.
+
+**FF complex `acos` does NOT share it.** `acos` was rebuilt on Kahan's log form
+for KI-5(c) and never forms `1 - z^2`; it scores 14.00 at `1e8 + 1e-8i` before
+and after. Its own far-axis weaknesses (Re 6.84 digits at `1e8 - 1e-8i`, 0.00 at
+`1e30 + 1e-30i` where the true Re is 1e-61) are a *different* mechanism — a
+vanishing Re component measured against an enormous Im one — are unchanged by
+this fix, and are not this entry.
+
+### Why it is not conditioning
+
+`Re asin` is `pi/2` to within 1e-16 at `1e8 + 1e-8i` and `|z f'(z)/f(z)| = 1.0`
+there, so the format permits all 14 digits. DD gets 31.00 and QF 29.00 at the
+same point with the *same* formula, purely because their words are wider. The
+gap is the formulation's.
+
+### Resolution — the other half of the same HFT parametrisation
+
+Hull, Fairgrove & Tang (1997) TOMS 23(3):299-335, the paper `xp_asin_imag_mag()`
+already implements. Writing `asin(z) = u + iv`, `z = sin(u+iv)` gives
+`x = sin(u) cosh(v)` and `1 - z^2 = cos^2(u+iv)`, so with the **same**
+`r = hypot(x+1, y)`, `s = hypot(|x-1|, y)`, `a = (r+s)/2 = cosh(v)`:
+
+```
+Re sqrt(1 - z^2) = cos(u) cosh(v) = sqrt(a^2 - x^2)      u = atan2(x, that)
+```
+
+`a^2 - x^2 = (a-x)(a+x)` isolates the whole cancellation into `a - x`, and the
+exact hypot identities `r = (x+1) + y^2/(r+(x+1))`, `s = |x-1| + y^2/(s+|x-1|)`
+give
+
+```
+a - x = (max(1,x) - x) + y^2 * v,     v = (1/(r+(x+1)) + 1/(s+|x-1|))/2
+```
+
+— a sum of **non-negative** terms at every x, so there is no cancellation left.
+This is the same `v` the imaginary half already carries; `a - 1` and `a - x`
+differ only in which of 1 and x is subtracted. The sum `iz + sqrt(1-z^2)` is
+never formed, `z^2` is never formed, and `sqrt(a-x)*sqrt(a+x)` is split into two
+roots so nothing overflows however large |z| is. The new helper is
+`xp_asin_real_mag()`, added next to `xp_asin_imag_mag()` in all four complex
+headers; `asin` is now just the two magnitudes with their signs put back by
+`copysign`, and the KI-5(d) sheet-selection block it used to need is gone — on
+the cut `a - x` is exactly 0, `atan2(x, 0)` is `pi/2`, and `Re asin` is `±pi/2`
+by the sign of x on both sides, which is what C99 Annex G asks for.
+
+**Applied to all four backends, not just FF.** DD scored 31.00 at the filed
+point and would have looked fine; it has the identical structure and the
+identical exposure, just further out. Three consecutive batches have found filed
+scopes too narrow and this one was too.
+
+**One derived detail cost 3.58 digits until it was measured.** `sqrt(a-x)` where
+the `(max(1,x) - x)` term is absent is `y*sqrt(v)`, and forming it that way keeps
+y out of a square: `y^2 * v` is 1.9e-41 at `z = 3 + 1e-20i`, subnormal in an FP32
+word, and the first cut of this fix took QF from 29.00 to 25.42 there. This is
+the same trap the imaginary half documents on `sqrt(a-1)`, hit again.
+
+### Measured, before and after (oracle at each backend's own widened input)
+
+`Re asin`, digits, cap 31/14/29/21:
+
+| z | DD | FF | QF | TF |
+|---|---|---|---|---|
+| `+1e8 + 1e-8i` | 31.00 → 31.00 | **0.00 → 14.00** | 29.00 → 29.00 | 21.00 → 21.00 |
+| `+1e8 - 1e-8i` | 31.00 → 31.00 | 14.00 → 14.00 | 29.00 → 29.00 | 21.00 → 21.00 |
+| `-1e8 + 1e-8i` | 31.00 → 31.00 | **0.00 → 14.00** | 29.00 → 29.00 | 21.00 → 21.00 |
+| `-1e8 - 1e-8i` | 31.00 → 31.00 | 14.00 → 14.00 | 29.00 → 29.00 | 21.00 → 21.00 |
+| `+1e30 + 1e-30i` | 31.00 → 31.00 | **NaN → 14.00** | **NaN → 29.00** | **NaN → 21.00** |
+| `-1e30 + 1e-30i` | 31.00 → 31.00 | **NaN → 14.00** | **NaN → 29.00** | **NaN → 21.00** |
+| `+3 + 1e-20i` | 31.00 → 31.00 | 14.00 → 14.00 | 29.00 → 29.00 | 21.00 → 21.00 |
+
+Complex `acos` at every one of these points is byte-identical before and after —
+it does not go through `asin`.
+
+In the sweep, complex `asin` moved at **1,238 grid points, 808 up and 430 down**.
+The upside includes whole blocks of 0.00 → full-format recoveries (TF points
+1640-1650, +21.70 each). The downside is sub-digit churn at 425 of the 430: five
+points fall by more than one digit, worst 2.34 (QF point 1399, 20.07 → 17.73),
+all inside bands that were already well below the format ceiling. The per-op
+means all *rose*, and the four complex accuracy gates were ratcheted up with
+them (DD 27.30 → 28.79, FF 10.82 → 12.08, QF 25.66 → 26.40, TF 18.35 → 19.62).
 
 ---
 
