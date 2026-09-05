@@ -1199,18 +1199,27 @@ XPMATH_INLINE_FUNCTION TripleFloat angle(TripleFloat x, TripleFloat y) {
     const TripleFloat pi_4 = mul_pwr2(pi, 0.25f);   // exact: power-of-2 scaling
 
     // Degenerate axes.  QD qd_real.cpp:2411-2422.
-    if (x.f0 == 0.0f) {
-        if (y.f0 == 0.0f) {
-            // QD raises an error and returns NaN here (qd_real.cpp:2415-2417).
-            // TF follows qf_math.hpp:1014 and returns 0 with a diagnostic —
-            // see PORT_NOTES_TF.md §11b for this deliberate divergence.
-            XPMATH_PRINTF("TFATAN2: both arguments zero\n");
-            return TripleFloat(0.0f);
-        }
-        return (y.f0 > 0.0f) ? pi_2 : negate(pi_2);
-    }
+    // `== 0.0f` is true of negative zero too, so the sign of a zero operand
+    // cannot be recovered from the comparison and has to be read off copysign
+    // -- IEEE-754 atan2 takes the sign of the result from y, and x = -0 belongs
+    // on the pi side exactly like any negative x.  The y test has to run FIRST:
+    // it subsumes the both-zero case, which the x test would otherwise answer
+    // with +-pi/2 instead of the required +-pi / +-0.
     if (y.f0 == 0.0f) {
-        return (x.f0 > 0.0f) ? TripleFloat(0.0f) : pi;
+        if (x.f0 == 0.0f) {
+            // QD raises an error and returns NaN here (qd_real.cpp:2415-2417).
+            // TF follows qf_math.hpp:1014 and returns a value with a diagnostic
+            // — see PORT_NOTES_TF.md §11b for this deliberate divergence.  The
+            // value is now the IEEE-754 one (+-0 for x = +0, +-pi for x = -0)
+            // rather than an unconditional 0; the diagnostic is unchanged.
+            XPMATH_PRINTF("TFATAN2: both arguments zero\n");
+        }
+        const TripleFloat r =
+            (detail::copysign(1.0f, x.f0) < 0.0f) ? pi : TripleFloat(0.0f);
+        return (detail::copysign(1.0f, y.f0) < 0.0f) ? negate(r) : r;
+    }
+    if (x.f0 == 0.0f) {
+        return (y.f0 > 0.0f) ? pi_2 : negate(pi_2);
     }
 
     // Exact octant cases.  QD qd_real.cpp:2424-2430. (qf_math.hpp omits these;

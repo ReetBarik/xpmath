@@ -1267,9 +1267,18 @@ inline constexpr float kQFSqHi = 1.0e18f;
 
 XPMATH_INLINE_FUNCTION QuadFloat angle(QuadFloat x, QuadFloat y) {
     QuadFloat pi = QuadFloat_pi();
-    if (x.f0 == 0.0f && y.f0 == 0.0f) return QuadFloat(0.0f);
+    // Degenerate axes.  `== 0.0f` is true of negative zero too, so the sign of a
+    // zero operand cannot be recovered from the comparison and has to be read
+    // off copysign -- IEEE-754 atan2 takes the sign of the result from y, and
+    // x = -0 belongs on the pi side exactly like any negative x.  The y test
+    // has to run FIRST: it subsumes the both-zero case, which the x test would
+    // otherwise answer with +-pi/2 instead of the required +-pi / +-0.
+    if (y.f0 == 0.0f) {
+        const QuadFloat r =
+            (detail::copysign(1.0f, x.f0) < 0.0f) ? pi : QuadFloat(0.0f);
+        return (detail::copysign(1.0f, y.f0) < 0.0f) ? negate(r) : r;
+    }
     if (x.f0 == 0.0f) return (y.f0 > 0.0f) ? mul_pwr2(pi, 0.5f) : mul_pwr2(pi, -0.5f);
-    if (y.f0 == 0.0f) return (x.f0 > 0.0f) ? QuadFloat(0.0f) : pi;
     // KI-13.  The r below is a sum of squares and has exactly hypot's exposure:
     // it overflowed the word above |x| ~ 1.8e19 (atan(3.16e19) returned NaN, and
     // atan2/asin/acos/complex arg inherited it) and shed low words below the
