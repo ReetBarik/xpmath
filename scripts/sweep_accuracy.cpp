@@ -2128,23 +2128,79 @@ bool write_grid(const std::string& path, const std::vector<GridPoint>& rg,
 // (repr = digits the input survived storage with, range = digits the RESULT's
 // magnitude leaves room for, ach = digits any implementation could achieve).
 
-void print_summary(const std::vector<Cell>& cells) {
-  std::printf("\n  %-3s %-4s %-9s %8s %8s %8s %8s %8s\n",
-              "be", "kind", "op", "mean", "min", "cap", "zeros", "n");
-  std::printf("  --- ---- --------- -------- -------- -------- -------- --------\n");
-  int below_cap = 0, with_zero = 0;
+// WHY THIS TABLE NO LONGER LEADS WITH `zeros`.
+//
+// `digits` is a RELATIVE score, -log10(|got-ref|/|ref|), clamped to [0, cap].
+// It reads 0.00 in three unrelated situations, and the old `zeros` column
+// counted all three together:
+//
+//   (a) the answer is EXACT or near-exact but |ref| is tiny or zero, so the
+//       relative form has nothing to divide by. FF cplx tanh has 136 such
+//       points; their measured error ranges from 0 to 7.1e-73 ulps against a
+//       bound of 16. These are the most accurate points in the cell.
+//   (b) the point is exempt (state U/N) — the format cannot carry the
+//       question, so no verdict is issuable and 0.00 is not a claim.
+//   (c) the point really is wrong.
+//
+// Reporting one number for all three invites exactly the reading it should
+// prevent, so the verdict now has its own column. `defects` is case (c) and
+// only case (c): points whose ULP error — the measurement of record — exceeds
+// the derived bound by more than the allowance. That is the same number the
+// absolute gate registers, so this table and the gate cannot disagree.
+//
+// `min` is still the worst digit score in the cell, but it is now qualified by
+// `defects`: min 0.00 with defects 0 means the cell is clean and the 0.00 is
+// case (a) or (b).
+void print_summary(const std::vector<Cell>& cells,
+                   const std::vector<UlpCell>* ucells) {
+  std::printf("\n  %-3s %-4s %-9s %8s %8s %8s %8s %8s %8s\n",
+              "be", "kind", "op", "mean", "min", "cap", "defects", "exempt", "n");
+  std::printf("  --- ---- --------- -------- -------- -------- -------- -------- --------\n");
+  int below_cap = 0, cells_with_defects = 0;
+  long total_defects = 0;
   for (size_t i = 0; i < cells.size(); ++i) {
     const Cell& c = cells[i];
     const double mean = c.n ? c.sum / double(c.n) : 0.0;
     if (mean < c.cap - 0.005) ++below_cap;
-    if (c.n_zero > 0) ++with_zero;
-    std::printf("  %-3s %-4s %-9s %8.2f %8.2f %8.2f %8ld %8ld\n",
+
+    // Join to the ulp cell on (backend, kind, op). Both vectors are produced by
+    // the same emission order, but match by key rather than index so that a
+    // future divergence is a missing number, not a wrong one.
+    long defects = -1, exempt = -1;
+    if (ucells) {
+      for (size_t j = 0; j < ucells->size(); ++j) {
+        const UlpCell& u = (*ucells)[j];
+        if (u.kind == c.kind && std::strcmp(u.backend, c.backend) == 0 &&
+            std::strcmp(u.op, c.op) == 0) {
+          defects = u.n_fail;
+          exempt  = u.n_unresolved + u.n_unscorable;
+          break;
+        }
+      }
+    }
+    if (defects > 0) { ++cells_with_defects; total_defects += defects; }
+
+    std::printf("  %-3s %-4s %-9s %8.2f %8.2f %8.2f",
                 c.backend, c.kind == 'r' ? "real" : "cplx", c.op,
-                mean, c.min, c.cap, c.n_zero, c.n);
+                mean, c.min, c.cap);
+    if (defects >= 0) std::printf(" %8ld %8ld", defects, exempt);
+    else              std::printf(" %8s %8s", "-", "-");
+    std::printf(" %8ld\n", c.n);
   }
   std::printf("\n  (backend, op) cells            : %zu\n", cells.size());
   std::printf("  ... with mean below their cap  : %d\n", below_cap);
-  std::printf("  ... containing a 0.00 point    : %d\n", with_zero);
+  if (ucells) {
+    std::printf("  ... containing a DEFECT        : %d   (%ld point(s) total)\n",
+                cells_with_defects, total_defects);
+    std::printf("\n  defect = measured ulp error above the derived bound (x%.1f allowance);\n"
+                "           `min` is a digit score and reads 0.00 for an exact answer at a\n"
+                "           tiny |ref| too, so read `defects`, not `min`, for the verdict.\n",
+                kUlpAllowance);
+  } else {
+    // Unreachable in practice: the ulp verdict is computed on every run (see
+    // the note at the run_sweep call). Kept so the function is total.
+    std::printf("  (no ulp cells supplied; per-cell defect count unavailable)\n");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2698,7 +2754,7 @@ int main(int argc, char** argv) {
   // so the baseline it writes always carries it.
   run_sweep(seed, rgrid, cgrid, rows, cells, &ux);
 
-  if (!quiet) print_summary(cells);
+  if (!quiet) print_summary(cells, &ulp_cells);
 
   if (ulp_gate) {
     const long bad = print_ulp_report(ulp_cells, ulp_fails, ulp_explains, ulp_allowance);
