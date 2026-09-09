@@ -382,18 +382,18 @@ for each cell that has any:
 | `exp` | QF | 29.00 | 24.60 | 1 .. 2 | 79% | below 1: 13.77; above 2: 13.82 | 219 | UNRESOLVED |
 | `exp` | TF | 21.70 | 19.00 | 1e-27 .. 0.1 | 84% | above 100: 1.77 | 193 | UNRESOLVED |
 | `exp` | FF | 14.00 | 12.40 | 0 .. 2.236 | 89% | above 100: 1.77 | 193 | UNRESOLVED |
-| `log` | DD | 31.00 | 27.41 | 2 .. 2.236 | 79% | below 2: 0.00; above 10: 0.00 | 84 | OPEN DEFECT (**82 above bound**) |
-| `log` | QF | 29.00 | 24.55 | 2 .. 2.236 | 75% | below 2: 0.00; above 10: 0.00 | 249 | OPEN DEFECT (**82 above bound**) |
-| `log` | TF | 21.70 | 18.49 | 2 .. 2.236 | 76% | below 2: 0.00; above 10: 0.00 | 220 | OPEN DEFECT (**82 above bound**) |
-| `log` | FF | 14.00 | 11.74 | 2 .. 2.236 | 75% | below 2: 0.00; above 10: 0.00 | 208 | OPEN DEFECT (**82 above bound**) |
-| `log10` | DD | 31.00 | 27.41 | 2 .. 2.236 | 79% | below 2: 0.00; above 10: 0.00 | 84 | OPEN DEFECT (**82 above bound**) |
-| `log10` | QF | 29.00 | 24.34 | 2 .. 2.236 | 73% | below 2: 0.00; above 10: 0.00 | 249 | OPEN DEFECT (**82 above bound**) |
-| `log10` | TF | 21.70 | 18.46 | 2 .. 2.236 | 75% | below 2: 0.00; above 10: 0.00 | 220 | OPEN DEFECT (**82 above bound**) |
-| `log10` | FF | 14.00 | 11.74 | 2 .. 2.236 | 75% | below 2: 0.00; above 10: 0.00 | 208 | OPEN DEFECT (**82 above bound**) |
-| `pow` | DD | 31.00 | 28.95 | 2 .. 2.236 | 94% | below 2: 0.00; above 10: 0.00 | 83 | OPEN DEFECT (**82 above bound**) |
-| `pow` | QF | 29.00 | 26.09 | 2 .. 2.002 | 87% | below 2: 14.11; above 2.236: 8.92 | 124 | OPEN DEFECT (**82 above bound**) |
-| `pow` | TF | 21.70 | 19.80 | 2 .. 2.002 | 89% | below 2: 0.00; above 2.236: 8.92 | 113 | OPEN DEFECT (**82 above bound**) |
-| `pow` | FF | 14.00 | 12.49 | 0.5 .. 0.5 | 75% | below 0.5: 0.08; above 0.9: 0.00 | 90 | OPEN DEFECT (**82 above bound**) |
+| `log` | DD | 31.00 | 28.80 | 1 .. 1e+15 | 84% | below 0: 0.00 | 2 | UNRESOLVED |
+| `log` | QF | 29.00 | 25.85 | 1e-30 .. 0.1 | 79% | below 0: 0.00; above 0.5: 13.95 | 167 | UNRESOLVED |
+| `log` | TF | 21.70 | 19.46 | 1e-30 .. 0.1 | 80% | below 0: 0.00; above 1: 6.91 | 138 | UNRESOLVED |
+| `log` | FF | 14.00 | 12.33 | 1.01 .. 10.05 | 78% | below 1: 0.00 | 126 | UNRESOLVED |
+| `log10` | DD | 31.00 | 28.80 | 1 .. 1e+15 | 84% | below 0: 0.00 | 2 | UNRESOLVED |
+| `log10` | QF | 29.00 | 25.63 | 1e-30 .. 0.1 | 77% | below 0: 0.00; above 0.5: 13.92 | 167 | UNRESOLVED |
+| `log10` | TF | 21.70 | 19.42 | 1e-30 .. 0.1 | 79% | below 0: 0.00; above 1: 6.91 | 138 | UNRESOLVED |
+| `log10` | FF | 14.00 | 12.34 | 1.01 .. 10.05 | 78% | below 1: 0.00 | 126 | UNRESOLVED |
+| `pow` | DD | 31.00 | 30.35 | 1e-30 .. 1 | 98% | below 0: 0.00 | 1 | UNRESOLVED |
+| `pow` | QF | 29.00 | 27.32 | 2 .. 2.002 | 92% | below 2: 14.11; above 2.236: 8.92 | 47 | UNRESOLVED |
+| `pow` | TF | 21.70 | 20.74 | 2 .. 2.002 | 93% | below 1.1: 7.92; above 2.236: 8.92 | 35 | UNRESOLVED |
+| `pow` | FF | 14.00 | 13.08 | 0.5 .. 0.5 | 78% | below 0.5: 6.38; above 1: 6.89 | 8 | UNRESOLVED |
 | `sqrt` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
 | `sqrt` | QF | 29.00 | 27.74 | 1 .. 2 | 86% | -- | 0 | UNRESOLVED |
 | `sqrt` | TF | 21.70 | 21.39 | 1e-25 .. 0.1 | 94% | -- | 0 | UNRESOLVED |
@@ -403,9 +403,9 @@ for each cell that has any:
 for each cell that has any:
 
 - `exp` — DD 61 pts (polar shells); QF 219 pts (perpendicular approach to the real axis); TF 193 pts (perpendicular approach to the real axis); FF 193 pts (perpendicular approach to the real axis)
-- `log` — DD 84 pts (the real axis on a geometric ladder); QF 249 pts (perpendicular approach to the real axis); TF 220 pts (the real axis on a geometric ladder); FF 208 pts (the real axis on a geometric ladder)
-- `log10` — DD 84 pts (the real axis on a geometric ladder); QF 249 pts (perpendicular approach to the real axis); TF 220 pts (the real axis on a geometric ladder); FF 208 pts (the real axis on a geometric ladder)
-- `pow` — DD 83 pts (the real axis on a geometric ladder); QF 124 pts (the real axis on a geometric ladder); TF 113 pts (the real axis on a geometric ladder); FF 90 pts (the real axis on a geometric ladder)
+- `log` — DD 2 pts (perpendicular approach to the real axis); QF 167 pts (perpendicular approach to the real axis); TF 138 pts (perpendicular approach to the real axis); FF 126 pts (perpendicular approach to the real axis)
+- `log10` — DD 2 pts (perpendicular approach to the real axis); QF 167 pts (perpendicular approach to the real axis); TF 138 pts (perpendicular approach to the real axis); FF 126 pts (perpendicular approach to the real axis)
+- `pow` — DD 1 pts (perpendicular approach to the real axis); QF 47 pts (perpendicular approach to the real axis); TF 35 pts (perpendicular approach to the real axis); FF 8 pts (perpendicular approach to the real axis)
 
 ---
 
@@ -475,9 +475,9 @@ for each cell that has any:
 | `acosh` | TF | 21.70 | 21.40 | 1e-28 .. 0.1 | 96% | -- | 0 | UNRESOLVED |
 | `acosh` | FF | 14.00 | 13.82 | 1.005 .. 10.05 | 98% | -- | 0 | UNRESOLVED |
 | `atanh` | DD | 31.00 | 30.99 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
-| `atanh` | QF | 29.00 | 27.86 | 10 .. 1e+04 | 90% | below 10: 13.51 | 26 | OPEN DEFECT (**16 above bound**) |
-| `atanh` | TF | 21.70 | 21.28 | 10 .. 1e+15 | 96% | below 1: 0.00 | 16 | OPEN DEFECT (**16 above bound**) |
-| `atanh` | FF | 14.00 | 13.80 | 1 .. 1e+15 | 98% | below 1: 0.00 | 16 | OPEN DEFECT (**16 above bound**) |
+| `atanh` | QF | 29.00 | 28.12 | 1 .. 2 | 91% | below 0.5: 14.25; above 10: 13.51 | 10 | UNRESOLVED |
+| `atanh` | TF | 21.70 | 21.48 | 10 .. 1e+15 | 96% | -- | 0 | UNRESOLVED |
+| `atanh` | FF | 14.00 | 13.92 | 1 .. 1e+15 | 98% | -- | 0 | UNRESOLVED |
 
 **Where the failures sit.** The grid family carrying the most failures
 for each cell that has any:
@@ -487,7 +487,7 @@ for each cell that has any:
 - `atan` — QF 20 pts (perpendicular approach to the real axis)
 - `asinh` — QF 36 pts (perpendicular approach to the real axis)
 - `acosh` — QF 12 pts (perpendicular approach to the real axis)
-- `atanh` — QF 26 pts (the real axis on a geometric ladder); TF 16 pts (the real axis on a geometric ladder); FF 16 pts (the real axis on a geometric ladder)
+- `atanh` — QF 10 pts (perpendicular approach to the real axis)
 
 ---
 

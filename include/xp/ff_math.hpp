@@ -950,9 +950,18 @@ inline constexpr float kFFSqHi = 1.0e18f;
 
 XPMATH_INLINE_FUNCTION FloatFloat angle(FloatFloat x, FloatFloat y) {
     FloatFloat pi = FloatFloat_pi();
-    if (x.hi == 0.0f && y.hi == 0.0f) return FloatFloat(0.0f);
+    // Degenerate axes.  `== 0.0f` is true of negative zero too, so the sign of a
+    // zero operand cannot be recovered from the comparison and has to be read
+    // off copysign -- IEEE-754 atan2 takes the sign of the result from y, and
+    // x = -0 belongs on the pi side exactly like any negative x.  The y test
+    // has to run FIRST: it subsumes the both-zero case, which the x test would
+    // otherwise answer with +-pi/2 instead of the required +-pi / +-0.
+    if (y.hi == 0.0f) {
+        const FloatFloat r =
+            (detail::copysign(1.0f, x.hi) < 0.0f) ? pi : FloatFloat(0.0f);
+        return (detail::copysign(1.0f, y.hi) < 0.0f) ? negate(r) : r;
+    }
     if (x.hi == 0.0f) return (y.hi > 0.0f) ? multiply_scalar(pi, 0.5f) : multiply_scalar(pi, -0.5f);
-    if (y.hi == 0.0f) return (x.hi > 0.0f) ? FloatFloat(0.0f) : pi;
     // KI-13.  The r below is a sum of squares and has exactly hypot's exposure:
     // it overflowed the FP32 word above |x| ~ 1.8e19 (atan(3.16e19) returned
     // NaN, and atan2/asin/acos/complex arg inherited it) and shed low words

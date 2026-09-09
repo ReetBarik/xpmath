@@ -909,9 +909,18 @@ inline constexpr double kDDSqHi = 1.0e150;
 
 XPMATH_INLINE_FUNCTION DoubleDouble angle(DoubleDouble x, DoubleDouble y) {
     DoubleDouble pi = DoubleDouble_pi();
-    if (x.hi == 0.0 && y.hi == 0.0) return DoubleDouble(0.0);
+    // Degenerate axes.  `== 0.0` is true of negative zero too, so the sign of a
+    // zero operand cannot be recovered from the comparison and has to be read
+    // off copysign -- IEEE-754 atan2 takes the sign of the result from y, and
+    // x = -0 belongs on the pi side exactly like any negative x.  The y test
+    // has to run FIRST: it subsumes the both-zero case, which the x test would
+    // otherwise answer with +-pi/2 instead of the required +-pi / +-0.
+    if (y.hi == 0.0) {
+        const DoubleDouble r =
+            (detail::copysign(1.0, x.hi) < 0.0) ? pi : DoubleDouble(0.0);
+        return (detail::copysign(1.0, y.hi) < 0.0) ? negate(r) : r;
+    }
     if (x.hi == 0.0) return (y.hi > 0.0) ? multiply_scalar(pi, 0.5) : multiply_scalar(pi, -0.5);
-    if (y.hi == 0.0) return (x.hi > 0.0) ? DoubleDouble(0.0) : pi;
     // Normalize
     // KI-13.  The r below is a sum of squares and has exactly hypot's exposure:
     // it overflowed the word above |x| ~ 1.3e154 (atan(1e160) returned NaN, and

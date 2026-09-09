@@ -80,7 +80,9 @@ by arithmetic instead of by being on a list.
 
 ## 3. The two gates
 
-Both are ctest targets. `ctest` alone is the whole answer.
+Both are ctest targets. `ctest` alone is the whole answer. Each also has a
+self-test target that poisons its input and requires it to fail — see the end of
+this section.
 
 ### `sweep_absolute_gate` — no point above its bound
 
@@ -121,6 +123,48 @@ procedure.
 
 A point that changes **state** (scored ↔ unresolved) is always reported, and
 losing a verdict counts as a regression even though no ulp count grew.
+
+**Every recorded field is read.** A baseline row is
+`backend,kind,op,point,digits,ulps,bound,state`. The first four are matched
+positionally; `ulps` carries the verdict. `digits`, `bound` and `state` are not
+verdicts — they are the *record*, and they are checked for the separate question
+of whether the file describes this build at all. A rerun under the toolchain of
+record reproduces the committed baseline byte for byte, so any row whose bound
+moved by more than 10^0.1 relatively, whose digit count moved by more than 0.1,
+or whose state moved at all, means the baseline is stale or edited. The gate
+then exits **3** and asks for a re-baseline, rather than comparing against a
+standard that is no longer the standard. Exit 1 is a regression, exit 2 is a
+grid or op-inventory change, exit 0 is a pass.
+
+This mattered: `digits` and `bound` used to be parsed and discarded, and only
+the *losing* direction of a state move was counted. Rewriting the last numeric
+column — `bound`, not `ulps` — of all 428,592 rows to zero printed
+`unchanged: 428592 / RESULT: PASS`, and so did rewriting every state to `U`.
+
+### `sweep_monotone_gate_selftest`, `sweep_absolute_gate_selftest`
+
+```
+validation/gate_selftest.sh <sweep_accuracy> monotone|absolute <workdir>
+```
+
+Both gates are negative assertions, and a negative assertion that has only ever
+been observed passing is indistinguishable from one that cannot fail. So each
+gate is run against deliberately poisoned inputs built in the **build**
+directory — never in `validation/` — and is required to exit nonzero:
+
+| mode | poison | must exit |
+|---|---|---|
+| monotone | `ulps` column zeroed | 1 (regression) |
+| monotone | `bound` column zeroed | 3 (record drift) |
+| monotone | `digits` column zeroed | 3 (record drift) |
+| monotone | `state` column all `U` | 3 (record drift) |
+| monotone | baseline truncated to 1000 rows | 2 (grid changed) |
+| absolute | a registered defect deleted | 4 (unlisted point above bound) |
+| absolute | a bogus entry added | 4 (stale register entry) |
+| absolute | register emptied | 4 (every above-bound point unlisted) |
+
+Each mode also runs the **real** input and requires exit 0, so a gate wired to
+fail unconditionally does not satisfy the self-test either.
 
 ## 4. The document
 

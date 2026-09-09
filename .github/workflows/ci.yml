@@ -9,7 +9,7 @@
 #                   macOS/ARM?  (The macOS leg is the evidence for the upstream
 #                   claim that the core is not x86_64-dependent.)
 #   monotone-gate   Did any of the 428,592 scored sweep points get LESS accurate?
-#   build-and-test  Does the full Kokkos build + 34-test ctest suite pass?
+#   build-and-test  Does the full Kokkos build + 31-test ctest suite pass?
 #   device-nvcc     Does each of the eight headers compile for a CUDA device?
 #   device-hip      Same for HIP/ROCm.  UNVERIFIED — see `continue-on-error`.
 #
@@ -147,7 +147,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y g++-13
           g++-13 -dumpfullversion
-      # WHY NOT COMPARE AGAINST validation/sweep/sweep_baseline.csv?
+      # WHY NOT COMPARE AGAINST validation/sweep/sweep_baseline.csv.gz?
       #
       # Because the oracle is libquadmath, and its transcendental results are a
       # property of the libquadmath BUILD -- not, as first assumed, of the gcc
@@ -204,10 +204,10 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          base_fp=$(sed -n 's/^# oracle-fingerprint: //p' validation/sweep/sweep_baseline.csv | head -1)
+          base_fp=$(zcat validation/sweep/sweep_baseline.csv.gz | sed -n 's/^# oracle-fingerprint: //p' | head -1)
           echo "committed baseline fingerprint : ${base_fp}"
           if [ -x /tmp/sweep_head ]; then
-            /tmp/sweep_head --baseline validation/sweep/sweep_baseline.csv || true
+            /tmp/sweep_head --baseline validation/sweep/sweep_baseline.csv.gz || true
           fi
           echo "(informational: a differing oracle makes this diff meaningless)"
 
@@ -220,7 +220,7 @@ jobs:
   #    Kokkos.
   # ==========================================================================
   build-and-test:
-    name: Kokkos build + ctest (34 tests)
+    name: Kokkos build + ctest (31 tests)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
