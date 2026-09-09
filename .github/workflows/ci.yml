@@ -147,7 +147,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y g++-13
           g++-13 -dumpfullversion
-      # WHY NOT COMPARE AGAINST validation/sweep/sweep_baseline.csv?
+      # WHY NOT COMPARE AGAINST validation/sweep/sweep_baseline.csv.gz?
       #
       # Because the oracle is libquadmath, and its transcendental results are a
       # property of the libquadmath BUILD -- not, as first assumed, of the gcc
@@ -204,10 +204,10 @@ jobs:
         continue-on-error: true
         shell: bash
         run: |
-          base_fp=$(sed -n 's/^# oracle-fingerprint: //p' validation/sweep/sweep_baseline.csv | head -1)
+          base_fp=$(zcat validation/sweep/sweep_baseline.csv.gz | sed -n 's/^# oracle-fingerprint: //p' | head -1)
           echo "committed baseline fingerprint : ${base_fp}"
           if [ -x /tmp/sweep_head ]; then
-            /tmp/sweep_head --baseline validation/sweep/sweep_baseline.csv || true
+            /tmp/sweep_head --baseline validation/sweep/sweep_baseline.csv.gz || true
           fi
           echo "(informational: a differing oracle makes this diff meaningless)"
 
