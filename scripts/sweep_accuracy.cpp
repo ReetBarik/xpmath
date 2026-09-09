@@ -1743,6 +1743,10 @@ struct UlpCtx {
   double                allowance;
   std::vector<UlpCell>* cells;
   std::vector<UlpFail>* fails;
+  // --dump-operands OP:POINT — print the exact operands, reference and bound
+  // terms the sweep uses, for one complex grid point on every backend.
+  const char*           dump_op = nullptr;
+  int                   dump_point = -1;
   // --ulp-explain OP:POINT — record the full breakdown for one grid point on
   // every backend, pass or fail. This is the microscope the metric is argued
   // with; without it a claim about a single point cannot be reproduced.
@@ -1993,6 +1997,26 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
           bd.abs_floor = 0.0;
           bd.value = bound_value(bd);
           row_.bound = bd.value;
+          if (ux->dump_op && ux->dump_point == int(i) &&
+              std::strcmp(ux->dump_op, kComplex[id].name) == 0) {
+            char qa[64], qb[64], qc[64], qd[64], qr[64], qi[64];
+            quadmath_snprintf(qa, sizeof qa, "%.36Qg", exact[0]);
+            quadmath_snprintf(qb, sizeof qb, "%.36Qg", exact[1]);
+            quadmath_snprintf(qc, sizeof qc, "%.36Qg", exact[2]);
+            quadmath_snprintf(qd, sizeof qd, "%.36Qg", exact[3]);
+            quadmath_snprintf(qr, sizeof qr, "%.36Qg", ref_re[i]);
+            quadmath_snprintf(qi, sizeof qi, "%.36Qg", ref_im[i]);
+            std::printf("DUMP %s c %s point %d\n", B::name(), kComplex[id].name, int(i));
+            std::printf("  a      = (%s, %s)\n", qa, qb);
+            std::printf("  b      = (%s, %s)\n", qc, qd);
+            std::printf("  ref    = (%s, %s)\n", qr, qi);
+            std::printf("  ulps=%.6g bound=%.6g ratio=%.6g  (allowance %.1f)\n",
+                        m, bd.value, bd.value > 0 ? m / bd.value : HUGE_VAL,
+                        ux->allowance);
+            std::printf("  terms  : res=%.6g kappa=%.6g in_delta=%.6g kappa_int=%.6g gain=%.6g\n",
+                        bd.res, bd.kappa, bd.in_delta, bd.kappa_int, bd.gain);
+            std::printf("  digits=%.2f  sig_bits=%d\n", d, sb_bits);
+          }
           if (point_unresolved(bd.value, mref, exact, nop4, inter, ninter,
                                rg, sb_bits)) {
             ++ucell.n_unresolved; row_.state = 'U';
@@ -2680,6 +2704,10 @@ void usage(const char* argv0) {
     "                    listed point no longer above it both exit 4.\n"
     "  --ulp-dump PATH   with --ulp, write EVERY above-bound point to PATH as CSV\n"
     "  --ulp-allowance A slack multiplier on the bound (default %.1f)\n"
+    "  --dump-operands O:P  print the exact operands, reference and bound terms\n"
+    "                    the sweep uses for COMPLEX op O at grid point P, on every\n"
+    "                    backend. Re-deriving them by hand does not reproduce the\n"
+    "                    gate; use this before analysing a failing point.\n"
     "  --ulp-explain O:P print the full both-metric breakdown for real op O at grid\n"
     "                    point P on all four backends (implies --ulp)\n",
     argv0, argv0, argv0, (unsigned long long)kDefaultSeed, kUlpAllowance);
@@ -2694,7 +2722,8 @@ int main(int argc, char** argv) {
   // directory is the build tree, the same default made a passing gate exit 1
   // because the relative path did not resolve. Writing the baseline is now an
   // explicit --out.
-  std::string out, grid_out, baseline, explain_op, ulp_dump;
+  std::string out, grid_out, baseline, explain_op, ulp_dump, dump_op;
+  int dump_point = -1;
   std::string ulp_register;
   uint64_t    seed = kDefaultSeed;
   bool        quiet = false, out_set = false, ulp_gate = false;
@@ -2715,6 +2744,16 @@ int main(int argc, char** argv) {
     else if (s == "--ulp-allowance") { ulp_allowance = std::atof(need("--ulp-allowance")); }
     else if (s == "--ulp-dump") { ulp_dump = need("--ulp-dump"); }
     else if (s == "--register") { ulp_register = need("--register"); ulp_gate = true; }
+    else if (s == "--dump-operands") {
+      const std::string v = need("--dump-operands");
+      const size_t colon = v.rfind(':');
+      if (colon == std::string::npos) {
+        std::fprintf(stderr, "--dump-operands wants OP:POINT\n"); return 2;
+      }
+      dump_op = v.substr(0, colon);
+      dump_point = std::atoi(v.c_str() + colon + 1);
+      ulp_gate = true;
+    }
     else if (s == "--ulp-explain") {
       const std::string v = need("--ulp-explain");
       const size_t colon = v.rfind(':');
@@ -2748,6 +2787,8 @@ int main(int argc, char** argv) {
   std::vector<UlpCell>  ulp_cells;
   std::vector<UlpFail>  ulp_fails, ulp_explains;
   UlpCtx                ux = {ulp_allowance, &ulp_cells, &ulp_fails,
+                              dump_op.empty() ? nullptr : dump_op.c_str(),
+                              dump_point,
                               explain_op.c_str(), explain_point,
                               explain_point >= 0 ? &ulp_explains : nullptr};
   // The ulp verdict is now THE measurement, not a mode: every run computes it,
