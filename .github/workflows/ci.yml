@@ -144,7 +144,15 @@ jobs:
 
       - name: Install g++-13
         run: |
-          sudo apt-get update
+          # Third-party apt sources shipped with the runner image (Chrome,
+          # Microsoft) are not used by this project and have broken the build
+          # before with "Hash Sum mismatch" on dl.google.com. Remove them so an
+          # unrelated mirror cannot fail this lane, then retry once for genuine
+          # transient network errors.
+          sudo rm -f /etc/apt/sources.list.d/*google*.list \
+                     /etc/apt/sources.list.d/*chrome*.list \
+                     /etc/apt/sources.list.d/*microsoft*.list || true
+          sudo apt-get update || (sleep 15 && sudo apt-get update)
           sudo apt-get install -y g++-13
           g++-13 -dumpfullversion
       # WHY NOT COMPARE AGAINST validation/sweep/sweep_baseline.csv.gz?
@@ -227,7 +235,15 @@ jobs:
 
       - name: Install toolchain
         run: |
-          sudo apt-get update
+          # Third-party apt sources shipped with the runner image (Chrome,
+          # Microsoft) are not used by this project and have broken the build
+          # before with "Hash Sum mismatch" on dl.google.com. Remove them so an
+          # unrelated mirror cannot fail this lane, then retry once for genuine
+          # transient network errors.
+          sudo rm -f /etc/apt/sources.list.d/*google*.list \
+                     /etc/apt/sources.list.d/*chrome*.list \
+                     /etc/apt/sources.list.d/*microsoft*.list || true
+          sudo apt-get update || (sleep 15 && sudo apt-get update)
           sudo apt-get install -y g++-13 cmake ninja-build
           g++-13 -dumpfullversion
           cmake --version | head -1
