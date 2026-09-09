@@ -347,9 +347,9 @@ for each cell that has any:
 | `mul` | TF | 21.70 | 20.83 | 100 .. 1e+08 | 92% | below 10: 10.62; above 1e+08: 7.52 | 63 | UNRESOLVED |
 | `mul` | FF | 14.00 | 13.63 | 10 .. 1e+08 | 96% | below 10: 0.36; above 1e+08: 0.00 | 45 | UNRESOLVED |
 | `div` | DD | 31.00 | 29.59 | 0 .. 1e-09 | 89% | above 0.99: 13.14 | 7 | UNRESOLVED |
-| `div` | QF | 29.00 | 25.98 | 1e-13 .. 1e-10 | 76% | below 1e-15: 10.44; above 1e-08: 11.73 | 123 | OPEN DEFECT (**5 above bound**) |
-| `div` | TF | 21.70 | 20.23 | 1e-14 .. 1e-09 | 84% | below 1e-15: 10.44; above 1e-08: 0.00 | 83 | OPEN DEFECT (**3 above bound**) |
-| `div` | FF | 14.00 | 12.49 | 0.99 .. 1 | 88% | below 0.99: 0.00; above 1: 0.00 | 189 | OPEN DEFECT (**3 above bound**) |
+| `div` | QF | 29.00 | 26.05 | 1e-14 .. 1e-10 | 77% | below 1e-19: 11.38; above 1e-08: 3.44 | 113 | UNRESOLVED |
+| `div` | TF | 21.70 | 20.26 | 1e-14 .. 1e-09 | 84% | below 1e-15: 10.44; above 1e-08: 0.00 | 80 | UNRESOLVED |
+| `div` | FF | 14.00 | 12.50 | 0.99 .. 1 | 89% | below 0.99: 0.00; above 1: 0.00 | 189 | UNRESOLVED |
 | `abs` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
 | `abs` | QF | 29.00 | 29.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
 | `abs` | TF | 21.70 | 21.70 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
@@ -369,7 +369,7 @@ for each cell that has any:
 - `add` — QF 6 pts (perpendicular approach to the real axis); TF 4 pts (perpendicular approach to the real axis); FF 84 pts (perpendicular approach to the real axis)
 - `sub` — QF 6 pts (perpendicular approach to the real axis); TF 6 pts (perpendicular approach to the real axis); FF 96 pts (perpendicular approach to the real axis)
 - `mul` — QF 76 pts (perpendicular approach to the real axis); TF 63 pts (perpendicular approach to the real axis); FF 45 pts (perpendicular approach to the real axis)
-- `div` — DD 7 pts (polar shells); QF 123 pts (perpendicular approach to the real axis); TF 83 pts (perpendicular approach to the real axis); FF 189 pts (perpendicular approach to the real axis)
+- `div` — DD 7 pts (polar shells); QF 113 pts (perpendicular approach to the real axis); TF 80 pts (perpendicular approach to the real axis); FF 189 pts (perpendicular approach to the real axis)
 - `polar` — QF 21 pts (perpendicular approach to the real axis); FF 12 pts (polar shells)
 
 ---
