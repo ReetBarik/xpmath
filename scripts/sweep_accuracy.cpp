@@ -2402,9 +2402,26 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
     // `bound` drift is untouched and still gates in both directions: the bound
     // is derived from the format and kappa, not measured, so a fix does not
     // move it. A moved bound is a changed standard and wants a human.
-    const bool row_improved = both_scored &&
-                              (fresh_ulps * kNoiseFactor < base_ulps) &&
-                              (r.digits > dig);
+    // The regression predicate, evaluated here so the exemption below is
+    // exactly its negation and the two cannot both be true.
+    const bool ulps_worse = fresh_ulps > kSubUlpFloor &&
+                            fresh_ulps > base_ulps * kNoiseFactor;
+    // The digit count rose AND the measured error actually fell.
+    //
+    // Both clauses are needed. Requiring the ulps DECREASE is what the
+    // `digits-zeroed` self-test poison cannot satisfy: it rewrites the digit
+    // column to 0.00 and leaves `ulps` bit-identical, so on a digits-only test
+    // every row would read as an improvement and a wholly rewritten baseline
+    // would pass. A genuine fix moves both columns together.
+    //
+    // NOT gated on `both_scored`. An UNRESOLVED row carries no verdict, but it
+    // still carries a measurement, and it improves like any other: the complex
+    // div fix took FF point 767 from 1175.66 to 0.485543 ulps with both sides
+    // state U. Requiring state S there left 16 such rows unexplained and failed
+    // the gate on a fix. `decreased` keeps its own both_scored guard below, so
+    // an exempt row still cannot be counted a regression.
+    const bool row_improved = (r.digits > dig) && !ulps_worse &&
+                              (fresh_ulps < base_ulps);
     bool row_moved = false;
     if (st == r.state) {
       const bool bound_ok = within_rel(base_bound, r.bound, kNoiseFactor - 1.0);
