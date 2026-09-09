@@ -264,6 +264,67 @@ struct TripleFloatComplex {
                 }
             }
         }
+        // KI-41.  THE NUMERATOR PRODUCT CAN GO SUBNORMAL, INDEPENDENTLY OF
+        // ANYTHING THE TEST ABOVE SEES.
+        //
+        // The band test asks whether the DENOMINATOR's square is formable. The
+        // direct form also builds the numerator products a*b, and an expansion
+        // of 3 words spaces them 2^-24 apart, so the lowest word of a*b sits at
+        //
+        //     |a| * |b| * 2^-48
+        //
+        // Below FLT_MIN that word is subnormal and holds a couple of bits
+        // instead of 24, so the product quietly loses the bottom of the
+        // expansion. MORE WORDS IS WORSE HERE: at grid point 1526 QF scored
+        // 2.07e6 ulps while TF -- one word FEWER, its lowest word only 2^-48
+        // down -- scored 0.0275, on identical operands. A |b|-only test cannot
+        // express that, since |b| is the same for every backend.
+        //
+        // THE FIX IS SCALING, NOT A DIFFERENT ALGORITHM. a/b is invariant under
+        // scaling BOTH operands by the same power of two, and a power-of-two
+        // scale of an expansion is exact -- every word's exponent shifts and no
+        // bit moves. So lift the operands until the product's low word is
+        // normal again, run the unchanged direct path, and shift the result
+        // back.
+        //
+        // Smith's algorithm was tried first and rejected on measurement: it
+        // fixes the defects but is intrinsically slightly less accurate, and it
+        // cost 13 regressions elsewhere in complex div (QF point 746
+        // 452 -> 1.08e4 ulps). Scaling fixes the same points AND leaves those
+        // 13 alone or better -- point 746 unchanged at 452, point 1538
+        // 5.48 -> 2.44.
+        //
+        //   pt1526   direct 2.07e6   smith 0.227     scaled 1.009
+        //   pt765    direct 9.26e20  smith 9.32e12   scaled 2.21e4
+        //   pt746    direct 452      smith 1.08e4    scaled 452
+        {
+            const float ma = detail::fabs(re.f0) > detail::fabs(im.f0)
+                             ? detail::fabs(re.f0) : detail::fabs(im.f0);
+            const float mbb = detail::fabs(b.re.f0) > detail::fabs(b.im.f0)
+                              ? detail::fabs(b.re.f0) : detail::fabs(b.im.f0);
+            // 1.17549435e-38f is FLT_MIN, spelled out rather than <cfloat> to
+            // keep the header freestanding (qf_math.hpp:1157 does the same).
+            // The 4x margin keeps the lifted word clear of the boundary itself.
+            if (ma != 0.0f && mbb != 0.0f &&
+                (ma * mbb) * 0x1p-48f < 1.17549435e-38f * 4.0f) {
+                float sa = 1.0f, sb = 1.0f, pa = ma, pb = mbb;
+                // Lift whichever operand is smaller, so neither overflows.
+                for (int k = 0; k < 8; ++k) {
+                    if ((pa * pb) * 0x1p-48f >= 1.17549435e-38f * 4.0f) break;
+                    if (pa < pb) { sa *= 0x1p24f; pa *= 0x1p24f; }
+                    else         { sb *= 0x1p24f; pb *= 0x1p24f; }
+                }
+                const TripleFloat ar2 = detail::tf_pow2_scale(re, sa), ai2 = detail::tf_pow2_scale(im, sa);
+                const TripleFloat br2 = detail::tf_pow2_scale(b.re, sb), bi2 = detail::tf_pow2_scale(b.im, sb);
+                const TripleFloat den2 = add(multiply(br2, br2), multiply(bi2, bi2));
+                const TripleFloat inv2 = divide(TripleFloat(1.0f), den2);
+                const TripleFloat q_re = multiply(detail::tf_cross(ar2, br2, negate(ai2), bi2), inv2);
+                const TripleFloat q_im = multiply(detail::tf_cross(ai2, br2, ar2, bi2), inv2);
+                // result carries the factor sa/sb; undo it exactly.
+                const float un = sb / sa;
+                return TripleFloatComplex(detail::tf_pow2_scale(q_re, un), detail::tf_pow2_scale(q_im, un));
+            }
+        }
         TripleFloat denom = add(multiply(b.re, b.re), multiply(b.im, b.im));
         TripleFloat inv   = divide(TripleFloat(1.0f), denom);
         // KI-36: both numerators are 2x2 determinants and both can cancel.
