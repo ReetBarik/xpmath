@@ -109,6 +109,39 @@ monotone)
   # happens to contain.
   gzip -dc "$base" | head -1000 | gzip > "$work/short.csv.gz"
   run truncated fail --baseline "$work/short.csv.gz"
+
+  # ---------------------------------------------------------------------
+  # DIRECTIONAL DIGIT DRIFT.
+  #
+  # Digit drift no longer gates when a measured improvement explains it, so
+  # that an accuracy fix can pass a parent-vs-HEAD comparison. That relaxation
+  # is only safe if the OTHER direction still fails, and if the forgiving path
+  # cannot be reached by a point that got worse.
+  #
+  # `digits-inflated` is the guard: a baseline claiming MORE digits than this
+  # build derives, with the ulps column left alone. No row can be classified as
+  # improved (the error did not shrink), so every one of the 428,592 rows is
+  # unexplained digit drift and the gate must still exit nonzero. If someone
+  # later widens the exemption to "any digit movement", this case goes green
+  # and tells them.
+  # ---------------------------------------------------------------------
+  gzip -dc "$base" \
+    | awk -F, -v OFS=, '/^#/ {print; next} /^backend,/ {print; next}
+                        {$5 = $5 + 5.0; print}' \
+    | gzip > "$work/digits_up.csv.gz"
+  run digits-inflated fail --baseline "$work/digits_up.csv.gz"
+
+  # And the ulps column inflated on its own: the record says every point was
+  # far WORSE than this build measures. Those rows do satisfy "error shrank",
+  # which is the improvement predicate -- but the digit column is untouched, so
+  # there is no digit drift to forgive and the run must still come back clean.
+  # This pins the exemption to rows where BOTH moved consistently, rather than
+  # letting a shrinking error excuse an arbitrary record.
+  gzip -dc "$base" \
+    | awk -F, -v OFS=, '/^#/ {print; next} /^backend,/ {print; next}
+                        {$6 = $6 * 1000.0 + 1.0; print}' \
+    | gzip > "$work/ulps_inflated.csv.gz"
+  run ulps-inflated pass --baseline "$work/ulps_inflated.csv.gz"
   ;;
 
 absolute)

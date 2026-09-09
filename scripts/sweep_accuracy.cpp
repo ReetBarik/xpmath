@@ -2216,6 +2216,7 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
   long   decreased = 0, increased = 0, worst_shown = 0;
   long   state_moved = 0, state_shown = 0;
   long   drift_bound = 0, drift_digits = 0, drift_shown = 0;
+  long   drift_digits_up = 0;   // digit drift explained by a measured IMPROVEMENT
   long   unchanged = 0;
   double worst_drop = 0.0;
   bool   saw_header = false, structural = false;
@@ -2297,12 +2298,39 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
     // derives LOOSER than the record is a weakened standard, and one it derives
     // TIGHTER means the record is stale. Both want a re-baseline, not a silent
     // comparison against a rule that is no longer the rule.
+    // A FIX MOVES THE DIGIT COUNT TOO. The record-integrity check below asks
+    // whether the baseline still describes this build; an improvement makes it
+    // stop describing this build just as surely as staleness does, so gating on
+    // raw digit drift made it STRUCTURALLY IMPOSSIBLE for an accuracy fix to
+    // pass this gate -- the parent-vs-HEAD lane in CI compares against the
+    // immediately preceding commit, so the very commit that fixes something is
+    // the one whose parent record it no longer matches. (Observed: the atan2
+    // signed-zero fix, 1032 points 0.00 -> full cap, decreased 0, exit 3.)
+    //
+    // So digit drift is split by DIRECTION, and only the unexplained half
+    // gates. A row counts as improvement-drift only if this build's error is
+    // strictly SMALLER than the record's by more than the noise floor -- the
+    // same predicate that counts `increased` below -- and the digit count moved
+    // UP. That is mutually exclusive with the regression predicate
+    // (fresh_ulps > base_ulps * kNoiseFactor), so this cannot forgive a point
+    // that got worse, and `decreased` still exits 1 on its own regardless.
+    //
+    // It is deliberately NOT symmetric: a record claiming MORE digits than this
+    // build derives is this build having got worse, or a stale file, and both
+    // still fail. Self-test case `digits-inflated` pins that down.
+    //
+    // `bound` drift is untouched and still gates in both directions: the bound
+    // is derived from the format and kappa, not measured, so a fix does not
+    // move it. A moved bound is a changed standard and wants a human.
+    const bool row_improved = both_scored &&
+                              (fresh_ulps * kNoiseFactor < base_ulps) &&
+                              (r.digits > dig);
     bool row_moved = false;
     if (st == r.state) {
       const bool bound_ok = within_rel(base_bound, r.bound, kNoiseFactor - 1.0);
       const bool dig_ok   = std::fabs(dig - r.digits) <= kDigitFloor;
       if (!bound_ok) ++drift_bound;
-      if (!dig_ok)   ++drift_digits;
+      if (!dig_ok) { if (row_improved) ++drift_digits_up; else ++drift_digits; }
       if (!bound_ok || !dig_ok) row_moved = true;
       if ((!bound_ok || !dig_ok) && drift_shown < 20) {
         std::printf("  RECORD      %s %c %-9s point %-5d  ", be, kind, op, point);
@@ -2377,6 +2405,9 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
               drift_bound, drift_digits,
               (drift_bound || drift_digits) ? "   <-- BASELINE IS NOT A RECORD "
                                               "OF THIS BUILD" : "");
+  if (drift_digits_up)
+    std::printf("  improved rows : %ld   (digit drift explained by a measured "
+                "improvement; not gated)\n", drift_digits_up);
   if (decreased) {
     std::printf("  worst drop    : %.2f digits equivalent\n", worst_drop);
     if (decreased > worst_shown)
@@ -2581,7 +2612,10 @@ void usage(const char* argv0) {
     "                    than a tenth of a digit. Exits 3 if the recorded bound\n"
     "                    or digit count is not the one this build derives -- the\n"
     "                    baseline is then stale or edited, not a record of this\n"
-    "                    code, and a PASS from it would mean nothing. Exits 2 on\n"
+    "                    code, and a PASS from it would mean nothing. Digit drift\n"
+    "                    that a MEASURED IMPROVEMENT explains (error strictly\n"
+    "                    smaller, digits up) is reported, not gated, so a fix can\n"
+    "                    pass; the reverse direction still exits 3. Exits 2 on\n"
     "                    a grid or op-inventory change. Writes nothing.\n"
     "  --ulp             score every point in ulps against the derived bound and\n"
     "                    report the worst point per (backend, op). Never a mean.\n"
