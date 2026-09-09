@@ -9,7 +9,7 @@
 #                   macOS/ARM?  (The macOS leg is the evidence for the upstream
 #                   claim that the core is not x86_64-dependent.)
 #   monotone-gate   Did any of the 428,592 scored sweep points get LESS accurate?
-#   build-and-test  Does the full Kokkos build + 34-test ctest suite pass?
+#   build-and-test  Does the full Kokkos build + 31-test ctest suite pass?
 #   device-nvcc     Does each of the eight headers compile for a CUDA device?
 #   device-hip      Same for HIP/ROCm.  UNVERIFIED — see `continue-on-error`.
 #
@@ -220,7 +220,7 @@ jobs:
   #    Kokkos.
   # ==========================================================================
   build-and-test:
-    name: Kokkos build + ctest (34 tests)
+    name: Kokkos build + ctest (31 tests)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

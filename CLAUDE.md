@@ -14,8 +14,9 @@ library, and compiles under plain `g++`/`clang++`, `nvcc` and `hipcc`.
 | DD | `xp::DoubleDouble` | 2×FP64 | ~31 | `dd_math.hpp`, `dd_complex.hpp` |
 | FF | `xp::FloatFloat` | 2×FP32 | ~14 | `ff_math.hpp`, `ff_complex.hpp` |
 | QF | `xp::QuadFloat` | 4×FP32 | ~29 | `qf_math.hpp`, `qf_complex.hpp` |
+| TF | `xp::TripleFloat` | 3×FP32 | ~21.7 | `tf_math.hpp`, `tf_complex.hpp` |
 
-`include/xp/config.hpp` is shared by all six headers and supplies what Kokkos used
+`include/xp/config.hpp` is shared by all eight math/complex headers and supplies what Kokkos used
 to: `XPMATH_INLINE_FUNCTION` (`__host__ __device__ inline` under CUDA/HIP), an
 `XPMATH_ON_DEVICE` predicate unifying `__CUDA_ARCH__` / `__HIP_DEVICE_COMPILE__` /
 `__SYCL_DEVICE_ONLY__`, an `xp::detail::` scalar-math dispatch, and a
@@ -38,7 +39,8 @@ passing on `main`.
 
 ## Executables
 
-Seven targets in CMakeLists.txt:
+Nine targets in CMakeLists.txt (the four complex demos are inside a
+`Kokkos_ENABLE_LIBQUADMATH` conditional):
 
 - `kokkos_ep_demo` — DD real (39 ops)
 - `kokkos_ep_demo_complex` — DD complex (24 ops)
@@ -46,13 +48,18 @@ Seven targets in CMakeLists.txt:
 - `kokkos_ep_demo_ff_complex` — FF complex (24 ops)
 - `kokkos_ep_demo_qf` — QF real (39 ops)
 - `kokkos_ep_demo_qf_complex` — QF complex (24 ops)
+- `kokkos_ep_demo_tf` — TF real (39 ops)
+- `kokkos_ep_demo_tf_complex` — TF complex (24 ops)
 - `kokkos_ep_bench_cost` — cost benchmark across backends
+
+**Never run the demos casually** — they are hours of kernel time. The accuracy
+record is `validation/sweep/`, not the demos.
 
 ## Branch Structure
 
 | Branch | Backends | Requirement |
 |---|---|---|
-| `main` | DD + FF + QF (portable) | any Kokkos-compatible hardware |
+| `main` | DD + FF + QF + TF (portable) | any Kokkos-compatible hardware |
 | `CUDAFP128Kokkos` | CUDA FP128 only | compute ≥ 10.0 (sm_100, Blackwell) |
 | `corpus-generator` | shared validation corpus tool | — (unmerged, see below) |
 
@@ -126,12 +133,50 @@ scored on identical data instead of each demo generating its own. The generated
 file is gitignored; the generator and `tests/corpus_binary.hpp` (loader with a
 staleness guard) are committed. Nothing consumes it yet.
 
+## Working on accuracy
+
+Read **docs/CORRECTNESS.md** first. The short version:
+
+- One measurement: error in ulps against the `__float128` oracle.
+- One verdict per point: at or below its derived bound, or above it.
+- The gate allows `kUlpAllowance = 8.0` × the derived bound
+  (`scripts/sweep_accuracy.cpp:876`). A point can therefore exceed its raw
+  derived bound and still pass; report both numbers if you claim "at the limit".
+- ~8.5% of sweep rows carry state `U`/`N` and get **no verdict** — the format
+  cannot carry the question. Absence of a defect there is not evidence of
+  correctness.
+
+**Traps that have cost real time:**
+
+- `sweep_accuracy` with no mode flag OVERWRITES the committed baseline
+  (`kDefaultOut`, `scripts/sweep_accuracy.cpp:249`). Always pass `--out /tmp/...`.
+  `--grid-out` behaves the same way.
+- `write_baseline` uses plain `fopen` — it does NOT gzip. Writing `--out foo.gz`
+  produces uncompressed bytes under a `.gz` name. Write plain, then `gzip -9 -c`.
+- `ctest --test-dir` on a MISSING directory exits 0. Confirm the dir exists and
+  that a nonzero test count ran, or the run proved nothing.
+- Build without the gcc module and a different libquadmath links: the oracle
+  fingerprint moves off `578322f998a329c8` and ~328 rows read as spurious
+  "increased". Load `gcc/13.3.0` in EVERY shell, before cmake.
+- The sweep is not bit-reproducible: ~23 of 428,592 rows shift between identical
+  runs. That is what the monotone gate's noise floor is for.
+- A STALE sweep binary yields structurally impossible results (cross-backend
+  deltas from a single-backend change). Rebuild before believing a diff.
+
+**Nothing has ever executed on a GPU.** CI compiles for nvcc and hip; every
+accuracy number in the repo is CPU-measured, and `docs/DOMAINS.md` is host-only
+and wrong below ~1e-31 under FTZ.
+
 ## Documentation
 
 - **README.md** — operation inventory, measured accuracy tables, algorithm references
 - **docs/UPSTREAM_PLAN.md** — standalone extraction + Kokkos upstream arc (S0–S10), active
-- **docs/history/KNOWN_ISSUES.md** — reproduced defects deliberately deferred, with evidence and
-  what closing each one involves. Read before assuming a surprising result is new.
+- **docs/history/KNOWN_ISSUES.md** — development history: 40 filed defects, 39 resolved.
+  Does NOT ship and is NOT the open-defect list. Read before assuming a surprising
+  result is new. (`docs/KNOWN_ISSUES.md` is a redirect stub kept only because eight
+  `include/xp/*.hpp` headers cite the old path in comments.)
+- **validation/sweep/open_defects.txt** — the ONLY list of open defects, enforced
+  in both directions by the `sweep_absolute_gate` ctest target.
 - **docs/UPSTREAM_PLAN_STATUS.md** — one STATUS block per completed sub-plan; read this before starting one
 - **docs/TEST_SUITE_PLAN.md** — test suite architecture and conventions
 - **docs/PERF_PLAN.md** — performance measurement plan (PARKED pending the upstream restructure)

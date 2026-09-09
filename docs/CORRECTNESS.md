@@ -161,7 +161,7 @@ directory — never in `validation/` — and is required to exit nonzero:
 | monotone | baseline truncated to 1000 rows | 2 (grid changed) |
 | absolute | a registered defect deleted | 4 (unlisted point above bound) |
 | absolute | a bogus entry added | 4 (stale register entry) |
-| absolute | register emptied | 4 (1047 unlisted) |
+| absolute | register emptied | 4 (every above-bound point unlisted) |
 
 Each mode also runs the **real** input and requires exit 0, so a gate wired to
 fail unconditionally does not satisfy the self-test either.

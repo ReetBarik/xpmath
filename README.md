@@ -111,7 +111,7 @@ than stated badly. The measurements below come from a single-threaded Serial
 build.
 
 These figures are optimization-invariant, and that was checked rather than
-assumed: for each of the three backends tabulated below the full 39-operation sweep was re-run
+assumed: for each of the backends tabulated below the full 39-operation sweep was re-run
 at `-O0` and at `-O3 -DNDEBUG`, and all 39 rows are identical across both
 builds in every statistic. `CMAKE_CXX_EXTENSIONS OFF` means the backends
 compile as strict ISO `-std=c++20`, where GCC leaves `-ffp-contract` off, so no
@@ -295,7 +295,7 @@ src/
     demo_qf_complex.cpp    QF complex-operation demo   -> kokkos_ep_demo_qf_complex
     bench_cost.cpp         cost benchmark harness      -> kokkos_ep_bench_cost
 
-tests/                 34-test ctest suite covering all four backends
+tests/                 31-test ctest suite covering all four backends
 docs/                  TEST_SUITE_PLAN.md, PORT_NOTES_QF.md
 scripts/               build helpers, coefficient generators, run-all scripts
 PORT_NOTES.md          port-specific fixes and design lessons
@@ -304,7 +304,7 @@ LICENSE, NOTICE.md, LICENSES/   licensing — see Section 6
 
 ## Section 4 — Tests
 
-The suite is 34 ctest tests spanning all four backends:
+The suite is 31 ctest tests spanning all four backends:
 
 - **Accuracy, real** — per-backend differential accuracy against the `__float128`
   oracle: `dd_accuracy_test`, `ff_accuracy_test`, `qf_accuracy_test`,
@@ -328,7 +328,7 @@ The suite is 34 ctest tests spanning all four backends:
   `qf_cancellation_test`, `tf_cancellation_test`.
 - **Foundational** — `hello_test`, `corpus_test`.
 
-All 34 tests pass on `main`.
+All 31 tests pass on `main`.
 
 Tests are exercised on the Serial Kokkos execution space; the type headers are
 `KOKKOS_INLINE_FUNCTION` throughout so they compile for device execution spaces
