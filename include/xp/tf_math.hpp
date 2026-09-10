@@ -854,7 +854,28 @@ XPMATH_INLINE_FUNCTION TripleFloat exp(TripleFloat a) {
     // for the scale-back, so the result is unchanged. Converting it would
     // perturb the reduction on a large set of inputs to buy nothing.
     float m = detail::floor(a.f0 * k_inv_log2 + 0.5f);
-    TripleFloat r = subtract(a, multiply_scalar(k_log2, m));
+
+    // KI-42: Cody-Waite range reduction; see dd_math.hpp's exp for the
+    // derivation and ff_math.hpp's for the FP32 width. `multiply_scalar(k_log2,
+    // m)` was a rounded TF-by-scalar product with the same defect. Five 16-bit
+    // pieces put the tail at 2^-89.3 (9.4e-04 ulps of 2^-72 at kmax); 0 of 1400
+    // products inexact over k in [-151, 128]. Measured end-to-end over
+    // a >= -54.1 (TF's subnormal wall, tf_math.hpp:917):
+    //     shipped   702 rows > 1 ulp, worst 14.44
+    //     4 pieces 1394 rows > 1 ulp, worst 242      <- one short is FATAL
+    //     5 pieces    0 rows > 1 ulp, worst 0.8241
+    // and 5 pieces equals a 400-bit oracle reduction, so nothing is left.
+    // This is also why exp no longer calls multiply_scalar at all.
+    const float kLn2_1 =  0x1.62e4p-1f;    // 15 significant bits
+    const float kLn2_2 =  0x1.7f7ep-20f;   // 16
+    const float kLn2_3 = -0x1.c61p-37f;    // 13
+    const float kLn2_4 = -0x1.950ep-54f;   // 16
+    const float kLn2_5 =  0x1.e3b4p-72f;   // 15
+    TripleFloat r = subtract(a, TripleFloat(m * kLn2_1));
+    r = subtract(r, TripleFloat(m * kLn2_2));
+    r = subtract(r, TripleFloat(m * kLn2_3));
+    r = subtract(r, TripleFloat(m * kLn2_4));
+    r = subtract(r, TripleFloat(m * kLn2_5));
 
     const int nq = 5;
     r = divide_scalar(r, float(1 << nq));
@@ -1446,12 +1467,38 @@ XPMATH_INLINE_FUNCTION TripleFloat atanh(TripleFloat a) {
 }
 
 // exp2, exp10, expm1, log1p, log10 (derived from exp/log)
+// KI-43: see dd_math.hpp's exp2 for the derivation.
 XPMATH_INLINE_FUNCTION TripleFloat exp2(TripleFloat a) {
-    return exp(multiply(a, TripleFloat_log2()));
+    TripleFloat k = round_to_nearest_int(a);
+    const int ki = (int)k.f0;
+    TripleFloat r = subtract(a, k);                     // EXACT
+    TripleFloat s = (r.f0 == 0.0f && r.f1 == 0.0f && r.f2 == 0.0f)
+                  ? TripleFloat(1.0f)
+                  : exp(multiply(r, TripleFloat_log2()));
+    if (ki >= -125 && ki <= 127) return mul_pwr2(s, ldexpf(1.0f, ki));
+    return TripleFloat(ldexpf(s.f0, ki), ldexpf(s.f1, ki), ldexpf(s.f2, ki));
 }
 
+// KI-43: see dd_math.hpp's exp10. Five 16-bit log10(2) pieces, tail 2^-95.0.
 XPMATH_INLINE_FUNCTION TripleFloat exp10(TripleFloat a) {
-    return exp(multiply(a, TripleFloat_log10()));
+    const float kLog2_10 = 3.32192809f;
+    const float kf = detail::rint(a.f0 * kLog2_10);
+    if (!(detail::fabs(kf) < 1.0e5f))
+        return exp(multiply(a, TripleFloat_log10()));
+    const int ki = (int)kf;
+    const float kLog10_2_1 =  0x1.3442p-2f;
+    const float kLog10_2_2 = -0x1.95ecp-19f;
+    const float kLog10_2_3 = -0x1.0c02p-39f;
+    const float kLog10_2_4 = -0x1.9dc2p-59f;
+    const float kLog10_2_5 =  0x1.2b36p-78f;
+    TripleFloat r = subtract(a,  TripleFloat(kf * kLog10_2_1));
+    r = subtract(r, TripleFloat(kf * kLog10_2_2));
+    r = subtract(r, TripleFloat(kf * kLog10_2_3));
+    r = subtract(r, TripleFloat(kf * kLog10_2_4));
+    r = subtract(r, TripleFloat(kf * kLog10_2_5));
+    TripleFloat s = exp(multiply(r, TripleFloat_log10()));
+    if (ki >= -125 && ki <= 127) return mul_pwr2(s, ldexpf(1.0f, ki));
+    return TripleFloat(ldexpf(s.f0, ki), ldexpf(s.f1, ki), ldexpf(s.f2, ki));
 }
 
 XPMATH_INLINE_FUNCTION TripleFloat expm1(TripleFloat a) {

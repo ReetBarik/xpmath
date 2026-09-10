@@ -653,7 +653,28 @@ XPMATH_INLINE_FUNCTION FloatFloat exp(FloatFloat a) {
     FloatFloat s1 = round_to_nearest_int(s0);
     float t1  = s1.hi;
     int nz    = (int)(t1 + detail::copysign(1.0e-6f, t1));
-    s0 = subtract(a, multiply(al2, s1));
+
+    // KI-42: Cody-Waite range reduction. See dd_math.hpp's exp for the full
+    // derivation. |a| < 104 bounds k to [-151, 128], 8 bits, leaving 24-8 = 16
+    // bits per float piece; 0 of 1120 products k*c_i inexact over that range.
+    //
+    // FF takes FOUR pieces, not three. Three is not merely tight, it is
+    // catastrophic -- measured end-to-end over a >= -70.7 (FF's own subnormal
+    // wall, ff_math.hpp:717):
+    //     shipped   1158 rows > 1 ulp, worst 55.19
+    //     3 pieces  1025 rows > 1 ulp, worst  3.844   <- barely an improvement
+    //     4 pieces    11 rows > 1 ulp, worst  1.321
+    // The tail after three 16-bit pieces is 2^-53.3, worth ~3.7 ulps of 2^-48
+    // at kmax; a fourth takes it to 2^-71.1 and 1.7e-05 ulps.
+    const float kLn2_1 =  0x1.62e4p-1f;    // 15 significant bits
+    const float kLn2_2 =  0x1.7f7ep-20f;   // 16
+    const float kLn2_3 = -0x1.c61p-37f;    // 13
+    const float kLn2_4 = -0x1.950ep-54f;   // 16
+    const float kf = (float)nz;            // exact integer, |kf| <= 151
+    s0 = subtract(a,  FloatFloat(kf * kLn2_1));
+    s0 = subtract(s0, FloatFloat(kf * kLn2_2));
+    s0 = subtract(s0, FloatFloat(kf * kLn2_3));
+    s0 = subtract(s0, FloatFloat(kf * kLn2_4));
 
     if (s0.hi == 0.0f) {
         return FloatFloat(ldexpf(1.0f, nz));
@@ -756,12 +777,45 @@ XPMATH_INLINE_FUNCTION FloatFloat log1p(FloatFloat a) {
     return log(add(FloatFloat(1.0f), a));
 }
 
+// KI-43: see dd_math.hpp's exp2 for the derivation.
+// dense [-120,120]: rows > 1 ulp 610 -> 66.
 XPMATH_INLINE_FUNCTION FloatFloat exp2(FloatFloat a) {
-    return exp(multiply(a, FloatFloat_log2()));
+    FloatFloat k = round_to_nearest_int(a);
+    const int ki = (int)k.hi;
+    FloatFloat r = subtract(a, k);                      // EXACT
+    FloatFloat s = (r.hi == 0.0f && r.lo == 0.0f)
+                 ? FloatFloat(1.0f)
+                 : exp(multiply(r, FloatFloat_log2()));
+    if (ki >= -125 && ki <= 127) {
+        const float p2 = ldexpf(1.0f, ki);
+        return FloatFloat(s.hi * p2, s.lo * p2);
+    }
+    return FloatFloat(ldexpf(s.hi, ki), ldexpf(s.lo, ki));
 }
 
+// KI-43: see dd_math.hpp's exp10. FP32 pieces are 16-bit (|k| <= 151);
+// 0 of 1120 products inexact, tail 2^-77.8.
+// dense [-36,36]: rows > 1 ulp 694 -> 60.
 XPMATH_INLINE_FUNCTION FloatFloat exp10(FloatFloat a) {
-    return exp(multiply(a, FloatFloat_log10()));
+    const float kLog2_10 = 3.32192809f;
+    const float kf = detail::rint(a.hi * kLog2_10);
+    if (!(detail::fabs(kf) < 1.0e5f))
+        return exp(multiply(a, FloatFloat_log10()));
+    const int ki = (int)kf;
+    const float kLog10_2_1 =  0x1.3442p-2f;             // 16 significant bits
+    const float kLog10_2_2 = -0x1.95ecp-19f;            // 15
+    const float kLog10_2_3 = -0x1.0c02p-39f;            // 16
+    const float kLog10_2_4 = -0x1.9dc2p-59f;            // 16
+    FloatFloat r = subtract(a,  FloatFloat(kf * kLog10_2_1));
+    r = subtract(r, FloatFloat(kf * kLog10_2_2));
+    r = subtract(r, FloatFloat(kf * kLog10_2_3));
+    r = subtract(r, FloatFloat(kf * kLog10_2_4));
+    FloatFloat s = exp(multiply(r, FloatFloat_log10()));
+    if (ki >= -125 && ki <= 127) {
+        const float p2 = ldexpf(1.0f, ki);
+        return FloatFloat(s.hi * p2, s.lo * p2);
+    }
+    return FloatFloat(ldexpf(s.hi, ki), ldexpf(s.lo, ki));
 }
 
 XPMATH_INLINE_FUNCTION FloatFloat expm1(FloatFloat a) {

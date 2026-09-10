@@ -415,6 +415,41 @@ add_test(NAME sweep_absolute_gate_selftest
          COMMAND ${CMAKE_SOURCE_DIR}/validation/gate_selftest.sh
                  $<TARGET_FILE:sweep_accuracy> absolute ${CMAKE_CURRENT_BINARY_DIR})
 
+# ---------------------------------------------------------------------------
+# KI-42/43 STRUCTURAL TEST FOR exp()'s ARGUMENT REDUCTION
+# ---------------------------------------------------------------------------
+# exp/exp2/exp10 reduce their argument by subtracting k*ln2 (resp. k*log10(2))
+# as a sum of Cody-Waite pieces, each narrow enough that k*c_i is EXACT in one
+# machine word. That property is invisible at the call site -- the pieces look
+# like ordinary hex float literals -- so the failure mode is an edit that
+# "improves precision" by widening one, silently restoring the |a|*2^-p
+# reduction error the change removed.
+#
+# This test asserts the property structurally: piece widths read from the
+# shipped mantissas (never re-derived at a nominal width -- rounding ln2 to 17
+# or 18 bits yields a BIT-IDENTICAL float, so a widen-by-one poison tests
+# nothing), exactness of k*c_i over the FULL k range the guards admit
+# (DD [-1075, 1024], not the [-1024, 1024] the overflow limit suggests), and a
+# tail that pins the piece COUNT so the test cannot be satisfied by deleting a
+# piece.
+#
+# It issues NO accuracy verdict on exp -- docs/CORRECTNESS.md:5-6 reserves that
+# for the sweep. Bit-equalities only, no oracle, no tolerance.
+#
+# Registered by hand rather than through kokkos_ep_add_standalone_test: it needs
+# no corpus define, and no Kokkos link (no device code). libquadmath is required
+# for the __float128 tail arithmetic.
+add_executable(exp_reduction_test exp_reduction_test.cpp)
+target_include_directories(exp_reduction_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(exp_reduction_test PRIVATE quadmath)
+add_test(NAME exp_reduction_test COMMAND exp_reduction_test)
+
+# ... and the self-test that proves it can fail. Same contract as the gate
+# self-tests above: poison must FAIL, clean must PASS.
+add_test(NAME exp_reduction_selftest
+         COMMAND ${CMAKE_SOURCE_DIR}/validation/exp_reduction_selftest.sh
+                 ${CMAKE_CURRENT_BINARY_DIR})
+
 # The generated domain document must be what the generator currently emits from
 # the committed baseline. Pure Python, well under a second, no build products.
 add_test(NAME domains_fresh

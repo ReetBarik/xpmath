@@ -985,7 +985,29 @@ XPMATH_INLINE_FUNCTION QuadFloat exp(QuadFloat a) {
     QuadFloat s1 = round_to_nearest_int(s0);
     float t1  = s1.f0;
     int   nz  = (int)(t1 + detail::copysign(1.0e-6f, t1));
-    s0 = subtract(a, multiply(al2, s1));            // |s0| <= log2/2
+
+    // KI-42: Cody-Waite range reduction; see dd_math.hpp's exp for the
+    // derivation and ff_math.hpp's for the FP32 width. Six 16-bit pieces put
+    // the tail at 2^-108.3 (0.03 ulps of 2^-96 at kmax); 0 of 1680 products
+    // inexact over k in [-151, 128]. Measured end-to-end over a >= -37.4 (QF's
+    // subnormal wall, qf_math.hpp:1062):
+    //     shipped   325 rows > 1 ulp, worst 6.585
+    //     5 pieces 1393 rows > 1 ulp, worst 1.331e+04   <- one short is FATAL
+    //     6 pieces    0 rows > 1 ulp, worst 0.6732
+    // and 6 pieces equals a 400-bit oracle reduction, so nothing is left.
+    const float kLn2_1 =  0x1.62e4p-1f;    // 15 significant bits
+    const float kLn2_2 =  0x1.7f7ep-20f;   // 16
+    const float kLn2_3 = -0x1.c61p-37f;    // 13
+    const float kLn2_4 = -0x1.950ep-54f;   // 16
+    const float kLn2_5 =  0x1.e3b4p-72f;   // 15
+    const float kLn2_6 = -0x1.9ffp-90f;    // 13
+    const float kf = (float)nz;            // exact integer, |kf| <= 151
+    s0 = subtract(a,  QuadFloat(kf * kLn2_1));
+    s0 = subtract(s0, QuadFloat(kf * kLn2_2));
+    s0 = subtract(s0, QuadFloat(kf * kLn2_3));
+    s0 = subtract(s0, QuadFloat(kf * kLn2_4));
+    s0 = subtract(s0, QuadFloat(kf * kLn2_5));
+    s0 = subtract(s0, QuadFloat(kf * kLn2_6));      // |s0| <= log2/2
 
     if (s0.f0 == 0.0f && s0.f1 == 0.0f) {
         return QuadFloat(ldexpf(1.0f, nz));         // result = 2^nz exactly
@@ -1103,13 +1125,49 @@ XPMATH_INLINE_FUNCTION QuadFloat log1p(QuadFloat a) {
 }
 
 // exp2(a) = e^(a*ln2).  QD has no exp2; composition (cf. dd_math.hpp:409).
+// KI-43: see dd_math.hpp's exp2 for the derivation.
 XPMATH_INLINE_FUNCTION QuadFloat exp2(QuadFloat a) {
-    return exp(multiply(a, QuadFloat_log2()));
+    QuadFloat k = round_to_nearest_int(a);
+    const int ki = (int)k.f0;
+    QuadFloat r = subtract(a, k);                       // EXACT
+    QuadFloat s = (r.f0 == 0.0f && r.f1 == 0.0f && r.f2 == 0.0f && r.f3 == 0.0f)
+                ? QuadFloat(1.0f)
+                : exp(multiply(r, QuadFloat_log2()));
+    if (ki >= -125 && ki <= 127) {
+        const float p2 = ldexpf(1.0f, ki);
+        return QuadFloat(s.f0 * p2, s.f1 * p2, s.f2 * p2, s.f3 * p2);
+    }
+    return QuadFloat(ldexpf(s.f0, ki), ldexpf(s.f1, ki),
+                     ldexpf(s.f2, ki), ldexpf(s.f3, ki));
 }
 
 // exp10(a) = e^(a*ln10).  QD has no exp10; composition (cf. dd_math.hpp:413).
+// KI-43: see dd_math.hpp's exp10. Six 16-bit log10(2) pieces, tail 2^-113.8.
 XPMATH_INLINE_FUNCTION QuadFloat exp10(QuadFloat a) {
-    return exp(multiply(a, QuadFloat_log10()));
+    const float kLog2_10 = 3.32192809f;
+    const float kf = detail::rint(a.f0 * kLog2_10);
+    if (!(detail::fabs(kf) < 1.0e5f))
+        return exp(multiply(a, QuadFloat_log10()));
+    const int ki = (int)kf;
+    const float kLog10_2_1 =  0x1.3442p-2f;
+    const float kLog10_2_2 = -0x1.95ecp-19f;
+    const float kLog10_2_3 = -0x1.0c02p-39f;
+    const float kLog10_2_4 = -0x1.9dc2p-59f;
+    const float kLog10_2_5 =  0x1.2b36p-78f;
+    const float kLog10_2_6 = -0x1.fa42p-96f;
+    QuadFloat r = subtract(a,  QuadFloat(kf * kLog10_2_1));
+    r = subtract(r, QuadFloat(kf * kLog10_2_2));
+    r = subtract(r, QuadFloat(kf * kLog10_2_3));
+    r = subtract(r, QuadFloat(kf * kLog10_2_4));
+    r = subtract(r, QuadFloat(kf * kLog10_2_5));
+    r = subtract(r, QuadFloat(kf * kLog10_2_6));
+    QuadFloat s = exp(multiply(r, QuadFloat_log10()));
+    if (ki >= -125 && ki <= 127) {
+        const float p2 = ldexpf(1.0f, ki);
+        return QuadFloat(s.f0 * p2, s.f1 * p2, s.f2 * p2, s.f3 * p2);
+    }
+    return QuadFloat(ldexpf(s.f0, ki), ldexpf(s.f1, ki),
+                     ldexpf(s.f2, ki), ldexpf(s.f3, ki));
 }
 
 // expm1(a) = e^a - 1.  QD has no expm1; Taylor for |a| <= 0.5 to avoid the

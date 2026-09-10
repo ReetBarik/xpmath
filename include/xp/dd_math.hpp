@@ -551,7 +551,48 @@ XPMATH_INLINE_FUNCTION DoubleDouble exp(DoubleDouble a) {
     DoubleDouble s1 = round_to_nearest_int(s0);
     double t1  = s1.hi;
     int nz     = (int)(t1 + detail::copysign(1.0e-14, t1));
-    s0 = subtract(a, multiply(al2, s1));
+
+    // KI-42: Cody-Waite range reduction. `multiply(al2, s1)` was a ROUNDED DD
+    // product; a - k*ln2 then cancels down to |r| <= ln2/2, so that rounding
+    // survived whole as an ABSOLUTE error ~|a|*2^-p -- i.e. a relative error of
+    // the result, since exp(r+d) = exp(r)(1+d). Measured against MPFR at 400
+    // bits: 14.28 ulps at a=100, 420.4 at a=300, 1046 at a=700.
+    //
+    // NEGATIVE CONTROL, reproduced -- do not "fix" this by widening the
+    // constant: adding a THIRD limb of ln2 while keeping the rounded product
+    // does not help and sometimes hurts (a=50: 14.28 -> 21.18). The constant's
+    // width was never the mechanism; the rounded product is.
+    //
+    // Split ln2 into pieces narrow enough that every k*c_i is EXACT in one
+    // double. |a| < 745.2 (the guards above) bounds k to [-1075, 1024], 11
+    // bits, leaving 53-11 = 42 bits per piece. Three pieces put the tail at
+    // 2^-136.1, worth 9.5e-07 ulps at kmax -- far below the 0.5 ulp target.
+    // Verified: 0 of 6300 products k*c_i inexact over the full k range.
+    //
+    // Then a - k*c1 is exact by Sterbenz-class cancellation and each further
+    // subtraction removes an exact quantity, so the reduction carries no
+    // rounding of its own. DESCENDING order is load-bearing: taking a small
+    // piece first would round the running value at ulp(a), reintroducing
+    // exactly the |a|*2^-p error this replaces. See tests/exp_reduction_test.
+    //
+    // Measured effect, dense sweep of 4001 points over [-745, 709] restricted
+    // to a >= -671.7 (below that DD's lo word leaves the FP64 normal range --
+    // a FORMAT limit, the same threshold log() switches on at line 639):
+    //     rows > 1 ulp  3691 -> 73      worst 665.1 -> 1.891
+    // A third arm computing the reduction in MPFR at 400 bits agrees with the
+    // Cody-Waite result on every one of those 3799 rows, so the 73 residual
+    // rows are the series core, not the reduction -- no reduction headroom is
+    // left here.
+    //
+    // GPU: no Dekker split anywhere in this sequence, so it is unperturbed by
+    // -ffp-contract=fast (unlike two_prod, which breaks on device).
+    const double kLn2_1 =  0x1.62e42fefa38p-1;   // 42 significant bits
+    const double kLn2_2 =  0x1.ef35793c768p-45;  // 42
+    const double kLn2_3 = -0x1.9ff0342543p-90;   // 41
+    const double kd = t1;                        // exact integer, |kd| <= 1075
+    s0 = subtract(a,  DoubleDouble(kd * kLn2_1));
+    s0 = subtract(s0, DoubleDouble(kd * kLn2_2));
+    s0 = subtract(s0, DoubleDouble(kd * kLn2_3));
 
     if (s0.hi == 0.0) {
         return DoubleDouble(detail::ldexp(1.0, nz)); // result = 2^nz exactly
@@ -718,12 +759,55 @@ XPMATH_INLINE_FUNCTION DoubleDouble log1p(DoubleDouble a) {
     return log(add(DoubleDouble(1.0), a));
 }
 
+// KI-43: exp2/exp10 reduce their OWN argument; they no longer hand exp a
+// rounded pre-multiply. `exp(multiply(a, ln2))` rounds a*ln2 at |a*ln2|*2^-p,
+// which is an ABSOLUTE error in exp's argument and therefore a RELATIVE error
+// of the result of |a*ln2| ulps -- up to ~709 for DD, and entirely independent
+// of how accurate exp itself is. Measured DD exp10 worst 768 ulps at a=300.25.
+//
+// exp2 needs no constants at all: k = nint(a) makes r = a - k EXACT (|a| <=
+// 1024 puts a's lowest bit at 2^(10-p), so a-k needs p-11 bits and the type
+// holds p), and 2^a = 2^k * exp(r*ln2) has |r*ln2| <= 0.347 -- one rounded
+// product of a small quantity, under half an ulp of the result.
+//   dense [-1000,1000]: rows > 1 ulp 1163 -> 11
 XPMATH_INLINE_FUNCTION DoubleDouble exp2(DoubleDouble a) {
-    return exp(multiply(a, DoubleDouble_log2()));
+    DoubleDouble k = round_to_nearest_int(a);
+    const int ki = (int)k.hi;
+    DoubleDouble r = subtract(a, k);                    // EXACT
+    DoubleDouble s = (r.hi == 0.0 && r.lo == 0.0)
+                   ? DoubleDouble(1.0)
+                   : exp(multiply(r, DoubleDouble_log2()));
+    // KI-6 scale-back: component-wise, never by materialising 2^ki.
+    if (ki >= -1021 && ki <= 1023) {
+        const double p2 = detail::ldexp(1.0, ki);
+        return DoubleDouble(s.hi * p2, s.lo * p2);
+    }
+    return DoubleDouble(detail::ldexp(s.hi, ki), detail::ldexp(s.lo, ki));
 }
 
+// exp10 reduces on log10(2) with a Cody-Waite table: k = nint(a*log2(10)),
+// r = a - sum k*d_i with every k*d_i EXACT in one double (42-bit pieces, |k| <=
+// 1075), so |r| <= log10(2)/2 = 0.1505 and 10^a = 2^k * exp(r*ln10).
+// Pieces verified: 0 of 6300 products inexact over k in [-1075, 1024];
+// tail 2^-131.7. dense [-300,300]: rows > 1 ulp 1186 -> 54.
 XPMATH_INLINE_FUNCTION DoubleDouble exp10(DoubleDouble a) {
-    return exp(multiply(a, DoubleDouble_log10()));
+    const double kLog2_10 = 3.321928094887362348;       // only selects k
+    const double kd = detail::rint(a.hi * kLog2_10);
+    if (!(detail::fabs(kd) < 1.0e6))                    // out of band
+        return exp(multiply(a, DoubleDouble_log10()));
+    const int ki = (int)kd;
+    const double kLog10_2_1 = 0x1.34413509f78p-2;       // 42 significant bits
+    const double kLog10_2_2 = 0x1.fef311f12bp-46;       // 41
+    const double kLog10_2_3 = 0x1.ac0b7c9178p-89;       // 38
+    DoubleDouble r = subtract(a,  DoubleDouble(kd * kLog10_2_1));
+    r = subtract(r, DoubleDouble(kd * kLog10_2_2));
+    r = subtract(r, DoubleDouble(kd * kLog10_2_3));
+    DoubleDouble s = exp(multiply(r, DoubleDouble_log10()));
+    if (ki >= -1021 && ki <= 1023) {
+        const double p2 = detail::ldexp(1.0, ki);
+        return DoubleDouble(s.hi * p2, s.lo * p2);
+    }
+    return DoubleDouble(detail::ldexp(s.hi, ki), detail::ldexp(s.lo, ki));
 }
 
 XPMATH_INLINE_FUNCTION DoubleDouble expm1(DoubleDouble a) {
