@@ -258,6 +258,7 @@
 #include <string>
 #include <random>
 #include <string>
+#include <map>
 #include <vector>
 
 namespace {
@@ -2464,6 +2465,14 @@ static bool within_rel(double a, double b, double rel) {
   return std::fabs(a - b) <= rel * m;
 }
 
+// Identity of a scored row: the tuple that names the same measurement across
+// two runs. Used to compare a baseline against a sweep whose grid has grown.
+std::string row_key(const char* be, char kind, const char* op, int point) {
+  char buf[96];
+  std::snprintf(buf, sizeof buf, "%s|%c|%s|%d", be, kind, op, point);
+  return std::string(buf);
+}
+
 int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
   // The committed baseline is gzipped -- 428,592 rows is 8.7 MB of text and
   // 2.6 MB compressed, and it is rewritten on every accepted change, so the
@@ -2478,6 +2487,20 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
     f = std::fopen(path.c_str(), "rb");
   }
   if (!f) { std::fprintf(stderr, "cannot open baseline %s\n", path.c_str()); return 2; }
+
+  // Match baseline rows to fresh rows by IDENTITY, not by position. The old
+  // lock-step walk (fresh[idx]) required both files to be the same length and
+  // in the same order, so ADDING grid points desynchronised every row after
+  // the insertion and the comparison bailed with exit 2 -- the apparatus
+  // refusing the one change it exists to encourage. See the note on
+  // `new_points` below for what replaces it.
+  long declared_real = 0, declared_cplx = 0;   // from the baseline's own header
+  std::map<std::string, size_t> fresh_by_key;
+  for (size_t i = 0; i < fresh.size(); ++i)
+    fresh_by_key[row_key(fresh[i].backend, fresh[i].kind, fresh[i].op,
+                         fresh[i].point)] = i;
+  std::vector<bool> fresh_seen(fresh.size(), false);
+  long new_points = 0, removed_points = 0, removed_shown = 0;
 
   char   line[256];
   size_t idx = 0, parsed = 0;
@@ -2494,6 +2517,16 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
 
   while (std::fgets(line, sizeof(line), f)) {
     if (line[0] == '#') {
+      // The header declares the grid this file was produced from. Keep it:
+      // it is what distinguishes a TRUNCATED file (body shorter than its own
+      // header says) from an older, honest baseline with a smaller grid.
+      {
+        long hr = 0, hc = 0;
+        if (std::sscanf(line, "# grid: real=%ld complex=%ld", &hr, &hc) == 2) {
+          declared_real = hr;
+          declared_cplx = hc;
+        }
+      }
       unsigned long long fp = 0;
       if (std::sscanf(line, "# oracle-fingerprint: %llx", &fp) == 1) {
         fp_seen = true;
@@ -2520,20 +2553,23 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
     }
     ++parsed;
 
-    if (idx >= fresh.size()) {
-      std::fprintf(stderr, "baseline has more rows than the fresh sweep "
-                           "(%zu vs %zu) — the grid changed\n", parsed, fresh.size());
-      structural = true; break;
+    // Keyed lookup. A baseline row with no fresh counterpart means COVERAGE
+    // WAS REMOVED, which is still structural -- losing a point silently is the
+    // failure the old index walk was really guarding against, and it stays a
+    // hard failure. A fresh row with no baseline counterpart is simply new and
+    // is counted at the end.
+    const auto it = fresh_by_key.find(row_key(be, kind, op, point));
+    if (it == fresh_by_key.end()) {
+      ++removed_points;
+      if (removed_shown < 10) {
+        std::fprintf(stderr, "  REMOVED    %-4s %c %-9s point %d — in the baseline, "
+                             "absent from this sweep\n", be, kind, op, point);
+        ++removed_shown;
+      }
+      continue;
     }
-    const Row& r = fresh[idx];
-    if (std::strcmp(be, r.backend) != 0 || kind != r.kind ||
-        std::strcmp(op, r.op) != 0 || point != r.point) {
-      std::fprintf(stderr,
-                   "baseline row %zu is %s,%c,%s,%d but the fresh sweep has %s,%c,%s,%d\n"
-                   "  the grid or the op inventory changed; the comparison is invalid\n",
-                   idx, be, kind, op, point, r.backend, r.kind, r.op, r.point);
-      structural = true; break;
-    }
+    fresh_seen[it->second] = true;
+    const Row& r = fresh[it->second];
 
     // THE MONOTONE GATE, in ulps. Larger is worse, so a regression is a point
     // whose error GREW. Two things are deliberately not regressions:
@@ -2668,12 +2704,61 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
   }
   if (gz) pclose(f); else std::fclose(f);
 
-  if (structural) return 2;
-  if (idx != fresh.size()) {
-    std::fprintf(stderr, "baseline has %zu rows, the fresh sweep has %zu — "
-                         "the grid changed\n", idx, fresh.size());
-    return 2;
+  for (size_t i = 0; i < fresh.size(); ++i)
+    if (!fresh_seen[i]) ++new_points;
+
+  // TRUNCATION CHECK. Count how many rows this baseline's OWN header implies,
+  // and require the body to deliver them. Older baselines with a smaller grid
+  // are fine -- they are compared on the intersection -- but a file that is
+  // short of its own declared grid has been cut or corrupted, and the rows it
+  // is missing would otherwise be silently reclassified as `new points`.
+  if (declared_real > 0 || declared_cplx > 0) {
+    long n_real_ops = 0, n_cplx_ops = 0;
+    for (const auto& kv : fresh_by_key) {
+      (void)kv;
+    }
+    // Count ops per realm from the fresh sweep, which shares the op inventory.
+    std::map<std::string, bool> seen_real, seen_cplx;
+    for (size_t i = 0; i < fresh.size(); ++i) {
+      if (fresh[i].kind == 'r') seen_real[fresh[i].op] = true;
+      else                      seen_cplx[fresh[i].op] = true;
+    }
+    n_real_ops = (long)seen_real.size();
+    n_cplx_ops = (long)seen_cplx.size();
+    std::map<std::string, bool> seen_be;
+    for (size_t i = 0; i < fresh.size(); ++i) seen_be[fresh[i].backend] = true;
+    const long n_be = (long)seen_be.size();
+    const long expect =
+        (declared_real * n_real_ops + declared_cplx * n_cplx_ops) * n_be;
+    if (expect > 0 && (long)parsed < expect) {
+      std::fprintf(stderr,
+                   "\n  baseline body is SHORT of its own header: %zu rows read, "
+                   "%ld implied by\n  '# grid: real=%ld complex=%ld' over %ld ops "
+                   "and %ld backends.\n"
+                   "  The file is truncated or corrupt; its missing rows would be "
+                   "silently\n  reclassified as new points. Refusing to compare.\n",
+                   parsed, expect, declared_real, declared_cplx,
+                   n_real_ops + n_cplx_ops, n_be);
+      structural = true;
+    }
   }
+
+  if (removed_points) {
+    std::fprintf(stderr,
+                 "\n  %ld point(s) present in the baseline are absent from this sweep.\n"
+                 "  Coverage was removed; that is a change of standard and the\n"
+                 "  comparison cannot certify it. Re-record deliberately.\n",
+                 removed_points);
+    structural = true;
+  }
+  if (structural) return 2;
+  // NO row-count equality check here. With keyed matching `idx` counts the
+  // baseline rows consumed, which is legitimately smaller than fresh.size()
+  // whenever the grid grew. Both asymmetries are already handled: a baseline
+  // row with no counterpart is `removed_points` (structural, above), and a
+  // fresh row with no counterpart is `new_points` (reported, not gated). A
+  // count comparison here would re-impose the very constraint that made the
+  // gate refuse added coverage.
 
   std::printf("\n  compared      : %zu points against %s\n", idx, path.c_str());
   std::printf("  decreased     : %ld%s\n", decreased,
@@ -2684,6 +2769,9 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
   // state flip, a rewritten bound -- be reported as unchanged, which is
   // precisely the sentence a blind gate prints.
   std::printf("  unchanged     : %ld\n", unchanged);
+  if (new_points)
+    std::printf("  new points    : %ld   (not in the baseline; nothing to compare "
+                "against, not gated)\n", new_points);
   std::printf("  state moved   : %ld%s\n", state_moved,
               state_moved ? "   <-- the recorded verdicts are not this build's" : "");
   std::printf("  record drift  : %ld bound, %ld digits%s\n",
