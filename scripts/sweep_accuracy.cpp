@@ -1881,7 +1881,27 @@ void sweep_real(int id, const std::vector<GridPoint>& grid,
     Row& row_ = rows.back();
     // --- condition-aware ulp verdict -------------------------------------
     if (ux) {
-      const double m = ulps_scalar(to_q(r), ref[i], sb_bits);
+      // LAYER 0. Score against f(x_stored), not f(x_grid).
+      //
+      // `ref` was computed once from the grid double and shared by all four
+      // backends. That asks the oracle a question the backend was never given:
+      // DD/QF/TF hold any double exactly so it makes no difference to them
+      // (measured: storage error identically 0), but FF carries 48 bits and
+      // cannot hold a 53-bit double, so its verdict was taken against a value
+      // it does not have. The library is asked to compute correctly on the
+      // value it holds; the input's own storage error is the caller's business.
+      //
+      // Recomputing per backend also makes `in_delta` identically zero by
+      // construction rather than by argument -- the operand IS the exact input
+      // once the oracle is asked about it.
+      //
+      // Measured effect (FF, real sin/cos/tan/exp/log over the log-sweep and
+      // linear families): 1402 of 2415 rows change value, 55 stop being
+      // defects, 25 become defects, net -30. The change is about provenance,
+      // not about the defect count.
+      const __float128 ref_stored = reference_real_q(
+          id, to_q(S(a_in[i])), to_q(S(b_in[i])), to_q(S(c_in[i])));
+      const double m = ulps_scalar(to_q(r), ref_stored, sb_bits);
       double kappa = 0.0;
       row_.ulps = m;
       if (m == kUnscorableUlps()) {
@@ -2052,14 +2072,69 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
     // consolidated bound, with kappa obtained by differentiating the oracle
     // (kappa_complex_numeric) instead of by hand.
     if (ux) {
-      const __float128 e_re = to_q(r.re) - ref_re[i], e_im = to_q(r.im) - ref_im[i];
-      const __float128 mref = hypotq(ref_re[i], ref_im[i]);
+      // LAYER 0, COMPLEX: NOT APPLIED. Deliberately still the grid oracle.
+      //
+      // Widening a stored operand with to_q() sums the limbs, and in IEEE
+      // (-0.0) + (0.0) = +0.0 -- so the SIGN OF A ZERO IS DESTROYED. The grid
+      // carries both signed zeros on purpose (family 2 exists for exactly
+      // that; KI-5(d) is invisible without them), so handing to_q's output to
+      // the oracle asks about the CONJUGATE at every branch-cut point.
+      //
+      // Measured, DD c sqrt at z = (-100, -0):
+      //     grid oracle   (0, -10)   <- correct; the library agrees
+      //     stored oracle (0, +10)   <- wrong side of the cut
+      //     library       (0, -10)
+      // scoring 1.623e32 ulps = 2 * 2^106, a pure sign flip. Applying it
+      // produced 1,996 false defects, every one complex, concentrated in
+      // sqrt/log/log10/acosh -- the branch-cut ops.
+      //
+      // The real path IS on x_stored: a real zero has no conjugate to flip to,
+      // and DD/QF/TF hold any double exactly, so only FF moves there.
+      //
+      // Fixing this properly needs a sign-preserving widen -- carry the sign
+      // of the leading limb explicitly when the sum is zero -- and that must
+      // be poisoned against the signed-zero grid family before it is trusted.
+      const __float128 sref_re = ref_re[i], sref_im = ref_im[i];
+      const __float128 e_re = to_q(r.re) - sref_re, e_im = to_q(r.im) - sref_im;
+      const __float128 mref = hypotq(sref_re, sref_im);
       const bool bad = isnanq(e_re) || isnanq(e_im) ||
-                       isnanq(ref_re[i]) || isnanq(ref_im[i]) ||
-                       !finiteq(ref_re[i]) || !finiteq(ref_im[i]);
+                       isnanq(sref_re) || isnanq(sref_im) ||
+                       !finiteq(sref_re) || !finiteq(sref_im);
       if (bad || mref == 0) {
         ++ucell.n_unscorable;
       } else {
+        // MODULUS-RELATIVE, retained deliberately for now.
+        //
+        // A per-component metric was tried here and REVERTED on measurement.
+        // The naive form -- score each component against its own magnitude,
+        // falling back to the other component only when the reference is
+        // EXACTLY zero -- produced 6,105 false defects, all complex, none
+        // real. Worked example, FF c mul at grid point 92:
+        //
+        //   a = (0.35355339, -0.35355339), b = (0.35355339, 0.35355339)
+        //   exact product: re = 2.5e-01, im = -1.570092e-16
+        //   |e_re| = 3.95e-17, |e_im| = 1.57e-16    (both tiny, absolutely)
+        //   per-component:  re 0.044 ulps, im 2.81e14 ulps
+        //   modulus:        0.182 ulps
+        //
+        // The imaginary part CANCELS: ar*bi ~ -ai*br, so |ref_im| collapses to
+        // 1.6e-16 while the operands and the modulus stay O(1). Dividing a
+        // perfectly normal absolute error by that collapsed magnitude
+        // manufactures total loss for an answer that is correct. `ref == 0`
+        // does not catch it because the component is tiny, not zero, and there
+        // is no non-arbitrary threshold at which "tiny" becomes "zero".
+        //
+        // The digit path's score_component has the same shape but never hit
+        // this, because it only special-cases an exactly-zero reference and is
+        // read as a digit count rather than gated on.
+        //
+        // The underlying criticism stands: modulus-relative error DOES permit
+        // one component to be wrong when the other dominates (the KI-1 shape).
+        // But the fix is a component metric with a NON-COLLAPSING scale --
+        // plausibly max(|ref_component|, |other_component| * 2^-p), i.e. judge
+        // a cancelled component against the resolution the modulus affords --
+        // and that needs deriving and poisoning before it gates anything.
+        // Filed rather than guessed.
         const double m = (double)ldexpq(hypotq(e_re, e_im) / mref, B::sig_bits());
         row_.ulps = m;
         if (m > ucell.max_ulps) { ucell.max_ulps = m; ucell.max_ulps_point = int(i); }
@@ -2068,7 +2143,7 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
                                                    (__float128)grid[i].im,
                                                    (__float128)b_re[i],
                                                    (__float128)b_im[i],
-                                                   ref_re[i], ref_im[i]);
+                                                   sref_re, sref_im);
         if (kappa < 0.0) {
           ++ucell.n_ungated; row_.state = 'X';   // no derivative -> no bound
         } else {
@@ -2108,8 +2183,8 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
             quadmath_snprintf(qb, sizeof qb, "%.36Qg", exact[1]);
             quadmath_snprintf(qc, sizeof qc, "%.36Qg", exact[2]);
             quadmath_snprintf(qd, sizeof qd, "%.36Qg", exact[3]);
-            quadmath_snprintf(qr, sizeof qr, "%.36Qg", ref_re[i]);
-            quadmath_snprintf(qi, sizeof qi, "%.36Qg", ref_im[i]);
+            quadmath_snprintf(qr, sizeof qr, "%.36Qg", sref_re);
+            quadmath_snprintf(qi, sizeof qi, "%.36Qg", sref_im);
             std::printf("DUMP %s c %s point %d\n", B::name(), kComplex[id].name, int(i));
             std::printf("  a      = (%s, %s)\n", qa, qb);
             std::printf("  b      = (%s, %s)\n", qc, qd);
