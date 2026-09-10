@@ -439,6 +439,17 @@ add_test(NAME sweep_absolute_gate_selftest
 # Registered by hand rather than through kokkos_ep_add_standalone_test: it needs
 # no corpus define, and no Kokkos link (no device code). libquadmath is required
 # for the __float128 tail arithmetic.
+# pow()'s non-positive-base contract, all four backends. Registered separately
+# from the sweep because the sweep CANNOT see this: repair_real's R_Pow case
+# (scripts/sweep_accuracy.cpp:529-537) sets a = fabs(a) and maps a == 0 to 1, so
+# no grid point ever reaches pow with a zero or negative base. TF shipped
+# without the guard the other three carry, returning 1 for pow(-0.5, 2), and
+# nothing in the apparatus could notice. Contract assertions only -- exact
+# comparisons against specified values, no accuracy verdict.
+add_executable(pow_domain_test pow_domain_test.cpp)
+target_include_directories(pow_domain_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
+add_test(NAME pow_domain_test COMMAND pow_domain_test)
+
 add_executable(exp_reduction_test exp_reduction_test.cpp)
 target_include_directories(exp_reduction_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(exp_reduction_test PRIVATE quadmath)

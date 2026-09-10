@@ -1886,6 +1886,29 @@ void sweep_real(int id, const std::vector<GridPoint>& grid,
         }
         const double ratio = (exp_u > 0.0) ? m / exp_u : HUGE_VAL;
         ++ucell.n_scored; row_.state = 'S'; row_.bound = exp_u;
+        // --dump-operands for the REAL realm. The complex loop has carried this
+        // since the metric was first argued; the real loop never did, so a real
+        // point's operands could not be read out of the tool at all. External
+        // probes had to RECONSTRUCT the seeded operand stream, and that does not
+        // reproduce it: three variants of fill_real_operands scored 0 of 8
+        // against known FF pow rows, each 5-30x below the recorded ulps. A probe
+        // built on a reconstruction measures a different function than the
+        // sweep -- which silently invalidated several probes in the session that
+        // added this.
+        if (ux->dump_op && ux->dump_point == int(i) &&
+            std::strcmp(ux->dump_op, kReal[id].name) == 0) {
+          char qa[64], qb[64], qc[64], qr[64];
+          quadmath_snprintf(qa, sizeof qa, "%.36Qg", exact[0]);
+          quadmath_snprintf(qb, sizeof qb, "%.36Qg", exact[1]);
+          quadmath_snprintf(qc, sizeof qc, "%.36Qg", exact[2]);
+          quadmath_snprintf(qr, sizeof qr, "%.36Qg", ref[i]);
+          std::printf("DUMP %s r %s point %d\n", B::name(), kReal[id].name, int(i));
+          std::printf("  a      = %s\n", qa);
+          if (nops >= 2) std::printf("  b      = %s\n", qb);
+          if (nops >= 3) std::printf("  c      = %s\n", qc);
+          std::printf("  ref    = %s\n", qr);
+          std::printf("  ulps=%g bound=%g digits=%g\n", m, exp_u, d);
+        }
         if (m > ucell.max_ulps) { ucell.max_ulps = m; ucell.max_ulps_point = int(i); }
         if (ratio > ucell.worst_ratio) {
           ucell.worst_ratio = ratio;    ucell.worst_point    = int(i);
