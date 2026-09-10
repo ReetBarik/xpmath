@@ -1226,7 +1226,14 @@ XPMATH_INLINE_FUNCTION void sincos(QuadFloat a, QuadFloat& sin_a, QuadFloat& cos
     QuadFloat s3  = subtract(a, multiply(pi2, s2));   // |s3| <= pi
     if (s3.f0 == 0.0f) { sin_a = QuadFloat(0.0f); cos_a = QuadFloat(1.0f); return; }
 
-    QuadFloat r  = mul_pwr2(s3, ldexpf(1.0f, -nq));   // r = s3 / 2^nq, |r| < pi/2^nq
+    // Mod pi/2 reduction
+    QuadFloat pi_half = mul_pwr2(QuadFloat_pi(), 0.5f);
+    QuadFloat n_exact = divide(s3, pi_half);
+    QuadFloat n = round_to_nearest_int(n_exact);
+    int j = ((int)n.f0) & 3;
+    QuadFloat r_mod = subtract(s3, multiply(pi_half, n));
+
+    QuadFloat r  = mul_pwr2(r_mod, ldexpf(1.0f, -nq));   // r = r_mod / 2^nq, |r| < pi/(4*2^nq)
     QuadFloat r2 = multiply(r, r);
 
     // sin(r) = r - r^3/3! + ... ; cos(r) = 1 - r^2/2! + ...
@@ -1264,7 +1271,11 @@ XPMATH_INLINE_FUNCTION void sincos(QuadFloat a, QuadFloat& sin_a, QuadFloat& cos
     if (cos_r.f0 >  1.0f || (cos_r.f0 ==  1.0f && cos_r.f1 > 0.0f)) cos_r = QuadFloat( 1.0f);
     if (cos_r.f0 < -1.0f || (cos_r.f0 == -1.0f && cos_r.f1 < 0.0f)) cos_r = QuadFloat(-1.0f);
 
-    sin_a = sin_r; cos_a = cos_r;
+    // Quadrant selection (QF has sin first, cos second)
+    if (j == 0) { sin_a = sin_r;  cos_a = cos_r; }
+    else if (j == 1) { sin_a = cos_r;  cos_a = negate(sin_r); }
+    else if (j == 2) { sin_a = negate(sin_r); cos_a = negate(cos_r); }
+    else { sin_a = negate(cos_r); cos_a = sin_r; }
 }
 
 // tan(a) = sin(a)/cos(a).  QD qd_real.cpp:2473 (sincos then s/c).

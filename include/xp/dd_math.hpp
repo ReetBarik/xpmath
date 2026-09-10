@@ -869,8 +869,14 @@ XPMATH_INLINE_FUNCTION void sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble
     DoubleDouble s2  = round_to_nearest_int(s1);
     DoubleDouble s3  = subtract(a, multiply(pi2, s2));
     if (s3.hi == 0.0) { x = DoubleDouble(1.0); y = DoubleDouble(0.0); return; }
+    // Mod pi/2 reduction
+    DoubleDouble pi_half = multiply_scalar(DoubleDouble_pi(), 0.5);
+    DoubleDouble n_exact = divide(s3, pi_half);
+    DoubleDouble n = round_to_nearest_int(n_exact);
+    int j = ((int)n.hi) & 3;
+    DoubleDouble r_mod = subtract(s3, multiply(pi_half, n));
     double scale = 1.0 / (double)(1 << nq);
-    DoubleDouble r  = multiply_scalar(s3, scale);   // r = s3 / 2^nq, |r| < pi/2^nq
+    DoubleDouble r  = multiply_scalar(r_mod, scale);   // r = r_mod / 2^nq, |r| < pi/(4*2^nq)
     // For subnormal |a| the scaling underflows r to zero, and then the relative
     // convergence test below is vacuous (0 < eps*0 is false) and the series runs
     // to itrmx. Answer it directly: sin(a) = a and cos(a) = 1 to far beyond DD
@@ -944,7 +950,11 @@ XPMATH_INLINE_FUNCTION void sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble
     if (cos_r.hi >  1.0 || (cos_r.hi ==  1.0 && cos_r.lo > 0.0)) cos_r = DoubleDouble( 1.0);
     if (cos_r.hi < -1.0 || (cos_r.hi == -1.0 && cos_r.lo < 0.0)) cos_r = DoubleDouble(-1.0);
 
-    x = cos_r; y = sin_r;
+    // Quadrant selection
+    if (j == 0) { x = cos_r;  y = sin_r; }
+    else if (j == 1) { x = negate(sin_r); y = cos_r; }
+    else if (j == 2) { x = negate(cos_r); y = negate(sin_r); }
+    else { x = sin_r;  y = negate(cos_r); }
 }
 
 XPMATH_INLINE_FUNCTION DoubleDouble sin(DoubleDouble a) {

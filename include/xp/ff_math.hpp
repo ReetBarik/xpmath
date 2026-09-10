@@ -898,8 +898,14 @@ XPMATH_INLINE_FUNCTION void sincos(FloatFloat a, FloatFloat& x, FloatFloat& y) {
     FloatFloat s2  = round_to_nearest_int(s1);
     FloatFloat s3  = subtract(a, multiply(pi2, s2));
     if (s3.hi == 0.0f) { x = FloatFloat(1.0f); y = FloatFloat(0.0f); return; }
+    // Mod pi/2 reduction
+    FloatFloat pi_half = multiply_scalar(FloatFloat_pi(), 0.5f);
+    FloatFloat n_exact = divide(s3, pi_half);
+    FloatFloat n = round_to_nearest_int(n_exact);
+    int j = ((int)n.hi) & 3;
+    FloatFloat r_mod = subtract(s3, multiply(pi_half, n));
     float scale = 1.0f / (float)(1 << nq);
-    FloatFloat r  = multiply_scalar(s3, scale);   // r = s3 / 2^nq, |r| < pi/2^nq
+    FloatFloat r  = multiply_scalar(r_mod, scale);   // r = r_mod / 2^nq, |r| < pi/(4*2^nq)
     FloatFloat r2 = multiply(r, r);
 
     // sin(r) = r - r^3/3! + r^5/5! - ...
@@ -954,7 +960,11 @@ XPMATH_INLINE_FUNCTION void sincos(FloatFloat a, FloatFloat& x, FloatFloat& y) {
     if (cos_r.hi >  1.0f || (cos_r.hi ==  1.0f && cos_r.lo > 0.0f)) cos_r = FloatFloat( 1.0f);
     if (cos_r.hi < -1.0f || (cos_r.hi == -1.0f && cos_r.lo < 0.0f)) cos_r = FloatFloat(-1.0f);
 
-    x = cos_r; y = sin_r;
+    // Quadrant selection
+    if (j == 0) { x = cos_r;  y = sin_r; }
+    else if (j == 1) { x = negate(sin_r); y = cos_r; }
+    else if (j == 2) { x = negate(cos_r); y = negate(sin_r); }
+    else { x = sin_r;  y = negate(cos_r); }
 }
 
 XPMATH_INLINE_FUNCTION FloatFloat sin(FloatFloat a) {

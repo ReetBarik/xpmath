@@ -1009,11 +1009,18 @@ XPMATH_INLINE_FUNCTION void sincos(TripleFloat a, TripleFloat& sin_a, TripleFloa
 
     // Reduce mod 2π
     TripleFloat z = round_to_nearest_int(divide(a, k_2pi));
-    TripleFloat r = subtract(a, multiply(k_2pi, z));
+    TripleFloat s3 = subtract(a, multiply(k_2pi, z));
+
+    // Mod pi/2 reduction
+    TripleFloat pi_half = mul_pwr2(TripleFloat_pi(), 0.5f);
+    TripleFloat n_exact = divide(s3, pi_half);
+    TripleFloat n = round_to_nearest_int(n_exact);
+    int j = ((int)n.f0) & 3;
+    TripleFloat r_mod = subtract(s3, multiply(pi_half, n));
 
     // Reduce by 2^nq
     const int nq = 4;
-    r = divide_scalar(r, float(1 << nq));
+    TripleFloat r = divide_scalar(r_mod, float(1 << nq));
 
     // Taylor: sin(r) = r - r^3/3! + ..., cos(r) = 1 - r^2/2! + ...
     TripleFloat r2 = sqr(r);
@@ -1058,8 +1065,11 @@ XPMATH_INLINE_FUNCTION void sincos(TripleFloat a, TripleFloat& sin_a, TripleFloa
     if (cos_r.f0 >  1.0f || (cos_r.f0 ==  1.0f && cos_r.f1 > 0.0f)) cos_r = TripleFloat( 1.0f);
     if (cos_r.f0 < -1.0f || (cos_r.f0 == -1.0f && cos_r.f1 < 0.0f)) cos_r = TripleFloat(-1.0f);
 
-    sin_a = sin_r;
-    cos_a = cos_r;
+    // Quadrant selection (TF has sin first, cos second)
+    if (j == 0) { sin_a = sin_r;  cos_a = cos_r; }
+    else if (j == 1) { sin_a = cos_r;  cos_a = negate(sin_r); }
+    else if (j == 2) { sin_a = negate(sin_r); cos_a = negate(cos_r); }
+    else { sin_a = negate(cos_r); cos_a = sin_r; }
 }
 
 XPMATH_INLINE_FUNCTION TripleFloat sin(TripleFloat a) {
