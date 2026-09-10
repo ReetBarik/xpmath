@@ -881,7 +881,22 @@ XPMATH_INLINE_FUNCTION void sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble
     // convergence test below is vacuous (0 < eps*0 is false) and the series runs
     // to itrmx. Answer it directly: sin(a) = a and cos(a) = 1 to far beyond DD
     // precision for any |a| this small.
-    if (r.hi == 0.0) { x = DoubleDouble(1.0); y = s3; return; }
+    // The scaled residual underflowed. The reduced angle is r_mod, whose
+    // sine is r_mod itself to far beyond this precision, so the reduced
+    // pair is (sin_r, cos_r) = (r_mod, 1) -- and it MUST still go through
+    // the quadrant table. Returning a hand-made answer here was the
+    // Phase 1 defect: for a = pi the mod-pi/2 stage correctly yields
+    // r_mod = 0 with j = 2, and the old guard returned y = s3 = pi as if
+    // it were sin(pi).
+    if (r.hi == 0.0) {
+        const DoubleDouble s0 = r_mod;
+        const DoubleDouble c0 = DoubleDouble(1.0);
+    if (j == 0)      { x = c0;         y = s0; }
+    else if (j == 1) { x = negate(s0); y = c0; }
+    else if (j == 2) { x = negate(c0); y = negate(s0); }
+    else             { x = s0;         y = negate(c0); }
+        return;
+    }
     DoubleDouble r2 = multiply(r, r);
 
     // sin(r) = r - r^3/3! + r^5/5! - ...
