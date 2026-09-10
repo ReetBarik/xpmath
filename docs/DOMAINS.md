@@ -89,64 +89,60 @@ comparing FF against DD to page between two distant sections.
 
 | op | backend | cap | mean | trusted \|x\| | at cap | boundary (digits) | fails | verdict |
 |---|---|---:|---:|---|---:|---|---:|---|
-| `add` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `add` | QF | 29.00 | 28.99 | 3e-30 .. 1e+30 | 100% | below 1e-30: 9.56 | 1 | UNRESOLVED |
-| `add` | TF | 21.70 | 21.69 | 3e-30 .. 1e+30 | 100% | below 1e-30: 9.56 | 1 | UNRESOLVED |
-| `add` | FF | 14.00 | 13.19 | 0.9999 .. 1 | 90% | below 0.999: 6.22; above 1.1: 6.36 | 100 | UNRESOLVED |
-| `sub` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `sub` | QF | 29.00 | 28.98 | 3e-30 .. 1e+30 | 100% | below 1e-30: 1.91 | 1 | UNRESOLVED |
-| `sub` | TF | 21.70 | 21.69 | 3e-30 .. 1e+30 | 100% | below 1e-30: 1.91 | 1 | UNRESOLVED |
-| `sub` | FF | 14.00 | 13.21 | 1 .. 1.05 | 89% | below 0.999: 3.01; above 1.571: 5.61 | 87 | UNRESOLVED |
-| `mul` | DD | 31.00 | 30.94 | 1e-30 .. 1e+30 | 100% | below 1e-323: 4.89 | 4 | UNRESOLVED |
-| `mul` | QF | 29.00 | 28.36 | 1e-10 .. 3e+20 | 97% | below 1e-16: 13.67; above 1e+21: 0.00 | 35 | UNRESOLVED |
-| `mul` | TF | 21.70 | 21.30 | 3e-14 .. 3e+20 | 97% | below 3e-18: 10.59; above 1e+21: 0.00 | 30 | UNRESOLVED |
-| `mul` | FF | 14.00 | 13.79 | 1e-17 .. 3e+20 | 98% | below 3e-20: 6.70; above 1e+21: 0.00 | 25 | UNRESOLVED |
-| `div` | DD | 31.00 | 30.95 | 1e-30 .. 1e+30 | 100% | below 1e-323: 14.55 | 4 | UNRESOLVED |
-| `div` | QF | 29.00 | 28.50 | 1e-06 .. 1e+24 | 96% | below 1e-21: 11.81; above 3e+24: 0.00 | 17 | UNRESOLVED |
-| `div` | TF | 21.70 | 21.47 | 1e-12 .. 1e+24 | 98% | below 1e-22: 9.81; above 3e+24: 0.00 | 12 | UNRESOLVED |
-| `div` | FF | 14.00 | 13.92 | 3e-21 .. 1e+24 | 99% | below 1e-323: 0.00; above 3e+24: 0.00 | 6 | UNRESOLVED |
-| `fma` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `fma` | QF | 29.00 | 28.63 | 3e-09 .. 3e+20 | 98% | below 3e-13: 6.94; above 1e+21: 0.00 | 19 | UNRESOLVED |
-| `fma` | TF | 21.70 | 21.46 | 1e-12 .. 3e+20 | 99% | below 3e-13: 6.94; above 1e+21: 0.00 | 19 | UNRESOLVED |
-| `fma` | FF | 14.00 | 12.99 | 1 .. 1 | 89% | below 1: 0.00; above 1: 6.83 | 126 | UNRESOLVED |
-| `abs` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `abs` | QF | 29.00 | 28.93 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `abs` | TF | 21.70 | 21.65 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `abs` | FF | 14.00 | 13.97 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `copysign` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `copysign` | QF | 29.00 | 28.93 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `copysign` | TF | 21.70 | 21.65 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `copysign` | FF | 14.00 | 13.97 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `fmax` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `fmax` | QF | 29.00 | 28.92 | 191.6 .. 1e+30 | 100% | below 1e-323: 0.00 | 2 | UNRESOLVED |
-| `fmax` | TF | 21.70 | 21.65 | 191.6 .. 1e+30 | 100% | below 1e-323: 0.00 | 2 | UNRESOLVED |
-| `fmax` | FF | 14.00 | 13.98 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 2 | UNRESOLVED |
-| `fmin` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `fmin` | QF | 29.00 | 28.93 | 6.15 .. 216.8 | 100% | below 1e-323: 0.00 | 2 | UNRESOLVED |
-| `fmin` | TF | 21.70 | 21.66 | 6.15 .. 216.8 | 100% | below 1e-323: 0.00 | 2 | UNRESOLVED |
-| `fmin` | FF | 14.00 | 13.98 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 2 | UNRESOLVED |
-| `fdim` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `fdim` | QF | 29.00 | 29.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `fdim` | TF | 21.70 | 21.70 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `fdim` | FF | 14.00 | 13.69 | 0.9999 .. 2.65 | 96% | below 3e-18: 0.00; above 3.6: 0.76 | 35 | UNRESOLVED |
-| `hypot` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `hypot` | QF | 29.00 | 28.95 | 1e-19 .. 1e+30 | 99% | -- | 0 | UNRESOLVED |
-| `hypot` | TF | 21.70 | 21.69 | 1e-26 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `hypot` | FF | 14.00 | 14.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
+| `add` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `add` | QF | 29.00 | 28.89 | 3e-30 .. 1e+30 | 100% | below 1e-30: 9.56; above 4e+151: 0.00 | 7 | UNRESOLVED |
+| `add` | TF | 21.70 | 21.62 | 3e-30 .. 1e+30 | 100% | below 1e-30: 9.56; above 4e+151: 0.00 | 7 | UNRESOLVED |
+| `add` | FF | 14.00 | 13.15 | 0.9999 .. 1 | 90% | below 0.999: 6.22; above 1.1: 6.36 | 109 | UNRESOLVED |
+| `sub` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `sub` | QF | 29.00 | 28.88 | 3e-30 .. 1e+30 | 100% | below 1e-30: 1.91; above 4e+151: 0.00 | 7 | UNRESOLVED |
+| `sub` | TF | 21.70 | 21.61 | 3e-30 .. 1e+30 | 100% | below 1e-30: 1.91; above 4e+151: 0.00 | 7 | UNRESOLVED |
+| `sub` | FF | 14.00 | 13.17 | 1 .. 1.05 | 89% | below 0.999: 3.01; above 1.571: 5.61 | 94 | UNRESOLVED |
+| `mul` | DD | 31.00 | 30.95 | 1e-30 .. 5e+255 | 100% | below 1e-323: 4.89 | 4 | UNRESOLVED |
+| `mul` | QF | 29.00 | 28.28 | 1e-10 .. 3e+20 | 96% | below 1e-16: 13.67; above 1e+21: 0.00 | 41 | UNRESOLVED |
+| `mul` | TF | 21.70 | 21.24 | 3e-14 .. 3e+20 | 97% | below 3e-18: 10.59; above 1e+21: 0.00 | 36 | UNRESOLVED |
+| `mul` | FF | 14.00 | 13.74 | 1e-17 .. 3e+20 | 98% | below 3e-20: 6.70; above 1e+21: 0.00 | 31 | UNRESOLVED |
+| `div` | DD | 31.00 | 30.95 | 1e-30 .. 5e+255 | 100% | below 1e-323: 14.55 | 4 | UNRESOLVED |
+| `div` | QF | 29.00 | 28.41 | 1e-06 .. 1e+24 | 96% | below 1e-21: 11.81; above 3e+24: 0.00 | 23 | UNRESOLVED |
+| `div` | TF | 21.70 | 21.40 | 1e-12 .. 1e+24 | 97% | below 1e-22: 9.81; above 3e+24: 0.00 | 18 | UNRESOLVED |
+| `div` | FF | 14.00 | 13.88 | 3e-21 .. 1e+24 | 99% | below 1e-323: 0.00; above 3e+24: 0.00 | 12 | UNRESOLVED |
+| `fma` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `fma` | QF | 29.00 | 28.54 | 3e-09 .. 3e+20 | 98% | below 3e-13: 6.94; above 1e+21: 0.00 | 25 | UNRESOLVED |
+| `fma` | TF | 21.70 | 21.39 | 1e-12 .. 3e+20 | 98% | below 3e-13: 6.94; above 1e+21: 0.00 | 25 | UNRESOLVED |
+| `fma` | FF | 14.00 | 12.94 | 1 .. 1 | 88% | below 1: 0.00; above 1: 6.83 | 135 | UNRESOLVED |
+| `abs` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `abs` | QF | 29.00 | 28.83 | 1e-30 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `abs` | TF | 21.70 | 21.57 | 1e-30 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `abs` | FF | 14.00 | 13.92 | 1e-30 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `copysign` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `copysign` | QF | 29.00 | 28.83 | 1e-30 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `copysign` | TF | 21.70 | 21.57 | 1e-30 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `copysign` | FF | 14.00 | 13.92 | 1e-30 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `fmax` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `fmax` | QF | 29.00 | 28.84 | 191.6 .. 3e+05 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 6 | UNRESOLVED |
+| `fmax` | TF | 21.70 | 21.60 | 191.6 .. 3e+05 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 6 | UNRESOLVED |
+| `fmax` | FF | 14.00 | 13.95 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00; above 4e+151: 0.00 | 6 | UNRESOLVED |
+| `fmin` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `fmin` | QF | 29.00 | 28.88 | 6.15 .. 216.8 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 5 | UNRESOLVED |
+| `fmin` | TF | 21.70 | 21.62 | 6.15 .. 216.8 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 5 | UNRESOLVED |
+| `fmin` | FF | 14.00 | 13.96 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00; above 4e+151: 0.00 | 5 | UNRESOLVED |
+| `fdim` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `fdim` | QF | 29.00 | 28.95 | 0 .. 1e+30 | 100% | above 4e+151: 0.00 | 3 | UNRESOLVED |
+| `fdim` | TF | 21.70 | 21.66 | 0 .. 1e+30 | 100% | above 4e+151: 0.00 | 3 | UNRESOLVED |
+| `fdim` | FF | 14.00 | 13.67 | 5e+08 .. 1e+29 | 96% | below 314.2: 6.41; above 4e+151: 0.00 | 39 | UNRESOLVED |
+| `hypot` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `hypot` | QF | 29.00 | 28.85 | 1e-19 .. 1e+30 | 99% | above 4e+151: 0.00 | 6 | UNRESOLVED |
+| `hypot` | TF | 21.70 | 21.61 | 1e-26 .. 1e+30 | 99% | above 4e+151: 0.00 | 6 | UNRESOLVED |
+| `hypot` | FF | 14.00 | 13.95 | 0 .. 1e+30 | 100% | above 4e+151: 0.00 | 6 | UNRESOLVED |
 
 **Where the failures sit.** The grid family carrying the most failures
 for each cell that has any:
 
-- `add` — QF 1 pts (log sweep, |x| = 10^e); TF 1 pts (log sweep, |x| = 10^e); FF 100 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `sub` — QF 1 pts (log sweep, |x| = 10^e); TF 1 pts (log sweep, |x| = 10^e); FF 87 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `mul` — DD 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); QF 35 pts (log sweep, |x| = 10^e); TF 30 pts (log sweep, |x| = 10^e); FF 25 pts (log sweep, |x| = 10^e)
-- `div` — DD 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); QF 17 pts (log sweep, |x| = 10^e); TF 12 pts (log sweep, |x| = 10^e); FF 6 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `fma` — QF 19 pts (log sweep, |x| = 10^e); TF 19 pts (log sweep, |x| = 10^e); FF 126 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `abs` — QF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `copysign` — QF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `fmax` — QF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `fmin` — QF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `fdim` — FF 35 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `add` — FF 109 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `sub` — FF 94 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `mul` — DD 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); QF 41 pts (log sweep, |x| = 10^e); TF 36 pts (log sweep, |x| = 10^e); FF 31 pts (log sweep, |x| = 10^e)
+- `div` — DD 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); QF 23 pts (log sweep, |x| = 10^e); TF 18 pts (log sweep, |x| = 10^e)
+- `fma` — QF 25 pts (log sweep, |x| = 10^e); TF 25 pts (log sweep, |x| = 10^e); FF 135 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `fdim` — FF 39 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
 
 ---
 
@@ -154,38 +150,36 @@ for each cell that has any:
 
 | op | backend | cap | mean | trusted \|x\| | at cap | boundary (digits) | fails | verdict |
 |---|---|---:|---:|---|---:|---|---:|---|
-| `ceil` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `ceil` | QF | 29.00 | 28.96 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 2 | UNRESOLVED |
-| `ceil` | TF | 21.70 | 21.67 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 2 | UNRESOLVED |
-| `ceil` | FF | 14.00 | 13.98 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 2 | UNRESOLVED |
-| `floor` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `floor` | QF | 29.00 | 28.96 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 2 | UNRESOLVED |
-| `floor` | TF | 21.70 | 21.67 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 2 | UNRESOLVED |
-| `floor` | FF | 14.00 | 13.98 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 2 | UNRESOLVED |
-| `round` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `round` | QF | 29.00 | 29.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `round` | TF | 21.70 | 21.70 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `round` | FF | 14.00 | 14.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `trunc` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `trunc` | QF | 29.00 | 29.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `trunc` | TF | 21.70 | 21.70 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `trunc` | FF | 14.00 | 14.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `fmod` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `fmod` | QF | 29.00 | 28.80 | 40.84 .. 219.9 | 99% | below 40.84: 0.36; above 219.9: 0.15 | 12 | UNRESOLVED |
-| `fmod` | TF | 21.70 | 21.55 | 40.84 .. 219.9 | 99% | below 40.84: 0.36; above 219.9: 0.15 | 12 | UNRESOLVED |
-| `fmod` | FF | 14.00 | 9.42 | 3e-30 .. 1e-25 | 58% | below 1e-323: 0.00; above 3e-16: 0.00 | 550 | UNRESOLVED |
-| `remainder` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `remainder` | QF | 29.00 | 28.75 | 6.283 .. 78.54 | 99% | below 6.283: 0.00; above 78.54: 0.76 | 15 | UNRESOLVED |
-| `remainder` | TF | 21.70 | 21.51 | 6.283 .. 78.54 | 99% | below 6.283: 0.00; above 78.54: 0.76 | 14 | UNRESOLVED |
-| `remainder` | FF | 14.00 | 8.92 | 3e-30 .. 1e-27 | 52% | below 1e-30: 2.81; above 3e-25: 1.69 | 596 | UNRESOLVED |
+| `ceil` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `ceil` | QF | 29.00 | 28.86 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00; above 4e+151: 0.00 | 8 | UNRESOLVED |
+| `ceil` | TF | 21.70 | 21.60 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00; above 4e+151: 0.00 | 8 | UNRESOLVED |
+| `ceil` | FF | 14.00 | 13.93 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00; above 4e+151: 0.00 | 8 | UNRESOLVED |
+| `floor` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `floor` | QF | 29.00 | 28.86 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00; above 4e+151: 0.00 | 8 | UNRESOLVED |
+| `floor` | TF | 21.70 | 21.60 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00; above 4e+151: 0.00 | 8 | UNRESOLVED |
+| `floor` | FF | 14.00 | 13.93 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00; above 4e+151: 0.00 | 8 | UNRESOLVED |
+| `round` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `round` | QF | 29.00 | 28.90 | 0 .. 1e+30 | 100% | above 4e+151: 0.00 | 6 | UNRESOLVED |
+| `round` | TF | 21.70 | 21.62 | 0 .. 1e+30 | 100% | above 4e+151: 0.00 | 6 | UNRESOLVED |
+| `round` | FF | 14.00 | 13.95 | 0 .. 1e+30 | 100% | above 4e+151: 0.00 | 6 | UNRESOLVED |
+| `trunc` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `trunc` | QF | 29.00 | 28.90 | 0 .. 1e+30 | 100% | above 4e+151: 0.00 | 6 | UNRESOLVED |
+| `trunc` | TF | 21.70 | 21.62 | 0 .. 1e+30 | 100% | above 4e+151: 0.00 | 6 | UNRESOLVED |
+| `trunc` | FF | 14.00 | 13.95 | 0 .. 1e+30 | 100% | above 4e+151: 0.00 | 6 | UNRESOLVED |
+| `fmod` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `fmod` | QF | 29.00 | 28.70 | 40.84 .. 219.9 | 99% | below 40.84: 0.36; above 219.9: 0.15 | 18 | UNRESOLVED |
+| `fmod` | TF | 21.70 | 21.48 | 40.84 .. 219.9 | 99% | below 40.84: 0.36; above 219.9: 0.15 | 18 | UNRESOLVED |
+| `fmod` | FF | 14.00 | 9.34 | 3e-30 .. 1e-25 | 57% | below 1e-323: 0.00; above 3e-16: 0.00 | 574 | UNRESOLVED |
+| `remainder` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `remainder` | QF | 29.00 | 28.65 | 6.283 .. 78.54 | 99% | below 6.283: 0.00; above 78.54: 0.76 | 21 | UNRESOLVED |
+| `remainder` | TF | 21.70 | 21.44 | 6.283 .. 78.54 | 99% | below 6.283: 0.00; above 78.54: 0.76 | 20 | UNRESOLVED |
+| `remainder` | FF | 14.00 | 8.85 | 3e-30 .. 1e-27 | 51% | below 1e-30: 2.81; above 3e-25: 1.69 | 623 | UNRESOLVED |
 
 **Where the failures sit.** The grid family carrying the most failures
 for each cell that has any:
 
-- `ceil` — QF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `floor` — QF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `fmod` — QF 12 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 12 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 550 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `remainder` — QF 15 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 14 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 596 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `fmod` — QF 18 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 18 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 574 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `remainder` — QF 21 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 20 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 623 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
 
 ---
 
@@ -193,60 +187,59 @@ for each cell that has any:
 
 | op | backend | cap | mean | trusted \|x\| | at cap | boundary (digits) | fails | verdict |
 |---|---|---:|---:|---|---:|---|---:|---|
-| `exp` | DD | 31.00 | 30.62 | 0 .. 316.2 | 100% | above 1000: 0.00 | 6 | UNRESOLVED |
-| `exp` | QF | 29.00 | 15.67 | 0 .. 43.98 | 52% | above 72.26: 14.21 | 759 | UNRESOLVED |
-| `exp` | TF | 21.70 | 11.87 | 0 .. 59.69 | 53% | above 81.68: 10.03 | 745 | UNRESOLVED |
-| `exp` | FF | 14.00 | 7.73 | 0 .. 62.83 | 54% | above 91.11: 0.00 | 730 | UNRESOLVED |
-| `exp2` | DD | 31.00 | 30.62 | 0 .. 1000 | 100% | above 3162: 0.00 | 4 | UNRESOLVED |
-| `exp2` | QF | 29.00 | 17.61 | 0 .. 62.83 | 57% | above 103.7: 13.94 | 647 | UNRESOLVED |
-| `exp2` | TF | 21.70 | 13.40 | 0 .. 84.82 | 59% | above 116.2: 10.55 | 628 | UNRESOLVED |
-| `exp2` | FF | 14.00 | 8.75 | 0 .. 94.25 | 61% | above 128.8: 0.00 | 608 | UNRESOLVED |
-| `exp10` | DD | 31.00 | 29.76 | 0 .. 295.3 | 97% | above 311: 0.00 | 26 | UNRESOLVED |
-| `exp10` | QF | 29.00 | 13.13 | 0 .. 18.85 | 44% | above 31.42: 13.96 | 903 | UNRESOLVED |
-| `exp10` | TF | 21.70 | 9.89 | 0 .. 25.13 | 45% | above 34.56: 10.76 | 898 | UNRESOLVED |
-| `exp10` | FF | 14.00 | 6.40 | 0 .. 31.62 | 46% | above 40.84: 0.00 | 888 | UNRESOLVED |
-| `expm1` | DD | 31.00 | 29.83 | 0 .. 316.2 | 97% | above 1000: 0.00 | 55 | UNRESOLVED |
-| `expm1` | QF | 29.00 | 22.42 | 3e-20 .. 87.96 | 76% | below 1e-323: 0.00; above 91.11: 0.00 | 369 | UNRESOLVED |
-| `expm1` | TF | 21.70 | 16.83 | 1e-30 .. 87.96 | 78% | below 1e-323: 0.00; above 91.11: 0.00 | 369 | UNRESOLVED |
-| `expm1` | FF | 14.00 | 10.39 | 1e-30 .. 62.83 | 74% | below 1e-323: 0.00; above 91.11: 0.00 | 421 | UNRESOLVED |
-| `log` | DD | 31.00 | 30.93 | 1e-30 .. 1e+30 | 100% | below 0: 0.00 | 2 | UNRESOLVED |
-| `log` | QF | 29.00 | 28.81 | 1 .. 1e+30 | 98% | below 1e-323: 0.00 | 6 | UNRESOLVED |
-| `log` | TF | 21.70 | 21.57 | 1.001 .. 1e+30 | 99% | below 1e-323: 0.00 | 6 | UNRESOLVED |
-| `log` | FF | 14.00 | 13.86 | 1.01 .. 1e+30 | 97% | below 1e-323: 0.00 | 6 | UNRESOLVED |
-| `log2` | DD | 31.00 | 30.93 | 1e-30 .. 1e+30 | 100% | below 0: 0.00 | 2 | UNRESOLVED |
-| `log2` | QF | 29.00 | 28.81 | 1 .. 1e+30 | 98% | below 1e-323: 0.00 | 6 | UNRESOLVED |
-| `log2` | TF | 21.70 | 21.57 | 1.001 .. 1e+30 | 99% | below 1e-323: 0.00 | 6 | UNRESOLVED |
-| `log2` | FF | 14.00 | 13.86 | 1.01 .. 1e+30 | 97% | below 1e-323: 0.00 | 6 | UNRESOLVED |
-| `log10` | DD | 31.00 | 30.93 | 1e-30 .. 1e+30 | 100% | below 0: 0.00 | 2 | UNRESOLVED |
-| `log10` | QF | 29.00 | 28.80 | 1 .. 1e+30 | 98% | below 1e-323: 0.00 | 6 | UNRESOLVED |
-| `log10` | TF | 21.70 | 21.57 | 1.001 .. 1e+30 | 99% | below 1e-323: 0.00 | 6 | UNRESOLVED |
-| `log10` | FF | 14.00 | 13.86 | 1.01 .. 1e+30 | 97% | below 1e-323: 0.00 | 6 | UNRESOLVED |
-| `log1p` | DD | 31.00 | 30.89 | 1 .. 1e+30 | 100% | below 1: 0.00 | 6 | UNRESOLVED |
-| `log1p` | QF | 29.00 | 28.67 | 1 .. 3e+18 | 97% | below 1: 0.00 | 8 | UNRESOLVED |
-| `log1p` | TF | 21.70 | 21.57 | 1 .. 1e+29 | 99% | below 1: 0.00 | 8 | UNRESOLVED |
-| `log1p` | FF | 14.00 | 13.91 | 1.001 .. 1e+30 | 99% | below 1: 0.00 | 8 | UNRESOLVED |
-| `pow` | DD | 31.00 | 30.79 | 1e-30 .. 1e+30 | 100% | below 5e-324: 15.19 | 2 | UNRESOLVED |
-| `pow` | QF | 29.00 | 26.86 | 0.3162 .. 3.45 | 86% | below 3e-05: 14.48; above 3.65: 13.96 | 147 | UNRESOLVED |
-| `pow` | TF | 21.70 | 20.62 | 0.0001 .. 3.6 | 87% | below 1e-323: 0.00; above 28.27: 9.78 | 7 | UNRESOLVED |
-| `pow` | FF | 14.00 | 13.73 | 1e-30 .. 4.55 | 99% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `sqrt` | DD | 31.00 | 30.98 | 1e-30 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `sqrt` | QF | 29.00 | 28.70 | 3e-20 .. 1e+30 | 97% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `sqrt` | TF | 21.70 | 21.59 | 3e-26 .. 1e+30 | 99% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `sqrt` | FF | 14.00 | 13.96 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 4 | UNRESOLVED |
+| `exp` | DD | 31.00 | 30.89 | 0 .. 344 | 100% | above 1000: 0.00 | 6 | UNRESOLVED |
+| `exp` | QF | 29.00 | 16.02 | 0 .. 43.98 | 53% | above 72.26: 14.21 | 761 | UNRESOLVED |
+| `exp` | TF | 21.70 | 12.16 | 0 .. 59.69 | 54% | above 81.68: 10.03 | 747 | UNRESOLVED |
+| `exp` | FF | 14.00 | 7.92 | 0 .. 75.4 | 56% | above 91.11: 0.00 | 732 | UNRESOLVED |
+| `exp2` | DD | 31.00 | 29.92 | 0 .. 1000 | 97% | above 3162: 0.00 | 59 | UNRESOLVED |
+| `exp2` | QF | 29.00 | 16.95 | 0 .. 62.83 | 55% | above 103.7: 13.94 | 707 | UNRESOLVED |
+| `exp2` | TF | 21.70 | 12.93 | 0 .. 84.82 | 57% | above 116.2: 10.55 | 688 | UNRESOLVED |
+| `exp2` | FF | 14.00 | 8.46 | 0 .. 110 | 59% | above 128.8: 0.00 | 668 | UNRESOLVED |
+| `exp10` | DD | 31.00 | 30.44 | 0 .. 295.3 | 97% | above 311: 0.00 | 28 | UNRESOLVED |
+| `exp10` | QF | 29.00 | 13.58 | 0 .. 18.85 | 46% | above 31.42: 13.96 | 905 | UNRESOLVED |
+| `exp10` | TF | 21.70 | 10.24 | 0 .. 25.13 | 46% | above 34.56: 10.76 | 900 | UNRESOLVED |
+| `exp10` | FF | 14.00 | 6.64 | 0 .. 31.62 | 47% | above 40.84: 0.00 | 890 | UNRESOLVED |
+| `expm1` | DD | 31.00 | 29.63 | 0 .. 344 | 96% | above 1000: 0.00 | 75 | UNRESOLVED |
+| `expm1` | QF | 29.00 | 22.60 | 3e-20 .. 87.96 | 77% | below 1e-323: 0.00; above 91.11: 0.00 | 370 | UNRESOLVED |
+| `expm1` | TF | 21.70 | 16.98 | 1e-30 .. 87.96 | 78% | below 1e-323: 0.00; above 91.11: 0.00 | 370 | UNRESOLVED |
+| `expm1` | FF | 14.00 | 10.34 | 1e-30 .. 87.96 | 74% | below 1e-323: 0.00; above 91.11: 0.00 | 442 | UNRESOLVED |
+| `log` | DD | 31.00 | 30.93 | 1e-30 .. 5e+255 | 100% | below 0: 0.00 | 2 | UNRESOLVED |
+| `log` | QF | 29.00 | 28.71 | 1 .. 1e+30 | 98% | below 1e-323: 0.00; above 4e+151: 0.00 | 12 | UNRESOLVED |
+| `log` | TF | 21.70 | 21.50 | 1.001 .. 1e+30 | 98% | below 1e-323: 0.00; above 4e+151: 0.00 | 12 | UNRESOLVED |
+| `log` | FF | 14.00 | 13.81 | 1.01 .. 1e+30 | 97% | below 1e-323: 0.00; above 4e+151: 0.00 | 12 | UNRESOLVED |
+| `log2` | DD | 31.00 | 30.93 | 1e-30 .. 5e+255 | 100% | below 0: 0.00 | 2 | UNRESOLVED |
+| `log2` | QF | 29.00 | 28.71 | 1 .. 1e+30 | 98% | below 1e-323: 0.00; above 4e+151: 0.00 | 12 | UNRESOLVED |
+| `log2` | TF | 21.70 | 21.50 | 1.001 .. 1e+30 | 98% | below 1e-323: 0.00; above 4e+151: 0.00 | 12 | UNRESOLVED |
+| `log2` | FF | 14.00 | 13.81 | 1.01 .. 1e+30 | 97% | below 1e-323: 0.00; above 4e+151: 0.00 | 12 | UNRESOLVED |
+| `log10` | DD | 31.00 | 30.93 | 1e-30 .. 5e+255 | 100% | below 0: 0.00 | 2 | UNRESOLVED |
+| `log10` | QF | 29.00 | 28.71 | 1 .. 1e+30 | 98% | below 1e-323: 0.00; above 4e+151: 0.00 | 12 | UNRESOLVED |
+| `log10` | TF | 21.70 | 21.50 | 1.001 .. 1e+30 | 98% | below 1e-323: 0.00; above 4e+151: 0.00 | 12 | UNRESOLVED |
+| `log10` | FF | 14.00 | 13.81 | 1.01 .. 1e+30 | 97% | below 1e-323: 0.00; above 4e+151: 0.00 | 12 | UNRESOLVED |
+| `log1p` | DD | 31.00 | 30.89 | 1 .. 5e+255 | 100% | below 1: 0.00 | 6 | UNRESOLVED |
+| `log1p` | QF | 29.00 | 28.57 | 1 .. 3e+18 | 97% | below 1: 0.00; above 4e+151: 0.00 | 14 | UNRESOLVED |
+| `log1p` | TF | 21.70 | 21.50 | 1 .. 1e+29 | 99% | below 1: 0.00; above 4e+151: 0.00 | 14 | UNRESOLVED |
+| `log1p` | FF | 14.00 | 13.86 | 1.001 .. 1e+30 | 99% | below 1: 0.00; above 4e+151: 0.00 | 14 | UNRESOLVED |
+| `pow` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `pow` | QF | 29.00 | 26.76 | 0.3162 .. 3.45 | 86% | below 3e-05: 14.48; above 3.65: 13.96 | 155 | UNRESOLVED |
+| `pow` | TF | 21.70 | 20.64 | 0.0001 .. 3.6 | 87% | below 1e-323: 0.00; above 28.27: 9.78 | 13 | UNRESOLVED |
+| `pow` | FF | 14.00 | 13.82 | 40.84 .. 188.5 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `sqrt` | DD | 31.00 | 30.98 | 1e-30 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `sqrt` | QF | 29.00 | 28.60 | 3e-20 .. 1e+30 | 97% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `sqrt` | TF | 21.70 | 21.52 | 3e-26 .. 1e+30 | 98% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `sqrt` | FF | 14.00 | 13.91 | 1e-30 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
 
 **Where the failures sit.** The grid family carrying the most failures
 for each cell that has any:
 
-- `exp` — DD 6 pts (log sweep, |x| = 10^e); QF 759 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 745 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 730 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `exp2` — DD 4 pts (log sweep, |x| = 10^e); QF 647 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 628 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 608 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `exp10` — DD 26 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); QF 903 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 898 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 888 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `expm1` — DD 55 pts (log sweep, |x| = 10^e); QF 369 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 369 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 421 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `log` — DD 2 pts (linear sweep over [-8, 8]); QF 6 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 6 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 6 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `log2` — DD 2 pts (linear sweep over [-8, 8]); QF 6 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 6 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 6 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `log10` — DD 2 pts (linear sweep over [-8, 8]); QF 6 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 6 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 6 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `log1p` — DD 6 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); QF 8 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 8 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 8 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `pow` — DD 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); QF 147 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 7 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `sqrt` — QF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `exp` — DD 6 pts (log sweep, |x| = 10^e); QF 761 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 747 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 732 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `exp2` — DD 59 pts (log sweep, |x| = 10^e); QF 707 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 688 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 668 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `exp10` — DD 28 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); QF 905 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 900 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 890 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `expm1` — DD 75 pts (log sweep, |x| = 10^e); QF 370 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 370 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 442 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `log` — DD 2 pts (linear sweep over [-8, 8])
+- `log2` — DD 2 pts (linear sweep over [-8, 8])
+- `log10` — DD 2 pts (linear sweep over [-8, 8])
+- `log1p` — DD 6 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `pow` — QF 155 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 13 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
 
 ---
 
@@ -254,39 +247,38 @@ for each cell that has any:
 
 | op | backend | cap | mean | trusted \|x\| | at cap | boundary (digits) | fails | verdict |
 |---|---|---:|---:|---|---:|---|---:|---|
-| `sin` | DD | 31.00 | 21.38 | 0 .. 3.1 | 33% | above 3.142: 15.42 | 72 | UNRESOLVED |
-| `sin` | QF | 29.00 | 19.00 | 3e-28 .. 3.1 | 32% | below 3e-30: 14.31; above 3.142: 13.46 | 520 | UNRESOLVED |
-| `sin` | TF | 21.70 | 11.84 | 3e-28 .. 3.1 | 32% | below 1e-323: 0.00; above 3.142: 7.15 | 1078 | UNRESOLVED |
-| `sin` | FF | 14.00 | 4.66 | 1e-30 .. 3.05 | 32% | below 1e-323: 0.00; above 3.142: 0.00 | 1092 | UNRESOLVED |
-| `cos` | DD | 31.00 | 29.75 | 1.6 .. 1e+05 | 93% | below 1.571: 15.24; above 1e+17: 0.00 | 54 | UNRESOLVED |
-| `cos` | QF | 29.00 | 27.66 | 1.6 .. 1000 | 93% | below 1.571: 13.39; above 1e+15: 14.35 | 72 | UNRESOLVED |
-| `cos` | TF | 21.70 | 20.62 | 1.6 .. 1000 | 93% | below 1.571: 7.35; above 3e+12: 10.64 | 82 | UNRESOLVED |
-| `cos` | FF | 14.00 | 13.00 | 7.9 .. 316.2 | 92% | below 1.571: 0.00; above 3e+07: 6.72 | 98 | UNRESOLVED |
-| `tan` | DD | 31.00 | 21.35 | 0 .. 1.55 | 33% | above 1.571: 15.24 | 76 | UNRESOLVED |
-| `tan` | QF | 29.00 | 18.89 | 3e-28 .. 1.55 | 32% | below 3e-30: 14.31; above 1.571: 13.90 | 532 | UNRESOLVED |
-| `tan` | TF | 21.70 | 11.75 | 3e-28 .. 1.55 | 31% | below 1e-323: 0.00; above 1.571: 6.84 | 1090 | UNRESOLVED |
-| `tan` | FF | 14.00 | 4.55 | 1e-30 .. 1.55 | 31% | below 1e-323: 0.00; above 1.571: 0.00 | 1104 | UNRESOLVED |
-| `asin` | DD | 31.00 | 30.90 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `asin` | QF | 29.00 | 28.55 | 3e-28 .. 1e+28 | 99% | below 3e-30: 14.35; above 3e+29: 14.48 | 12 | UNRESOLVED |
-| `asin` | TF | 21.70 | 21.50 | 3e-28 .. 1e+28 | 99% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `asin` | FF | 14.00 | 13.83 | 1 .. 1e+30 | 99% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `acos` | DD | 31.00 | 30.99 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `acos` | QF | 29.00 | 28.94 | 1.001 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `acos` | TF | 21.70 | 21.66 | 1 .. 1e+30 | 99% | -- | 0 | UNRESOLVED |
-| `acos` | FF | 14.00 | 13.95 | 1.01 .. 1e+30 | 99% | -- | 0 | UNRESOLVED |
-| `atan` | DD | 31.00 | 30.98 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `atan` | QF | 29.00 | 28.79 | 3e-28 .. 1e+30 | 99% | below 3e-30: 14.35 | 8 | UNRESOLVED |
-| `atan` | TF | 21.70 | 21.59 | 3e-28 .. 1e+30 | 99% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `atan` | FF | 14.00 | 13.94 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 4 | UNRESOLVED |
+| `sin` | DD | 31.00 | 21.38 | 0 .. 3.1 | 34% | above 3.142: 15.42 | 88 | UNRESOLVED |
+| `sin` | QF | 29.00 | 19.01 | 3e-28 .. 3.1 | 33% | below 3e-30: 14.31; above 3.142: 13.46 | 538 | UNRESOLVED |
+| `sin` | TF | 21.70 | 11.89 | 3e-28 .. 3.1 | 33% | below 1e-323: 0.00; above 3.142: 7.15 | 1096 | UNRESOLVED |
+| `sin` | FF | 14.00 | 4.70 | 1e-30 .. 3.05 | 32% | below 1e-323: 0.00; above 3.142: 0.00 | 1120 | UNRESOLVED |
+| `cos` | DD | 31.00 | 29.36 | 12.57 .. 316.2 | 91% | below 1.571: 15.24; above 5e+08: 15.33 | 76 | UNRESOLVED |
+| `cos` | QF | 29.00 | 27.27 | 12.57 .. 316.2 | 91% | below 11: 13.79; above 344: 14.27 | 104 | UNRESOLVED |
+| `cos` | TF | 21.70 | 20.26 | 12.57 .. 316.2 | 91% | below 11: 6.98; above 344: 7.08 | 118 | UNRESOLVED |
+| `cos` | FF | 14.00 | 12.71 | 12.57 .. 316.2 | 90% | below 11: 0.00; above 344: 0.00 | 138 | UNRESOLVED |
+| `tan` | DD | 31.00 | 21.03 | 0 .. 1.55 | 32% | above 1.571: 15.24 | 108 | UNRESOLVED |
+| `tan` | QF | 29.00 | 18.58 | 3e-28 .. 1.55 | 31% | below 3e-30: 14.31; above 1.571: 13.90 | 576 | UNRESOLVED |
+| `tan` | TF | 21.70 | 11.50 | 3e-28 .. 1.55 | 30% | below 1e-323: 0.00; above 1.571: 6.84 | 1138 | UNRESOLVED |
+| `tan` | FF | 14.00 | 4.42 | 1e-30 .. 1.55 | 30% | below 1e-323: 0.00; above 1.571: 0.00 | 1152 | UNRESOLVED |
+| `asin` | DD | 31.00 | 30.90 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `asin` | QF | 29.00 | 28.46 | 3e-28 .. 1e+28 | 98% | below 3e-30: 14.35; above 3e+29: 14.48 | 18 | UNRESOLVED |
+| `asin` | TF | 21.70 | 21.43 | 3e-28 .. 1e+28 | 98% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `asin` | FF | 14.00 | 13.79 | 1 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `acos` | DD | 31.00 | 30.99 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `acos` | QF | 29.00 | 28.94 | 1.001 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `acos` | TF | 21.70 | 21.66 | 1 .. 5e+255 | 99% | -- | 0 | UNRESOLVED |
+| `acos` | FF | 14.00 | 13.95 | 1.01 .. 5e+255 | 99% | -- | 0 | UNRESOLVED |
+| `atan` | DD | 31.00 | 30.98 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `atan` | QF | 29.00 | 28.69 | 3e-28 .. 1e+30 | 99% | below 3e-30: 14.35; above 4e+151: 0.00 | 14 | UNRESOLVED |
+| `atan` | TF | 21.70 | 21.52 | 3e-28 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `atan` | FF | 14.00 | 13.90 | 1e-30 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
 
 **Where the failures sit.** The grid family carrying the most failures
 for each cell that has any:
 
-- `sin` — DD 72 pts (log sweep, |x| = 10^e); QF 520 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 1078 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 1092 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `cos` — DD 54 pts (log sweep, |x| = 10^e); QF 72 pts (log sweep, |x| = 10^e); TF 82 pts (log sweep, |x| = 10^e); FF 98 pts (log sweep, |x| = 10^e)
-- `tan` — DD 76 pts (log sweep, |x| = 10^e); QF 532 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 1090 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 1104 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `asin` — QF 12 pts (log sweep, |x| = 10^e); TF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `atan` — QF 8 pts (log sweep, |x| = 10^e); TF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `sin` — DD 88 pts (log sweep, |x| = 10^e); QF 538 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 1096 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 1120 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `cos` — DD 76 pts (log sweep, |x| = 10^e); QF 104 pts (log sweep, |x| = 10^e); TF 118 pts (log sweep, |x| = 10^e); FF 138 pts (log sweep, |x| = 10^e)
+- `tan` — DD 108 pts (log sweep, |x| = 10^e); QF 576 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 1138 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 1152 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `asin` — QF 18 pts (log sweep, |x| = 10^e)
 
 ---
 
@@ -294,39 +286,38 @@ for each cell that has any:
 
 | op | backend | cap | mean | trusted \|x\| | at cap | boundary (digits) | fails | verdict |
 |---|---|---:|---:|---|---:|---|---:|---|
-| `sinh` | DD | 31.00 | 30.62 | 0 .. 316.2 | 100% | above 1000: 0.00 | 6 | UNRESOLVED |
-| `sinh` | QF | 29.00 | 16.09 | 1e-30 .. 87.96 | 56% | below 1e-323: 0.00; above 91.11: 0.00 | 734 | UNRESOLVED |
-| `sinh` | TF | 21.70 | 12.00 | 1e-30 .. 87.96 | 56% | below 1e-323: 0.00; above 91.11: 0.00 | 734 | UNRESOLVED |
-| `sinh` | FF | 14.00 | 7.69 | 1e-30 .. 62.83 | 55% | below 1e-323: 0.00; above 91.11: 0.00 | 734 | UNRESOLVED |
-| `cosh` | DD | 31.00 | 30.62 | 0 .. 316.2 | 100% | above 1000: 0.00 | 6 | UNRESOLVED |
-| `cosh` | QF | 29.00 | 16.16 | 0 .. 87.96 | 56% | above 91.11: 0.00 | 730 | UNRESOLVED |
-| `cosh` | TF | 21.70 | 12.05 | 0 .. 87.96 | 56% | above 91.11: 0.00 | 730 | UNRESOLVED |
-| `cosh` | FF | 14.00 | 7.73 | 0 .. 62.83 | 55% | above 91.11: 0.00 | 730 | UNRESOLVED |
-| `tanh` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `tanh` | QF | 29.00 | 28.93 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `tanh` | TF | 21.70 | 21.64 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `tanh` | FF | 14.00 | 13.97 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `asinh` | DD | 31.00 | 30.96 | 1e-323 .. 1e+30 | 100% | below 5e-324: 0.00 | 2 | UNRESOLVED |
-| `asinh` | QF | 29.00 | 28.89 | 3e-29 .. 1e+30 | 100% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `asinh` | TF | 21.70 | 21.63 | 3e-29 .. 1e+30 | 100% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `asinh` | FF | 14.00 | 13.97 | 1e-30 .. 1e+30 | 100% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `acosh` | DD | 31.00 | 30.89 | 1 .. 1e+30 | 99% | -- | 0 | UNRESOLVED |
-| `acosh` | QF | 29.00 | 28.82 | 1 .. 1e+30 | 97% | -- | 0 | UNRESOLVED |
-| `acosh` | TF | 21.70 | 21.53 | 1 .. 1e+30 | 97% | -- | 0 | UNRESOLVED |
-| `acosh` | FF | 14.00 | 13.83 | 1.001 .. 1e+30 | 96% | -- | 0 | UNRESOLVED |
-| `atanh` | DD | 31.00 | 31.00 | 0 .. 1e+30 | 100% | -- | 0 | UNRESOLVED |
-| `atanh` | QF | 29.00 | 28.90 | 1e-30 .. 1e+29 | 100% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `atanh` | TF | 21.70 | 21.63 | 1e-30 .. 1e+29 | 100% | below 1e-323: 0.00 | 4 | UNRESOLVED |
-| `atanh` | FF | 14.00 | 13.92 | 1.001 .. 1e+30 | 99% | below 1e-323: 0.00 | 4 | UNRESOLVED |
+| `sinh` | DD | 31.00 | 30.89 | 0 .. 344 | 100% | above 1000: 0.00 | 6 | UNRESOLVED |
+| `sinh` | QF | 29.00 | 16.44 | 1e-30 .. 87.96 | 57% | below 1e-323: 0.00; above 91.11: 0.00 | 736 | UNRESOLVED |
+| `sinh` | TF | 21.70 | 12.29 | 1e-30 .. 87.96 | 57% | below 1e-323: 0.00; above 91.11: 0.00 | 736 | UNRESOLVED |
+| `sinh` | FF | 14.00 | 7.84 | 1e-30 .. 87.96 | 56% | below 1e-323: 0.00; above 91.11: 0.00 | 742 | UNRESOLVED |
+| `cosh` | DD | 31.00 | 30.89 | 0 .. 344 | 100% | above 1000: 0.00 | 6 | UNRESOLVED |
+| `cosh` | QF | 29.00 | 16.50 | 0 .. 87.96 | 57% | above 91.11: 0.00 | 732 | UNRESOLVED |
+| `cosh` | TF | 21.70 | 12.34 | 0 .. 87.96 | 57% | above 91.11: 0.00 | 732 | UNRESOLVED |
+| `cosh` | FF | 14.00 | 7.88 | 0 .. 87.96 | 57% | above 91.11: 0.00 | 738 | UNRESOLVED |
+| `tanh` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `tanh` | QF | 29.00 | 28.93 | 1e-30 .. 5e+255 | 100% | below 1e-323: 0.00 | 4 | UNRESOLVED |
+| `tanh` | TF | 21.70 | 21.65 | 1e-30 .. 5e+255 | 100% | below 1e-323: 0.00 | 4 | UNRESOLVED |
+| `tanh` | FF | 14.00 | 13.97 | 1e-30 .. 5e+255 | 100% | below 1e-323: 0.00 | 4 | UNRESOLVED |
+| `asinh` | DD | 31.00 | 30.96 | 1e-323 .. 5e+255 | 100% | below 5e-324: 0.00 | 2 | UNRESOLVED |
+| `asinh` | QF | 29.00 | 28.79 | 3e-29 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `asinh` | TF | 21.70 | 21.56 | 3e-29 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `asinh` | FF | 14.00 | 13.92 | 1e-30 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `acosh` | DD | 31.00 | 30.89 | 1 .. 5e+255 | 99% | -- | 0 | UNRESOLVED |
+| `acosh` | QF | 29.00 | 28.73 | 1 .. 1e+30 | 96% | above 4e+151: 0.00 | 6 | UNRESOLVED |
+| `acosh` | TF | 21.70 | 21.45 | 1 .. 1e+30 | 96% | above 4e+151: 0.00 | 6 | UNRESOLVED |
+| `acosh` | FF | 14.00 | 13.78 | 1.001 .. 1e+30 | 96% | above 4e+151: 0.00 | 6 | UNRESOLVED |
+| `atanh` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `atanh` | QF | 29.00 | 28.80 | 1e-30 .. 1e+29 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `atanh` | TF | 21.70 | 21.56 | 1e-30 .. 1e+29 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `atanh` | FF | 14.00 | 13.88 | 1.001 .. 1e+30 | 98% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
 
 **Where the failures sit.** The grid family carrying the most failures
 for each cell that has any:
 
-- `sinh` — DD 6 pts (log sweep, |x| = 10^e); QF 734 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 734 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 734 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `cosh` — DD 6 pts (log sweep, |x| = 10^e); QF 730 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 730 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 730 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `sinh` — DD 6 pts (log sweep, |x| = 10^e); QF 736 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 736 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 742 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `cosh` — DD 6 pts (log sweep, |x| = 10^e); QF 732 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 732 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 738 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
 - `tanh` — QF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `asinh` — DD 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); QF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `atanh` — QF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `asinh` — DD 2 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
 
 ---
 
@@ -390,10 +381,10 @@ for each cell that has any:
 | `log10` | QF | 29.00 | 25.63 | 1e-30 .. 0.1 | 77% | below 0: 0.00; above 0.5: 13.92 | 167 | UNRESOLVED |
 | `log10` | TF | 21.70 | 19.42 | 1e-30 .. 0.1 | 79% | below 0: 0.00; above 1: 6.91 | 138 | UNRESOLVED |
 | `log10` | FF | 14.00 | 12.34 | 1.01 .. 10.05 | 78% | below 1: 0.00 | 126 | UNRESOLVED |
-| `pow` | DD | 31.00 | 30.35 | 1e-30 .. 1 | 98% | below 0: 0.00 | 1 | UNRESOLVED |
+| `pow` | DD | 31.00 | 30.37 | 1e-30 .. 1 | 98% | below 0: 0.00 | 1 | UNRESOLVED |
 | `pow` | QF | 29.00 | 27.32 | 2 .. 2.002 | 92% | below 2: 14.11; above 2.236: 8.92 | 47 | UNRESOLVED |
-| `pow` | TF | 21.70 | 20.74 | 2 .. 2.002 | 93% | below 1.1: 7.92; above 2.236: 8.92 | 35 | UNRESOLVED |
-| `pow` | FF | 14.00 | 13.08 | 0.5 .. 0.5 | 78% | below 0.5: 6.38; above 1: 6.89 | 8 | UNRESOLVED |
+| `pow` | TF | 21.70 | 20.75 | 2 .. 2.002 | 93% | below 1.1: 7.92; above 2.236: 8.92 | 35 | UNRESOLVED |
+| `pow` | FF | 14.00 | 13.10 | 2 .. 2 | 79% | below 1: 6.89; above 10: 3.48 | 8 | UNRESOLVED |
 | `sqrt` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
 | `sqrt` | QF | 29.00 | 27.74 | 1 .. 2 | 86% | -- | 0 | UNRESOLVED |
 | `sqrt` | TF | 21.70 | 21.39 | 1e-25 .. 0.1 | 94% | -- | 0 | UNRESOLVED |
@@ -414,7 +405,7 @@ for each cell that has any:
 | op | backend | cap | mean | trusted \|z\| | at cap | boundary (digits) | fails | verdict |
 |---|---|---:|---:|---|---:|---|---:|---|
 | `sin` | DD | 31.00 | 30.08 | 0 .. 1000 | 96% | above 1e+04: 0.00 | 30 | UNRESOLVED |
-| `sin` | QF | 29.00 | 26.13 | 1 .. 2 | 75% | below 1: 13.80; above 2: 13.77 | 46 | UNRESOLVED |
+| `sin` | QF | 29.00 | 26.12 | 1 .. 2 | 75% | below 1: 13.80; above 2: 13.77 | 46 | UNRESOLVED |
 | `sin` | TF | 21.70 | 20.49 | 1e-27 .. 0.1 | 87% | above 1e+04: 0.00 | 42 | UNRESOLVED |
 | `sin` | FF | 14.00 | 13.31 | 0 .. 100 | 95% | above 1e+04: 0.00 | 58 | UNRESOLVED |
 | `cos` | DD | 31.00 | 30.09 | 0 .. 1000 | 96% | above 1e+04: 0.00 | 30 | UNRESOLVED |
@@ -422,7 +413,7 @@ for each cell that has any:
 | `cos` | TF | 21.70 | 20.54 | 1 .. 2 | 87% | above 1e+04: 0.00 | 42 | UNRESOLVED |
 | `cos` | FF | 14.00 | 13.32 | 0 .. 100 | 95% | above 1e+04: 0.00 | 58 | UNRESOLVED |
 | `tan` | DD | 31.00 | 30.51 | 0 .. 1e+04 | 97% | above 1e+04: 0.00 | 12 | UNRESOLVED |
-| `tan` | QF | 29.00 | 26.01 | 1 .. 2 | 72% | below 1: 13.84; above 10: 13.31 | 56 | UNRESOLVED |
+| `tan` | QF | 29.00 | 26.00 | 1 .. 2 | 72% | below 1: 13.84; above 10: 13.31 | 56 | UNRESOLVED |
 | `tan` | TF | 21.70 | 20.49 | 1e-27 .. 0.1 | 85% | above 10: 10.52 | 48 | UNRESOLVED |
 | `tan` | FF | 14.00 | 13.43 | 0 .. 2.236 | 95% | above 1e+04: 0.00 | 40 | OPEN DEFECT (**4 above bound**) |
 | `sinh` | DD | 31.00 | 29.43 | 0 .. 100 | 95% | above 1000: 0.00 | 83 | UNRESOLVED |
@@ -433,7 +424,7 @@ for each cell that has any:
 | `cosh` | QF | 29.00 | 23.73 | 1 .. 2 | 70% | below 1: 13.77; above 2: 13.77 | 232 | UNRESOLVED |
 | `cosh` | TF | 21.70 | 18.62 | 1 .. 2 | 80% | above 100: 0.00 | 215 | UNRESOLVED |
 | `cosh` | FF | 14.00 | 12.22 | 0 .. 10.05 | 88% | above 100: 0.00 | 215 | UNRESOLVED |
-| `tanh` | DD | 31.00 | 30.55 | 0 .. 1000 | 99% | above 1e+04: 0.00 | 12 | UNRESOLVED |
+| `tanh` | DD | 31.00 | 30.58 | 0 .. 1000 | 99% | above 1e+04: 0.00 | 12 | UNRESOLVED |
 | `tanh` | QF | 29.00 | 24.47 | 1 .. 2 | 72% | below 1: 13.84; above 10: 13.31 | 178 | UNRESOLVED |
 | `tanh` | TF | 21.70 | 19.27 | 1e-27 .. 0.1 | 82% | above 10: 10.52 | 156 | UNRESOLVED |
 | `tanh` | FF | 14.00 | 12.71 | 0 .. 2.236 | 91% | above 100: 0.00 | 136 | UNRESOLVED |
