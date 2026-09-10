@@ -948,7 +948,23 @@ XPMATH_INLINE_FUNCTION TripleFloat log(TripleFloat a) {
 }
 
 // pow: a^b = exp(b·log a). PORT_NOTES_QF.md §10 conditioning caveat applies.
+//
+// The non-positive-base guard mirrors dd_math.hpp / ff_math.hpp / qf_math.hpp,
+// which have carried it since their KI-19-era domain audit; TF was missed. Left
+// bare, pow(0, b) fell through to log(0) -- which returns 0 after printing
+// TFLOG's diagnostic -- and then exp(b*0) = 1, so TF answered 1 where the other
+// three answer 0, with only the misleading TFLOG line to show for it.
+//
+// The sweep cannot catch this: repair_real's R_Pow case
+// (scripts/sweep_accuracy.cpp:529-537) sets a = fabs(a) and maps a == 0 to 1,
+// so no grid point ever presents pow with a non-positive base. Covered by a
+// targeted test instead.
 XPMATH_INLINE_FUNCTION TripleFloat pow(TripleFloat a, TripleFloat b) {
+    if (a.f0 <= 0.0f) {
+        if (a.f0 == 0.0f && b.f0 > 0.0f) return TripleFloat(0.0f);
+        XPMATH_PRINTF("TFPOW: non-positive base\n");
+        return TripleFloat(0.0f);
+    }
     return exp(multiply(b, log(a)));
 }
 
