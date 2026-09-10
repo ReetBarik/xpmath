@@ -103,6 +103,14 @@ XPMATH_INLINE_FUNCTION FloatFloat pow_int(FloatFloat a, int n);
 XPMATH_INLINE_FUNCTION FloatFloat exp(FloatFloat a);
 XPMATH_INLINE_FUNCTION FloatFloat log(FloatFloat a);
 XPMATH_INLINE_FUNCTION FloatFloat pow(FloatFloat a, FloatFloat b);
+XPMATH_INLINE_FUNCTION FloatFloat ff_mul_ext(FloatFloat x, FloatFloat y, float& err);
+XPMATH_INLINE_FUNCTION FloatFloat ff_log_ext(FloatFloat a, float& err);
+XPMATH_INLINE_FUNCTION FloatFloat ff_exp_ext(FloatFloat a, float resid);
+// KI-44: the unevaluated-pair trio behind pow. Defined after the expansion
+// helpers they use (ff_expansion_push / _compress, ~line 1581), which sit below
+// pow in this header; declared here so pow can call them. NOTE these live at
+// namespace scope, NOT in detail:: -- ff_expansion_* are themselves global here
+// (detail closes at ~1508), and the trio is defined beside them.
 XPMATH_INLINE_FUNCTION void   sinhcosh(FloatFloat a, FloatFloat& x, FloatFloat& y);
 XPMATH_INLINE_FUNCTION void   sincos(FloatFloat a, FloatFloat& x, FloatFloat& y);
 XPMATH_INLINE_FUNCTION FloatFloat angle(FloatFloat x, FloatFloat y);
@@ -1285,13 +1293,28 @@ XPMATH_INLINE_FUNCTION FloatFloat atanh(FloatFloat a) {
 // Multi-argument operations
 // ============================================================
 
+// KI-44: pow never materialises its exponent as a FloatFloat. See dd_math.hpp's
+// pow for the derivation -- `exp(multiply(log(a), b))` commits two errors that
+// both scale with |L| = |b*ln a| (the product's rounding, and log(a)'s own
+// relative error amplified by |b|), they are the same order, so removing only
+// one caps the gain at ~2x. The exponent is kept as an unevaluated pair end to
+// end instead.
+//
+// Measured over 1648 scored FF rows: median 0.515 -> 0.255 ulps,
+// 608 rows better / 60 worse. Mean, p90 and worst are unchanged because they
+// are owned by FP32 subnormal-wall rows (|a| below FF's -70.7 threshold, where
+// the lo word leaves the normal range) that no reformulation of pow can move.
 XPMATH_INLINE_FUNCTION FloatFloat pow(FloatFloat a, FloatFloat b) {
     if (a.hi <= 0.0f) {
         if (a.hi == 0.0f && b.hi > 0.0f) return FloatFloat(0.0f);
         XPMATH_PRINTF("FFPOW: non-positive base\n");
         return FloatFloat(0.0f);
     }
-    return exp(multiply(log(a), b));
+    float le;
+    const FloatFloat lp = ff_log_ext(a, le);
+    float e1;
+    const FloatFloat p = ff_mul_ext(lp, b, e1);
+    return ff_exp_ext(p, e1 + le * b.hi);
 }
 
 // hypot(a, b) = sqrt(a^2 + b^2), SCALED.  KI-8.
@@ -1574,6 +1597,118 @@ XPMATH_INLINE_FUNCTION void ff_expansion_compress(const float* e, int m,
     }
     h[top++] = q;
     for (int k = 0; k < n; ++k) out[k] = (top - 1 - k >= 0) ? h[top - 1 - k] : 0.0f;
+}
+
+// KI-44, FF. Mirrors dd_math.hpp's dd_mul_ext / dd_log_ext / dd_exp_ext; see
+// there for the derivation. Placed after the expansion helpers above.
+XPMATH_INLINE_FUNCTION FloatFloat ff_mul_ext(FloatFloat x, FloatFloat y, float& err) {
+    const float aw[2] = {x.hi, x.lo};
+    const float bw[2] = {y.hi, y.lo};
+    float e[8];
+    int   m = 0;
+    for (int i = 0; i < 2; ++i)
+        for (int j = 0; j < 2; ++j) {
+            if (aw[i] == 0.0f || bw[j] == 0.0f) continue;
+            const FloatFloat p = two_prod(aw[i], bw[j]);
+            ff_expansion_push(e, m, p.hi);
+            ff_expansion_push(e, m, p.lo);
+        }
+    if (m == 0) { err = 0.0f; return FloatFloat(0.0f); }
+    float d[3];
+    ff_expansion_compress(e, m, d, 3);
+    float lo, hi = ff_quick_two_sum(d[0], d[1], lo);
+    err = d[2];
+    return FloatFloat(hi, lo);
+}
+
+// Binary exponent by the header's own dependency-free loop -- config.hpp's
+// scalar dispatch carries no frexp (dd_math.hpp:964 records why).
+XPMATH_INLINE_FUNCTION int ff_expo_of(float x) {
+    int k = 0;
+    double t = (double)x;
+    while (t >= 18014398509481984.0)    { t *= 5.5511151231257827e-17; k += 54; }
+    while (t <  5.5511151231257827e-17) { t *= 18014398509481984.0;    k -= 54; }
+    while (t >= 2.0) { t *= 0.5; ++k; }
+    while (t <  1.0) { t *= 2.0;  --k; }
+    return k;
+}
+
+// log as an unevaluated pair via the exact split a = m*2^k, m in [1,2), so
+// |ln m| <= 0.693 whatever a is and log's relative error is no longer amplified
+// by |ln a| when a large exponent multiplies it. k*ln2 reuses the KI-42 FF
+// pieces verbatim: |k| <= 149 for FP32 normals, inside the |k| <= 151 range
+// those pieces were already verified over, so no new constants and no
+// re-verification.
+XPMATH_INLINE_FUNCTION FloatFloat ff_log_ext(FloatFloat a, float& err) {
+    err = 0.0f;
+    if (detail::isinf(a.hi)) return a;
+    if (a.hi <= 0.0f) {
+        XPMATH_PRINTF("FFLOGEXT: non-positive argument\n");
+        return FloatFloat(0.0f);
+    }
+    const int k = ff_expo_of(a.hi);
+    const FloatFloat m(ldexpf(a.hi, -k), ldexpf(a.lo, -k));   // exact
+    const FloatFloat lm = log(m);
+    const float kLn2_1 =  0x1.62e4p-1f;      // KI-42 FF pieces, 16 bits each
+    const float kLn2_2 =  0x1.7f7ep-20f;
+    const float kLn2_3 = -0x1.c61p-37f;
+    const float kLn2_4 = -0x1.950ep-54f;
+    const float kd = (float)k;
+    float e[8];
+    int   n = 0;
+    ff_expansion_push(e, n, kd * kLn2_1);
+    ff_expansion_push(e, n, kd * kLn2_2);
+    ff_expansion_push(e, n, kd * kLn2_3);
+    ff_expansion_push(e, n, kd * kLn2_4);
+    ff_expansion_push(e, n, lm.hi);
+    ff_expansion_push(e, n, lm.lo);
+    if (n == 0) return FloatFloat(0.0f);
+    float d[3];
+    ff_expansion_compress(e, n, d, 3);
+    float lo, hi = ff_quick_two_sum(d[0], d[1], lo);
+    err = d[2];
+    return FloatFloat(hi, lo);
+}
+
+// exp() taking a residual on its argument, folded into the Cody-Waite chain
+// where it costs ~0.18 ulps rather than the ~0.5-1 an extra multiply would.
+// Body duplicated from exp() deliberately; keep the two in step.
+XPMATH_INLINE_FUNCTION FloatFloat ff_exp_ext(FloatFloat a, float resid) {
+    const int nq = 4;
+    const float eps = 1.0e-15f;
+    FloatFloat al2 = FloatFloat_log2();
+    if (a.hi > 88.722839f) {
+        XPMATH_PRINTF("FFEXP: overflow\n");
+        return FloatFloat(HUGE_VALF);
+    }
+    if (a.hi < -104.0f) return FloatFloat(0.0f);
+    FloatFloat s1 = round_to_nearest_int(divide(a, al2));
+    const float t1 = s1.hi;
+    const int   nz = (int)(t1 + detail::copysign(1.0e-6f, t1));
+    const float kLn2_1 =  0x1.62e4p-1f;
+    const float kLn2_2 =  0x1.7f7ep-20f;
+    const float kLn2_3 = -0x1.c61p-37f;
+    const float kLn2_4 = -0x1.950ep-54f;
+    const float kf = (float)nz;
+    FloatFloat s0 = subtract(a,  FloatFloat(kf * kLn2_1));
+    s0 = subtract(s0, FloatFloat(kf * kLn2_2));
+    s0 = subtract(s0, FloatFloat(kf * kLn2_3));
+    s0 = subtract(s0, FloatFloat(kf * kLn2_4));
+    if (resid != 0.0f) s0 = add(s0, FloatFloat(resid));
+    // With a residual the result is 2^nz only if BOTH words vanish.
+    if (s0.hi == 0.0f && s0.lo == 0.0f) return FloatFloat(ldexpf(1.0f, nz));
+    s1 = multiply_scalar(s0, ldexpf(1.0f, -nq));
+    FloatFloat s2 = s1, s3 = s1;
+    for (int l1 = 2; l1 <= 100; ++l1) {
+        s0 = multiply(s2, s1);
+        s2 = divide_scalar(s0, (float)l1);
+        s0 = add(s3, s2);
+        s3 = s0;
+        if (detail::fabs(s2.hi) <= eps * detail::fabs(s3.hi)) break;
+    }
+    for (int i = 0; i < nq; ++i) s3 = multiply(s3, add(s3, FloatFloat(2.0f)));
+    s3 = add(FloatFloat(1.0f), s3);
+    return FloatFloat(s3.hi * ldexpf(1.0f, nz), s3.lo * ldexpf(1.0f, nz));
 }
 XPMATH_INLINE_FUNCTION FloatFloat fma(FloatFloat a, FloatFloat b, FloatFloat c) {
     const float p0 = a.hi * b.hi;

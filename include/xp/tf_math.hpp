@@ -94,6 +94,13 @@ XPMATH_INLINE_FUNCTION TripleFloat exp(TripleFloat a);
 XPMATH_INLINE_FUNCTION TripleFloat log(TripleFloat a);
 XPMATH_INLINE_FUNCTION TripleFloat log1p(TripleFloat a);   // asinh() is defined above it
 XPMATH_INLINE_FUNCTION TripleFloat pow(TripleFloat a, TripleFloat b);
+// KI-44: the unevaluated-pair trio behind pow, defined after the expansion
+// helpers they use (tf_expansion_push / _compress, ~line 1732).
+namespace detail {
+XPMATH_INLINE_FUNCTION TripleFloat tf_mul_ext(TripleFloat x, TripleFloat y, float& err);
+XPMATH_INLINE_FUNCTION TripleFloat tf_log_ext(TripleFloat a, float& err);
+XPMATH_INLINE_FUNCTION TripleFloat tf_exp_ext(TripleFloat a, float resid);
+}  // namespace detail
 XPMATH_INLINE_FUNCTION void   sincos(TripleFloat a, TripleFloat& sin_a, TripleFloat& cos_a);
 XPMATH_INLINE_FUNCTION void   sinhcosh(TripleFloat a, TripleFloat& sinh_a, TripleFloat& cosh_a);
 XPMATH_INLINE_FUNCTION TripleFloat angle(TripleFloat x, TripleFloat y);
@@ -965,7 +972,12 @@ XPMATH_INLINE_FUNCTION TripleFloat pow(TripleFloat a, TripleFloat b) {
         XPMATH_PRINTF("TFPOW: non-positive base\n");
         return TripleFloat(0.0f);
     }
-    return exp(multiply(b, log(a)));
+    // KI-44: exponent kept as an unevaluated pair; see dd_math.hpp's pow.
+    float le;
+    const TripleFloat lp = detail::tf_log_ext(a, le);
+    float e1;
+    const TripleFloat p = detail::tf_mul_ext(lp, b, e1);
+    return detail::tf_exp_ext(p, e1 + le * b.f0);
 }
 
 // sin/cos: joint computation via argument reduction mod 2π, divide-by-k Taylor
@@ -1760,6 +1772,101 @@ XPMATH_INLINE_FUNCTION void tf_expansion_compress(const float* e, int m,
     h[top++] = q;
     for (int k = 0; k < n; ++k) out[k] = (top - 1 - k >= 0) ? h[top - 1 - k] : 0.0f;
 }
+
+namespace detail {
+// KI-44, TF. See dd_math.hpp's dd_mul_ext / dd_log_ext / dd_exp_ext.
+XPMATH_INLINE_FUNCTION TripleFloat tf_mul_ext(TripleFloat x, TripleFloat y, float& err) {
+    const float aw[3] = {x.f0, x.f1, x.f2};
+    const float bw[3] = {y.f0, y.f1, y.f2};
+    float e[20];
+    int   m = 0;
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) {
+            if (aw[i] == 0.0f || bw[j] == 0.0f) continue;
+            float q;
+            const float p = tf_two_prod(aw[i], bw[j], q);
+            tf_expansion_push(e, m, p);
+            tf_expansion_push(e, m, q);
+        }
+    if (m == 0) { err = 0.0f; return TripleFloat(0.0f); }
+    float d[4];
+    tf_expansion_compress(e, m, d, 4);
+    err = d[3];
+    return TripleFloat(d[0], d[1], d[2]);
+}
+XPMATH_INLINE_FUNCTION int tf_expo_of(float x) {
+    int k = 0;
+    double t = (double)x;
+    while (t >= 18014398509481984.0)    { t *= 5.5511151231257827e-17; k += 54; }
+    while (t <  5.5511151231257827e-17) { t *= 18014398509481984.0;    k -= 54; }
+    while (t >= 2.0) { t *= 0.5; ++k; }
+    while (t <  1.0) { t *= 2.0;  --k; }
+    return k;
+}
+XPMATH_INLINE_FUNCTION TripleFloat tf_log_ext(TripleFloat a, float& err) {
+    err = 0.0f;
+    if (detail::isinf(a.f0)) return a;
+    if (a.f0 <= 0.0f) { XPMATH_PRINTF("TFLOGEXT: non-positive argument\n"); return TripleFloat(0.0f); }
+    const int k = tf_expo_of(a.f0);
+    const TripleFloat m(ldexpf(a.f0, -k), ldexpf(a.f1, -k), ldexpf(a.f2, -k));
+    const TripleFloat lm = log(m);
+    const float kLn2_1 =  0x1.62e4p-1f;    // KI-42 FP32 pieces, 16 bits each
+    const float kLn2_2 =  0x1.7f7ep-20f;
+    const float kLn2_3 = -0x1.c61p-37f;
+    const float kLn2_4 = -0x1.950ep-54f;
+    const float kLn2_5 =  0x1.e3b4p-72f;
+    const float kd = (float)k;
+    float e[20];
+    int   n = 0;
+    tf_expansion_push(e, n, kd * kLn2_1);
+    tf_expansion_push(e, n, kd * kLn2_2);
+    tf_expansion_push(e, n, kd * kLn2_3);
+    tf_expansion_push(e, n, kd * kLn2_4);
+    tf_expansion_push(e, n, kd * kLn2_5);
+    tf_expansion_push(e, n, lm.f0);
+    tf_expansion_push(e, n, lm.f1);
+    tf_expansion_push(e, n, lm.f2);
+    if (n == 0) return TripleFloat(0.0f);
+    float d[4];
+    tf_expansion_compress(e, n, d, 4);
+    err = d[3];
+    return TripleFloat(d[0], d[1], d[2]);
+}
+XPMATH_INLINE_FUNCTION TripleFloat tf_exp_ext(TripleFloat a, float resid) {
+    const float k_inv_log2 = 1.44269504088896341f;
+    if (a.f0 < -104.0f) return TripleFloat(0.0f);
+    if (a.f0 >  88.722839f) { XPMATH_PRINTF("TFEXP: overflow\n"); return TripleFloat(HUGE_VALF); }
+    const float m = detail::floor(a.f0 * k_inv_log2 + 0.5f);
+    const float kLn2_1 =  0x1.62e4p-1f;
+    const float kLn2_2 =  0x1.7f7ep-20f;
+    const float kLn2_3 = -0x1.c61p-37f;
+    const float kLn2_4 = -0x1.950ep-54f;
+    const float kLn2_5 =  0x1.e3b4p-72f;
+    TripleFloat r = subtract(a, TripleFloat(m * kLn2_1));
+    r = subtract(r, TripleFloat(m * kLn2_2));
+    r = subtract(r, TripleFloat(m * kLn2_3));
+    r = subtract(r, TripleFloat(m * kLn2_4));
+    r = subtract(r, TripleFloat(m * kLn2_5));
+    if (resid != 0.0f) r = add(r, TripleFloat(resid));
+    const int nq = 5;
+    r = divide_scalar(r, float(1 << nq));
+    TripleFloat s = r;
+    TripleFloat t = sqr(r);
+    TripleFloat term = t;
+    int kk = 2;
+    while (kk < 64 && abs(term).f0 > 1.0e-21f * abs(s).f0) {
+        term = divide_scalar(term, float(kk));
+        s = add(s, term);
+        term = multiply(term, r);
+        kk++;
+    }
+    for (int i = 0; i < nq; i++) s = multiply(s, add(s, TripleFloat(2.0f)));
+    s = add(TripleFloat(1.0f), s);
+    const int mi = (int)m;
+    if (mi >= -125 && mi <= 127) return mul_pwr2(s, ldexpf(1.0f, mi));
+    return TripleFloat(ldexpf(s.f0, mi), ldexpf(s.f1, mi), ldexpf(s.f2, mi));
+}
+}  // namespace detail
 XPMATH_INLINE_FUNCTION TripleFloat fma(TripleFloat a, TripleFloat b, TripleFloat c) {
     const float p0 = a.f0 * b.f0;
     if (!detail::isfinite(p0) || !detail::isfinite(c.f0))

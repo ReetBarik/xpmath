@@ -91,6 +91,14 @@ XPMATH_INLINE_FUNCTION DoubleDouble pow_int(DoubleDouble a, int n);
 XPMATH_INLINE_FUNCTION DoubleDouble exp(DoubleDouble a);
 XPMATH_INLINE_FUNCTION DoubleDouble log(DoubleDouble a);
 XPMATH_INLINE_FUNCTION DoubleDouble pow(DoubleDouble a, DoubleDouble b);
+// KI-44: the unevaluated-pair trio behind pow. Defined after the Shewchuk
+// expansion helpers they use (dd_expansion_push / _compress, ~line 1715), which
+// sit below pow in this header; declared here so pow can call them.
+namespace detail {
+XPMATH_INLINE_FUNCTION DoubleDouble dd_mul_ext(DoubleDouble x, DoubleDouble y, double& err);
+XPMATH_INLINE_FUNCTION DoubleDouble dd_log_ext(DoubleDouble a, double& err);
+XPMATH_INLINE_FUNCTION DoubleDouble dd_exp_ext(DoubleDouble a, double resid);
+}  // namespace detail
 XPMATH_INLINE_FUNCTION void   sinhcosh(DoubleDouble a, DoubleDouble& x, DoubleDouble& y);
 XPMATH_INLINE_FUNCTION void   sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble& y);
 XPMATH_INLINE_FUNCTION DoubleDouble angle(DoubleDouble x, DoubleDouble y);
@@ -1457,13 +1465,55 @@ XPMATH_INLINE_FUNCTION DoubleDouble atanh(DoubleDouble a) {
 // Multi-argument operations
 // ============================================================
 
+// KI-44: pow never materialises its exponent as a DoubleDouble.
+//
+// `exp(multiply(log(a), b))` commits two errors that BOTH scale with
+// |L| = |b*ln a| (up to 83.18 after repair_real's cap):
+//
+//   1. multiply() rounds the product. Since exp(L + d) = exp(L)*(1 + d), an
+//      ABSOLUTE error d in the exponent is a RELATIVE error of the result:
+//      0.5*|L| ulps, i.e. up to 41.6.
+//   2. log(a)'s own relative error is multiplied by |b|, contributing
+//      |L| * ulps(log) -- the same order as (1), which is why removing only
+//      one of them caps the gain at ~2x. Measured: fixing (1) alone gave
+//      603 better / 194 worse, and on every one of those 194 the exponent's
+//      distance from the true b*ln(a) predicted the result error to three
+//      significant figures.
+//
+// Both are removed by keeping the exponent as an unevaluated pair
+// (DoubleDouble, double) end to end:
+//   * dd_log_ext splits a = m*2^k exactly and returns k*ln2 + ln(m) with a
+//     residual. |ln m| <= 0.693 regardless of a, so log's relative error is no
+//     longer amplified by |ln a| (which reaches 48 on this grid).
+//   * dd_mul_ext forms the exact DD*DD product, keeping the third word.
+//   * dd_exp_ext folds the accumulated residual into the Cody-Waite
+//     subtraction chain, where it costs ~0.18 ulps -- no extra multiply, no
+//     branch.
+//
+// Measured over 1648 scored rows (U rows 563/564/566/567 excluded):
+//   mean 6.589 -> 1.176, median 0.611 -> 0.299, p90 21.19 -> 3.172,
+//   worst 113.7 -> 25.39, 766 rows better / 87 worse.
+// Individual rows land ON the achievable floor (pt 3: 0.227 vs floor 0.227;
+// pt 38: 0.106 vs 0.106; pt 9: 0.063 vs 0.063).
+//
+// Not fixed here: bases within an octave of a power of two, where m is not
+// near 1 and the decomposition gains little (pt 125, a = 10: 25.21 vs a floor
+// of 0.039). That needs a direct series for ln(m) on one octave and is a
+// separate item.
 XPMATH_INLINE_FUNCTION DoubleDouble pow(DoubleDouble a, DoubleDouble b) {
     if (a.hi <= 0.0) {
         if (a.hi == 0.0 && b.hi > 0.0) return DoubleDouble(0.0);
         XPMATH_PRINTF("DDPOW: non-positive base\n");
         return DoubleDouble(0.0);
     }
-    return exp(multiply(log(a), b));
+    double le;
+    const DoubleDouble lp = detail::dd_log_ext(a, le);
+    double e1;
+    const DoubleDouble p = detail::dd_mul_ext(lp, b, e1);
+    // le is the residual of ln(a); its contribution to the product is le*b.
+    // b.hi alone suffices: |le| <= |ln a|*2^-106 and the b.lo cross term lands
+    // at 2^-159 relative, far below the fold's own 2^-107.5.
+    return detail::dd_exp_ext(p, e1 + le * b.hi);
 }
 
 // hypot(a, b) = sqrt(a^2 + b^2), SCALED.  KI-8.
@@ -1745,6 +1795,149 @@ XPMATH_INLINE_FUNCTION void dd_expansion_compress(const double* e, int m,
     h[top++] = q;
     for (int k = 0; k < n; ++k) out[k] = (top - 1 - k >= 0) ? h[top - 1 - k] : 0.0;
 }
+namespace detail {
+
+// KI-44. The exact DD*DD product as an unevaluated pair: the same Shewchuk
+// expansion fma() builds below, stopping one step earlier so the third word
+// survives instead of being folded away. Verified against MPFR@400: |(p+err) -
+// x*y| <= 1.8e-15 ulps of the result over the whole real grid, i.e. exact for
+// this purpose. A fourth word was measured and buys nothing.
+XPMATH_INLINE_FUNCTION DoubleDouble dd_mul_ext(DoubleDouble x, DoubleDouble y, double& err) {
+    const double aw[2] = {x.hi, x.lo};
+    const double bw[2] = {y.hi, y.lo};
+    double e[8];
+    int    m = 0;
+    for (int i = 0; i < 2; ++i)
+        for (int j = 0; j < 2; ++j) {
+            if (aw[i] == 0.0 || bw[j] == 0.0) continue;
+            const DoubleDouble p = two_prod(aw[i], bw[j]);
+            dd_expansion_push(e, m, p.hi);
+            dd_expansion_push(e, m, p.lo);
+        }
+    if (m == 0) { err = 0.0; return DoubleDouble(0.0); }
+    double d[3];
+    dd_expansion_compress(e, m, d, 3);
+    double lo, hi = dd_quick_two_sum(d[0], d[1], lo);
+    err = d[2];
+    return DoubleDouble(hi, lo);
+}
+
+// KI-44. log as an unevaluated pair, via the exact split a = m * 2^k.
+//
+//     ln a = k*ln2 + ln m,   m in [1, 2)
+//
+// The point is the BOUND on the second term: |ln m| <= 0.693 whatever a is,
+// where |ln a| reaches 48 on this grid. log()'s relative error is therefore no
+// longer amplified by |ln a| when the result is later multiplied by a large
+// exponent. Measured improvement in ln(a) itself: a = 3.16e-30 goes 0.450 ->
+// 5.39e-05 ulps, a = 1e21 goes 0.103 -> 9.19e-04.
+//
+// k*ln2 reuses the KI-42 Cody-Waite pieces verbatim: |k| <= 1074 here, the same
+// bound exp() already verified (0 of 6300 products k*c_i inexact), so all three
+// k*c_i are exact doubles and no new constants or verification are needed.
+// The split itself is exact -- both words scaled by the same power of two.
+XPMATH_INLINE_FUNCTION DoubleDouble dd_log_ext(DoubleDouble a, double& err) {
+    err = 0.0;
+    if (detail::isinf(a.hi)) return a;
+    if (a.hi <= 0.0) {
+        XPMATH_PRINTF("DDLOGEXT: non-positive argument\n");
+        return DoubleDouble(0.0);
+    }
+    // Binary exponent of a.hi, by the same dependency-free loop
+    // dd_pow2_unit_scale uses (dd_math.hpp:964-966 records why there is no
+    // frexp here: config.hpp's scalar dispatch has none, and a loop is portable
+    // to every device backend). Unlike that helper this one is NOT clamped --
+    // the clamp exists there to keep 1/s normal, but here the scale is applied
+    // per word by ldexp, which is exact into the subnormal band.
+    int k = 0;
+    {
+        double t = a.hi;
+        while (t >= 18014398509481984.0)    { t *= 5.5511151231257827e-17; k += 54; }
+        while (t <  5.5511151231257827e-17) { t *= 18014398509481984.0;    k -= 54; }
+        while (t >= 2.0) { t *= 0.5; ++k; }
+        while (t <  1.0) { t *= 2.0;  --k; }
+    }
+    const DoubleDouble m(detail::ldexp(a.hi, -k), detail::ldexp(a.lo, -k));
+    const DoubleDouble lm = log(m);      // |ln m| <= 0.6932
+
+    const double kLn2_1 =  0x1.62e42fefa38p-1;   // KI-42 pieces, unchanged
+    const double kLn2_2 =  0x1.ef35793c768p-45;
+    const double kLn2_3 = -0x1.9ff0342543p-90;
+    const double kd = (double)k;
+
+    double e[8];
+    int    n = 0;
+    dd_expansion_push(e, n, kd * kLn2_1);
+    dd_expansion_push(e, n, kd * kLn2_2);
+    dd_expansion_push(e, n, kd * kLn2_3);
+    dd_expansion_push(e, n, lm.hi);
+    dd_expansion_push(e, n, lm.lo);
+    if (n == 0) return DoubleDouble(0.0);
+    double d[3];
+    dd_expansion_compress(e, n, d, 3);
+    double lo, hi = dd_quick_two_sum(d[0], d[1], lo);
+    err = d[2];
+    return DoubleDouble(hi, lo);
+}
+
+// KI-44. exp() taking an extra residual on its argument. Identical to exp()
+// except that `resid` joins the Cody-Waite subtraction chain: |s0| <= ln2/2 =
+// 0.347 and |resid| <= |a|*2^-106, so the fold rounds at ~2^-107.5 -- about
+// 0.18 ulps of the result, against the ~0.5-1 ulp an extra multiply(E, 1+e)
+// would cost, with no branch.
+//
+// The body is duplicated from exp() rather than exp() being re-expressed as
+// dd_exp_ext(a, 0.0): exp() is defined ~1000 lines above the expansion helpers
+// this file places below pow, and reordering it is a larger and riskier diff
+// than one duplicated body. Keep the two in step.
+XPMATH_INLINE_FUNCTION DoubleDouble dd_exp_ext(DoubleDouble a, double resid) {
+    const int nq = 6;
+    const double eps = 1.0e-32;
+    DoubleDouble al2 = DoubleDouble_log2();
+    if (a.hi > 709.78271289338397) {
+        XPMATH_PRINTF("DDEXP: overflow\n");
+        return DoubleDouble(HUGE_VAL);
+    }
+    if (a.hi < -745.2) return DoubleDouble(0.0);
+
+    DoubleDouble s0 = divide(a, al2);
+    DoubleDouble s1 = round_to_nearest_int(s0);
+    const double t1 = s1.hi;
+    const int    nz = (int)(t1 + detail::copysign(1.0e-14, t1));
+
+    const double kLn2_1 =  0x1.62e42fefa38p-1;
+    const double kLn2_2 =  0x1.ef35793c768p-45;
+    const double kLn2_3 = -0x1.9ff0342543p-90;
+    const double kd = t1;
+    s0 = subtract(a,  DoubleDouble(kd * kLn2_1));
+    s0 = subtract(s0, DoubleDouble(kd * kLn2_2));
+    s0 = subtract(s0, DoubleDouble(kd * kLn2_3));
+    if (resid != 0.0) s0 = add(s0, DoubleDouble(resid));
+
+    // With a residual the result is 2^nz only if BOTH words vanish; exp()'s
+    // `s0.hi == 0.0` test is not sufficient here.
+    if (s0.hi == 0.0 && s0.lo == 0.0) return DoubleDouble(detail::ldexp(1.0, nz));
+
+    s1 = multiply_scalar(s0, detail::ldexp(1.0, -nq));
+    DoubleDouble s2 = s1, s3 = s1;
+    for (int l1 = 2; l1 <= 100; ++l1) {
+        s0 = multiply(s2, s1);
+        s2 = divide_scalar(s0, (double)l1);
+        s0 = add(s3, s2);
+        s3 = s0;
+        if (detail::fabs(s2.hi) <= eps * detail::fabs(s3.hi)) break;
+    }
+    for (int i = 0; i < nq; ++i) s3 = multiply(s3, add(s3, DoubleDouble(2.0)));
+    s3 = add(DoubleDouble(1.0), s3);
+    if (nz >= -1021 && nz <= 1023) {
+        const double pow2 = detail::ldexp(1.0, nz);
+        return DoubleDouble(s3.hi * pow2, s3.lo * pow2);
+    }
+    return DoubleDouble(detail::ldexp(s3.hi, nz), detail::ldexp(s3.lo, nz));
+}
+
+}  // namespace detail
+
 XPMATH_INLINE_FUNCTION DoubleDouble fma(DoubleDouble a, DoubleDouble b, DoubleDouble c) {
     // Non-finite operands, and products that overflow, keep the old path so
     // that the KI-19/25/26/27 inf/NaN behaviour is untouched.
