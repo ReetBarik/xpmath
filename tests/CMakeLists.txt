@@ -463,6 +463,23 @@ add_test(NAME exp_reduction_selftest
          COMMAND ${CMAKE_SOURCE_DIR}/validation/exp_reduction_selftest.sh
                  ${CMAKE_CURRENT_BINARY_DIR})
 
+# Payne-Hanek argument reduction: does the engine in include/xp/trig_reduction.hpp
+# return the exact quadrant and a fraction within one ulp at the inputs that
+# make the shipped table and guard work hardest? Links MPFR because it computes
+# its own 4000-bit ground truth rather than citing a number it cannot check --
+# see the header comment for why that distinction matters here. No accuracy
+# verdict on sin/cos/tan: this scores the reduction, which the sweep cannot see.
+add_executable(trig_reduction_test trig_reduction_test.cpp)
+target_include_directories(trig_reduction_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(trig_reduction_test PRIVATE mpfr gmp)
+add_test(NAME trig_reduction_test COMMAND trig_reduction_test)
+
+# ... and the self-test that proves it can fail: four poisons, plus a check
+# that the committed table is byte-identical to what the generator emits.
+add_test(NAME trig_reduction_selftest
+         COMMAND ${CMAKE_SOURCE_DIR}/validation/trig_reduction_selftest.sh
+                 ${CMAKE_CURRENT_BINARY_DIR})
+
 # The generated domain document must be what the generator currently emits from
 # the committed baseline. Pure Python, well under a second, no build products.
 add_test(NAME domains_fresh
