@@ -94,6 +94,23 @@
 //                     asin/acos/atanh, approached geometrically rather than in
 //                     ulps, so the whole ramp is sampled and not just its foot.
 //
+//   [1652, 1700)  (5) HARD CASES FOR ARGUMENT REDUCTION. 24 anchors, both signs.
+//                     x whose reduced argument x mod pi/2 is anomalously tiny,
+//                     from the continued-fraction convergents of 2/pi. Reducing
+//                     such an x cancels log2(|x|/|x mod pi/2|) bits, so a
+//                     reduction carrying only p bits of pi returns nothing
+//                     correct. NO uniformly-spaced grid lands on them: family
+//                     (3) bottoms out near 2^-40, these reach 2^-60.9, and the
+//                     defect lives in between.
+//
+//                     This family exists because the grid was BLIND to the one
+//                     thing exact reduction is for. Measured on the shipped
+//                     naive reduction before it was added: sin(pi) scored 15.42
+//                     of DD's 31 digits and 0.00 of FF's 14; at the published
+//                     FP64 worst case 6381956970095103*2^797 all four backends
+//                     emit "argument too large" and return nothing correct.
+//                     Both gates reported PASS throughout.
+//
 // COMPLEX GRID (1472 points), two families:
 //
 //   [0, 384)      (1) POLAR. |z| in { 1e-8, 1e-4, 0.5, 0.9, 0.99, 1, 1.01, 1.1,
@@ -434,6 +451,54 @@ std::vector<GridPoint> build_real_grid() {
     g.push_back({-1.0 + d, 0.0, "near1"});
     g.push_back({ 1.0 + d, 0.0, "near1"});
     g.push_back({-1.0 - d, 0.0, "near1"});
+  }
+  // (5) HARD CASES FOR ARGUMENT REDUCTION -- 24 anchors, both signs.
+  //
+  //     x whose reduced argument x mod pi/2 is anomalously tiny, taken from
+  //     the continued-fraction convergents of 2/pi. Reducing such an x
+  //     cancels log2(|x|/|x mod pi/2|) bits, so a reduction carrying only
+  //     p bits of pi returns nothing correct -- and NO uniformly-spaced grid
+  //     lands on them. Family (3) reaches about 2^-40 at its best; these go
+  //     to 2^-61, which is where the defect actually lives.
+  //
+  //     Measured on the shipped naive reduction BEFORE this family existed:
+  //     sin(3.14159265358979) scored 15.42 of DD's 31 digits and 0.00 of
+  //     FF's 14; at the published worst case 6381956970095103*2^797 all four
+  //     backends emit "argument too large" and return nothing correct.
+  //     None of it was visible to the 428,592-point grid.
+  //
+  //     Hex literals: the input must be bit-exact, not decimal-parsed.
+  {
+    static const double kHard[] = {
+      0x1.921fb54442d18p+0,    // 1.5708       log2|r| =  -53.9
+      0x1.921fb54442d18p+1,    // 3.14159      log2|r| =  -52.9
+      0x1.5fdbbe9bba775p+3,    // 10.9956      log2|r| =  -51.1
+      0x1.5801201165294p+8,    // 344.004      log2|r| =  -46.1
+      0x1.94d600033aacep+15,   // 51819        log2|r| =  -39.9
+      0x1.fcd1800015de1p+17,   // 260515       log2|r| =  -36.8
+      0x1.17e27fffff624p+19,   // 573204       log2|r| =  -34.0
+      0x1.4ac55bfffffd7p+22,   // 5.41935e+06  log2|r| =  -35.8
+      0x1.4665d1ffffffep+25,   // 4.27816e+07  log2|r| =  -28.2
+      0x1.d4ec654p+26,         // 1.22925e+08  log2|r| =  -28.3
+      0x1.fdb91f8p+28,         // 5.34483e+08  log2|r| =  -30.8
+      0x1.6fa37476p+31,        // 3.08398e+09  log2|r| =  -33.6
+      0x1.39b821694p+34,       // 2.10533e+10  log2|r| =  -39.1
+      0x1.a41fc970f8p+39,      // 9.0221e+11   log2|r| =  -40.8
+      0x1.38a466d1e78p+41,     // 2.68558e+12  log2|r| =  -42.4
+      0x1.04bd49b47d2p+43,     // 8.95894e+12  log2|r| =  -45.4
+      0x1.dbd58768f97p+45,     // 6.53981e+13  log2|r| =  -46.0
+      0x1.fc6d309f8914p+46,    // 1.39755e+14  log2|r| =  -47.0
+      0x1.8577cec54ab8p+47,    // 2.14112e+14  log2|r| =  -51.8
+      0x1.5cba89af1f855p+52,   // 6.1349e+15   log2|r| =  -53.2
+      0x1.56a4aa740a5a7p+53,   // 1.20557e+16  log2|r| =  -53.7
+      0x1.888ecd2edf9ccp+503,  // 4.01561e+151  log2|r| =   -8.3
+      0x1.88451b1af0ca3p+658,  // 1.83266e+198  log2|r| =  -10.1
+      0x1.6ac5b262ca1ffp+849,  // 5.31937e+255  log2|r| =  -60.9
+    };
+    for (size_t i = 0; i < sizeof(kHard)/sizeof(kHard[0]); ++i) {
+      g.push_back({ kHard[i], 0.0, "hardred"});
+      g.push_back({-kHard[i], 0.0, "hardred"});
+    }
   }
   return g;
 }
@@ -1478,6 +1543,7 @@ Range range_float(int limbs) {
 // An fmod whose integral quotient the format cannot resolve is charged its
 // honest absolute error, one modulus |b|, which is >= |f| by definition of a
 // remainder — so the bound reaches 2^p and clause 4 fires by arithmetic.
+
 bool out_of_format(__float128 v, const Range& rg) {
   if (v == 0) return false;                      // exact zero is representable
   if (!finiteq(v)) return true;
@@ -1747,6 +1813,9 @@ struct UlpCtx {
   // terms the sweep uses, for one complex grid point on every backend.
   const char*           dump_op = nullptr;
   int                   dump_point = -1;
+  // --dump-terms: for every scored row whose DERIVED bound exceeds 2^p, print
+  // the terms that produced it. Diagnostic; changes no verdict.
+  bool                  dump_terms = false;
   // --ulp-explain OP:POINT — record the full breakdown for one grid point on
   // every backend, pass or fail. This is the microscope the metric is argued
   // with; without it a claim about a single point cannot be reproduced.
@@ -1884,7 +1953,19 @@ void sweep_real(int id, const std::vector<GridPoint>& grid,
           ++cell.n;
           continue;
         }
-        const double ratio = (exp_u > 0.0) ? m / exp_u : HUGE_VAL;
+        // Judged against the CLAMPED bound: a derivation that exceeds total
+        // loss is not a bound (see point_unresolved). The CSV still records
+        // exp_u itself, so the clamp is visible rather than baked in.
+        if (ux->dump_terms && exp_u > std::exp2((double)sb_bits)) {
+          std::printf("TERMS %s r %s %d ulps=%.6g bound=%.6g res=%.6g "
+                      "kappa=%.6g in_delta=%.6g kappa_int=%.6g gain=%.6g "
+                      "abs_floor=%.6g tl=%.6g\n",
+                      B::name(), kReal[id].name, int(i), m, exp_u,
+                      bd.res, bd.kappa, bd.in_delta, bd.kappa_int, bd.gain,
+                      bd.abs_floor, std::exp2((double)sb_bits));
+        }
+        const double gate_u = exp_u;
+        const double ratio = (gate_u > 0.0) ? m / gate_u : HUGE_VAL;
         ++ucell.n_scored; row_.state = 'S'; row_.bound = exp_u;
         // --dump-operands for the REAL realm. The complex loop has carried this
         // since the metric was first argued; the real loop never did, so a real
@@ -2044,7 +2125,16 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
                                rg, sb_bits)) {
             ++ucell.n_unresolved; row_.state = 'U';
           } else {
-            const double ratio = (bd.value > 0.0) ? m / bd.value : HUGE_VAL;
+            if (ux->dump_terms && bd.value > std::exp2((double)sb_bits)) {
+              std::printf("TERMS %s c %s %d ulps=%.6g bound=%.6g res=%.6g "
+                          "kappa=%.6g in_delta=%.6g kappa_int=%.6g gain=%.6g "
+                          "abs_floor=%.6g tl=%.6g\n",
+                          B::name(), kComplex[id].name, int(i), m, bd.value,
+                          bd.res, bd.kappa, bd.in_delta, bd.kappa_int, bd.gain,
+                          bd.abs_floor, std::exp2((double)sb_bits));
+            }
+            const double gate_v = bd.value;
+            const double ratio = (gate_v > 0.0) ? m / gate_v : HUGE_VAL;
             ++ucell.n_scored; row_.state = 'S';
             if (ratio > ucell.worst_ratio) {
               ucell.worst_ratio = ratio;  ucell.worst_point    = int(i);
@@ -2764,6 +2854,7 @@ int main(int argc, char** argv) {
   // explicit --out.
   std::string out, grid_out, baseline, explain_op, ulp_dump, dump_op;
   int dump_point = -1;
+  bool dump_terms = false;
   std::string ulp_register;
   uint64_t    seed = kDefaultSeed;
   bool        quiet = false, out_set = false, ulp_gate = false;
@@ -2784,6 +2875,7 @@ int main(int argc, char** argv) {
     else if (s == "--ulp-allowance") { ulp_allowance = std::atof(need("--ulp-allowance")); }
     else if (s == "--ulp-dump") { ulp_dump = need("--ulp-dump"); }
     else if (s == "--register") { ulp_register = need("--register"); ulp_gate = true; }
+    else if (s == "--dump-terms") { dump_terms = true; ulp_gate = true; }
     else if (s == "--dump-operands") {
       const std::string v = need("--dump-operands");
       const size_t colon = v.rfind(':');
@@ -2828,7 +2920,7 @@ int main(int argc, char** argv) {
   std::vector<UlpFail>  ulp_fails, ulp_explains;
   UlpCtx                ux = {ulp_allowance, &ulp_cells, &ulp_fails,
                               dump_op.empty() ? nullptr : dump_op.c_str(),
-                              dump_point,
+                              dump_point, dump_terms,
                               explain_op.c_str(), explain_point,
                               explain_point >= 0 ? &ulp_explains : nullptr};
   // The ulp verdict is now THE measurement, not a mode: every run computes it,
