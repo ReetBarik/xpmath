@@ -386,7 +386,9 @@ add_executable(sweep_accuracy ${CMAKE_SOURCE_DIR}/scripts/sweep_accuracy.cpp)
 target_include_directories(sweep_accuracy PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_compile_features(sweep_accuracy PRIVATE cxx_std_17)
 target_compile_options(sweep_accuracy PRIVATE -fext-numeric-literals)
-target_link_libraries(sweep_accuracy PRIVATE quadmath)
+# MPFR is the alternate oracle (--oracle=mpfr): libquadmath mis-reduces
+# trig above ~1e40, so large-|x| rows need a reference that does not.
+target_link_libraries(sweep_accuracy PRIVATE quadmath mpfr gmp)
 
 add_test(NAME sweep_absolute_gate
          COMMAND sweep_accuracy --ulp

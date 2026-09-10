@@ -247,6 +247,7 @@
 #include "../include/xp/tf_complex.hpp"
 
 #include <quadmath.h>
+#include <mpfr.h>
 
 #include <cmath>
 #include <cstdint>
@@ -309,8 +310,12 @@ uint64_t stream_seed(uint64_t base, const char* name, unsigned kind) {
 // complex inverse functions, which is where the two libquadmath builds on this
 // machine actually differ.
 // ---------------------------------------------------------------------------
+extern bool g_oracle_mpfr;
 uint64_t oracle_fingerprint() {
-  uint64_t h = 1469598103934665603ull;
+  // Seeded by WHICH oracle is in use: an MPFR-scored baseline and a
+  // libquadmath-scored one are not comparable, and the fingerprint is the
+  // mechanism that says so.
+  uint64_t h = g_oracle_mpfr ? 0xc3a5c85c97cb3127ull : 1469598103934665603ull;
   auto mix = [&h](__float128 v) {
     unsigned char b[sizeof(__float128)];
     std::memcpy(b, &v, sizeof(b));
@@ -695,10 +700,111 @@ __float128 round_ties_even_q(__float128 a) {
   return t + copysignq((__float128)1.0, a);
 }
 
+// ---------------------------------------------------------------------------
+// MPFR ORACLE (real path only), enabled with --oracle=mpfr.
+//
+// libquadmath's argument reduction fails above ~1e40: measured against MPFR at
+// 400 bits, sinq/cosq/tanq are clean at 1e40 and wrong by ~1e34 ulps at 1e60
+// and beyond. Since ulps_scalar treats the oracle as exact, every trig row at
+// family (5) magnitudes (to 5.32e255) is currently scored against a broken
+// reference, and a correct implementation would read as a regression.
+//
+// 400 bits is >3x the 113-bit format under test and matches the precision used
+// by every probe in this arc.
+//
+// REAL ONLY. MPFR has no complex type; complex stays on libquadmath rather
+// than pulling in MPC or hand-rolling branch cuts.
+__float128 reference_real_q_quad(int id, __float128 a, __float128 b, __float128 c);
+static const mpfr_prec_t kOraclePrec = 400;
+bool g_oracle_mpfr = false;
+
+// __float128 <-> mpfr without going through double. quadmath_snprintf at 40
+// significant digits round-trips p=113 exactly (113 bits ~ 34.0 decimal
+// digits), and mpfr_get_str/strtoflt128 does the same in reverse.
+void q_to_mpfr(mpfr_t out, __float128 v) {
+  char buf[160];
+  quadmath_snprintf(buf, sizeof buf, "%.40Qe", v);
+  mpfr_set_str(out, buf, 10, MPFR_RNDN);
+}
+__float128 mpfr_to_q(mpfr_srcptr v) {
+  if (mpfr_nan_p(v))  return nanq("");
+  if (mpfr_inf_p(v))  return mpfr_sgn(v) > 0 ?  HUGE_VALQ : -HUGE_VALQ;
+  char* s = nullptr;
+  mpfr_exp_t e = 0;
+  s = mpfr_get_str(nullptr, &e, 10, 45, v, MPFR_RNDN);
+  if (!s) return (__float128)0;
+  // mpfr_get_str gives a mantissa string and a base-10 exponent: value is
+  // 0.<digits> * 10^e. Rebuild that as a parseable literal.
+  const bool neg = (s[0] == '-');
+  const char* digits = neg ? s + 1 : s;
+  char buf[192];
+  std::snprintf(buf, sizeof buf, "%s0.%sE%ld", neg ? "-" : "", digits, (long)e);
+  mpfr_free_str(s);
+  return strtoflt128(buf, nullptr);
+}
+
+__float128 reference_real_mpfr(int id, __float128 a, __float128 b, __float128 c) {
+  mpfr_t ma, mb, mc, r;
+  mpfr_inits2(kOraclePrec, ma, mb, mc, r, (mpfr_ptr)0);
+  q_to_mpfr(ma, a); q_to_mpfr(mb, b); q_to_mpfr(mc, c);
+  bool handled = true;
+
+  switch (id) {
+    case R_Add:       mpfr_add(r, ma, mb, MPFR_RNDN); break;
+    case R_Sub:       mpfr_sub(r, ma, mb, MPFR_RNDN); break;
+    case R_Mul:       mpfr_mul(r, ma, mb, MPFR_RNDN); break;
+    case R_Div:       mpfr_div(r, ma, mb, MPFR_RNDN); break;
+    case R_Sqrt:      mpfr_sqrt(r, ma, MPFR_RNDN); break;
+    case R_Abs:       mpfr_abs(r, ma, MPFR_RNDN); break;
+    case R_Exp:       mpfr_exp(r, ma, MPFR_RNDN); break;
+    case R_Log:       mpfr_log(r, ma, MPFR_RNDN); break;
+    case R_Exp2:      mpfr_exp2(r, ma, MPFR_RNDN); break;
+    case R_Exp10:     mpfr_exp10(r, ma, MPFR_RNDN); break;
+    case R_Expm1:     mpfr_expm1(r, ma, MPFR_RNDN); break;
+    case R_Log2:      mpfr_log2(r, ma, MPFR_RNDN); break;
+    case R_Log10:     mpfr_log10(r, ma, MPFR_RNDN); break;
+    case R_Log1p:     mpfr_log1p(r, ma, MPFR_RNDN); break;
+    case R_Sin:       mpfr_sin(r, ma, MPFR_RNDN); break;
+    case R_Cos:       mpfr_cos(r, ma, MPFR_RNDN); break;
+    case R_Tan:       mpfr_tan(r, ma, MPFR_RNDN); break;
+    case R_Asin:      mpfr_asin(r, ma, MPFR_RNDN); break;
+    case R_Acos:      mpfr_acos(r, ma, MPFR_RNDN); break;
+    case R_Atan:      mpfr_atan(r, ma, MPFR_RNDN); break;
+    case R_Sinh:      mpfr_sinh(r, ma, MPFR_RNDN); break;
+    case R_Cosh:      mpfr_cosh(r, ma, MPFR_RNDN); break;
+    case R_Tanh:      mpfr_tanh(r, ma, MPFR_RNDN); break;
+    case R_Acosh:     mpfr_acosh(r, ma, MPFR_RNDN); break;
+    case R_Asinh:     mpfr_asinh(r, ma, MPFR_RNDN); break;
+    case R_Atanh:     mpfr_atanh(r, ma, MPFR_RNDN); break;
+    case R_Pow:       mpfr_pow(r, ma, mb, MPFR_RNDN); break;
+    case R_Hypot:     mpfr_hypot(r, ma, mb, MPFR_RNDN); break;
+    case R_Fmod:      mpfr_fmod(r, ma, mb, MPFR_RNDN); break;
+    case R_Remainder: mpfr_remainder(r, ma, mb, MPFR_RNDN); break;
+    case R_Fma:       mpfr_fma(r, ma, mb, mc, MPFR_RNDN); break;
+    case R_Ceil:      mpfr_ceil(r, ma); break;
+    case R_Floor:     mpfr_floor(r, ma); break;
+    case R_Trunc:     mpfr_trunc(r, ma); break;
+    case R_Round:     mpfr_rint(r, ma, MPFR_RNDN); break;   // ties-to-even, KI-37
+    default:          handled = false; break;               // sign/select ops
+  }
+
+  __float128 out;
+  if (handled) {
+    out = mpfr_to_q(r);
+  } else {
+    // copysign/fmax/fmin/fdim are exact bit operations with no rounding to
+    // improve on; defer to libquadmath rather than reimplement their corner
+    // cases (signed zero, NaN propagation) in a second place.
+    out = reference_real_q_quad(id, a, b, c);
+  }
+  mpfr_clears(ma, mb, mc, r, (mpfr_ptr)0);
+  return out;
+}
+
 // The quad-argument form. --classify needs to evaluate the oracle at PERTURBED
 // inputs, which are quad and not exactly representable as double, so the body
 // lives here and the double entry point below just widens and forwards.
-__float128 reference_real_q(int id, __float128 a, __float128 b, __float128 c) {
+__float128 reference_real_q_quad(int id, __float128 a, __float128 b, __float128 c) {
   switch (id) {
     case R_Add:       return a + b;
     case R_Sub:       return a - b;
@@ -741,6 +847,13 @@ __float128 reference_real_q(int id, __float128 a, __float128 b, __float128 c) {
     case R_Trunc:     return truncq(a);
   }
   return (__float128)0.0;
+}
+
+// Oracle dispatch. Default is libquadmath so this change records no different
+// number until --oracle=mpfr is asked for explicitly.
+__float128 reference_real_q(int id, __float128 a, __float128 b, __float128 c) {
+  return g_oracle_mpfr ? reference_real_mpfr(id, a, b, c)
+                       : reference_real_q_quad(id, a, b, c);
 }
 
 __float128 reference_real(int id, double da, double db, double dc) {
@@ -2977,6 +3090,12 @@ void usage(const char* argv0) {
     "  --out PATH        write the baseline CSV here. No default: without this\n"
     "                    flag nothing is written.\n"
     "  --grid-out PATH   also write the grid manifest here\n"
+    "  --oracle WHICH    quadmath (default) or mpfr. libquadmath's own argument\n"
+    "                    reduction fails above ~1e40 (measured: clean at 1e40,\n"
+    "                    ~1e34 ulps wrong at 1e60+), so trig rows at family (5)\n"
+    "                    magnitudes are scored against a broken reference.\n"
+    "                    --oracle=mpfr uses MPFR at 400 bits for the REAL path;\n"
+    "                    complex stays on libquadmath.\n"
     "  --seed N          RNG seed for the derived operands (default %llu)\n"
     "  --summary         print the per-(backend, op) table (implied unless --quiet)\n"
     "  --quiet           suppress the per-(backend, op) table\n"
@@ -3033,6 +3152,12 @@ int main(int argc, char** argv) {
     if (s == "--help" || s == "-h") { usage(argv[0]); return 0; }
     else if (s == "--out")       { out = need("--out"); out_set = true; }
     else if (s == "--grid-out")  { grid_out = need("--grid-out"); }
+    else if (s == "--oracle") {
+      const std::string v = need("--oracle");
+      if (v == "mpfr")           g_oracle_mpfr = true;
+      else if (v == "quadmath")  g_oracle_mpfr = false;
+      else { std::fprintf(stderr, "--oracle must be quadmath or mpfr\n"); return 2; }
+    }
     else if (s == "--baseline")  { baseline = need("--baseline"); }
     else if (s == "--ulp")       { ulp_gate = true; }
     else if (s == "--ulp-allowance") { ulp_allowance = std::atof(need("--ulp-allowance")); }
