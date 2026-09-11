@@ -753,7 +753,18 @@ XPMATH_INLINE_FUNCTION TripleFloat xp_asin_imag_mag(TripleFloat x, TripleFloat y
 // sign of x on BOTH sides -- which is what C99 Annex G asks for, so the KI-5(d)
 // sheet-selection block the old body needed is not merely unnecessary here, it
 // has nothing left to select.
-XPMATH_INLINE_FUNCTION TripleFloat xp_asin_real_mag(TripleFloat x, TripleFloat y) {
+//
+// SPLIT IN TWO. The leg sqrt(a^2 - x^2) is returned on its own because Re asin
+// and Re acos are the SAME two atan2 arguments in the opposite order:
+//     Re asin = atan2(x, sqrt(a^2 - x^2))
+//     Re acos = atan2(sqrt(a^2 - x^2), x)
+// so acos() below gets this entire cancellation-free construction for free. Both
+// callers must pass x = |Re z| and y = |Im z|: the (max(1,x) - x) term above is
+// derived for x >= 0 and is wrong for negative x. That costs acos nothing,
+// because a is EVEN in x -- x -> -x swaps r and s -- so the leg is even too and
+// the quadrant comes from the SIGNED Re z in acos's atan2 alone, with no case
+// split. xp_asin_real_mag() is left as the atan2 wrapper so asin is unchanged.
+XPMATH_INLINE_FUNCTION TripleFloat xp_asin_real_leg(TripleFloat x, TripleFloat y) {
     const TripleFloat one(1.0f);
     const TripleFloat xp1  = add(x, one);
     const TripleFloat xm1s = subtract(x, one);            // signed, for the max(1,x) term
@@ -781,7 +792,10 @@ XPMATH_INLINE_FUNCTION TripleFloat xp_asin_real_mag(TripleFloat x, TripleFloat y
     // root of it cost QF 3.58 digits (29.00 -> 25.42) before this line existed.
     const TripleFloat sax = xlt1 ? sqrt(amx) : multiply(y, sqrt(v));
     const TripleFloat apx = add(multiply_scalar(add(r, s_), 0.5f), x);   // a + x
-    return atan2(x, multiply(sax, sqrt(apx)));
+    return multiply(sax, sqrt(apx));
+}
+XPMATH_INLINE_FUNCTION TripleFloat xp_asin_real_mag(TripleFloat x, TripleFloat y) {
+    return atan2(x, xp_asin_real_leg(x, y));
 }
 // |Re z| and |Im z|, the two arguments xp_asin_imag_mag() wants. Split out so
 // asin/acosh/asinh cannot disagree about them.
