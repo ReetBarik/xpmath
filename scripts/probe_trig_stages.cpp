@@ -69,14 +69,79 @@
 // shows the form cannot be run at any q: nint(a/2pi) is off by 2^909 at the
 // table pin, tracking log2|n| - 106, because the QUOTIENT cannot hold n.
 //
+// A fourth mode, `--fp32`, does for QF and TF what the default mode does for
+// DD.  It exists because Payne-Hanek left QF -- and only QF -- above its
+// format floor at grid family (5): 22.8 ulps for cos and tan at the FP64 pi/2
+// (sweep point 1652) and 405 ulps for sin and tan at 182.21 (point 1160),
+// where TF scores 0.86 and DD 0.98 on the same inputs.  22.8 ulps passes its
+// derived bound of 5.739e17 by seventeen orders of magnitude -- every one of
+// these points is a near-zero of the function -- so none is a gate failure,
+// but it is not the format's floor either, and "QF is worse than TF" is the
+// kind of result that must be attributed rather than documented.
+//
+// It is NOT the reduction.  MEASURED, 2026-09-11:
+//
+//   point           log2|x/r|   pio2    fr    r_mod   r_best   deficit
+//   1652  pi/2          54.51  103.87  96.59   94.55   96.17      1.62
+//   1160  182.21        66.00  103.87  92.45   95.46   95.46      0.00
+//    870  91.106        66.00  103.87  92.45   90.56   90.56      0.00
+//
+// r_best is the best a QuadFloat can represent of the exact r_mod, so the
+// deficit column is what Payne-Hanek costs over a perfect reduction: zero at
+// two of the three points and 1.62 bits at the third.  That cannot produce a
+// 4.8-bit error.
+//
+// It IS the nq scale-down/double-back, and the nq sweep proves it by holding
+// the reduction bit-identical across every arm:
+//
+//   point            nq=0    1     2     3     4     5(ship)  6     7
+//   1652  pi/2      110.3 110.3 110.3  93.1  93.1   91.6    90.8  90.8
+//   1160  182.21    119.6  90.5  90.5  90.5  87.7   87.3    86.0  85.2
+//    870  91.106    121.6  89.5  89.5  87.9  87.2   86.1    85.1  85.1
+//
+// The loss grows as |r| shrinks, which is the FP32 subnormal floor being
+// reached by the SCALED intermediates: u = r_mod/2^nq puts a QuadFloat's
+// fourth limb at 2^(e-nq-72), under FLT_MIN = 2^-126 once e < -49, and u^2
+// lower still.  Worst of 64 random full-width r per row, with the mean count
+// of subnormal limbs the arm actually touched, and TF (nq=4) for contrast:
+//
+//   log2|r|   QF nq=0  sub    QF nq=5  sub     loss    TF nq=4
+//     -32       99.91  3.7      97.99  3.5      1.92      72.31
+//     -44       99.35  5.2      98.71  9.3      0.64      88.60
+//     -48       99.54  4.1      97.06 12.4      2.49      96.59
+//     -52      104.59  5.0      93.31 24.3     11.28     104.59
+//     -56      112.59  5.0      89.24 201.9    23.35     112.59
+//     -64      128.59 201.4     80.94 196.3    47.65     128.59
+//
+// The nq=0 and TF columns rise above p because sin(r) -> r as r shrinks, so
+// the answer is very nearly the input and almost nothing is left to get wrong;
+// that is the shape the shipped arm should have and does not.  TF matching the
+// nq=0 column exactly from -52 down is the same effect, not TF beating QF at
+// arithmetic -- but it is why TF scores 0.86 ulps at point 1652 where QF
+// scores 22.8.
+//
+// Read that correlation carefully: subnormal limbs are NOT sufficient on their
+// own.  The nq=0 arm touches just as many at the bottom of the range (201 at
+// 2^-64) and loses nothing, because there they sit in the r^3/6 tail terms.
+// What costs bits is subnormal limbs in u and u^2 THEMSELVES, which the
+// doublings then scale back up by 2^nq.  So: proven at the nq level, and
+// consistent with -- not proven to be -- the subnormal floor at the limb level.
+//
+// Holding nq at 5 is a series-stage question, the same one the DD nq sweep
+// above raises, and it is deliberately left to the series phase.  Recorded
+// here so that phase starts from a measurement instead of a hypothesis.
+//
 // Build (needs MPFR; not part of the CMake build):
 //   g++ -O2 -std=c++17 -fext-numeric-literals -I include \
 //       scripts/probe_trig_stages.cpp -o /tmp/probe_trig_stages -lmpfr -lgmp
 //   /tmp/probe_trig_stages -10000 1.75 -7.65 182.21237390820801
 //   /tmp/probe_trig_stages --range 1e60 1.7976931348623157e308 4000
 //   /tmp/probe_trig_stages --widen
+//   /tmp/probe_trig_stages --fp32
 
 #include <xp/dd_math.hpp>
+#include <xp/qf_math.hpp>
+#include <xp/tf_math.hpp>
 
 #include <mpfr.h>
 
@@ -348,17 +413,282 @@ static int range_mode(double lo, double hi, long n) {
     return 0;
 }
 
+// ---------------------------------------------------------------------------
+// --fp32 : the same stage attribution for QF and TF.
+// ---------------------------------------------------------------------------
+
+static double bits_of(mpfr_srcptr exact, const QuadFloat& v) {
+    mpfr_t e;
+    mpfr_init2(e, kPrec);
+    mpfr_set_flt(e, v.f0, MPFR_RNDN);
+    mpfr_add_d(e, e, (double)v.f1, MPFR_RNDN);
+    mpfr_add_d(e, e, (double)v.f2, MPFR_RNDN);
+    mpfr_add_d(e, e, (double)v.f3, MPFR_RNDN);
+    mpfr_sub(e, e, exact, MPFR_RNDN);
+    const double r = log2abs(exact) - log2abs(e);
+    mpfr_clear(e);
+    return r;
+}
+
+static double bits_of(mpfr_srcptr exact, const TripleFloat& v) {
+    mpfr_t e;
+    mpfr_init2(e, kPrec);
+    mpfr_set_flt(e, v.f0, MPFR_RNDN);
+    mpfr_add_d(e, e, (double)v.f1, MPFR_RNDN);
+    mpfr_add_d(e, e, (double)v.f2, MPFR_RNDN);
+    mpfr_sub(e, e, exact, MPFR_RNDN);
+    const double r = log2abs(exact) - log2abs(e);
+    mpfr_clear(e);
+    return r;
+}
+
+// The best value the format can hold, by greedy round-to-nearest limb.  This
+// is the reference the reduction is judged against: a PERFECT reduction that
+// still has to land in a QuadFloat scores exactly this.
+static QuadFloat qf_best(mpfr_srcptr v) {
+    mpfr_t t;
+    mpfr_init2(t, kPrec);
+    mpfr_set(t, v, MPFR_RNDN);
+    float c[4];
+    for (int i = 0; i < 4; ++i) {
+        c[i] = mpfr_get_flt(t, MPFR_RNDN);
+        mpfr_sub_d(t, t, (double)c[i], MPFR_RNDN);
+    }
+    mpfr_clear(t);
+    return QuadFloat(c[0], c[1], c[2], c[3]);
+}
+
+static TripleFloat tf_best(mpfr_srcptr v) {
+    mpfr_t t;
+    mpfr_init2(t, kPrec);
+    mpfr_set(t, v, MPFR_RNDN);
+    float c[3];
+    for (int i = 0; i < 3; ++i) {
+        c[i] = mpfr_get_flt(t, MPFR_RNDN);
+        mpfr_sub_d(t, t, (double)c[i], MPFR_RNDN);
+    }
+    mpfr_clear(t);
+    return TripleFloat(c[0], c[1], c[2]);
+}
+
+static int subnormal_limbs(const QuadFloat& v) {
+    const float w[4] = { v.f0, v.f1, v.f2, v.f3 };
+    int n = 0;
+    for (int i = 0; i < 4; ++i)
+        if (w[i] != 0.0f && std::fabs(w[i]) < 1.17549435e-38f) ++n;
+    return n;
+}
+
+// qf_math.hpp:sincos lines 1262-1284, verbatim, with nq lifted to a parameter
+// and a tally of the subnormal limbs the arm touches.  The reduction is NOT
+// part of this: every arm is handed the same r_mod, so nothing the sweep shows
+// can be blamed on Payne-Hanek.
+static void qf_series_nq(QuadFloat r_mod, int nq, QuadFloat& sin_r,
+                         QuadFloat& cos_r, int* sub) {
+    const int   itrmx = 100;
+    const float eps   = 1.0e-28f;
+    if (sub) *sub = 0;
+    QuadFloat r  = mul_pwr2(r_mod, ldexpf(1.0f, -nq));
+    QuadFloat r2 = multiply(r, r);
+    if (sub) *sub += subnormal_limbs(r) + subnormal_limbs(r2);
+    sin_r = r;
+    cos_r = QuadFloat(1.0f);
+    QuadFloat sterm = r, cterm = QuadFloat(1.0f);
+    for (int k = 1; k <= itrmx; ++k) {
+        sterm = divide_scalar(multiply(sterm, r2), -(float)((2*k) * (2*k + 1)));
+        sin_r = add(sin_r, sterm);
+        cterm = divide_scalar(multiply(cterm, r2), -(float)((2*k - 1) * (2*k)));
+        cos_r = add(cos_r, cterm);
+        if (sub) *sub += subnormal_limbs(sterm) + subnormal_limbs(sin_r)
+                       + subnormal_limbs(cterm) + subnormal_limbs(cos_r);
+        if (detail::fabs(sterm.f0) < eps * detail::fabs(sin_r.f0) &&
+            detail::fabs(cterm.f0) < eps) break;
+    }
+    for (int j = 0; j < nq; ++j) {
+        const QuadFloat ns = mul_pwr2(multiply(sin_r, cos_r), 2.0f);
+        const QuadFloat nc = subtract(multiply(cos_r, cos_r), multiply(sin_r, sin_r));
+        sin_r = ns;
+        cos_r = nc;
+        if (sub) *sub += subnormal_limbs(sin_r) + subnormal_limbs(cos_r);
+    }
+}
+
+// tf_math.hpp:sincos lines 1045-1073, verbatim, with nq lifted.  Note TF
+// divides by 2^nq and squares with sqr(), where QF uses mul_pwr2 and
+// multiply(r,r) -- the arms are each backend's own code, not a shared model.
+static void tf_series_nq(TripleFloat r_mod, int nq, TripleFloat& sin_r,
+                         TripleFloat& cos_r) {
+    TripleFloat r  = divide_scalar(r_mod, float(1 << nq));
+    TripleFloat r2 = sqr(r);
+    sin_r = r;
+    cos_r = TripleFloat(1.0f);
+    TripleFloat term_sin = r, term_cos = TripleFloat(1.0f);
+    int k = 1;
+    while (k < 64 && (abs(term_sin).f0 > 1.0e-21f * abs(sin_r).f0 ||
+                      abs(term_cos).f0 > 1.0e-21f * abs(cos_r).f0)) {
+        term_sin = divide_scalar(multiply(term_sin, r2), -float((2*k) * (2*k+1)));
+        term_cos = divide_scalar(multiply(term_cos, r2), -float((2*k-1) * (2*k)));
+        sin_r = add(sin_r, term_sin);
+        cos_r = add(cos_r, term_cos);
+        k++;
+    }
+    for (int i = 0; i < nq; i++) {
+        TripleFloat s = multiply(sin_r, cos_r);
+        s = add(s, s);
+        const TripleFloat c = subtract(sqr(cos_r), sqr(sin_r));
+        sin_r = s;
+        cos_r = c;
+    }
+}
+
+static int fp32_mode() {
+    mpfr_t PIO2, X, F, N, R, HP, T;
+    mpfr_inits2(kPrec, PIO2, X, F, N, R, HP, T, (mpfr_ptr)0);
+    mpfr_const_pi(PIO2, MPFR_RNDN);
+    mpfr_div_ui(PIO2, PIO2, 2, MPFR_RNDN);
+    mpfr_set(HP, PIO2, MPFR_RNDN);
+
+    // The three grid points that carry QF's post-Payne-Hanek family-(5) peak.
+    static const struct { const char* label; double x; } kPts[] = {
+        { "1652  pi/2",   1.5707963267948966 },
+        { "1160  182.21", 182.21237390820801 },
+        { " 870  91.106", 91.106186954104004 },
+    };
+
+    std::printf("STAGE SPLIT -- is it the reduction?  (r_best = the best the "
+                "format can hold)\n");
+    std::printf("%-14s %10s %8s %8s %8s %8s %8s\n",
+                "point", "log2|x/r|", "pio2", "fr", "r_mod", "r_best", "deficit");
+    for (const auto& p : kPts) {
+        mpfr_set_d(X, p.x, MPFR_RNDN);
+        mpfr_div(F, X, PIO2, MPFR_RNDN);
+        mpfr_rint(N, F, MPFR_RNDN);
+        mpfr_sub(F, F, N, MPFR_RNDN);
+        mpfr_mul(R, F, PIO2, MPFR_RNDN);
+
+        const QuadFloat a((double)p.x);
+        const float     win[4] = { a.f0, a.f1, a.f2, a.f3 };
+        float           f[5];
+        detail::xp_ph_reduce<float>(win, 4, detail::kPhGuardQF,
+                                    detail::kPhChunksQF, f, 5);
+        QuadFloat pio2 = QuadFloat(detail::xp_ph_pio2_f(0));
+        for (int k = 1; k < detail::kPhPio2WordsF; ++k)
+            pio2 = add(pio2, QuadFloat(detail::xp_ph_pio2_f(k)));
+        QuadFloat fr = QuadFloat(f[0]);
+        for (int k = 1; k < 5; ++k) fr = add(fr, QuadFloat(f[k]));
+        const QuadFloat rmod  = multiply(fr, pio2);
+        const QuadFloat rbest = qf_best(R);
+
+        std::printf("%-14s %10.2f %8.2f %8.2f %8.2f %8.2f %8.2f\n",
+                    p.label, log2abs(X) - log2abs(R), bits_of(HP, pio2),
+                    bits_of(F, fr), bits_of(R, rmod), bits_of(R, rbest),
+                    bits_of(R, rbest) - bits_of(R, rmod));
+    }
+
+    std::printf("\nnq SWEEP -- same r_mod in every arm, so this cannot be the "
+                "reduction.  bits of sin.\n");
+    std::printf("%-14s %8s", "point", "log2|r|");
+    for (int nq = 0; nq <= 7; ++nq) std::printf(" %7s%d", "nq=", nq);
+    std::printf("\n");
+    for (const auto& p : kPts) {
+        mpfr_set_d(X, p.x, MPFR_RNDN);
+        mpfr_div(F, X, PIO2, MPFR_RNDN);
+        mpfr_rint(N, F, MPFR_RNDN);
+        mpfr_sub(F, F, N, MPFR_RNDN);
+        mpfr_mul(R, F, PIO2, MPFR_RNDN);
+        const QuadFloat rbest = qf_best(R);
+        // Reference is sin of the value the series ACTUALLY receives, so the
+        // rounding of r into the format is not charged to the series.
+        mpfr_set_flt(T, rbest.f0, MPFR_RNDN);
+        mpfr_add_d(T, T, (double)rbest.f1, MPFR_RNDN);
+        mpfr_add_d(T, T, (double)rbest.f2, MPFR_RNDN);
+        mpfr_add_d(T, T, (double)rbest.f3, MPFR_RNDN);
+        mpfr_sin(T, T, MPFR_RNDN);
+        std::printf("%-14s %8.2f", p.label, log2abs(R));
+        for (int nq = 0; nq <= 7; ++nq) {
+            QuadFloat s, c;
+            qf_series_nq(rbest, nq, s, c, nullptr);
+            std::printf(" %8.1f", bits_of(T, s));
+        }
+        std::printf("   (QF ships nq=5)\n");
+    }
+
+    // Magnitude scan.  A full-width value neither format can hold exactly:
+    // six random limbs, so QF (4) and TF (3) both have to round.
+    std::printf("\nMAGNITUDE SCAN -- worst of %d full-width r per row.  QF "
+                "nq=0 vs the shipped nq=5,\n", 64);
+    std::printf("with the mean count of subnormal FP32 limbs each arm touched, "
+                "and TF for contrast.\n");
+    std::printf("%-9s %10s %7s %10s %7s %9s %10s\n",
+                "log2|r|", "QF nq=0", "sub", "QF nq=5", "sub", "loss", "TF nq=4");
+    std::mt19937_64 rng(12345);
+    std::uniform_real_distribution<double> um(1.0, 2.0);
+    for (int e = -24; e >= -64; e -= 4) {
+        double w0 = 1e9, w5 = 1e9, wt = 1e9, s0 = 0.0, s5 = 0.0;
+        int    n = 0;
+        for (int trial = 0; trial < 64; ++trial) {
+            mpfr_set_zero(R, 1);
+            for (int i = 0; i < 6; ++i) {
+                mpfr_set_d(T, um(rng), MPFR_RNDN);
+                mpfr_mul_2si(T, T, e - 24 * i, MPFR_RNDN);
+                mpfr_add(R, R, T, MPFR_RNDN);
+            }
+            const QuadFloat   qa = qf_best(R);
+            const TripleFloat ta = tf_best(R);
+
+            mpfr_set_flt(T, qa.f0, MPFR_RNDN);
+            mpfr_add_d(T, T, (double)qa.f1, MPFR_RNDN);
+            mpfr_add_d(T, T, (double)qa.f2, MPFR_RNDN);
+            mpfr_add_d(T, T, (double)qa.f3, MPFR_RNDN);
+            mpfr_sin(T, T, MPFR_RNDN);
+            QuadFloat s, c;
+            int       sub0 = 0, sub5 = 0;
+            qf_series_nq(qa, 0, s, c, &sub0);
+            const double b0 = bits_of(T, s);
+            qf_series_nq(qa, 5, s, c, &sub5);
+            const double b5 = bits_of(T, s);
+
+            mpfr_set_flt(X, ta.f0, MPFR_RNDN);
+            mpfr_add_d(X, X, (double)ta.f1, MPFR_RNDN);
+            mpfr_add_d(X, X, (double)ta.f2, MPFR_RNDN);
+            mpfr_sin(X, X, MPFR_RNDN);
+            TripleFloat ts, tc;
+            tf_series_nq(ta, 4, ts, tc);
+            const double bt = bits_of(X, ts);
+
+            if (b0 < w0) w0 = b0;
+            if (b5 < w5) w5 = b5;
+            if (bt < wt) wt = bt;
+            s0 += sub0;
+            s5 += sub5;
+            ++n;
+        }
+        std::printf("%-9d %10.2f %7.1f %10.2f %7.1f %9.2f %10.2f\n",
+                    e, w0, s0 / n, w5, s5 / n, w0 - w5, wt);
+    }
+    std::printf("\nSubnormal limbs are NOT sufficient on their own: the nq=0 "
+                "arm touches as many at\nthe bottom of the range and loses "
+                "nothing, because there they sit in the r^3/6\ntail.  What "
+                "costs bits is subnormal limbs in u and u^2 themselves, which "
+                "the\ndoublings scale back up by 2^nq.\n");
+
+    mpfr_clears(PIO2, X, F, N, R, HP, T, (mpfr_ptr)0);
+    return 0;
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fprintf(stderr,
                      "usage: probe_trig_stages <x> [x ...]\n"
                      "       probe_trig_stages --range <lo> <hi> <n>\n"
                      "       probe_trig_stages --widen\n"
+                     "       probe_trig_stages --fp32\n"
                      "  bits of each reduction stage, then the nq sweep\n");
         return 2;
     }
     mpfr_set_default_prec(kPrec);
     if (std::string(argv[1]) == "--widen") return widen_mode();
+    if (std::string(argv[1]) == "--fp32")  return fp32_mode();
     if (std::string(argv[1]) == "--range") {
         if (argc != 5) { std::fprintf(stderr, "--range wants <lo> <hi> <n>\n"); return 2; }
         return range_mode(strtod(argv[2], nullptr), strtod(argv[3], nullptr),
