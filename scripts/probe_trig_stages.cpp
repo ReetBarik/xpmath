@@ -131,6 +131,20 @@
 // above raises, and it is deliberately left to the series phase.  Recorded
 // here so that phase starts from a measurement instead of a hypothesis.
 //
+// The same mode also ablates the 0.75 SMALL-ARGUMENT CUT, which the three FP32
+// backends took from dd_math.hpp by inheritance rather than by measuring it.
+// Below the cut sincos sets r_mod = a with j = 0; the question is whether the
+// cut is covering for a weak reduction on those arguments.  It is not.  Over
+// |a| in [0.1, pi/4] the PH branch returns j = 0 at every point -- so it agrees
+// with the cut on the quadrant -- and its r_mod lands at the format floor:
+// QF 98.00 bits or bit-exact, TF 74.49 or bit-exact, FF 47.40 to 54.81.  The
+// one row below its format's p is FF at a = 0.7599, 47.40 against p = 48, i.e.
+// 0.6 bits, which is rounding and not a mechanism.  The cut is therefore a
+// speed-and-exactness choice, not a correctness one.  Whether to widen it to
+// pi/4 is a sweep question and is NOT settled here: dd_math.hpp records that a
+// wider cut was measured to cost complex-op digits, and that is a different
+// quantity from the bits above.
+//
 // Build (needs MPFR; not part of the CMake build):
 //   g++ -O2 -std=c++17 -fext-numeric-literals -I include \
 //       scripts/probe_trig_stages.cpp -o /tmp/probe_trig_stages -lmpfr -lgmp
@@ -140,6 +154,7 @@
 //   /tmp/probe_trig_stages --fp32
 
 #include <xp/dd_math.hpp>
+#include <xp/ff_math.hpp>
 #include <xp/qf_math.hpp>
 #include <xp/tf_math.hpp>
 
@@ -442,6 +457,17 @@ static double bits_of(mpfr_srcptr exact, const TripleFloat& v) {
     return r;
 }
 
+static double bits_of(mpfr_srcptr exact, const FloatFloat& v) {
+    mpfr_t e;
+    mpfr_init2(e, kPrec);
+    mpfr_set_flt(e, v.hi, MPFR_RNDN);
+    mpfr_add_d(e, e, (double)v.lo, MPFR_RNDN);
+    mpfr_sub(e, e, exact, MPFR_RNDN);
+    const double r = log2abs(exact) - log2abs(e);
+    mpfr_clear(e);
+    return r;
+}
+
 // The best value the format can hold, by greedy round-to-nearest limb.  This
 // is the reference the reduction is judged against: a PERFECT reduction that
 // still has to land in a QuadFloat scores exactly this.
@@ -671,6 +697,78 @@ static int fp32_mode() {
                 "nothing, because there they sit in the r^3/6\ntail.  What "
                 "costs bits is subnormal limbs in u and u^2 themselves, which "
                 "the\ndoublings scale back up by 2^nq.\n");
+
+    // ---- the 0.75 cut -----------------------------------------------------
+    // The FP32 backends inherited this threshold from dd_math.hpp rather than
+    // measuring it.  Below it sincos sets r_mod = a with j = 0, which is exact
+    // and correct for any cut below pi/4 = 0.785398.  The question the cut
+    // raises is whether Payne-Hanek is WEAK on these arguments -- i.e. whether
+    // the cut is covering for the reduction.  It is not: on both sides of 0.75
+    // the PH branch lands at the format floor.
+    std::printf("\nTHE 0.75 CUT -- bits of the PH branch's r_mod against the "
+                "exact a, for |a| < pi/4,\nwhere the shipped code instead "
+                "takes r_mod = a exactly.  'exact' = bit-identical.\n");
+    std::printf("%-12s %6s %12s %12s %12s\n", "a", "j", "QF (p=96)",
+                "TF (p=72)", "FF (p=48)");
+    static const double kCut[] = { 0.1, 0.25, 0.5, 0.7, 0.74, 0.75,
+                                   0.7599, 0.78, 0.78539816 };
+    for (double x : kCut) {
+        int jq = 0, jt = 0, jf = 0;
+        const QuadFloat qa((double)x);
+        const float     qw[4] = { qa.f0, qa.f1, qa.f2, qa.f3 };
+        float           qf5[5];
+        jq = detail::xp_ph_reduce<float>(qw, 4, detail::kPhGuardQF,
+                                         detail::kPhChunksQF, qf5, 5);
+        QuadFloat qp = QuadFloat(detail::xp_ph_pio2_f(0));
+        for (int k = 1; k < detail::kPhPio2WordsF; ++k)
+            qp = add(qp, QuadFloat(detail::xp_ph_pio2_f(k)));
+        QuadFloat qfr = QuadFloat(qf5[0]);
+        for (int k = 1; k < 5; ++k) qfr = add(qfr, QuadFloat(qf5[k]));
+        const QuadFloat qr = multiply(qfr, qp);
+
+        const TripleFloat ta((double)x);
+        const float       tw[3] = { ta.f0, ta.f1, ta.f2 };
+        float             tf4[4];
+        jt = detail::xp_ph_reduce<float>(tw, 3, detail::kPhGuardTF,
+                                         detail::kPhChunksTF, tf4, 4);
+        TripleFloat tp = TripleFloat(detail::xp_ph_pio2_f(0));
+        for (int k = 1; k < detail::kPhPio2WordsF; ++k)
+            tp = add(tp, TripleFloat(detail::xp_ph_pio2_f(k)));
+        TripleFloat tfr = TripleFloat(tf4[0]);
+        for (int k = 1; k < 4; ++k) tfr = add(tfr, TripleFloat(tf4[k]));
+        const TripleFloat tr = multiply(tfr, tp);
+
+        const FloatFloat fa((float)x);
+        const float      fw[2] = { fa.hi, fa.lo };
+        float            ff3[3];
+        jf = detail::xp_ph_reduce<float>(fw, 2, detail::kPhGuardFF,
+                                         detail::kPhChunksFF, ff3, 3);
+        FloatFloat fp = FloatFloat(detail::xp_ph_pio2_f(0));
+        for (int k = 1; k < detail::kPhPio2WordsF; ++k)
+            fp = add(fp, FloatFloat(detail::xp_ph_pio2_f(k)));
+        FloatFloat ffr = FloatFloat(ff3[0]);
+        for (int k = 1; k < 3; ++k) ffr = add(ffr, FloatFloat(ff3[k]));
+        const FloatFloat fr2 = multiply(ffr, fp);
+
+        // QF/TF see the double x; FF sees the float, so it is scored against
+        // that value and not against a target it never received.
+        mpfr_set_d(X, x, MPFR_RNDN);
+        mpfr_set_flt(T, (float)x, MPFR_RNDN);
+        const double bq = bits_of(X, qr), bt = bits_of(X, tr), bf = bits_of(T, fr2);
+        char sq[16], st[16], sf[16];
+        std::snprintf(sq, sizeof sq, bq > 1e6 ? "exact" : "%.2f", bq);
+        std::snprintf(st, sizeof st, bt > 1e6 ? "exact" : "%.2f", bt);
+        std::snprintf(sf, sizeof sf, bf > 1e6 ? "exact" : "%.2f", bf);
+        std::printf("%-12.8g %6d %12s %12s %12s%s\n", x,
+                    jq == jt && jt == jf ? jq : -1, sq, st, sf,
+                    x <= 0.75 ? "   <- cut takes this" : "");
+    }
+    std::printf("j is 0 for every row, so the cut and the PH branch agree on "
+                "the quadrant.  The\ncut is therefore a speed and exactness "
+                "choice, not a correctness one, and widening\nit to pi/4 is a "
+                "question for the sweep -- dd_math.hpp records that a wider cut "
+                "was\nmeasured to cost complex-op digits, which is a different "
+                "quantity from these bits.\n");
 
     mpfr_clears(PIO2, X, F, N, R, HP, T, (mpfr_ptr)0);
     return 0;
