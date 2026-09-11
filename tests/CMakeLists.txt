@@ -379,6 +379,23 @@ kokkos_ep_add_eft_test_contract_on(tf_fma_guard_test)  # -> tf_fma_guard_test_co
 # Both run the same binary over the same 428,592 points in about eight seconds,
 # so `ctest` alone is the whole correctness answer.
 #
+# MPFR is an OPTIONAL measurement dependency, not a library one. The headers
+# in include/xp/ never use it; only the sweep's alternate oracle and the trig
+# reduction table test do. CI runners do not carry libmpfr-dev, and making it
+# mandatory broke every build on a machine without it (see sweep_accuracy.cpp
+# :250). Find it, use it when present, and degrade honestly when absent.
+find_path(MPFR_INCLUDE_DIR mpfr.h)
+find_library(MPFR_LIBRARY NAMES mpfr)
+find_library(GMP_LIBRARY NAMES gmp)
+if(MPFR_INCLUDE_DIR AND MPFR_LIBRARY AND GMP_LIBRARY)
+  set(XPMATH_MPFR_FOUND TRUE)
+  message(STATUS "MPFR found: ${MPFR_LIBRARY} -- the --oracle=mpfr arm is available")
+else()
+  set(XPMATH_MPFR_FOUND FALSE)
+  message(STATUS "MPFR NOT found -- building without the --oracle=mpfr arm; "
+                 "trig_reduction_test and oracle_conv_test will be skipped")
+endif()
+
 # sweep_accuracy is a host-only tool: it needs libquadmath for the oracle and it
 # has no Kokkos in it. It is built here rather than in scripts/ so that a stale
 # hand-compiled binary in the source tree can never be what the gate runs.
@@ -386,7 +403,14 @@ add_executable(sweep_accuracy ${CMAKE_SOURCE_DIR}/scripts/sweep_accuracy.cpp)
 target_include_directories(sweep_accuracy PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_compile_features(sweep_accuracy PRIVATE cxx_std_17)
 target_compile_options(sweep_accuracy PRIVATE -fext-numeric-literals)
+# MPFR is the alternate oracle (--oracle=mpfr): libquadmath mis-reduces
+# trig above ~1e40, so large-|x| rows need a reference that does not.
 target_link_libraries(sweep_accuracy PRIVATE quadmath)
+if(XPMATH_MPFR_FOUND)
+  target_include_directories(sweep_accuracy PRIVATE ${MPFR_INCLUDE_DIR})
+  target_link_libraries(sweep_accuracy PRIVATE ${MPFR_LIBRARY} ${GMP_LIBRARY})
+  target_compile_definitions(sweep_accuracy PRIVATE XPMATH_HAVE_MPFR=1)
+endif()
 
 add_test(NAME sweep_absolute_gate
          COMMAND sweep_accuracy --ulp
@@ -415,6 +439,96 @@ add_test(NAME sweep_absolute_gate_selftest
          COMMAND ${CMAKE_SOURCE_DIR}/validation/gate_selftest.sh
                  $<TARGET_FILE:sweep_accuracy> absolute ${CMAKE_CURRENT_BINARY_DIR})
 
+# ---------------------------------------------------------------------------
+# KI-42/43 STRUCTURAL TEST FOR exp()'s ARGUMENT REDUCTION
+# ---------------------------------------------------------------------------
+# exp/exp2/exp10 reduce their argument by subtracting k*ln2 (resp. k*log10(2))
+# as a sum of Cody-Waite pieces, each narrow enough that k*c_i is EXACT in one
+# machine word. That property is invisible at the call site -- the pieces look
+# like ordinary hex float literals -- so the failure mode is an edit that
+# "improves precision" by widening one, silently restoring the |a|*2^-p
+# reduction error the change removed.
+#
+# This test asserts the property structurally: piece widths read from the
+# shipped mantissas (never re-derived at a nominal width -- rounding ln2 to 17
+# or 18 bits yields a BIT-IDENTICAL float, so a widen-by-one poison tests
+# nothing), exactness of k*c_i over the FULL k range the guards admit
+# (DD [-1075, 1024], not the [-1024, 1024] the overflow limit suggests), and a
+# tail that pins the piece COUNT so the test cannot be satisfied by deleting a
+# piece.
+#
+# It issues NO accuracy verdict on exp -- docs/CORRECTNESS.md:5-6 reserves that
+# for the sweep. Bit-equalities only, no oracle, no tolerance.
+#
+# Registered by hand rather than through kokkos_ep_add_standalone_test: it needs
+# no corpus define, and no Kokkos link (no device code). libquadmath is required
+# for the __float128 tail arithmetic.
+# pow()'s non-positive-base contract, all four backends. Registered separately
+# from the sweep because the sweep CANNOT see this: repair_real's R_Pow case
+# (scripts/sweep_accuracy.cpp:529-537) sets a = fabs(a) and maps a == 0 to 1, so
+# no grid point ever reaches pow with a zero or negative base. TF shipped
+# without the guard the other three carry, returning 1 for pow(-0.5, 2), and
+# nothing in the apparatus could notice. Contract assertions only -- exact
+# comparisons against specified values, no accuracy verdict.
+add_executable(pow_domain_test pow_domain_test.cpp)
+target_include_directories(pow_domain_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
+add_test(NAME pow_domain_test COMMAND pow_domain_test)
+
+add_executable(exp_reduction_test exp_reduction_test.cpp)
+target_include_directories(exp_reduction_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(exp_reduction_test PRIVATE quadmath)
+add_test(NAME exp_reduction_test COMMAND exp_reduction_test)
+
+# ... and the self-test that proves it can fail. Same contract as the gate
+# self-tests above: poison must FAIL, clean must PASS.
+add_test(NAME exp_reduction_selftest
+         COMMAND ${CMAKE_SOURCE_DIR}/validation/exp_reduction_selftest.sh
+                 ${CMAKE_CURRENT_BINARY_DIR})
+
+# Payne-Hanek argument reduction: does the engine in include/xp/trig_reduction.hpp
+# return the exact quadrant and a fraction within one ulp at the inputs that
+# make the shipped table and guard work hardest? Links MPFR because it computes
+# its own 4000-bit ground truth rather than citing a number it cannot check --
+# see the header comment for why that distinction matters here. No accuracy
+# verdict on sin/cos/tan: this scores the reduction, which the sweep cannot see.
+# MPFR-only: this test recomputes the reduction tables at high precision, so
+# there is nothing it can check without MPFR. Guarded at the TARGET level --
+# linking ${MPFR_LIBRARY} when it is NOTFOUND fails CMake's generate step, which
+# is how a missing libmpfr-dev took down the whole configure on CI.
+if(XPMATH_MPFR_FOUND)
+  add_executable(trig_reduction_test trig_reduction_test.cpp)
+  target_include_directories(trig_reduction_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
+  target_include_directories(trig_reduction_test PRIVATE ${MPFR_INCLUDE_DIR})
+  target_link_libraries(trig_reduction_test PRIVATE ${MPFR_LIBRARY} ${GMP_LIBRARY})
+  add_test(NAME trig_reduction_test COMMAND trig_reduction_test)
+endif()
+
+# ... and the self-test that proves it can fail: four poisons, plus a check
+# that the committed table is byte-identical to what the generator emits.
+if(XPMATH_MPFR_FOUND)
+add_test(NAME trig_reduction_selftest
+         COMMAND ${CMAKE_SOURCE_DIR}/validation/trig_reduction_selftest.sh
+                 ${CMAKE_CURRENT_BINARY_DIR})
+endif()
+
+# The MPFR oracle's __float128 <-> mpfr conversions must be EXACT, not merely
+# round-trippable. The sweep has no oracle-error term, so a reference that is
+# wrong reads as a library that is wrong -- and the old conversion was wrong by
+# 1.28e11 ulps on precisely the large-|x| trig rows --oracle=mpfr exists to
+# measure. Runs the check, then poisons it four ways and requires each to fail.
+# MPFR-only, like the tests below it. Without MPFR the binary returns 77
+# ("nothing to check"), and ctest reports that as a FAILURE -- so register
+# the test only where it can actually check something, rather than leaving a
+# red mark that means "inapplicable".
+if(XPMATH_MPFR_FOUND)
+  add_test(NAME oracle_conv_test COMMAND sweep_accuracy --oracle-selftest)
+endif()
+if(XPMATH_MPFR_FOUND)
+add_test(NAME oracle_conv_selftest
+         COMMAND ${CMAKE_SOURCE_DIR}/validation/oracle_conv_selftest.sh
+                 ${CMAKE_CURRENT_BINARY_DIR})
+endif()
+
 # The generated domain document must be what the generator currently emits from
 # the committed baseline. Pure Python, well under a second, no build products.
 add_test(NAME domains_fresh
@@ -424,3 +538,9 @@ set_tests_properties(sweep_absolute_gate sweep_monotone_gate
                      PROPERTIES TIMEOUT 600)
 set_tests_properties(sweep_absolute_gate_selftest sweep_monotone_gate_selftest
                      PROPERTIES TIMEOUT 1200)
+# Five compiles of sweep_accuracy.cpp. Guarded with the test itself: setting a
+# property on an unregistered test is a hard CMake error, which is how the
+# no-MPFR configure died at tests/CMakeLists.txt:536.
+if(XPMATH_MPFR_FOUND)
+  set_tests_properties(oracle_conv_selftest PROPERTIES TIMEOUT 600)
+endif()

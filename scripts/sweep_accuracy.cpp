@@ -94,6 +94,23 @@
 //                     asin/acos/atanh, approached geometrically rather than in
 //                     ulps, so the whole ramp is sampled and not just its foot.
 //
+//   [1652, 1700)  (5) HARD CASES FOR ARGUMENT REDUCTION. 24 anchors, both signs.
+//                     x whose reduced argument x mod pi/2 is anomalously tiny,
+//                     from the continued-fraction convergents of 2/pi. Reducing
+//                     such an x cancels log2(|x|/|x mod pi/2|) bits, so a
+//                     reduction carrying only p bits of pi returns nothing
+//                     correct. NO uniformly-spaced grid lands on them: family
+//                     (3) bottoms out near 2^-40, these reach 2^-60.9, and the
+//                     defect lives in between.
+//
+//                     This family exists because the grid was BLIND to the one
+//                     thing exact reduction is for. Measured on the shipped
+//                     naive reduction before it was added: sin(pi) scored 15.42
+//                     of DD's 31 digits and 0.00 of FF's 14; at the published
+//                     FP64 worst case 6381956970095103*2^797 all four backends
+//                     emit "argument too large" and return nothing correct.
+//                     Both gates reported PASS throughout.
+//
 // COMPLEX GRID (1472 points), two families:
 //
 //   [0, 384)      (1) POLAR. |z| in { 1e-8, 1e-4, 0.5, 0.9, 0.99, 1, 1.01, 1.1,
@@ -230,6 +247,10 @@
 #include "../include/xp/tf_complex.hpp"
 
 #include <quadmath.h>
+#if defined(XPMATH_HAVE_MPFR)
+#include <mpfr.h>
+#endif
+
 
 #include <cmath>
 #include <cstdint>
@@ -241,6 +262,7 @@
 #include <string>
 #include <random>
 #include <string>
+#include <map>
 #include <vector>
 
 namespace {
@@ -291,8 +313,15 @@ uint64_t stream_seed(uint64_t base, const char* name, unsigned kind) {
 // complex inverse functions, which is where the two libquadmath builds on this
 // machine actually differ.
 // ---------------------------------------------------------------------------
+extern bool g_oracle_mpfr;
+#if defined(XPMATH_HAVE_MPFR)
+uint64_t mpfr_oracle_fingerprint(uint64_t h);   // defined with the MPFR oracle
+#endif
 uint64_t oracle_fingerprint() {
-  uint64_t h = 1469598103934665603ull;
+  // Seeded by WHICH oracle is in use: an MPFR-scored baseline and a
+  // libquadmath-scored one are not comparable, and the fingerprint is the
+  // mechanism that says so.
+  uint64_t h = g_oracle_mpfr ? 0xc3a5c85c97cb3127ull : 1469598103934665603ull;
   auto mix = [&h](__float128 v) {
     unsigned char b[sizeof(__float128)];
     std::memcpy(b, &v, sizeof(b));
@@ -309,6 +338,13 @@ uint64_t oracle_fingerprint() {
     mixc(casinq(z)); mixc(cacosq(z)); mixc(cacoshq(z));
     mixc(casinhq(z)); mixc(catanhq(z)); mixc(cpowq(z, z));
   }
+  // Seeding by WHICH oracle is in use stops being enough once the oracle itself
+  // can change. When MPFR is selected, hash values that have actually travelled
+  // the q_to_mpfr -> mpfr -> mpfr_to_q chain, so a change in the conversions
+  // moves the fingerprint instead of silently rescoring the sweep.
+#if defined(XPMATH_HAVE_MPFR)
+  if (g_oracle_mpfr) h = mpfr_oracle_fingerprint(h);
+#endif
   return h;
 }
 
@@ -434,6 +470,54 @@ std::vector<GridPoint> build_real_grid() {
     g.push_back({-1.0 + d, 0.0, "near1"});
     g.push_back({ 1.0 + d, 0.0, "near1"});
     g.push_back({-1.0 - d, 0.0, "near1"});
+  }
+  // (5) HARD CASES FOR ARGUMENT REDUCTION -- 24 anchors, both signs.
+  //
+  //     x whose reduced argument x mod pi/2 is anomalously tiny, taken from
+  //     the continued-fraction convergents of 2/pi. Reducing such an x
+  //     cancels log2(|x|/|x mod pi/2|) bits, so a reduction carrying only
+  //     p bits of pi returns nothing correct -- and NO uniformly-spaced grid
+  //     lands on them. Family (3) reaches about 2^-40 at its best; these go
+  //     to 2^-61, which is where the defect actually lives.
+  //
+  //     Measured on the shipped naive reduction BEFORE this family existed:
+  //     sin(3.14159265358979) scored 15.42 of DD's 31 digits and 0.00 of
+  //     FF's 14; at the published worst case 6381956970095103*2^797 all four
+  //     backends emit "argument too large" and return nothing correct.
+  //     None of it was visible to the 428,592-point grid.
+  //
+  //     Hex literals: the input must be bit-exact, not decimal-parsed.
+  {
+    static const double kHard[] = {
+      0x1.921fb54442d18p+0,    // 1.5708       log2|r| =  -53.9
+      0x1.921fb54442d18p+1,    // 3.14159      log2|r| =  -52.9
+      0x1.5fdbbe9bba775p+3,    // 10.9956      log2|r| =  -51.1
+      0x1.5801201165294p+8,    // 344.004      log2|r| =  -46.1
+      0x1.94d600033aacep+15,   // 51819        log2|r| =  -39.9
+      0x1.fcd1800015de1p+17,   // 260515       log2|r| =  -36.8
+      0x1.17e27fffff624p+19,   // 573204       log2|r| =  -34.0
+      0x1.4ac55bfffffd7p+22,   // 5.41935e+06  log2|r| =  -35.8
+      0x1.4665d1ffffffep+25,   // 4.27816e+07  log2|r| =  -28.2
+      0x1.d4ec654p+26,         // 1.22925e+08  log2|r| =  -28.3
+      0x1.fdb91f8p+28,         // 5.34483e+08  log2|r| =  -30.8
+      0x1.6fa37476p+31,        // 3.08398e+09  log2|r| =  -33.6
+      0x1.39b821694p+34,       // 2.10533e+10  log2|r| =  -39.1
+      0x1.a41fc970f8p+39,      // 9.0221e+11   log2|r| =  -40.8
+      0x1.38a466d1e78p+41,     // 2.68558e+12  log2|r| =  -42.4
+      0x1.04bd49b47d2p+43,     // 8.95894e+12  log2|r| =  -45.4
+      0x1.dbd58768f97p+45,     // 6.53981e+13  log2|r| =  -46.0
+      0x1.fc6d309f8914p+46,    // 1.39755e+14  log2|r| =  -47.0
+      0x1.8577cec54ab8p+47,    // 2.14112e+14  log2|r| =  -51.8
+      0x1.5cba89af1f855p+52,   // 6.1349e+15   log2|r| =  -53.2
+      0x1.56a4aa740a5a7p+53,   // 1.20557e+16  log2|r| =  -53.7
+      0x1.888ecd2edf9ccp+503,  // 4.01561e+151  log2|r| =   -8.3
+      0x1.88451b1af0ca3p+658,  // 1.83266e+198  log2|r| =  -10.1
+      0x1.6ac5b262ca1ffp+849,  // 5.31937e+255  log2|r| =  -60.9
+    };
+    for (size_t i = 0; i < sizeof(kHard)/sizeof(kHard[0]); ++i) {
+      g.push_back({ kHard[i], 0.0, "hardred"});
+      g.push_back({-kHard[i], 0.0, "hardred"});
+    }
   }
   return g;
 }
@@ -629,10 +713,461 @@ __float128 round_ties_even_q(__float128 a) {
   return t + copysignq((__float128)1.0, a);
 }
 
+#if defined(XPMATH_HAVE_MPFR)
+// ---------------------------------------------------------------------------
+// MPFR ORACLE (real path only), enabled with --oracle=mpfr.
+//
+// libquadmath's argument reduction fails above ~1e40: measured against MPFR at
+// 400 bits, sinq/cosq/tanq are clean at 1e40 and wrong by ~1e34 ulps at 1e60
+// and beyond. Since ulps_scalar treats the oracle as exact, every trig row at
+// family (5) magnitudes (to 5.32e255) is currently scored against a broken
+// reference, and a correct implementation would read as a regression.
+//
+// 400 bits is >3x the 113-bit format under test and matches the precision used
+// by every probe in this arc.
+//
+// REAL ONLY. MPFR has no complex type; complex stays on libquadmath rather
+// than pulling in MPC or hand-rolling branch cuts.
+__float128 reference_real_q_quad(int id, __float128 a, __float128 b, __float128 c);
+static const mpfr_prec_t kOraclePrec = 400;
+bool g_oracle_mpfr = false;
+
+// ---------------------------------------------------------------------------
+// __float128 <-> mpfr, EXACTLY. No decimal string anywhere on this path.
+//
+// WHAT WAS HERE BEFORE, AND WHY IT WAS WRONG. The first version formatted the
+// input with quadmath_snprintf("%.40Qe") and parsed it with mpfr_set_str, on
+// the grounds that 41 significant digits round-trip binary128 (113 bits ~ 34.0
+// decimal digits). They do — and that is the wrong property. Round-tripping
+// says q -> string -> binary128 is the identity. The oracle never goes back to
+// binary128: it EVALUATES AT the 400-bit number mpfr_set_str produced, which
+// differs from the input by up to 2^-136 relative.
+//
+// For a well-conditioned op that is invisible. For sin near a multiple of pi/2
+// it is the entire answer, because the condition number there is |x/tan(x)|,
+// which is unbounded: the derivative is |cos| = 1 while the value is |sin| ~ 0,
+// so a relative perturbation of the ARGUMENT becomes a much larger relative
+// perturbation of the RESULT.
+//
+// MEASURED, at the DD real grid point x = 182.21237390820801 (= 116*(pi/2) to
+// within 1.2e-15, where sin(x) = 2.4759e-18): the string route put the
+// reference 1.28e11 DD ulps off, and reported a library result that is right
+// to 0.356 ulps as the worst point in the entire sweep. That is why this is no
+// longer three lines. The population this matters for — near-zeros of trig at
+// large |x| — is exactly the population --oracle=mpfr was added to measure.
+//
+// The reverse direction is now a single correct rounding to the format's own
+// precision followed by an exact read, replacing a 45-digit string round trip
+// that was very nearly but not quite correctly rounded.
+//
+// XPMATH_POISON_ORACLE_CONV selects a deliberately broken conversion; see
+// validation/oracle_conv_selftest.sh.
+// ---------------------------------------------------------------------------
+#ifndef XPMATH_POISON_ORACLE_CONV
+#define XPMATH_POISON_ORACLE_CONV 0
+#endif
+
+static_assert(sizeof(unsigned long) == 8,
+              "the 113-bit split below hands mpfr two 64-bit halves");
+static const int kQMantBits = 113;                 // FLT128_MANT_DIG
+
+void q_to_mpfr(mpfr_t out, __float128 v) {
+#if XPMATH_POISON_ORACLE_CONV == 1
+  // POISON 1: the decimal round trip this function replaced.
+  char buf[160];
+  quadmath_snprintf(buf, sizeof buf, "%.40Qe", v);
+  mpfr_set_str(out, buf, 10, MPFR_RNDN);
+  return;
+#else
+  if (isnanq(v))          { mpfr_set_nan(out); return; }
+  if (isinfq(v))          { mpfr_set_inf(out, v > 0 ? 1 : -1); return; }
+  if (v == (__float128)0) { mpfr_set_zero(out, signbitq(v) ? -1 : 1); return; }
+
+  int        e = 0;
+  __float128 m = frexpq(v, &e);        // |m| in [0.5,1); normalises subnormals
+  m = ldexpq(m, kQMantBits);           // integral, |m| < 2^113. Both exact.
+  e -= kQMantBits;
+  const bool        neg = m < (__float128)0;
+  unsigned __int128 um  = (unsigned __int128)(neg ? -m : m);
+#if XPMATH_POISON_ORACLE_CONV == 2
+  um &= ~(unsigned __int128)1;         // POISON 2: drop the last significand
+                                       // bit — the smallest corruption the
+                                       // format admits, and 2^25 times finer
+                                       // than the string route's.
+#endif
+  // 113 bits do not fit one unsigned long, so set the top half and shift it up.
+  // Every step below is exact at kOraclePrec: a 113-bit integer, then powers
+  // of two.
+  mpfr_set_ui(out, (unsigned long)(uint64_t)(um >> 64), MPFR_RNDN);  // < 2^49
+  mpfr_mul_2ui(out, out, 64, MPFR_RNDN);
+  mpfr_add_ui(out, out, (unsigned long)(uint64_t)um, MPFR_RNDN);
+  mpfr_mul_2si(out, out, e, MPFR_RNDN);
+  if (neg) mpfr_neg(out, out, MPFR_RNDN);
+#endif
+}
+
+__float128 mpfr_to_q(mpfr_srcptr v) {
+  if (mpfr_nan_p(v))  return nanq("");
+  if (mpfr_inf_p(v))  return mpfr_sgn(v) > 0 ?  HUGE_VALQ : -HUGE_VALQ;
+  if (mpfr_zero_p(v)) return mpfr_signbit(v) ? -(__float128)0 : (__float128)0;
+#if XPMATH_POISON_ORACLE_CONV == 3
+  {
+    // POISON 3: the 45-digit string round trip this function replaced.
+    char*      s = nullptr;
+    mpfr_exp_t e = 0;
+    s = mpfr_get_str(nullptr, &e, 10, 45, v, MPFR_RNDN);
+    if (!s) return (__float128)0;
+    const bool  neg    = (s[0] == '-');
+    const char* digits = neg ? s + 1 : s;
+    char        buf[192];
+    std::snprintf(buf, sizeof buf, "%s0.%sE%ld", neg ? "-" : "", digits, (long)e);
+    mpfr_free_str(s);
+    return strtoflt128(buf, nullptr);
+  }
+#else
+  // Round ONCE, to the format's own precision — the rounding binary128 would
+  // do itself — and then read the result exactly.
+#if XPMATH_POISON_ORACLE_CONV == 4
+  const int prec = kQMantBits - 1;     // POISON 4: one bit short
+#else
+  const int prec = kQMantBits;
+#endif
+  mpfr_t t;
+  mpfr_init2(t, prec);
+  mpfr_set(t, v, MPFR_RNDN);
+  // Scale into double's exponent range so the three-double read is always
+  // available: exp() references in this sweep reach 1e434, far past DBL_MAX.
+  long shift = (long)mpfr_get_exp(t);
+  if (shift >  1000000) shift =  1000000;
+  if (shift < -1000000) shift = -1000000;
+  mpfr_mul_2si(t, t, -shift, MPFR_RNDN);      // exact; t is now in [0.5,1)
+  // 113 bits fit in three doubles (3 x 53 = 159), each residual is exactly
+  // representable, and the three-term sum equals t — which has 113 bits — so
+  // the accumulation in binary128 is exact too.
+  __float128 acc = 0;
+  for (int i = 0; i < 3 && !mpfr_zero_p(t); ++i) {
+    const double d = mpfr_get_d(t, MPFR_RNDN);
+    acc += (__float128)d;
+    mpfr_sub_d(t, t, d, MPFR_RNDN);
+  }
+  mpfr_clear(t);
+  // The only remaining rounding, and only for binary128 overflow/subnormals.
+  // The sweep's references never reach 1e-4900, so it never fires in practice.
+  return ldexpq(acc, (int)shift);
+#endif
+}
+
+uint64_t mpfr_oracle_fingerprint(uint64_t h) {
+  auto mix = [&h](__float128 v) {
+    unsigned char b[sizeof(__float128)];
+    std::memcpy(b, &v, sizeof(b));
+    for (size_t i = 0; i < sizeof(b); ++i) { h ^= b[i]; h *= 1099511628211ull; }
+  };
+  // Arguments where the conversion's exactness IS the answer: real grid points
+  // sitting within a double ulp of a multiple of pi/2, where sin is 1e-18 and
+  // the reference's own error is amplified by 1/|sin|.
+  static const double hard[] = {
+      182.21237390820801, 91.106186954104004, 344.00439556808237,
+      1.5707963267948966, 0.70710678118654757, 3.0, 1e40, 1e60,
+  };
+  mpfr_t a, r;
+  mpfr_inits2(kOraclePrec, a, r, (mpfr_ptr)0);
+  for (double x : hard) {
+    q_to_mpfr(a, (__float128)x);
+    mpfr_sin(r, a, MPFR_RNDN); mix(mpfr_to_q(r));
+    mpfr_cos(r, a, MPFR_RNDN); mix(mpfr_to_q(r));
+    mpfr_tan(r, a, MPFR_RNDN); mix(mpfr_to_q(r));
+    mpfr_log(r, a, MPFR_RNDN); mix(mpfr_to_q(r));
+  }
+  mpfr_clears(a, r, (mpfr_ptr)0);
+  return h;
+}
+
+// ---------------------------------------------------------------------------
+// --oracle-selftest: the two conversions above, checked against routes that
+// share no mechanism with them.
+//
+// The defect this exists to catch was silent for a reason: the old conversion
+// satisfied the property it was documented against (binary128 round trip) and
+// violated the one that mattered (equality at 400 bits). Nothing in the sweep
+// could see the difference, because the sweep has no oracle-error term — it
+// treats the reference as exact by construction. So the check has to be here,
+// and it has to be poisoned; see validation/oracle_conv_selftest.sh.
+// ---------------------------------------------------------------------------
+
+// Split v into three doubles and hand mpfr one at a time. Shares nothing with
+// q_to_mpfr: no frexpq, no 128-bit integer, no decimal. Three doubles cover
+// 113 bits (3 x 53 = 159) and each residual of a binary128 after its leading
+// double is exactly representable, so this is exact — but ONLY while the whole
+// 113-bit span stays inside double, i.e. 2^-961 <= |v| <= 2^1023. Outside that
+// the trailing doubles go subnormal and lose bits, which is not a hypothetical:
+// at 4e-302 the second double is 2.2e-318 and the third is zero, leaving a
+// residual of 1.4e-324. Callers keep to the range; check B covers the rest.
+void q_to_mpfr_by_doubles(mpfr_t out, __float128 v) {
+  const double     d0 = (double)v;
+  const __float128 r0 = v - (__float128)d0;
+  const double     d1 = (double)r0;
+  const __float128 r1 = r0 - (__float128)d1;
+  const double     d2 = (double)r1;
+  mpfr_set_d(out, d0, MPFR_RNDN);
+  mpfr_add_d(out, out, d1, MPFR_RNDN);
+  mpfr_add_d(out, out, d2, MPFR_RNDN);
+}
+
+#if defined(XPMATH_HAVE_MPFR)
+int oracle_conv_selftest() {
+  int fails = 0;
+  auto bad = [&fails](const char* what, const char* detail) {
+    std::printf("  FAIL  %-28s %s\n", what, detail);
+    ++fails;
+  };
+  auto qstr = [](__float128 v) {
+    static char b[4][64]; static int k = 0; k = (k + 1) & 3;
+    quadmath_snprintf(b[k], 64, "%.36Qe", v);
+    return b[k];
+  };
+  auto same_bits = [](__float128 a, __float128 b) {
+    return std::memcmp(&a, &b, sizeof a) == 0;
+  };
+
+  // Values the independent route can represent: the whole 113-bit span has to
+  // stay inside double, so the third double does not underflow. That is
+  // |v| >= 2^-961 and |v| <= 2^1023, MEASURED — at 4e-302 the second double is
+  // already subnormal and the third is zero, leaving a residual of 1.4e-324,
+  // and route A would then be flagging its own reference. The first three
+  // entries are the real grid points that exposed the defect.
+  const __float128 one = (__float128)1;
+  std::vector<__float128> exact_checkable = {
+      (__float128)182.21237390820801,
+      (__float128)91.106186954104004,
+      (__float128)344.00439556808237,
+      (__float128)1.5707963267948966,
+      one, -one, (__float128)0.5,
+      one + ldexpq(one, -112),                     // last significand bit set
+      one - ldexpq(one, -113),                     // just below 1
+      (__float128)2 / (__float128)3,               // 113 bits, none of them nice
+      -((__float128)7 / (__float128)11),
+      ldexpq(one, -960) * ((__float128)3 / (__float128)7),
+      ldexpq(one, 1000) * ((__float128)3 / (__float128)7),
+  };
+  // Round trip only: either outside double's range entirely (exp() references
+  // in this sweep reach 1e434) or with a 113-bit span that reaches below
+  // 2^-1074. An exponent error of even one bit still breaks the round trip, so
+  // B is what covers the extremes A cannot reach.
+  std::vector<__float128> wide = {
+      expq((__float128)1000), expq((__float128)-1000),
+      ldexpq(one, 16000) + ldexpq(one, 16000 - 112),
+      ldexpq(one, -16000),
+      ldexpq(one, -16440),                         // binary128 subnormal
+      ldexpq(one, -1000) * ((__float128)3 / (__float128)7),
+      (__float128)5e-324,                          // smallest double subnormal
+  };
+
+  mpfr_t m, m2;
+  mpfr_inits2(kOraclePrec, m, m2, (mpfr_ptr)0);
+
+  // A. q_to_mpfr must be EXACT, not merely round-trippable.
+  for (__float128 v : exact_checkable) {
+    q_to_mpfr(m, v);
+    q_to_mpfr_by_doubles(m2, v);
+    if (mpfr_cmp(m, m2) != 0) bad("A q_to_mpfr not exact", qstr(v));
+  }
+
+  // B. Round trip, bit for bit, including where the independent route cannot go.
+  for (const std::vector<__float128>* set : {&exact_checkable, &wide}) {
+    for (__float128 v : *set) {
+      q_to_mpfr(m, v);
+      const __float128 back = mpfr_to_q(m);
+      if (!same_bits(back, v)) bad("B round trip", qstr(v));
+    }
+  }
+
+  // C. END TO END, at the arguments where it went wrong: the oracle's own
+  // answer through the shipped chain, against the same answer through the
+  // independent input route, BIT FOR BIT. Under the old conversion the sin
+  // column here is wrong in the 21st digit, which at x = 182.2... is 1.28e11
+  // ulps of the DD format being measured.
+  //
+  // The arguments are PAIRS, not bare doubles. A bare double is a WEAK
+  // argument here: its binary128 image has 60 trailing zero significand bits,
+  // so any defect confined to the low bits of the conversion is invisible on
+  // it -- poison 2 is exactly that defect, and it is also why the sweep's own
+  // real trig rows, whose oracle argument IS a bare double, could never have
+  // exposed it. Each base value is therefore driven twice: once as the DD pair
+  // the sweep would build, and once as hi + 2^(exp(hi)-113). The second form
+  // has its last significand bit set BY CONSTRUCTION -- the added term sits
+  // below every bit of hi, so there is no carry to reason about. hi + hi*2^-60
+  // was the first attempt and was silently useless: all six of these doubles
+  // have even significands, so the shifted copy stops one bit short.
+  //
+  // C is deliberately blind to the OUTPUT side: both chains end in the same
+  // mpfr_to_q, so it cannot see a defect there. B and D cover that direction.
+  {
+    static const double hard[][2] = {
+        {182.21237390820801,   1.1e-15},   // 116*(pi/2) to within 1.2e-15
+        {91.106186954104004,  -3.3e-16},
+        {344.00439556808237,   7.7e-15},
+        {116.23892818282235,   0.0},
+        {1.5707963267948966,   6.123233995736766e-17},   // pi/2 as a DD pair
+        {7.65,                 0.0},
+    };
+    mpfr_t r, r2;
+    mpfr_inits2(kOraclePrec, r, r2, (mpfr_ptr)0);
+    std::vector<__float128> args;
+    for (const double* p : hard) {
+      args.push_back((__float128)p[0] + (__float128)p[1]);
+      int ex = 0;
+      frexpq((__float128)p[0], &ex);
+      args.push_back((__float128)p[0] + ldexpq(one, ex - kQMantBits));
+    }
+    for (const __float128 x : args) {
+      q_to_mpfr(m, x);
+      q_to_mpfr_by_doubles(m2, x);
+      if (mpfr_cmp(m, m2) != 0) bad("C argument not exact", qstr(x));
+      for (int op = 0; op < 3; ++op) {
+        if (op == 0) { mpfr_sin(r, m, MPFR_RNDN); mpfr_sin(r2, m2, MPFR_RNDN); }
+        if (op == 1) { mpfr_cos(r, m, MPFR_RNDN); mpfr_cos(r2, m2, MPFR_RNDN); }
+        if (op == 2) { mpfr_tan(r, m, MPFR_RNDN); mpfr_tan(r2, m2, MPFR_RNDN); }
+        if (!same_bits(mpfr_to_q(r), mpfr_to_q(r2))) {
+          char d[160];
+          std::snprintf(d, sizeof d, "x=%s op=%d", qstr(x), op);
+          bad("C end to end", d);
+        }
+      }
+    }
+    mpfr_clears(r, r2, (mpfr_ptr)0);
+  }
+
+  // D. mpfr_to_q must round CORRECTLY, not nearly. Each value below sits inside
+  // the rounding interval of a known binary128 q but only by 2^-40 of an ulp —
+  // finer than any decimal shortcut can resolve, and the direction it lands is
+  // then whatever the shortcut's own rounding happens to do.
+  {
+    mpfr_t u, off, p;
+    mpfr_inits2(kOraclePrec, u, off, p, (mpfr_ptr)0);
+    mpfr_set_d(off, 0.5 - ldexp(1.0, -40), MPFR_RNDN);
+    for (int k = 0; k < 64; ++k) {
+      const __float128 base = (__float128)(1.0 + (double)k * 0.0137);  // [1,2)
+      const __float128 q =
+          ldexpq(base + ldexpq(one, -112), k - 32);    // last bit set, spread
+      q_to_mpfr_by_doubles(m, q);
+      mpfr_set_ui(u, 1, MPFR_RNDN);
+      mpfr_mul_2si(u, u, (long)mpfr_get_exp(m) - kQMantBits, MPFR_RNDN);
+      mpfr_mul(p, off, u, MPFR_RNDN);                  // (0.5 - 2^-40) * ulp(q)
+      for (int s = -1; s <= 1; s += 2) {
+        if (s < 0) mpfr_sub(u, m, p, MPFR_RNDN); else mpfr_add(u, m, p, MPFR_RNDN);
+        if (!same_bits(mpfr_to_q(u), q)) {
+          char d[128];
+          std::snprintf(d, sizeof d, "k=%d s=%+d  %s", k, s, qstr(q));
+          bad("D not correctly rounded", d);
+        }
+      }
+    }
+    mpfr_clears(u, off, p, (mpfr_ptr)0);
+  }
+
+  // E. Specials, both directions.
+  {
+    const __float128 pz = (__float128)0, nz = -(__float128)0;
+    q_to_mpfr(m, pz);
+    if (!mpfr_zero_p(m) || mpfr_signbit(m))  bad("E +0 -> mpfr", "");
+    if (!same_bits(mpfr_to_q(m), pz))        bad("E +0 round trip", "");
+    q_to_mpfr(m, nz);
+    if (!mpfr_zero_p(m) || !mpfr_signbit(m)) bad("E -0 -> mpfr", "");
+    if (!same_bits(mpfr_to_q(m), nz))        bad("E -0 round trip", "");
+    q_to_mpfr(m, HUGE_VALQ);
+    if (!mpfr_inf_p(m) || mpfr_sgn(m) < 0)   bad("E +inf -> mpfr", "");
+    if (mpfr_to_q(m) != HUGE_VALQ)           bad("E +inf round trip", "");
+    q_to_mpfr(m, -HUGE_VALQ);
+    if (!mpfr_inf_p(m) || mpfr_sgn(m) > 0)   bad("E -inf -> mpfr", "");
+    if (mpfr_to_q(m) != -HUGE_VALQ)          bad("E -inf round trip", "");
+    q_to_mpfr(m, nanq(""));
+    if (!mpfr_nan_p(m))                      bad("E nan -> mpfr", "");
+    if (!isnanq(mpfr_to_q(m)))               bad("E nan round trip", "");
+  }
+
+  mpfr_clears(m, m2, (mpfr_ptr)0);
+  std::printf("oracle conversion selftest: %s (%d failure%s)  poison=%d\n",
+              fails ? "FAIL" : "PASS", fails, fails == 1 ? "" : "s",
+              XPMATH_POISON_ORACLE_CONV);
+  return fails ? 1 : 0;
+}
+#endif
+
+
+__float128 reference_real_mpfr(int id, __float128 a, __float128 b, __float128 c) {
+  mpfr_t ma, mb, mc, r;
+  mpfr_inits2(kOraclePrec, ma, mb, mc, r, (mpfr_ptr)0);
+  q_to_mpfr(ma, a); q_to_mpfr(mb, b); q_to_mpfr(mc, c);
+  bool handled = true;
+
+  switch (id) {
+    case R_Add:       mpfr_add(r, ma, mb, MPFR_RNDN); break;
+    case R_Sub:       mpfr_sub(r, ma, mb, MPFR_RNDN); break;
+    case R_Mul:       mpfr_mul(r, ma, mb, MPFR_RNDN); break;
+    case R_Div:       mpfr_div(r, ma, mb, MPFR_RNDN); break;
+    case R_Sqrt:      mpfr_sqrt(r, ma, MPFR_RNDN); break;
+    case R_Abs:       mpfr_abs(r, ma, MPFR_RNDN); break;
+    case R_Exp:       mpfr_exp(r, ma, MPFR_RNDN); break;
+    case R_Log:       mpfr_log(r, ma, MPFR_RNDN); break;
+    case R_Exp2:      mpfr_exp2(r, ma, MPFR_RNDN); break;
+    case R_Exp10:     mpfr_exp10(r, ma, MPFR_RNDN); break;
+    case R_Expm1:     mpfr_expm1(r, ma, MPFR_RNDN); break;
+    case R_Log2:      mpfr_log2(r, ma, MPFR_RNDN); break;
+    case R_Log10:     mpfr_log10(r, ma, MPFR_RNDN); break;
+    case R_Log1p:     mpfr_log1p(r, ma, MPFR_RNDN); break;
+    case R_Sin:       mpfr_sin(r, ma, MPFR_RNDN); break;
+    case R_Cos:       mpfr_cos(r, ma, MPFR_RNDN); break;
+    case R_Tan:       mpfr_tan(r, ma, MPFR_RNDN); break;
+    case R_Asin:      mpfr_asin(r, ma, MPFR_RNDN); break;
+    case R_Acos:      mpfr_acos(r, ma, MPFR_RNDN); break;
+    case R_Atan:      mpfr_atan(r, ma, MPFR_RNDN); break;
+    case R_Sinh:      mpfr_sinh(r, ma, MPFR_RNDN); break;
+    case R_Cosh:      mpfr_cosh(r, ma, MPFR_RNDN); break;
+    case R_Tanh:      mpfr_tanh(r, ma, MPFR_RNDN); break;
+    case R_Acosh:     mpfr_acosh(r, ma, MPFR_RNDN); break;
+    case R_Asinh:     mpfr_asinh(r, ma, MPFR_RNDN); break;
+    case R_Atanh:     mpfr_atanh(r, ma, MPFR_RNDN); break;
+    case R_Pow:       mpfr_pow(r, ma, mb, MPFR_RNDN); break;
+    case R_Hypot:     mpfr_hypot(r, ma, mb, MPFR_RNDN); break;
+    case R_Fmod:      mpfr_fmod(r, ma, mb, MPFR_RNDN); break;
+    case R_Remainder: mpfr_remainder(r, ma, mb, MPFR_RNDN); break;
+    case R_Fma:       mpfr_fma(r, ma, mb, mc, MPFR_RNDN); break;
+    case R_Ceil:      mpfr_ceil(r, ma); break;
+    case R_Floor:     mpfr_floor(r, ma); break;
+    case R_Trunc:     mpfr_trunc(r, ma); break;
+    case R_Round:     mpfr_rint(r, ma, MPFR_RNDN); break;   // ties-to-even, KI-37
+    default:          handled = false; break;               // sign/select ops
+  }
+
+  __float128 out;
+  if (handled) {
+    out = mpfr_to_q(r);
+  } else {
+    // copysign/fmax/fmin/fdim are exact bit operations with no rounding to
+    // improve on; defer to libquadmath rather than reimplement their corner
+    // cases (signed zero, NaN propagation) in a second place.
+    out = reference_real_q_quad(id, a, b, c);
+  }
+  mpfr_clears(ma, mb, mc, r, (mpfr_ptr)0);
+  return out;
+}
+
+#else
+// Built without MPFR. --oracle=mpfr is refused at startup rather than
+// silently falling back to libquadmath: a run that LOOKS like it used the
+// better oracle but did not is worse than one that will not start.
+bool g_oracle_mpfr = false;
+__float128 reference_real_q_quad(int id, __float128 a, __float128 b, __float128 c);
+__float128 reference_real_mpfr(int id, __float128 a, __float128 b, __float128 c) {
+  return reference_real_q_quad(id, a, b, c);
+}
+#endif  // XPMATH_HAVE_MPFR
+
 // The quad-argument form. --classify needs to evaluate the oracle at PERTURBED
 // inputs, which are quad and not exactly representable as double, so the body
 // lives here and the double entry point below just widens and forwards.
-__float128 reference_real_q(int id, __float128 a, __float128 b, __float128 c) {
+__float128 reference_real_q_quad(int id, __float128 a, __float128 b, __float128 c) {
   switch (id) {
     case R_Add:       return a + b;
     case R_Sub:       return a - b;
@@ -675,6 +1210,13 @@ __float128 reference_real_q(int id, __float128 a, __float128 b, __float128 c) {
     case R_Trunc:     return truncq(a);
   }
   return (__float128)0.0;
+}
+
+// Oracle dispatch. Default is libquadmath so this change records no different
+// number until --oracle=mpfr is asked for explicitly.
+__float128 reference_real_q(int id, __float128 a, __float128 b, __float128 c) {
+  return g_oracle_mpfr ? reference_real_mpfr(id, a, b, c)
+                       : reference_real_q_quad(id, a, b, c);
 }
 
 __float128 reference_real(int id, double da, double db, double dc) {
@@ -1478,6 +2020,7 @@ Range range_float(int limbs) {
 // An fmod whose integral quotient the format cannot resolve is charged its
 // honest absolute error, one modulus |b|, which is >= |f| by definition of a
 // remainder — so the bound reaches 2^p and clause 4 fires by arithmetic.
+
 bool out_of_format(__float128 v, const Range& rg) {
   if (v == 0) return false;                      // exact zero is representable
   if (!finiteq(v)) return true;
@@ -1747,6 +2290,9 @@ struct UlpCtx {
   // terms the sweep uses, for one complex grid point on every backend.
   const char*           dump_op = nullptr;
   int                   dump_point = -1;
+  // --dump-terms: for every scored row whose DERIVED bound exceeds 2^p, print
+  // the terms that produced it. Diagnostic; changes no verdict.
+  bool                  dump_terms = false;
   // --ulp-explain OP:POINT — record the full breakdown for one grid point on
   // every backend, pass or fail. This is the microscope the metric is argued
   // with; without it a claim about a single point cannot be reproduced.
@@ -1812,7 +2358,27 @@ void sweep_real(int id, const std::vector<GridPoint>& grid,
     Row& row_ = rows.back();
     // --- condition-aware ulp verdict -------------------------------------
     if (ux) {
-      const double m = ulps_scalar(to_q(r), ref[i], sb_bits);
+      // LAYER 0. Score against f(x_stored), not f(x_grid).
+      //
+      // `ref` was computed once from the grid double and shared by all four
+      // backends. That asks the oracle a question the backend was never given:
+      // DD/QF/TF hold any double exactly so it makes no difference to them
+      // (measured: storage error identically 0), but FF carries 48 bits and
+      // cannot hold a 53-bit double, so its verdict was taken against a value
+      // it does not have. The library is asked to compute correctly on the
+      // value it holds; the input's own storage error is the caller's business.
+      //
+      // Recomputing per backend also makes `in_delta` identically zero by
+      // construction rather than by argument -- the operand IS the exact input
+      // once the oracle is asked about it.
+      //
+      // Measured effect (FF, real sin/cos/tan/exp/log over the log-sweep and
+      // linear families): 1402 of 2415 rows change value, 55 stop being
+      // defects, 25 become defects, net -30. The change is about provenance,
+      // not about the defect count.
+      const __float128 ref_stored = reference_real_q(
+          id, to_q(S(a_in[i])), to_q(S(b_in[i])), to_q(S(c_in[i])));
+      const double m = ulps_scalar(to_q(r), ref_stored, sb_bits);
       double kappa = 0.0;
       row_.ulps = m;
       if (m == kUnscorableUlps()) {
@@ -1884,8 +2450,43 @@ void sweep_real(int id, const std::vector<GridPoint>& grid,
           ++cell.n;
           continue;
         }
-        const double ratio = (exp_u > 0.0) ? m / exp_u : HUGE_VAL;
+        // Judged against the CLAMPED bound: a derivation that exceeds total
+        // loss is not a bound (see point_unresolved). The CSV still records
+        // exp_u itself, so the clamp is visible rather than baked in.
+        if (ux->dump_terms && exp_u > std::exp2((double)sb_bits)) {
+          std::printf("TERMS %s r %s %d ulps=%.6g bound=%.6g res=%.6g "
+                      "kappa=%.6g in_delta=%.6g kappa_int=%.6g gain=%.6g "
+                      "abs_floor=%.6g tl=%.6g\n",
+                      B::name(), kReal[id].name, int(i), m, exp_u,
+                      bd.res, bd.kappa, bd.in_delta, bd.kappa_int, bd.gain,
+                      bd.abs_floor, std::exp2((double)sb_bits));
+        }
+        const double gate_u = exp_u;
+        const double ratio = (gate_u > 0.0) ? m / gate_u : HUGE_VAL;
         ++ucell.n_scored; row_.state = 'S'; row_.bound = exp_u;
+        // --dump-operands for the REAL realm. The complex loop has carried this
+        // since the metric was first argued; the real loop never did, so a real
+        // point's operands could not be read out of the tool at all. External
+        // probes had to RECONSTRUCT the seeded operand stream, and that does not
+        // reproduce it: three variants of fill_real_operands scored 0 of 8
+        // against known FF pow rows, each 5-30x below the recorded ulps. A probe
+        // built on a reconstruction measures a different function than the
+        // sweep -- which silently invalidated several probes in the session that
+        // added this.
+        if (ux->dump_op && ux->dump_point == int(i) &&
+            std::strcmp(ux->dump_op, kReal[id].name) == 0) {
+          char qa[64], qb[64], qc[64], qr[64];
+          quadmath_snprintf(qa, sizeof qa, "%.36Qg", exact[0]);
+          quadmath_snprintf(qb, sizeof qb, "%.36Qg", exact[1]);
+          quadmath_snprintf(qc, sizeof qc, "%.36Qg", exact[2]);
+          quadmath_snprintf(qr, sizeof qr, "%.36Qg", ref[i]);
+          std::printf("DUMP %s r %s point %d\n", B::name(), kReal[id].name, int(i));
+          std::printf("  a      = %s\n", qa);
+          if (nops >= 2) std::printf("  b      = %s\n", qb);
+          if (nops >= 3) std::printf("  c      = %s\n", qc);
+          std::printf("  ref    = %s\n", qr);
+          std::printf("  ulps=%g bound=%g digits=%g\n", m, exp_u, d);
+        }
         if (m > ucell.max_ulps) { ucell.max_ulps = m; ucell.max_ulps_point = int(i); }
         if (ratio > ucell.worst_ratio) {
           ucell.worst_ratio = ratio;    ucell.worst_point    = int(i);
@@ -1948,14 +2549,69 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
     // consolidated bound, with kappa obtained by differentiating the oracle
     // (kappa_complex_numeric) instead of by hand.
     if (ux) {
-      const __float128 e_re = to_q(r.re) - ref_re[i], e_im = to_q(r.im) - ref_im[i];
-      const __float128 mref = hypotq(ref_re[i], ref_im[i]);
+      // LAYER 0, COMPLEX: NOT APPLIED. Deliberately still the grid oracle.
+      //
+      // Widening a stored operand with to_q() sums the limbs, and in IEEE
+      // (-0.0) + (0.0) = +0.0 -- so the SIGN OF A ZERO IS DESTROYED. The grid
+      // carries both signed zeros on purpose (family 2 exists for exactly
+      // that; KI-5(d) is invisible without them), so handing to_q's output to
+      // the oracle asks about the CONJUGATE at every branch-cut point.
+      //
+      // Measured, DD c sqrt at z = (-100, -0):
+      //     grid oracle   (0, -10)   <- correct; the library agrees
+      //     stored oracle (0, +10)   <- wrong side of the cut
+      //     library       (0, -10)
+      // scoring 1.623e32 ulps = 2 * 2^106, a pure sign flip. Applying it
+      // produced 1,996 false defects, every one complex, concentrated in
+      // sqrt/log/log10/acosh -- the branch-cut ops.
+      //
+      // The real path IS on x_stored: a real zero has no conjugate to flip to,
+      // and DD/QF/TF hold any double exactly, so only FF moves there.
+      //
+      // Fixing this properly needs a sign-preserving widen -- carry the sign
+      // of the leading limb explicitly when the sum is zero -- and that must
+      // be poisoned against the signed-zero grid family before it is trusted.
+      const __float128 sref_re = ref_re[i], sref_im = ref_im[i];
+      const __float128 e_re = to_q(r.re) - sref_re, e_im = to_q(r.im) - sref_im;
+      const __float128 mref = hypotq(sref_re, sref_im);
       const bool bad = isnanq(e_re) || isnanq(e_im) ||
-                       isnanq(ref_re[i]) || isnanq(ref_im[i]) ||
-                       !finiteq(ref_re[i]) || !finiteq(ref_im[i]);
+                       isnanq(sref_re) || isnanq(sref_im) ||
+                       !finiteq(sref_re) || !finiteq(sref_im);
       if (bad || mref == 0) {
         ++ucell.n_unscorable;
       } else {
+        // MODULUS-RELATIVE, retained deliberately for now.
+        //
+        // A per-component metric was tried here and REVERTED on measurement.
+        // The naive form -- score each component against its own magnitude,
+        // falling back to the other component only when the reference is
+        // EXACTLY zero -- produced 6,105 false defects, all complex, none
+        // real. Worked example, FF c mul at grid point 92:
+        //
+        //   a = (0.35355339, -0.35355339), b = (0.35355339, 0.35355339)
+        //   exact product: re = 2.5e-01, im = -1.570092e-16
+        //   |e_re| = 3.95e-17, |e_im| = 1.57e-16    (both tiny, absolutely)
+        //   per-component:  re 0.044 ulps, im 2.81e14 ulps
+        //   modulus:        0.182 ulps
+        //
+        // The imaginary part CANCELS: ar*bi ~ -ai*br, so |ref_im| collapses to
+        // 1.6e-16 while the operands and the modulus stay O(1). Dividing a
+        // perfectly normal absolute error by that collapsed magnitude
+        // manufactures total loss for an answer that is correct. `ref == 0`
+        // does not catch it because the component is tiny, not zero, and there
+        // is no non-arbitrary threshold at which "tiny" becomes "zero".
+        //
+        // The digit path's score_component has the same shape but never hit
+        // this, because it only special-cases an exactly-zero reference and is
+        // read as a digit count rather than gated on.
+        //
+        // The underlying criticism stands: modulus-relative error DOES permit
+        // one component to be wrong when the other dominates (the KI-1 shape).
+        // But the fix is a component metric with a NON-COLLAPSING scale --
+        // plausibly max(|ref_component|, |other_component| * 2^-p), i.e. judge
+        // a cancelled component against the resolution the modulus affords --
+        // and that needs deriving and poisoning before it gates anything.
+        // Filed rather than guessed.
         const double m = (double)ldexpq(hypotq(e_re, e_im) / mref, B::sig_bits());
         row_.ulps = m;
         if (m > ucell.max_ulps) { ucell.max_ulps = m; ucell.max_ulps_point = int(i); }
@@ -1964,7 +2620,7 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
                                                    (__float128)grid[i].im,
                                                    (__float128)b_re[i],
                                                    (__float128)b_im[i],
-                                                   ref_re[i], ref_im[i]);
+                                                   sref_re, sref_im);
         if (kappa < 0.0) {
           ++ucell.n_ungated; row_.state = 'X';   // no derivative -> no bound
         } else {
@@ -2004,8 +2660,8 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
             quadmath_snprintf(qb, sizeof qb, "%.36Qg", exact[1]);
             quadmath_snprintf(qc, sizeof qc, "%.36Qg", exact[2]);
             quadmath_snprintf(qd, sizeof qd, "%.36Qg", exact[3]);
-            quadmath_snprintf(qr, sizeof qr, "%.36Qg", ref_re[i]);
-            quadmath_snprintf(qi, sizeof qi, "%.36Qg", ref_im[i]);
+            quadmath_snprintf(qr, sizeof qr, "%.36Qg", sref_re);
+            quadmath_snprintf(qi, sizeof qi, "%.36Qg", sref_im);
             std::printf("DUMP %s c %s point %d\n", B::name(), kComplex[id].name, int(i));
             std::printf("  a      = (%s, %s)\n", qa, qb);
             std::printf("  b      = (%s, %s)\n", qc, qd);
@@ -2021,7 +2677,16 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
                                rg, sb_bits)) {
             ++ucell.n_unresolved; row_.state = 'U';
           } else {
-            const double ratio = (bd.value > 0.0) ? m / bd.value : HUGE_VAL;
+            if (ux->dump_terms && bd.value > std::exp2((double)sb_bits)) {
+              std::printf("TERMS %s c %s %d ulps=%.6g bound=%.6g res=%.6g "
+                          "kappa=%.6g in_delta=%.6g kappa_int=%.6g gain=%.6g "
+                          "abs_floor=%.6g tl=%.6g\n",
+                          B::name(), kComplex[id].name, int(i), m, bd.value,
+                          bd.res, bd.kappa, bd.in_delta, bd.kappa_int, bd.gain,
+                          bd.abs_floor, std::exp2((double)sb_bits));
+            }
+            const double gate_v = bd.value;
+            const double ratio = (gate_v > 0.0) ? m / gate_v : HUGE_VAL;
             ++ucell.n_scored; row_.state = 'S';
             if (ratio > ucell.worst_ratio) {
               ucell.worst_ratio = ratio;  ucell.worst_point    = int(i);
@@ -2276,6 +2941,14 @@ static bool within_rel(double a, double b, double rel) {
   return std::fabs(a - b) <= rel * m;
 }
 
+// Identity of a scored row: the tuple that names the same measurement across
+// two runs. Used to compare a baseline against a sweep whose grid has grown.
+std::string row_key(const char* be, char kind, const char* op, int point) {
+  char buf[96];
+  std::snprintf(buf, sizeof buf, "%s|%c|%s|%d", be, kind, op, point);
+  return std::string(buf);
+}
+
 int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
   // The committed baseline is gzipped -- 428,592 rows is 8.7 MB of text and
   // 2.6 MB compressed, and it is rewritten on every accepted change, so the
@@ -2290,6 +2963,20 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
     f = std::fopen(path.c_str(), "rb");
   }
   if (!f) { std::fprintf(stderr, "cannot open baseline %s\n", path.c_str()); return 2; }
+
+  // Match baseline rows to fresh rows by IDENTITY, not by position. The old
+  // lock-step walk (fresh[idx]) required both files to be the same length and
+  // in the same order, so ADDING grid points desynchronised every row after
+  // the insertion and the comparison bailed with exit 2 -- the apparatus
+  // refusing the one change it exists to encourage. See the note on
+  // `new_points` below for what replaces it.
+  long declared_real = 0, declared_cplx = 0;   // from the baseline's own header
+  std::map<std::string, size_t> fresh_by_key;
+  for (size_t i = 0; i < fresh.size(); ++i)
+    fresh_by_key[row_key(fresh[i].backend, fresh[i].kind, fresh[i].op,
+                         fresh[i].point)] = i;
+  std::vector<bool> fresh_seen(fresh.size(), false);
+  long new_points = 0, removed_points = 0, removed_shown = 0;
 
   char   line[256];
   size_t idx = 0, parsed = 0;
@@ -2306,6 +2993,16 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
 
   while (std::fgets(line, sizeof(line), f)) {
     if (line[0] == '#') {
+      // The header declares the grid this file was produced from. Keep it:
+      // it is what distinguishes a TRUNCATED file (body shorter than its own
+      // header says) from an older, honest baseline with a smaller grid.
+      {
+        long hr = 0, hc = 0;
+        if (std::sscanf(line, "# grid: real=%ld complex=%ld", &hr, &hc) == 2) {
+          declared_real = hr;
+          declared_cplx = hc;
+        }
+      }
       unsigned long long fp = 0;
       if (std::sscanf(line, "# oracle-fingerprint: %llx", &fp) == 1) {
         fp_seen = true;
@@ -2332,20 +3029,23 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
     }
     ++parsed;
 
-    if (idx >= fresh.size()) {
-      std::fprintf(stderr, "baseline has more rows than the fresh sweep "
-                           "(%zu vs %zu) — the grid changed\n", parsed, fresh.size());
-      structural = true; break;
+    // Keyed lookup. A baseline row with no fresh counterpart means COVERAGE
+    // WAS REMOVED, which is still structural -- losing a point silently is the
+    // failure the old index walk was really guarding against, and it stays a
+    // hard failure. A fresh row with no baseline counterpart is simply new and
+    // is counted at the end.
+    const auto it = fresh_by_key.find(row_key(be, kind, op, point));
+    if (it == fresh_by_key.end()) {
+      ++removed_points;
+      if (removed_shown < 10) {
+        std::fprintf(stderr, "  REMOVED    %-4s %c %-9s point %d — in the baseline, "
+                             "absent from this sweep\n", be, kind, op, point);
+        ++removed_shown;
+      }
+      continue;
     }
-    const Row& r = fresh[idx];
-    if (std::strcmp(be, r.backend) != 0 || kind != r.kind ||
-        std::strcmp(op, r.op) != 0 || point != r.point) {
-      std::fprintf(stderr,
-                   "baseline row %zu is %s,%c,%s,%d but the fresh sweep has %s,%c,%s,%d\n"
-                   "  the grid or the op inventory changed; the comparison is invalid\n",
-                   idx, be, kind, op, point, r.backend, r.kind, r.op, r.point);
-      structural = true; break;
-    }
+    fresh_seen[it->second] = true;
+    const Row& r = fresh[it->second];
 
     // THE MONOTONE GATE, in ulps. Larger is worse, so a regression is a point
     // whose error GREW. Two things are deliberately not regressions:
@@ -2480,12 +3180,61 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
   }
   if (gz) pclose(f); else std::fclose(f);
 
-  if (structural) return 2;
-  if (idx != fresh.size()) {
-    std::fprintf(stderr, "baseline has %zu rows, the fresh sweep has %zu — "
-                         "the grid changed\n", idx, fresh.size());
-    return 2;
+  for (size_t i = 0; i < fresh.size(); ++i)
+    if (!fresh_seen[i]) ++new_points;
+
+  // TRUNCATION CHECK. Count how many rows this baseline's OWN header implies,
+  // and require the body to deliver them. Older baselines with a smaller grid
+  // are fine -- they are compared on the intersection -- but a file that is
+  // short of its own declared grid has been cut or corrupted, and the rows it
+  // is missing would otherwise be silently reclassified as `new points`.
+  if (declared_real > 0 || declared_cplx > 0) {
+    long n_real_ops = 0, n_cplx_ops = 0;
+    for (const auto& kv : fresh_by_key) {
+      (void)kv;
+    }
+    // Count ops per realm from the fresh sweep, which shares the op inventory.
+    std::map<std::string, bool> seen_real, seen_cplx;
+    for (size_t i = 0; i < fresh.size(); ++i) {
+      if (fresh[i].kind == 'r') seen_real[fresh[i].op] = true;
+      else                      seen_cplx[fresh[i].op] = true;
+    }
+    n_real_ops = (long)seen_real.size();
+    n_cplx_ops = (long)seen_cplx.size();
+    std::map<std::string, bool> seen_be;
+    for (size_t i = 0; i < fresh.size(); ++i) seen_be[fresh[i].backend] = true;
+    const long n_be = (long)seen_be.size();
+    const long expect =
+        (declared_real * n_real_ops + declared_cplx * n_cplx_ops) * n_be;
+    if (expect > 0 && (long)parsed < expect) {
+      std::fprintf(stderr,
+                   "\n  baseline body is SHORT of its own header: %zu rows read, "
+                   "%ld implied by\n  '# grid: real=%ld complex=%ld' over %ld ops "
+                   "and %ld backends.\n"
+                   "  The file is truncated or corrupt; its missing rows would be "
+                   "silently\n  reclassified as new points. Refusing to compare.\n",
+                   parsed, expect, declared_real, declared_cplx,
+                   n_real_ops + n_cplx_ops, n_be);
+      structural = true;
+    }
   }
+
+  if (removed_points) {
+    std::fprintf(stderr,
+                 "\n  %ld point(s) present in the baseline are absent from this sweep.\n"
+                 "  Coverage was removed; that is a change of standard and the\n"
+                 "  comparison cannot certify it. Re-record deliberately.\n",
+                 removed_points);
+    structural = true;
+  }
+  if (structural) return 2;
+  // NO row-count equality check here. With keyed matching `idx` counts the
+  // baseline rows consumed, which is legitimately smaller than fresh.size()
+  // whenever the grid grew. Both asymmetries are already handled: a baseline
+  // row with no counterpart is `removed_points` (structural, above), and a
+  // fresh row with no counterpart is `new_points` (reported, not gated). A
+  // count comparison here would re-impose the very constraint that made the
+  // gate refuse added coverage.
 
   std::printf("\n  compared      : %zu points against %s\n", idx, path.c_str());
   std::printf("  decreased     : %ld%s\n", decreased,
@@ -2496,6 +3245,9 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
   // state flip, a rewritten bound -- be reported as unchanged, which is
   // precisely the sentence a blind gate prints.
   std::printf("  unchanged     : %ld\n", unchanged);
+  if (new_points)
+    std::printf("  new points    : %ld   (not in the baseline; nothing to compare "
+                "against, not gated)\n", new_points);
   std::printf("  state moved   : %ld%s\n", state_moved,
               state_moved ? "   <-- the recorded verdicts are not this build's" : "");
   std::printf("  record drift  : %ld bound, %ld digits%s\n",
@@ -2701,6 +3453,18 @@ void usage(const char* argv0) {
     "  --out PATH        write the baseline CSV here. No default: without this\n"
     "                    flag nothing is written.\n"
     "  --grid-out PATH   also write the grid manifest here\n"
+    "  --oracle WHICH    quadmath (default) or mpfr. libquadmath's own argument\n"
+    "                    reduction fails above ~1e40 (measured: clean at 1e40,\n"
+    "                    ~1e34 ulps wrong at 1e60+), so trig rows at family (5)\n"
+    "                    magnitudes are scored against a broken reference.\n"
+    "                    --oracle=mpfr uses MPFR at 400 bits for the REAL path;\n"
+    "                    complex stays on libquadmath.\n"
+    "  --oracle-selftest check that the __float128 <-> mpfr conversions are\n"
+    "                    EXACT, against routes sharing no mechanism with them,\n"
+    "                    and exit. Runs nothing else. A conversion that merely\n"
+    "                    round-trips binary128 is not enough: the oracle\n"
+    "                    evaluates AT the 400-bit value, and near a zero of sin\n"
+    "                    a 2^-136 argument error is 1e11 ulps of reference error.\n"
     "  --seed N          RNG seed for the derived operands (default %llu)\n"
     "  --summary         print the per-(backend, op) table (implied unless --quiet)\n"
     "  --quiet           suppress the per-(backend, op) table\n"
@@ -2741,6 +3505,7 @@ int main(int argc, char** argv) {
   // explicit --out.
   std::string out, grid_out, baseline, explain_op, ulp_dump, dump_op;
   int dump_point = -1;
+  bool dump_terms = false;
   std::string ulp_register;
   uint64_t    seed = kDefaultSeed;
   bool        quiet = false, out_set = false, ulp_gate = false;
@@ -2756,11 +3521,36 @@ int main(int argc, char** argv) {
     if (s == "--help" || s == "-h") { usage(argv[0]); return 0; }
     else if (s == "--out")       { out = need("--out"); out_set = true; }
     else if (s == "--grid-out")  { grid_out = need("--grid-out"); }
+    else if (s == "--oracle") {
+      const std::string v = need("--oracle");
+#if defined(XPMATH_HAVE_MPFR)
+      if (v == "mpfr")           g_oracle_mpfr = true;
+#else
+      if (v == "mpfr") {
+        std::fprintf(stderr,
+            "--oracle=mpfr: this binary was built without MPFR.\n"
+            "  Install libmpfr-dev and reconfigure; refusing to run rather\n"
+            "  than score against libquadmath while claiming otherwise.\n");
+        return 2;
+      }
+#endif
+      else if (v == "quadmath")  g_oracle_mpfr = false;
+      else { std::fprintf(stderr, "--oracle must be quadmath or mpfr\n"); return 2; }
+    }
+#if defined(XPMATH_HAVE_MPFR)
+    else if (s == "--oracle-selftest") { return oracle_conv_selftest(); }
+#else
+    else if (s == "--oracle-selftest") {
+      std::fprintf(stderr, "--oracle-selftest: built without MPFR; nothing to check.\n");
+      return 77;   // ctest SKIP, not a pass
+    }
+#endif
     else if (s == "--baseline")  { baseline = need("--baseline"); }
     else if (s == "--ulp")       { ulp_gate = true; }
     else if (s == "--ulp-allowance") { ulp_allowance = std::atof(need("--ulp-allowance")); }
     else if (s == "--ulp-dump") { ulp_dump = need("--ulp-dump"); }
     else if (s == "--register") { ulp_register = need("--register"); ulp_gate = true; }
+    else if (s == "--dump-terms") { dump_terms = true; ulp_gate = true; }
     else if (s == "--dump-operands") {
       const std::string v = need("--dump-operands");
       const size_t colon = v.rfind(':');
@@ -2805,7 +3595,7 @@ int main(int argc, char** argv) {
   std::vector<UlpFail>  ulp_fails, ulp_explains;
   UlpCtx                ux = {ulp_allowance, &ulp_cells, &ulp_fails,
                               dump_op.empty() ? nullptr : dump_op.c_str(),
-                              dump_point,
+                              dump_point, dump_terms,
                               explain_op.c_str(), explain_point,
                               explain_point >= 0 ? &ulp_explains : nullptr};
   // The ulp verdict is now THE measurement, not a mode: every run computes it,

@@ -62,6 +62,7 @@
 //   * Math functions are ADL-findable via the argument's namespace.
 
 #include <xp/config.hpp>
+#include <xp/trig_reduction.hpp>
 #include <cstdint>
 #include <cstring>
 #include <cmath>
@@ -94,6 +95,13 @@ XPMATH_INLINE_FUNCTION TripleFloat exp(TripleFloat a);
 XPMATH_INLINE_FUNCTION TripleFloat log(TripleFloat a);
 XPMATH_INLINE_FUNCTION TripleFloat log1p(TripleFloat a);   // asinh() is defined above it
 XPMATH_INLINE_FUNCTION TripleFloat pow(TripleFloat a, TripleFloat b);
+// KI-44: the unevaluated-pair trio behind pow, defined after the expansion
+// helpers they use (tf_expansion_push / _compress, ~line 1732).
+namespace detail {
+XPMATH_INLINE_FUNCTION TripleFloat tf_mul_ext(TripleFloat x, TripleFloat y, float& err);
+XPMATH_INLINE_FUNCTION TripleFloat tf_log_ext(TripleFloat a, float& err);
+XPMATH_INLINE_FUNCTION TripleFloat tf_exp_ext(TripleFloat a, float resid);
+}  // namespace detail
 XPMATH_INLINE_FUNCTION void   sincos(TripleFloat a, TripleFloat& sin_a, TripleFloat& cos_a);
 XPMATH_INLINE_FUNCTION void   sinhcosh(TripleFloat a, TripleFloat& sinh_a, TripleFloat& cosh_a);
 XPMATH_INLINE_FUNCTION TripleFloat angle(TripleFloat x, TripleFloat y);
@@ -854,7 +862,28 @@ XPMATH_INLINE_FUNCTION TripleFloat exp(TripleFloat a) {
     // for the scale-back, so the result is unchanged. Converting it would
     // perturb the reduction on a large set of inputs to buy nothing.
     float m = detail::floor(a.f0 * k_inv_log2 + 0.5f);
-    TripleFloat r = subtract(a, multiply_scalar(k_log2, m));
+
+    // KI-42: Cody-Waite range reduction; see dd_math.hpp's exp for the
+    // derivation and ff_math.hpp's for the FP32 width. `multiply_scalar(k_log2,
+    // m)` was a rounded TF-by-scalar product with the same defect. Five 16-bit
+    // pieces put the tail at 2^-89.3 (9.4e-04 ulps of 2^-72 at kmax); 0 of 1400
+    // products inexact over k in [-151, 128]. Measured end-to-end over
+    // a >= -54.1 (TF's subnormal wall, tf_math.hpp:917):
+    //     shipped   702 rows > 1 ulp, worst 14.44
+    //     4 pieces 1394 rows > 1 ulp, worst 242      <- one short is FATAL
+    //     5 pieces    0 rows > 1 ulp, worst 0.8241
+    // and 5 pieces equals a 400-bit oracle reduction, so nothing is left.
+    // This is also why exp no longer calls multiply_scalar at all.
+    const float kLn2_1 =  0x1.62e4p-1f;    // 15 significant bits
+    const float kLn2_2 =  0x1.7f7ep-20f;   // 16
+    const float kLn2_3 = -0x1.c61p-37f;    // 13
+    const float kLn2_4 = -0x1.950ep-54f;   // 16
+    const float kLn2_5 =  0x1.e3b4p-72f;   // 15
+    TripleFloat r = subtract(a, TripleFloat(m * kLn2_1));
+    r = subtract(r, TripleFloat(m * kLn2_2));
+    r = subtract(r, TripleFloat(m * kLn2_3));
+    r = subtract(r, TripleFloat(m * kLn2_4));
+    r = subtract(r, TripleFloat(m * kLn2_5));
 
     const int nq = 5;
     r = divide_scalar(r, float(1 << nq));
@@ -927,17 +956,37 @@ XPMATH_INLINE_FUNCTION TripleFloat log(TripleFloat a) {
 }
 
 // pow: a^b = exp(b·log a). PORT_NOTES_QF.md §10 conditioning caveat applies.
+//
+// The non-positive-base guard mirrors dd_math.hpp / ff_math.hpp / qf_math.hpp,
+// which have carried it since their KI-19-era domain audit; TF was missed. Left
+// bare, pow(0, b) fell through to log(0) -- which returns 0 after printing
+// TFLOG's diagnostic -- and then exp(b*0) = 1, so TF answered 1 where the other
+// three answer 0, with only the misleading TFLOG line to show for it.
+//
+// The sweep cannot catch this: repair_real's R_Pow case
+// (scripts/sweep_accuracy.cpp:529-537) sets a = fabs(a) and maps a == 0 to 1,
+// so no grid point ever presents pow with a non-positive base. Covered by a
+// targeted test instead.
 XPMATH_INLINE_FUNCTION TripleFloat pow(TripleFloat a, TripleFloat b) {
-    return exp(multiply(b, log(a)));
+    if (a.f0 <= 0.0f) {
+        if (a.f0 == 0.0f && b.f0 > 0.0f) return TripleFloat(0.0f);
+        XPMATH_PRINTF("TFPOW: non-positive base\n");
+        return TripleFloat(0.0f);
+    }
+    // KI-44: exponent kept as an unevaluated pair; see dd_math.hpp's pow.
+    float le;
+    const TripleFloat lp = detail::tf_log_ext(a, le);
+    float e1;
+    const TripleFloat p = detail::tf_mul_ext(lp, b, e1);
+    return detail::tf_exp_ext(p, e1 + le * b.f0);
 }
 
-// sin/cos: joint computation via argument reduction mod 2π, divide-by-k Taylor
-// on the residual, and joint angle-doubling formulas (PORT_NOTES.md §3a).
-// With nq = 4, r = s3/2^4, and sin(r)/cos(r) Taylor converges in ~7 terms to
-// reach TF width. Four joint doublings recover sin(s3)/cos(s3).
+// sin/cos: joint computation via Payne-Hanek reduction mod π/2, divide-by-k
+// Taylor on the residual, and joint angle-doubling formulas (PORT_NOTES.md
+// §3a).  With nq = 4, r = r_mod/2^4, and sin(r)/cos(r) Taylor converges in ~7
+// terms to reach TF width.  Four joint doublings recover sin/cos of r_mod, and
+// the quadrant tables map that back onto a.
 XPMATH_INLINE_FUNCTION void sincos(TripleFloat a, TripleFloat& sin_a, TripleFloat& cos_a) {
-    const TripleFloat k_2pi = mul_pwr2(TripleFloat_pi(), 2.0f);
-
     if (a.f0 == 0.0f) {
         sin_a = TripleFloat(0.0f);
         cos_a = TripleFloat(1.0f);
@@ -946,51 +995,108 @@ XPMATH_INLINE_FUNCTION void sincos(TripleFloat a, TripleFloat& sin_a, TripleFloa
     // KI-12 residual.  Small-argument short circuit over the degenerate
     // reduction band only; full derivation at ff_math.hpp:sincos.  TF's limbs
     // are FP32 too, so the band is the same shape: below 2^nq * FLT_MIN the
-    // leading word of r = s3/2^nq is subnormal and sheds bits before the first
+    // leading word of r = r_mod/2^nq is subnormal and sheds bits before the first
     // Taylor term (and is 0 outright for subnormal |a|).  Measured before:
     // TF sin(1e-40) = 9.99967e-41 for an argument of 9.99995e-41, and
     // TF sin(1e-44) = 0.  Above the band the series is already correct and a
     // wider cut was measured to cost complex-op digits -- see ff_math.hpp.
-    // nq is declared below (== 4); the constant is 2^4 * FLT_MIN spelled out.
-    if (detail::fabs(a.f0) < 1.8807842e-37f /* 2^4 * FLT_MIN */) {
+    // nq is declared below and is now 0, so the band is FLT_MIN and not
+    // 2^4 * FLT_MIN: with no scale-down the only way the leading word of r can
+    // be subnormal is for a itself to be.  This is a NARROWING of the guard,
+    // not a removal, and it is a no-op on the vacated strip rather than a
+    // behaviour change -- for FLT_MIN <= |a| < 2^4*FLT_MIN the series now runs
+    // and returns the same pair, because r^2 underflows to zero there, leaving
+    // sin_r = r = a and v_r = 0 so cos_r = 1.
+    //
+    // The constant was spelled out literally when it was 2^4 * FLT_MIN and a
+    // reader had to trust that 1.8807842e-37f was that product.  It is written
+    // against nq now so it cannot drift from it again.
+    if (detail::fabs(a.f0) < float(1 << 0) * 1.17549435e-38f /* 2^nq * FLT_MIN */) {
         sin_a = a;
         cos_a = TripleFloat(1.0f);
         return;
     }
 
-    // Reduce mod 2π
-    TripleFloat z = round_to_nearest_int(divide(a, k_2pi));
-    TripleFloat r = subtract(a, multiply(k_2pi, z));
+    // ARGUMENT REDUCTION — Payne-Hanek.  a = j*(pi/2) + r_mod with |r_mod| <=
+    // pi/4 and j = nint(a*2/pi) mod 4, with n never formed.  Mirrors
+    // dd_math.hpp:sincos; why the old `a - 2pi*nint(a/2pi)` could not be
+    // rescued by a wider constant is measured in
+    // scripts/probe_trig_stages.cpp --widen, and kPhGuardTF / kPhChunksTF come
+    // from scripts/gen_trig_reduction_constants.cpp.
+    //
+    // r = r_mod/2^nq below can no longer underflow: it is zero only for
+    // |r_mod| < 2^nq * FLT_MIN = 2^-122, and |f| >= 2^-C with C = 78.649
+    // MEASURED over every TripleFloat (include/xp/trig_reduction_data.hpp),
+    // giving |r| >= 2^-83.  The KI-12 band above covers the only arguments that
+    // can, which is what it was sized for.
+    // nq = 0: no scale-down.  The FP32 subnormal mechanism and the measurement
+    // behind it are at ff_math.hpp:sincos; TF's own worst cell moved from
+    // 2.6e7 ulps to 0.59 on it, and its series length went 6 -> 10 terms.
+    const int nq = 0;
+    int         j;
+    TripleFloat r_mod;
+    if (detail::fabs(a.f0) <= 0.75f) {
+        // Nothing to reduce: r_mod is a itself, exactly.  See dd_math.hpp for
+        // the measurement behind both the branch and the 0.75.
+        j = 0; r_mod = a;
+    } else {
+        const float win[3] = { a.f0, a.f1, a.f2 };
+        float       f[4];
+        j = detail::xp_ph_reduce<float>(win, 3, detail::kPhGuardTF,
+                                        detail::kPhChunksTF, f, 4);
+        // f is exact to 2^-kPhGuardTF ABSOLUTE, i.e. 2^-(p+4) RELATIVE at the
+        // worst cancellation the format admits, so r_mod inherits ~2^-72
+        // relative -- proportional to |r_mod|, where the old form's error was
+        // proportional to |a|.
+        TripleFloat pio2 = TripleFloat(detail::xp_ph_pio2_f(0));
+        for (int k = 1; k < detail::kPhPio2WordsF; ++k)
+            pio2 = add(pio2, TripleFloat(detail::xp_ph_pio2_f(k)));
+        TripleFloat fr = TripleFloat(f[0]);
+        for (int k = 1; k < 4; ++k) fr = add(fr, TripleFloat(f[k]));
+        r_mod = multiply(fr, pio2);
+    }
 
     // Reduce by 2^nq
-    const int nq = 4;
-    r = divide_scalar(r, float(1 << nq));
+    TripleFloat r = divide_scalar(r_mod, float(1 << nq));
 
-    // Taylor: sin(r) = r - r^3/3! + ..., cos(r) = 1 - r^2/2! + ...
+    // Taylor: sin(r) = r - r^3/3! + ..., v(r) = r^2/2! - r^4/4! + ..., v = 1-cos.
+    // Carried in (sin, v) rather than (sin, cos); derivation at dd_math.hpp:sincos.
+    //
+    // v STARTS ONE TERM IN.  The cos series began at term_cos = 1, so its loop
+    // body produced -r^2/2 on the first pass; v_r is initialised TO r^2/2, so
+    // the first pass must produce -r^4/4! instead.  That is why the ratio below
+    // is -(2k+1)(2k+2) where the cos ratio was -(2k-1)(2k) -- same terms, index
+    // shifted by one, not a different series.
     TripleFloat r2 = sqr(r);
     TripleFloat sin_r = r;
-    TripleFloat cos_r = TripleFloat(1.0f);
     TripleFloat term_sin = r;
-    TripleFloat term_cos = TripleFloat(1.0f);
+    TripleFloat v_r = divide_scalar(r2, 2.0f);
+    TripleFloat term_v = v_r;
     int k = 1;
 
+    // TF alone tests convergence BEFORE the update, in a while loop, where FF
+    // and QF test after in a for loop.  That is preserved verbatim: the v test
+    // simply replaces the cos test in the same position, and it is relative
+    // (against v_r) exactly as the cos test was relative (against cos_r).
     while (k < 64 && (abs(term_sin).f0 > 1.0e-21f * abs(sin_r).f0 ||
-                      abs(term_cos).f0 > 1.0e-21f * abs(cos_r).f0)) {
+                      abs(term_v).f0   > 1.0e-21f * abs(v_r).f0)) {
         term_sin = divide_scalar(multiply(term_sin, r2), -float((2*k) * (2*k+1)));
-        term_cos = divide_scalar(multiply(term_cos, r2), -float((2*k-1) * (2*k)));
+        term_v   = divide_scalar(multiply(term_v,   r2), -float((2*k+1) * (2*k+2)));
         sin_r = add(sin_r, term_sin);
-        cos_r = add(cos_r, term_cos);
+        v_r   = add(v_r, term_v);
         k++;
     }
 
-    // Joint angle-doubling: sin(2θ) = 2·sin(θ)·cos(θ), cos(2θ) = cos²(θ) - sin²(θ)
+    // Joint angle-doubling in (sin, v): sin(2θ) = 2·sin(θ)·(1-v), v(2θ) = 2·sin²(θ).
+    // At nq = 0 this loop does not execute; kept because nq is what was measured.
     for (int i = 0; i < nq; i++) {
-        TripleFloat s = multiply(sin_r, cos_r);
+        const TripleFloat c_i = subtract(TripleFloat(1.0f), v_r);
+        TripleFloat s = multiply(sin_r, c_i);
         s = add(s, s);
-        TripleFloat c = subtract(sqr(cos_r), sqr(sin_r));
+        v_r   = add(sqr(sin_r), sqr(sin_r));    // 2 sin^2, from the OLD sin_r
         sin_r = s;
-        cos_r = c;
     }
+    TripleFloat cos_r = subtract(TripleFloat(1.0f), v_r);
 
     // KI-26 codomain guard: outside the slack band -> identity point
     // (sin, cos) = (0, 1), inside it -> clamp, so |sin| <= 1 and |cos| <= 1 hold
@@ -1009,8 +1115,11 @@ XPMATH_INLINE_FUNCTION void sincos(TripleFloat a, TripleFloat& sin_a, TripleFloa
     if (cos_r.f0 >  1.0f || (cos_r.f0 ==  1.0f && cos_r.f1 > 0.0f)) cos_r = TripleFloat( 1.0f);
     if (cos_r.f0 < -1.0f || (cos_r.f0 == -1.0f && cos_r.f1 < 0.0f)) cos_r = TripleFloat(-1.0f);
 
-    sin_a = sin_r;
-    cos_a = cos_r;
+    // Quadrant selection (TF has sin first, cos second)
+    if (j == 0) { sin_a = sin_r;  cos_a = cos_r; }
+    else if (j == 1) { sin_a = cos_r;  cos_a = negate(sin_r); }
+    else if (j == 2) { sin_a = negate(sin_r); cos_a = negate(cos_r); }
+    else { sin_a = negate(cos_r); cos_a = sin_r; }
 }
 
 XPMATH_INLINE_FUNCTION TripleFloat sin(TripleFloat a) {
@@ -1446,12 +1555,38 @@ XPMATH_INLINE_FUNCTION TripleFloat atanh(TripleFloat a) {
 }
 
 // exp2, exp10, expm1, log1p, log10 (derived from exp/log)
+// KI-43: see dd_math.hpp's exp2 for the derivation.
 XPMATH_INLINE_FUNCTION TripleFloat exp2(TripleFloat a) {
-    return exp(multiply(a, TripleFloat_log2()));
+    TripleFloat k = round_to_nearest_int(a);
+    const int ki = (int)k.f0;
+    TripleFloat r = subtract(a, k);                     // EXACT
+    TripleFloat s = (r.f0 == 0.0f && r.f1 == 0.0f && r.f2 == 0.0f)
+                  ? TripleFloat(1.0f)
+                  : exp(multiply(r, TripleFloat_log2()));
+    if (ki >= -125 && ki <= 127) return mul_pwr2(s, ldexpf(1.0f, ki));
+    return TripleFloat(ldexpf(s.f0, ki), ldexpf(s.f1, ki), ldexpf(s.f2, ki));
 }
 
+// KI-43: see dd_math.hpp's exp10. Five 16-bit log10(2) pieces, tail 2^-95.0.
 XPMATH_INLINE_FUNCTION TripleFloat exp10(TripleFloat a) {
-    return exp(multiply(a, TripleFloat_log10()));
+    const float kLog2_10 = 3.32192809f;
+    const float kf = detail::rint(a.f0 * kLog2_10);
+    if (!(detail::fabs(kf) < 1.0e5f))
+        return exp(multiply(a, TripleFloat_log10()));
+    const int ki = (int)kf;
+    const float kLog10_2_1 =  0x1.3442p-2f;
+    const float kLog10_2_2 = -0x1.95ecp-19f;
+    const float kLog10_2_3 = -0x1.0c02p-39f;
+    const float kLog10_2_4 = -0x1.9dc2p-59f;
+    const float kLog10_2_5 =  0x1.2b36p-78f;
+    TripleFloat r = subtract(a,  TripleFloat(kf * kLog10_2_1));
+    r = subtract(r, TripleFloat(kf * kLog10_2_2));
+    r = subtract(r, TripleFloat(kf * kLog10_2_3));
+    r = subtract(r, TripleFloat(kf * kLog10_2_4));
+    r = subtract(r, TripleFloat(kf * kLog10_2_5));
+    TripleFloat s = exp(multiply(r, TripleFloat_log10()));
+    if (ki >= -125 && ki <= 127) return mul_pwr2(s, ldexpf(1.0f, ki));
+    return TripleFloat(ldexpf(s.f0, ki), ldexpf(s.f1, ki), ldexpf(s.f2, ki));
 }
 
 XPMATH_INLINE_FUNCTION TripleFloat expm1(TripleFloat a) {
@@ -1697,6 +1832,101 @@ XPMATH_INLINE_FUNCTION void tf_expansion_compress(const float* e, int m,
     h[top++] = q;
     for (int k = 0; k < n; ++k) out[k] = (top - 1 - k >= 0) ? h[top - 1 - k] : 0.0f;
 }
+
+namespace detail {
+// KI-44, TF. See dd_math.hpp's dd_mul_ext / dd_log_ext / dd_exp_ext.
+XPMATH_INLINE_FUNCTION TripleFloat tf_mul_ext(TripleFloat x, TripleFloat y, float& err) {
+    const float aw[3] = {x.f0, x.f1, x.f2};
+    const float bw[3] = {y.f0, y.f1, y.f2};
+    float e[20];
+    int   m = 0;
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) {
+            if (aw[i] == 0.0f || bw[j] == 0.0f) continue;
+            float q;
+            const float p = tf_two_prod(aw[i], bw[j], q);
+            tf_expansion_push(e, m, p);
+            tf_expansion_push(e, m, q);
+        }
+    if (m == 0) { err = 0.0f; return TripleFloat(0.0f); }
+    float d[4];
+    tf_expansion_compress(e, m, d, 4);
+    err = d[3];
+    return TripleFloat(d[0], d[1], d[2]);
+}
+XPMATH_INLINE_FUNCTION int tf_expo_of(float x) {
+    int k = 0;
+    double t = (double)x;
+    while (t >= 18014398509481984.0)    { t *= 5.5511151231257827e-17; k += 54; }
+    while (t <  5.5511151231257827e-17) { t *= 18014398509481984.0;    k -= 54; }
+    while (t >= 2.0) { t *= 0.5; ++k; }
+    while (t <  1.0) { t *= 2.0;  --k; }
+    return k;
+}
+XPMATH_INLINE_FUNCTION TripleFloat tf_log_ext(TripleFloat a, float& err) {
+    err = 0.0f;
+    if (detail::isinf(a.f0)) return a;
+    if (a.f0 <= 0.0f) { XPMATH_PRINTF("TFLOGEXT: non-positive argument\n"); return TripleFloat(0.0f); }
+    const int k = tf_expo_of(a.f0);
+    const TripleFloat m(ldexpf(a.f0, -k), ldexpf(a.f1, -k), ldexpf(a.f2, -k));
+    const TripleFloat lm = log(m);
+    const float kLn2_1 =  0x1.62e4p-1f;    // KI-42 FP32 pieces, 16 bits each
+    const float kLn2_2 =  0x1.7f7ep-20f;
+    const float kLn2_3 = -0x1.c61p-37f;
+    const float kLn2_4 = -0x1.950ep-54f;
+    const float kLn2_5 =  0x1.e3b4p-72f;
+    const float kd = (float)k;
+    float e[20];
+    int   n = 0;
+    tf_expansion_push(e, n, kd * kLn2_1);
+    tf_expansion_push(e, n, kd * kLn2_2);
+    tf_expansion_push(e, n, kd * kLn2_3);
+    tf_expansion_push(e, n, kd * kLn2_4);
+    tf_expansion_push(e, n, kd * kLn2_5);
+    tf_expansion_push(e, n, lm.f0);
+    tf_expansion_push(e, n, lm.f1);
+    tf_expansion_push(e, n, lm.f2);
+    if (n == 0) return TripleFloat(0.0f);
+    float d[4];
+    tf_expansion_compress(e, n, d, 4);
+    err = d[3];
+    return TripleFloat(d[0], d[1], d[2]);
+}
+XPMATH_INLINE_FUNCTION TripleFloat tf_exp_ext(TripleFloat a, float resid) {
+    const float k_inv_log2 = 1.44269504088896341f;
+    if (a.f0 < -104.0f) return TripleFloat(0.0f);
+    if (a.f0 >  88.722839f) { XPMATH_PRINTF("TFEXP: overflow\n"); return TripleFloat(HUGE_VALF); }
+    const float m = detail::floor(a.f0 * k_inv_log2 + 0.5f);
+    const float kLn2_1 =  0x1.62e4p-1f;
+    const float kLn2_2 =  0x1.7f7ep-20f;
+    const float kLn2_3 = -0x1.c61p-37f;
+    const float kLn2_4 = -0x1.950ep-54f;
+    const float kLn2_5 =  0x1.e3b4p-72f;
+    TripleFloat r = subtract(a, TripleFloat(m * kLn2_1));
+    r = subtract(r, TripleFloat(m * kLn2_2));
+    r = subtract(r, TripleFloat(m * kLn2_3));
+    r = subtract(r, TripleFloat(m * kLn2_4));
+    r = subtract(r, TripleFloat(m * kLn2_5));
+    if (resid != 0.0f) r = add(r, TripleFloat(resid));
+    const int nq = 5;
+    r = divide_scalar(r, float(1 << nq));
+    TripleFloat s = r;
+    TripleFloat t = sqr(r);
+    TripleFloat term = t;
+    int kk = 2;
+    while (kk < 64 && abs(term).f0 > 1.0e-21f * abs(s).f0) {
+        term = divide_scalar(term, float(kk));
+        s = add(s, term);
+        term = multiply(term, r);
+        kk++;
+    }
+    for (int i = 0; i < nq; i++) s = multiply(s, add(s, TripleFloat(2.0f)));
+    s = add(TripleFloat(1.0f), s);
+    const int mi = (int)m;
+    if (mi >= -125 && mi <= 127) return mul_pwr2(s, ldexpf(1.0f, mi));
+    return TripleFloat(ldexpf(s.f0, mi), ldexpf(s.f1, mi), ldexpf(s.f2, mi));
+}
+}  // namespace detail
 XPMATH_INLINE_FUNCTION TripleFloat fma(TripleFloat a, TripleFloat b, TripleFloat c) {
     const float p0 = a.f0 * b.f0;
     if (!detail::isfinite(p0) || !detail::isfinite(c.f0))

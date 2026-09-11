@@ -37,3 +37,4 @@ scripts/xp_corpus.bin
 # an 8.7 MB text copy next to it is how the two diverge.
 /validation/sweep/sweep_baseline.csv
 /validation/sweep/sweep_classified.csv
+.run.log

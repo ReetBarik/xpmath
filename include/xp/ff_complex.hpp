@@ -692,7 +692,18 @@ XPMATH_INLINE_FUNCTION FloatFloat xp_asin_imag_mag(FloatFloat x, FloatFloat y) {
 // sign of x on BOTH sides -- which is what C99 Annex G asks for, so the KI-5(d)
 // sheet-selection block the old body needed is not merely unnecessary here, it
 // has nothing left to select.
-XPMATH_INLINE_FUNCTION FloatFloat xp_asin_real_mag(FloatFloat x, FloatFloat y) {
+//
+// SPLIT IN TWO. The leg sqrt(a^2 - x^2) is returned on its own because Re asin
+// and Re acos are the SAME two atan2 arguments in the opposite order:
+//     Re asin = atan2(x, sqrt(a^2 - x^2))
+//     Re acos = atan2(sqrt(a^2 - x^2), x)
+// so acos() below gets this entire cancellation-free construction for free. Both
+// callers must pass x = |Re z| and y = |Im z|: the (max(1,x) - x) term above is
+// derived for x >= 0 and is wrong for negative x. That costs acos nothing,
+// because a is EVEN in x -- x -> -x swaps r and s -- so the leg is even too and
+// the quadrant comes from the SIGNED Re z in acos's atan2 alone, with no case
+// split. xp_asin_real_mag() is left as the atan2 wrapper so asin is unchanged.
+XPMATH_INLINE_FUNCTION FloatFloat xp_asin_real_leg(FloatFloat x, FloatFloat y) {
     const FloatFloat one(1.0f);
     const FloatFloat xp1  = add(x, one);
     const FloatFloat xm1s = subtract(x, one);            // signed, for the max(1,x) term
@@ -720,7 +731,10 @@ XPMATH_INLINE_FUNCTION FloatFloat xp_asin_real_mag(FloatFloat x, FloatFloat y) {
     // root of it cost QF 3.58 digits (29.00 -> 25.42) before this line existed.
     const FloatFloat sax = xlt1 ? sqrt(amx) : multiply(y, sqrt(v));
     const FloatFloat apx = add(multiply_scalar(add(r, s_), 0.5f), x);   // a + x
-    return atan2(x, multiply(sax, sqrt(apx)));
+    return multiply(sax, sqrt(apx));
+}
+XPMATH_INLINE_FUNCTION FloatFloat xp_asin_real_mag(FloatFloat x, FloatFloat y) {
+    return atan2(x, xp_asin_real_leg(x, y));
 }
 // |Re z| and |Im z|, the two arguments xp_asin_imag_mag() wants. Split out so
 // asin/acosh/asinh cannot disagree about them.
@@ -742,93 +756,78 @@ XPMATH_INLINE_FUNCTION FloatFloatComplex asin(FloatFloatComplex z) {
     if (detail::copysign(1.0f, z.im.hi) < 0.0f) im = negate(im);
     return FloatFloatComplex(re, im);
 }
-// Principal sqrt of (u, v) with the sign of a ZERO v respected. The header's
-// complex sqrt above tests `z.im.hi < 0.0f`, which is false for -0.0f, so for u < 0
-// it puts BOTH zero conventions on the +i sheet. That is the same class of defect
-// as KI-5(d) and it is corrected locally here rather than inside sqrt itself,
-// which would move every other caller (acosh included) in one undocumented step.
-// The general sqrt defect was recorded in docs/KNOWN_ISSUES.md as part of KI-11
-// and HAS since been fixed at source (sqrt now reads the sheet off copysign), so
-// this local helper is now belt-and-braces rather than the only correct path.
-// `vsign` is +1/-1, the intended sign of v when v is a zero: multiply_scalar does
-// NOT carry a signed zero through (it renormalizes, and quick_two_sum(-0,+0) is
-// +0), so the caller passes the sign it read off the original Im(z) rather than
-// trusting the halved copy.
-XPMATH_INLINE_FUNCTION FloatFloatComplex sqrt_signed_cut(FloatFloat u, FloatFloat v, float vsign) {
-    FloatFloatComplex r = sqrt(FloatFloatComplex(u, v));
-    if (v.hi == 0.0f && u.hi < 0.0f && vsign != detail::copysign(1.0f, r.im.hi))
-        r.im = negate(r.im);
-    return r;
-}
-// KI-5(c) fix. acos(z) = -2i * log( sqrt((1+z)/2) + i*sqrt((1-z)/2) ) -- Kahan
-// 1987, the exact companion of the acosh form adopted for KI-1 below.
+// KI-5(c), second cut.
 //
-// The old body was `pi/2 - asin(z)`, which is unconditionally stable nowhere near
-// z = 1: acos(1) = 0, so as z -> 1 the difference cancels two quantities that
-// both tend to pi/2 and the ANSWER's own magnitude tends to 0. Every digit of
-// the result is a digit the subtraction destroyed. It is worse off the real axis
-// -- acos(2 + 1e-20i) scored 11.31f on DD, 0.00f on FF -- because asin there is
-// itself computed through 1 - z^2, so the loss compounds.
+//     Re(acos z) = atan2( sqrt(a^2 - x^2), Re z ),   x = |Re z|, y = |Im z|
+//     Im(acos z) = -Im(asin z)                       <- exact identity, pi/2 is real
 //
-// Why Kahan's log form and not his other one, acos(z) = 2*atan(sqrt((1-z)/(1+z))).
-// Both are well conditioned at z -> 1. The log form was chosen because (a) it is
-// structurally identical to the acosh already in this header, so the two share a
-// verified branch layout and one reader's understanding covers both, (b) it needs
-// only sqrt/log, which are the two best-tested primitives here, where the atan
-// form adds a complex atan on top of a complex divide by (1+z) -- a divide that
-// is singular at z = -1, the OTHER end of the principal interval, so that form
-// simply moves the bad point rather than removing it, and (c) it never forms z^2
-// or 1/(1+z), hence no overflow at large |z| and no singularity at either end.
+// on the Hull/Fairgrove/Tang r-s-a parametrisation Re asin already uses, reusing
+// xp_asin_real_leg() verbatim: Re asin = atan2(x, leg) and Re acos = atan2(leg, x)
+// are the SAME two arguments in the opposite order. The leg is even in x, so
+// |Re z| goes into the leg and the SIGNED Re z into the atan2 -- that is the
+// whole of the quadrant logic, with no case split.
 //
-// BUT THE PURE LOG FORM IS ONLY HALF RIGHT, and the monotone gate is what said
-// so. Writing w for the bracket, Im(acos z) = -2*ln|w|, and |w| -> 1 exactly
-// where Im(acos z) -> 0, i.e. for z near the real segment [-1,1]. There the log
-// is taken of a number whose information sits below the leading 1 -- the same
-// disease as KI-5(b), relocated. Measured: 4016 sweep points down across the
-// four backends, worst 31.00 -> 1.23 on DD at z = 0 + 1e-30i. Strictly worse
-// than the defect being fixed.
+// HISTORY. Two earlier forms, both worth not re-trying.
 //
-// SO THIS IS PER-COMPONENT, and the split is exact rather than a compromise.
-// Im(acos z) = -Im(asin z) is an IDENTITY (pi/2 is real), so the pi/2 - asin
-// cancellation was only ever in the real part:
+// (1) `pi/2 - asin(z)` is stable nowhere near z = 1: acos(1) = 0, so as z -> 1
+// the difference cancels two quantities that both tend to pi/2 while the
+// ANSWER's magnitude tends to 0. Every digit is one the subtraction destroyed.
+// It is worse off the real axis -- acos(2 + 1e-20i) scored 11.31 on DD, 0.00 on
+// FF -- because asin there went through 1 - z^2 and the loss compounded.
+// Replaced for KI-5(c).
 //
-//     Re(acos z) = 2*arg( sqrt((1+z)/2) + i*sqrt((1-z)/2) )   <- Kahan, stable
-//     Im(acos z) = -Im(asin z)                                <- exact identity
+// (2) Kahan 1987's log form, acos(z) = -2i*log(sqrt((1+z)/2) + i*sqrt((1-z)/2)),
+// which shipped from KI-5(c) until this commit -- as the REAL PART ONLY. Taking
+// Im through the same log costs 4016 sweep points (|w| -> 1 exactly where
+// Im(acos z) -> 0, the KI-5(b) disease relocated), so pairing it with the exact
+// identity above was never a compromise: it is each form's good component and
+// neither's bad one. That pairing survives this commit unchanged.
 //
-// Each form's good component, neither's bad one. This also inherits KI-5(d)'s
-// cut fix on the imaginary part for free. Decreases fell from 4016 to 949.
+// What does not survive is the log form's real part. It carried a KNOWN,
+// ACCEPTED loss: for |z| >> 1 with arg(z) < 0 the two roots satisfy rm ~ -i*rp,
+// so w = rp + i*rm is a difference of NEAR-EQUAL roots and arg(w) loses about
+// log10|z|/2 digits -- up to 7.85 on the |z| = 1e8 polar ring. Documenting it
+// was not the same as proving it inherent, and it was not: acosh forms rp + rm,
+// a SUM, at the same points. acos(z) = +-i*acosh(z) gives the two the same
+// modulus, and the sweep's complex metric is modulus-relative, so the sibling's
+// error transfers one for one. Measured over the sweep grid: 280 of the 1,268
+// acos rows above 1 ulp were more than 2x their acosh sibling at the same point,
+// 136 more than 10x, and 101 of the 149 rows above 8 ulps had an acosh sibling
+// BELOW 8 and more than 100x smaller (DD point 374: acos 6.62e6, acosh 0.0739).
+// A formulation defect, not conditioning and not the format. The leg form forms
+// no difference anywhere -- a - x is a sum of non-negative terms at every x.
 //
-// ACCEPTED LOSS, recorded in docs/KNOWN_ISSUES.md KI-5(c): for |z| >> 1 with
-// arg(z) < 0 the two roots satisfy rm ~ -i*rp, so w = rp + i*rm is a difference
-// of near-equal roots and arg(w) loses about log10|z|/2 digits -- up to 7.85 on
-// the |z| = 1e8 polar ring. Reflecting by acos(conj z) = conj(acos z) should
-// remove it and was tried both ways; both measured WORSE (1915 and 1648
-// decreases against 949), so no reflection ships. See the KNOWN_ISSUES entry
-// before retrying it.
+// Reflecting the log form by acos(conj z) = conj(acos z) was tried both ways and
+// measured WORSE (1915 and 1648 decreases against 949). Moot now, but the
+// KNOWN_ISSUES entry should not be read as an open invitation.
 //
-// This is NOT routed through acosh even though acos(z) = +-i*acosh(z) holds. The
-// sign of that relation flips with the half-plane AND with the side of each cut,
-// so sharing the body would mean reintroducing exactly the case analysis Kahan's
-// form exists to avoid; the two functions are three lines each and stay separate.
+// Still NOT routed through acosh, even though acos(z) = +-i*acosh(z) holds: that
+// sign flips with the half-plane AND with the side of each cut, so sharing the
+// body would reintroduce exactly the case analysis this form avoids. The two are
+// three lines each and stay separate. The identity is used to MEASURE, above,
+// which is a different thing from using it to compute.
+//
+// SIGNED ZEROS. The leg is a magnitude, and on the real cut (|Re z| > 1,
+// Im z = +-0) it is exactly zero. atan2's sign of zero then decides the entire
+// real part: atan2(+0, x < 0) is +pi, atan2(-0, x < 0) is -pi, and only +pi is
+// principal. xp_abs_word() tests v.hi < 0.0f and so leaves -0.0 alone, meaning a
+// -0 imaginary part does reach the leg; whether the sign then survives multiply()
+// depends on whether renormalisation absorbed it ((-0) + (+0) = +0, the KI-10
+// trap). Depend on neither outcome -- the zero is forced positive below. The old
+// body needed sqrt_signed_cut() for the same job, a local complex sqrt that put
+// the sign of a zero imaginary part on the correct sheet; with no complex sqrt
+// left on this path it has no callers left and is deleted with the form it
+// served.
 //
 // BRANCH CHECK (each verified against the __complex128 oracle, both half-planes
 // and both sides of both cuts): z=0 -> pi/2; z=1 -> 0; z=-1 -> pi;
 // z=2+0i -> -1.3170i; z=2-0i -> +1.3170i; z=-2+0i -> pi-1.3170i;
-// z=-2-0i -> pi+1.3170i. The last four are the cut points, and they are why
-// sqrt_signed_cut exists: at z = 2+-0i the argument of the SECOND root is
-// negative-real with a signed zero imaginary part, and at z = -2+-0i it is the
-// FIRST root, so both calls need the corrected sheet.
+// z=-2-0i -> pi+1.3170i. Now checked mechanically, on all four backends and
+// including the sign of every zero component, by scripts/probe_acos_branch.cpp.
 XPMATH_INLINE_FUNCTION FloatFloatComplex acos(FloatFloatComplex z) {
-    const FloatFloat one(1.0f);
-    const FloatFloat half_im = multiply_scalar(z.im, 0.5f);
-    const float s_im = detail::copysign(1.0f, z.im.hi);
-    FloatFloatComplex rp = sqrt_signed_cut(
-        multiply_scalar(add(one, z.re), 0.5f), half_im, s_im);
-    FloatFloatComplex rm = sqrt_signed_cut(
-        multiply_scalar(subtract(one, z.re), 0.5f), negate(half_im), -s_im);
-    // w = rp + i*rm, with i*(a+bi) = -b + ai
-    FloatFloatComplex w(subtract(rp.re, rm.im), add(rp.im, rm.re));
-    return FloatFloatComplex(multiply_scalar(atan2(w.im, w.re), 2.0f), negate(asin(z).im));
+    FloatFloat leg = xp_asin_real_leg(xp_abs_word(z.re), xp_abs_word(z.im));
+    if (leg.hi == 0.0f) leg = FloatFloat(0.0f);   // never -0; see SIGNED ZEROS above
+    return FloatFloatComplex(atan2(leg, z.re), negate(asin(z).im));
 }
 // log(a^2 + b^2), formed without ever squaring the larger operand -- used by the
 // two-log branches of atan()/atanh() below. Writing it as log(a*a + b*b) is what
@@ -874,6 +873,53 @@ XPMATH_INLINE_FUNCTION FloatFloat xp_atan2_safe(FloatFloat a, FloatFloat b) {
     }
     return atan2(a, b);
 }
+// A squared operand whose LEADING WORD has left the format's normal range --
+// zero, or subnormal, where a float word carries only a handful of bits.  Such a
+// product has lost essentially all of its information.
+XPMATH_INLINE_FUNCTION bool xp_sq_underflowed(FloatFloat v) {
+    return detail::fabs(v.hi) < 1.1754943508222875e-38f;
+}
+
+// Is the operand handed to sqrt() by Kahan's acosh chain too short to hold the
+// format's width?  The chain forms rp, rm = sqrt((x-+1)/2 + iy/2), so what
+// matters is the SCALE OF THE WHOLE OPERAND, not of y/2 alone.  A narrow y/2 is
+// harmless when the real half dominates -- at z = (2, 1e-30) the operand is
+// (0.5, 5e-31), sqrt() sees a well-scaled number and the tiny imaginary part
+// rides along -- and testing y/2 by itself fired there and made Im WORSE by up
+// to 0.9 digits, invisibly to the modulus-relative sweep metric because Im is
+// dwarfed by Re.  It is fatal only where the real half is gone as well, as at
+// the branch point z = (1, y) where (x-1)/2 is exactly zero and y/2 IS the
+// operand.  Either square root losing its operand is enough, so both are tested.
+XPMATH_INLINE_FUNCTION bool xp_acosh_chain_short(FloatFloat x, FloatFloat y) {
+    const FloatFloat one(1.0f);
+    const float hy = detail::fabs(multiply_scalar(y, 0.5f).hi);
+    const float am = detail::fabs(multiply_scalar(subtract(x, one), 0.5f).hi);
+    const float ap = detail::fabs(multiply_scalar(add(x, one), 0.5f).hi);
+    // NARROW: too small for the format to carry the width it advertises.  An
+    // expansion of 48 bits at magnitude a keeps its trailing word down at
+    // a * 2^-24; once that is below the smallest subnormal 2^-149 the word does
+    // not exist and the value silently holds fewer bits than the type claims.
+    // Bits available are ilogb(a) + 1 - (-149), so a is narrow below 2^-102 =
+    // 1.97e-31.  Zero is narrow by the same reading: it carries nothing.  KI-33's
+    // representational floor as a predicate -- fixed by the format, not tuned.
+    const float narrow = 0x1p-102f;
+    return (am > hy ? am : hy) < narrow || (ap > hy ? ap : hy) < narrow;
+}
+
+// Re atan(x+iy) as 0.5*(atan2(x, 1-y) + atan2(x, 1+y)), from
+// atan(z) = (i/2)[log(1-iz) - log(1+iz)] with the imaginary parts of the two
+// logs taken separately.  Algebraically identical to the primary
+// 0.5*atan2(2x, (1-y)(1+y) - x^2) form, but it never squares x, so nothing
+// underflows; and both terms carry the sign of x, so the sum never cancels.
+// Used ONLY where the primary form has provably lost its x^2 -- see the call
+// sites in atan() and atanh(), which explain when that is.
+XPMATH_INLINE_FUNCTION FloatFloat xp_atan_re_split(FloatFloat x, FloatFloat y) {
+    const FloatFloat one_(1.0f);
+    return multiply_scalar(add(xp_atan2_safe(x, subtract(one_, y)),
+                               xp_atan2_safe(x, add(one_, y))),
+                           0.5f);
+}
+
 // KI-11 + KI-18 fix. The old body was
 //     atan(z) = (i/2) * log( (1 - iz) / (1 + iz) )
 // and it has two independent defects, both repaired here by moving to the
@@ -955,9 +1001,29 @@ XPMATH_INLINE_FUNCTION FloatFloatComplex atan(FloatFloatComplex z) {
         // -- exactly the atan branch cut -- the tiny x^2 that survives is left
         // with only word-0 precision. The factored form is exact there
         // (Sterbenz on both factors) and costs one extra multiply.
-        const FloatFloat d2 =
-            subtract(multiply(subtract(one, z.im), add(one, z.im)), x2);
-        FloatFloat re = multiply_scalar(xp_atan2_safe(twox, d2), 0.5f);
+        const FloatFloat omy2 = multiply(subtract(one, z.im), add(one, z.im));
+        const FloatFloat d2 = subtract(omy2, x2);
+        // WHEN THE x^2 IS GONE.  On the cut |y| = 1 the factored product above
+        // is exactly zero, so d2 IS the -x^2 and nothing else.  For |x| below
+        // sqrt of the format's smallest normal -- 1.1e-19 on the FP32 backends
+        // -- that square underflows to zero or to a two-bit subnormal, d2
+        // collapses to 0, and atan2(2x, 0) returns pi/2 whatever x was.  At
+        // z = (1e-23, -1) that puts QF's real part on pi/4 instead of
+        // pi/4 + 2.5e-24: measured 2.522e5 component ulps, against a
+        // representational floor for pi/4 of 1.4e-16 ulps, so the answer is
+        // representable and only the intermediate is not.  The split form does
+        // not square x at all.  BOTH conditions are required: an underflowed
+        // x^2 is harmless wherever (1-y)(1+y) is O(1), because there the term
+        // really is negligible and dropping it is correct -- gating on the
+        // square alone made z = (6.1e-25, 1e-08) 6x worse for nothing.
+        // Measured over the whole complex grid, this leaves DD and FF
+        // bit-identical, moves 48 QF rows (80.04 -> 0.019, 11064 -> 0.0088,
+        // 252191 -> 0.035) and 4 TF rows (0.136 -> 0.182, both far below 1).
+        FloatFloat re;
+        if (z.re.hi != 0.0f && xp_sq_underflowed(x2) && xp_sq_underflowed(omy2))
+            re = xp_atan_re_split(z.re, z.im);
+        else
+            re = multiply_scalar(xp_atan2_safe(twox, d2), 0.5f);
         // ON THE CUT (Re(z) a zero, |Im z| > 1) the sheet is chosen by the SIGN
         // of that zero -- atan(+0 + 2i) = +pi/2 + 0.5493i, atan(-0 + 2i) =
         // -pi/2 + 0.5493i. atan2() is handed the zero verbatim above but does
@@ -1074,26 +1140,69 @@ XPMATH_INLINE_FUNCTION FloatFloatComplex asinh(FloatFloatComplex z) {
 // log(z + sqrt(z*z - 1)) form was on the wrong sqrt sheet throughout
 // Re(z) < 0, and overflowed above |z| ~ 1.8e19 where z*z leaves FP32 range.
 XPMATH_INLINE_FUNCTION FloatFloatComplex acosh(FloatFloatComplex z) {
-    const FloatFloat one(1.0f);
-    const FloatFloat half_im = multiply_scalar(z.im, 0.5f);
-    FloatFloatComplex rp = sqrt(FloatFloatComplex(
-        multiply_scalar(add(z.re, one), 0.5f), half_im));
-    FloatFloatComplex rm = sqrt(FloatFloatComplex(
-        multiply_scalar(subtract(z.re, one), 0.5f), half_im));
-    FloatFloatComplex lg = log(rp + rm);
-    // KI-11. Re acosh(z) = |Im asin(z)| is an identity (acosh(z) = +-i*acos(z)
-    // and Im acos = -Im asin), and 2*log|rp+rm| has exactly the disease
+    // acosh IS acos, rotated.  acosh(z) = +-i acos(z), and i(A + iB) = -B + iA,
+    // so Re acosh = -Im acos = |Im asin| and Im acosh = Re acos.  Both halves
+    // are taken from the acos reformulation; nothing here is a formula of its
+    // own.
+    //
+    // KI-11, the real part.  Re acosh(z) = |Im asin(z)| is that identity, and
+    // 2*log|rp+rm| -- what Kahan's chain computes -- has exactly the disease
     // xp_asin_imag_mag() exists to cure: |rp+rm| -> 1 all along the real segment
-    // [-1,1], so at z = 0.5 + 1e-30i it scored 0.00 of 14.00. The imaginary part
-    // is Kahan's and stays -- it is the well-conditioned one here.
-        // KI-11. acosh(conj z) = conj acosh(z) and the principal strip is
-    // Im acosh in (-pi, pi], so sign(Im acosh z) = sign(Im z) EVERYWHERE,
-    // signed zeros on the cut included (C99 Annex G). Kahan's form got that
-    // sign from a chain of sqrt/log that drops -0.0 on the FP32-word backends:
-    // QF and TF returned acosh(-0.1 - 0i) = +1.670964i, the wrong sheet and
-    // 0.00 digits, while DD and FF happened to keep it. Taking the magnitude
-    // and re-attaching the sign from copysign(Im z) is exact and cannot drift.
-    FloatFloat im_ = multiply_scalar(lg.im, 2.0f);
+    // [-1,1], so at z = 0.5 + 1e-30i it scored 0.00 of 14.00.
+    //
+    // THE IMAGINARY PART is 2*Im log(rp + rm) with rp, rm = sqrt((x+-1)/2 + iy/2)
+    // -- the other half of Kahan's chain -- EXCEPT where that chain's own sqrt
+    // operand is too short to hold 48 bits, which xp_acosh_chain_short() decides.
+    //
+    // WHAT GOES WRONG, and it is not the halving.  Traced step by step against
+    // MPC at the worst point on the grid, QF at z = (1, 1e-30) (point 894):
+    // y/2 is EXACT, 0 ulps, and so is (x-1)/2.  The 2.56e14 ulps appear two
+    // steps later, inside sqrt(rm), and arg() then faithfully reports an operand
+    // that is already destroyed -- arg of the COMPUTED sum is right to 0.249
+    // ulps.  The reason is magnitude, not arithmetic: a QuadFloat at 5e-31 wants
+    // its fourth word at 5e-31 * 2^-72 = 1.1e-52, far under 2^-149 = 1.4e-45, so
+    // the operand handed to sqrt() holds about 49 bits, not 96.  The ANSWER
+    // there is ~sqrt(y)(1+i), both components ~1e-15 and comfortably normal,
+    // with a representational floor of 0.079 ulps -- the formula loses the
+    // answer in an intermediate it never had to form.  scripts/probe_acosh_imag.cpp
+    // --trace 894 prints the step table.
+    //
+    // atan2(leg, x) is Re acos, which is Im acosh by the rotation above, and it
+    // forms no such intermediate.  It is used ONLY where the predicate fires, so
+    // the substitution is confined to the points where the chain provably cannot
+    // work.  Measured over the whole complex grid against MPC, the predicate is
+    // true at 40 of the 42 points where the chain reads above 8 ulps on the
+    // sweep's modulus-relative metric (the other 2 are an FF pair at 8.408 that
+    // the rotation does not improve either), and NO row is made worse on either
+    // metric -- modulus-relative or per-component -- on any backend.  On this
+    // backend it never fires on the sweep grid, so FF is bit-identical to before.
+    //
+    // WHY NOT EVERYWHERE.  The rotation is also better ON AVERAGE off the
+    // predicate -- unguarded it would take rows above 1 ulp from 1187 to 407 --
+    // but it is not better POINTWISE: unguarded it costs 629 rows across the
+    // four backends and the monotone gate rejects it (decreased: 132, worst drop
+    // 2.03 digits, all DD).  Ablation, both poisons and the signed-zero cases
+    // are in scripts/probe_acosh_imag.cpp.
+    //
+    // THE SHEET.  acosh(conj z) = conj acosh(z) and the principal strip is
+    // Im acosh in (-pi, pi], so sign(Im acosh z) = sign(Im z) everywhere, signed
+    // zeros on the cut included (C99 Annex G).  Both branches below are checked
+    // against 12 signed-zero cases on all four backends by the probe, including
+    // z = -0.1 -+ 0i and z = -0 + 0i; both pass, so the branch taken cannot move
+    // the sheet.  atan2(leg, x) with leg a magnitude lands in [0, pi] by
+    // construction, so re-attaching the sign from copysign(Im z) is exact.
+    FloatFloat im_;
+    if (xp_acosh_chain_short(z.re, z.im)) {
+        FloatFloat leg = xp_asin_real_leg(xp_abs_word(z.re), xp_abs_word(z.im));
+        if (leg.hi == 0.0f) leg = FloatFloat(0.0f);   // never -0; see SIGNED ZEROS above
+        im_ = atan2(leg, z.re);
+    } else {
+        const FloatFloat one(1.0f);
+        const FloatFloat half_im = multiply_scalar(z.im, 0.5f);
+        const FloatFloatComplex rp = sqrt(FloatFloatComplex(multiply_scalar(add(z.re, one), 0.5f), half_im));
+        const FloatFloatComplex rm = sqrt(FloatFloatComplex(multiply_scalar(subtract(z.re, one), 0.5f), half_im));
+        im_ = multiply_scalar(log(rp + rm).im, 2.0f);
+    }
     if (im_.hi < 0.0f) im_ = negate(im_);
     if (detail::copysign(1.0f, z.im.hi) < 0.0f) im_ = negate(im_);
     return FloatFloatComplex(xp_asin_imag_mag(xp_abs_word(z.re), xp_abs_word(z.im)), im_);
@@ -1196,8 +1305,14 @@ XPMATH_INLINE_FUNCTION FloatFloatComplex atanh(FloatFloatComplex z) {
         }
         FloatFloat twoy = multiply_scalar(z.im, 2.0f);
         if (z.im.hi == 0.0f) twoy = z.im;          // keep the signed zero
-        r.im = multiply_scalar(
-            xp_atan2_safe(twoy, subtract(multiply(subtract(one, z.re), add(one, z.re)), y2)), 0.5f);
+        // Im atanh(x+iy) is Re atan(y+ix) -- atanh(z) = i atan(-iz) -- so it is
+        // the same expression with the roles of x and y exchanged, and it loses
+        // the y^2 in exactly the same way on its own cut |x| = 1.  Same guard.
+        const FloatFloat omx2 = multiply(subtract(one, z.re), add(one, z.re));
+        if (z.im.hi != 0.0f && xp_sq_underflowed(y2) && xp_sq_underflowed(omx2))
+            r.im = xp_atan_re_split(z.im, z.re);
+        else
+            r.im = multiply_scalar(xp_atan2_safe(twoy, subtract(omx2, y2)), 0.5f);
     } else {
         FloatFloatComplex lg = log((FloatFloatComplex(one) + z) / (FloatFloatComplex(one) - z));
         r.re = multiply_scalar(lg.re, 0.5f);

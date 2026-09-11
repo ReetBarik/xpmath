@@ -72,6 +72,7 @@
 //     forwarded — they are for operators and explicit ADL only.
 
 #include <xp/config.hpp>
+#include <xp/trig_reduction.hpp>
 #include <cstdint>
 #include <cstring>
 #include <cmath>
@@ -985,7 +986,29 @@ XPMATH_INLINE_FUNCTION QuadFloat exp(QuadFloat a) {
     QuadFloat s1 = round_to_nearest_int(s0);
     float t1  = s1.f0;
     int   nz  = (int)(t1 + detail::copysign(1.0e-6f, t1));
-    s0 = subtract(a, multiply(al2, s1));            // |s0| <= log2/2
+
+    // KI-42: Cody-Waite range reduction; see dd_math.hpp's exp for the
+    // derivation and ff_math.hpp's for the FP32 width. Six 16-bit pieces put
+    // the tail at 2^-108.3 (0.03 ulps of 2^-96 at kmax); 0 of 1680 products
+    // inexact over k in [-151, 128]. Measured end-to-end over a >= -37.4 (QF's
+    // subnormal wall, qf_math.hpp:1062):
+    //     shipped   325 rows > 1 ulp, worst 6.585
+    //     5 pieces 1393 rows > 1 ulp, worst 1.331e+04   <- one short is FATAL
+    //     6 pieces    0 rows > 1 ulp, worst 0.6732
+    // and 6 pieces equals a 400-bit oracle reduction, so nothing is left.
+    const float kLn2_1 =  0x1.62e4p-1f;    // 15 significant bits
+    const float kLn2_2 =  0x1.7f7ep-20f;   // 16
+    const float kLn2_3 = -0x1.c61p-37f;    // 13
+    const float kLn2_4 = -0x1.950ep-54f;   // 16
+    const float kLn2_5 =  0x1.e3b4p-72f;   // 15
+    const float kLn2_6 = -0x1.9ffp-90f;    // 13
+    const float kf = (float)nz;            // exact integer, |kf| <= 151
+    s0 = subtract(a,  QuadFloat(kf * kLn2_1));
+    s0 = subtract(s0, QuadFloat(kf * kLn2_2));
+    s0 = subtract(s0, QuadFloat(kf * kLn2_3));
+    s0 = subtract(s0, QuadFloat(kf * kLn2_4));
+    s0 = subtract(s0, QuadFloat(kf * kLn2_5));
+    s0 = subtract(s0, QuadFloat(kf * kLn2_6));      // |s0| <= log2/2
 
     if (s0.f0 == 0.0f && s0.f1 == 0.0f) {
         return QuadFloat(ldexpf(1.0f, nz));         // result = 2^nz exactly
@@ -1103,13 +1126,49 @@ XPMATH_INLINE_FUNCTION QuadFloat log1p(QuadFloat a) {
 }
 
 // exp2(a) = e^(a*ln2).  QD has no exp2; composition (cf. dd_math.hpp:409).
+// KI-43: see dd_math.hpp's exp2 for the derivation.
 XPMATH_INLINE_FUNCTION QuadFloat exp2(QuadFloat a) {
-    return exp(multiply(a, QuadFloat_log2()));
+    QuadFloat k = round_to_nearest_int(a);
+    const int ki = (int)k.f0;
+    QuadFloat r = subtract(a, k);                       // EXACT
+    QuadFloat s = (r.f0 == 0.0f && r.f1 == 0.0f && r.f2 == 0.0f && r.f3 == 0.0f)
+                ? QuadFloat(1.0f)
+                : exp(multiply(r, QuadFloat_log2()));
+    if (ki >= -125 && ki <= 127) {
+        const float p2 = ldexpf(1.0f, ki);
+        return QuadFloat(s.f0 * p2, s.f1 * p2, s.f2 * p2, s.f3 * p2);
+    }
+    return QuadFloat(ldexpf(s.f0, ki), ldexpf(s.f1, ki),
+                     ldexpf(s.f2, ki), ldexpf(s.f3, ki));
 }
 
 // exp10(a) = e^(a*ln10).  QD has no exp10; composition (cf. dd_math.hpp:413).
+// KI-43: see dd_math.hpp's exp10. Six 16-bit log10(2) pieces, tail 2^-113.8.
 XPMATH_INLINE_FUNCTION QuadFloat exp10(QuadFloat a) {
-    return exp(multiply(a, QuadFloat_log10()));
+    const float kLog2_10 = 3.32192809f;
+    const float kf = detail::rint(a.f0 * kLog2_10);
+    if (!(detail::fabs(kf) < 1.0e5f))
+        return exp(multiply(a, QuadFloat_log10()));
+    const int ki = (int)kf;
+    const float kLog10_2_1 =  0x1.3442p-2f;
+    const float kLog10_2_2 = -0x1.95ecp-19f;
+    const float kLog10_2_3 = -0x1.0c02p-39f;
+    const float kLog10_2_4 = -0x1.9dc2p-59f;
+    const float kLog10_2_5 =  0x1.2b36p-78f;
+    const float kLog10_2_6 = -0x1.fa42p-96f;
+    QuadFloat r = subtract(a,  QuadFloat(kf * kLog10_2_1));
+    r = subtract(r, QuadFloat(kf * kLog10_2_2));
+    r = subtract(r, QuadFloat(kf * kLog10_2_3));
+    r = subtract(r, QuadFloat(kf * kLog10_2_4));
+    r = subtract(r, QuadFloat(kf * kLog10_2_5));
+    r = subtract(r, QuadFloat(kf * kLog10_2_6));
+    QuadFloat s = exp(multiply(r, QuadFloat_log10()));
+    if (ki >= -125 && ki <= 127) {
+        const float p2 = ldexpf(1.0f, ki);
+        return QuadFloat(s.f0 * p2, s.f1 * p2, s.f2 * p2, s.f3 * p2);
+    }
+    return QuadFloat(ldexpf(s.f0, ki), ldexpf(s.f1, ki),
+                     ldexpf(s.f2, ki), ldexpf(s.f3, ki));
 }
 
 // expm1(a) = e^a - 1.  QD has no expm1; Taylor for |a| <= 0.5 to avoid the
@@ -1133,27 +1192,57 @@ XPMATH_INLINE_FUNCTION QuadFloat expm1(QuadFloat a) {
 // ============================================================
 
 // sincos(a): writes sin_a = sin(a), cos_a = cos(a).  Mathematical mirror of
-// sincos(qd_real), QD 2.3.24 qd_real.cpp:2298-2360 (same reduce-mod-2pi
-// skeleton), BUT structured like ff_math.hpp:445 / dd_math.hpp:439 — a
-// divide-by-k Taylor on r = s3/2^nq followed by nq angle-doublings — instead of
-// QD's pi/1024 table lookup (see block header).  PORT_NOTES §3a: sin and cos are
-// tracked JOINTLY through the doublings (sin(2x)=2 sin x cos x,
-// cos(2x)=cos^2 x - sin^2 x) so no sqrt(1-cos^2) recovery loses relative
-// precision near multiples of pi.  QF's 4-word _2pi (accurate to ~2^-96) makes
-// the mod-2pi reduction good enough that near-pi sin/cos are distinguishable
-// from noise (the T3.6 goal FF §5 could not reach with 2-word pi).
+// sincos(qd_real), after QD 2.3.24 qd_real.cpp:2298-2360, BUT structured like
+// ff_math.hpp:445 / dd_math.hpp:439 — a divide-by-k Taylor on r = r_mod/2^nq
+// followed by nq angle-doublings — instead of QD's pi/1024 table lookup (see
+// block header).  PORT_NOTES §3a: sin and cos are tracked JOINTLY through the
+// doublings (sin(2x)=2 sin x cos x, cos(2x)=cos^2 x - sin^2 x) so no
+// sqrt(1-cos^2) recovery loses relative precision near multiples of pi.
+//
+// QD's reduce-mod-2pi skeleton is NOT kept: a single stored 2pi, however wide,
+// leaves an error proportional to |a| rather than to |r_mod|, and QF's 4-word
+// constant only moves the magnitude at which that becomes visible.  The
+// reduction below is Payne-Hanek; see the comment at the call site.
 XPMATH_INLINE_FUNCTION void sincos(QuadFloat a, QuadFloat& sin_a, QuadFloat& cos_a) {
-    const int   itrmx = 100, nq = 5;
+    // nq = 0: no scale-down.  QF is where the FP32 subnormal mechanism bites
+    // hardest -- a QuadFloat's fourth limb sits at 2^(e-nq-72), under FLT_MIN
+    // once e < -49 -- and it is the backend on which the prediction was
+    // checked: at nq = 5 the v-form leaves the two worst cells BIT-IDENTICAL to
+    // the old code, 1029.8804 and 405.0246 ulps to the digit, because the bits
+    // are gone before the first term.  Full account at ff_math.hpp:sincos.
+    // Series length goes 6 -> 13 terms against five fewer doublings.
+    //
+    // WHAT IS LEFT AT nq = 0 IS THE FORMAT, AND THAT IS MEASURED RATHER THAN
+    // ASSUMED.  x = 91.106186954104004 is the worst scored QF trig cell in the
+    // sweep and still reads 43.3832 ulps.  It sits a hair from 29*pi, so
+    // r_mod ~ 1.2e-18 (kappa ~ 7.4e19) and a QuadFloat's fourth limb lands near
+    // 2^-132, below FLT_MIN.  Three arms of scripts/probe_trig_series.cpp, all
+    // agreeing to the digit:
+    //     vform nq=0                                        43.3832
+    //     the same core on the EXACT 400-bit r_mod           43.3832   <- no
+    //         (`^exact nq=0`)                                            reduction
+    //                                                                    headroom
+    //     the cost of merely ROUNDING that exact r_mod       43.3832   <- the floor
+    //         into a QuadFloat (`repr r_mod`)
+    // The third line is the point: the argument has already lost that much
+    // before any series sees it, so no series and no wider reduction can
+    // recover it.  This is inherent to 4xFP32 at this magnitude, not a defect,
+    // and the implementation now reaches the floor exactly.  For contrast the
+    // same three arms at nq = 5 all read 1029.8804 -- that one WAS ours.
+    const int   itrmx = 100, nq = 0;
     const float eps = 1.0e-28f;
     if (a.f0 == 0.0f) { sin_a = QuadFloat(0.0f); cos_a = QuadFloat(1.0f); return; }
     // KI-12 residual.  Small-argument short circuit over the degenerate
     // reduction band only; full derivation at ff_math.hpp:sincos.  QF's limbs
     // are FP32 too, so the band is the same shape: below 2^nq * FLT_MIN the
-    // leading word of r = s3/2^nq is subnormal and sheds bits before the first
+    // leading word of r = r_mod/2^nq is subnormal and sheds bits before the first
     // Taylor term (and is 0 outright for subnormal |a|).  Measured before:
     // QF sin(1e-40) = 9.99967e-41 for an argument of 9.99995e-41, and
     // QF sin(1e-44) = 0.  Above the band the series is already correct and a
     // wider cut was measured to cost complex-op digits -- see ff_math.hpp.
+    // Written in terms of nq, so at nq = 0 it is FLT_MIN: a narrowing, and a
+    // no-op on the strip it gives up, because there r^2 underflows and the
+    // series returns the same (1, a).  See ff_math.hpp:sincos.
     if (detail::fabs(a.f0) < (float)(1 << nq) * 1.17549435e-38f /* 2^nq*FLT_MIN */) {
         sin_a = a; cos_a = QuadFloat(1.0f); return;
     }
@@ -1161,36 +1250,79 @@ XPMATH_INLINE_FUNCTION void sincos(QuadFloat a, QuadFloat& sin_a, QuadFloat& cos
         XPMATH_PRINTF("QFCSSNR: argument too large\n");
         sin_a = QuadFloat(0.0f); cos_a = QuadFloat(1.0f); return;   // KI-26
     }
-    // Reduce mod 2pi (QD qd_real.cpp:2306-2308: z = nint(a/2pi); t = a - 2pi*z).
-    QuadFloat pi2 = mul_pwr2(QuadFloat_pi(), 2.0f);   // 2pi, exact from 4-word pi
-    QuadFloat s1  = divide(a, pi2);
-    QuadFloat s2  = round_to_nearest_int(s1);
-    QuadFloat s3  = subtract(a, multiply(pi2, s2));   // |s3| <= pi
-    if (s3.f0 == 0.0f) { sin_a = QuadFloat(0.0f); cos_a = QuadFloat(1.0f); return; }
+    // ARGUMENT REDUCTION — Payne-Hanek, replacing QD's z = nint(a/2pi);
+    // t = a - 2pi*z (qd_real.cpp:2306-2308) and the mod-pi/2 stage that
+    // followed it.  a = j*(pi/2) + r_mod with |r_mod| <= pi/4 and
+    // j = nint(a*2/pi) mod 4, with n never formed.  Mirrors dd_math.hpp:sincos;
+    // why the old form could not be rescued by a wider constant (QF's 4-word
+    // 2pi included) is measured in scripts/probe_trig_stages.cpp --widen, and
+    // kPhGuardQF / kPhChunksQF come from
+    // scripts/gen_trig_reduction_constants.cpp.
+    //
+    // The old `if (s3.f0 == 0)` early-out goes with it and needs no
+    // replacement: r = r_mod/2^nq is zero only for |r_mod| < 2^nq * FLT_MIN =
+    // 2^-121, and |f| >= 2^-C with C = 101.121 MEASURED over every QuadFloat
+    // (include/xp/trig_reduction_data.hpp), so |r| >= 2^-106.  The KI-12 band
+    // above covers the only arguments that can underflow r.
+    int       j;
+    QuadFloat r_mod;
+    if (detail::fabs(a.f0) <= 0.75f) {
+        // Nothing to reduce: r_mod is a itself, exactly.  See dd_math.hpp for
+        // the measurement behind both the branch and the 0.75.
+        j = 0; r_mod = a;
+    } else {
+        const float win[4] = { a.f0, a.f1, a.f2, a.f3 };
+        float       f[5];
+        j = detail::xp_ph_reduce<float>(win, 4, detail::kPhGuardQF,
+                                        detail::kPhChunksQF, f, 5);
+        // f is exact to 2^-kPhGuardQF ABSOLUTE, i.e. 2^-(p+4) RELATIVE at the
+        // worst cancellation the format admits, so r_mod inherits ~2^-96
+        // relative -- proportional to |r_mod|, where the old form's error was
+        // proportional to |a|.
+        QuadFloat pio2 = QuadFloat(detail::xp_ph_pio2_f(0));
+        for (int k = 1; k < detail::kPhPio2WordsF; ++k)
+            pio2 = add(pio2, QuadFloat(detail::xp_ph_pio2_f(k)));
+        QuadFloat fr = QuadFloat(f[0]);
+        for (int k = 1; k < 5; ++k) fr = add(fr, QuadFloat(f[k]));
+        r_mod = multiply(fr, pio2);
+    }
 
-    QuadFloat r  = mul_pwr2(s3, ldexpf(1.0f, -nq));   // r = s3 / 2^nq, |r| < pi/2^nq
+    QuadFloat r  = mul_pwr2(r_mod, ldexpf(1.0f, -nq));   // r = r_mod / 2^nq, |r| < pi/(4*2^nq)
     QuadFloat r2 = multiply(r, r);
 
-    // sin(r) = r - r^3/3! + ... ; cos(r) = 1 - r^2/2! + ...
-    QuadFloat sin_r = r,             cos_r = QuadFloat(1.0f);
-    QuadFloat sterm = r,             cterm = QuadFloat(1.0f);
+    // sin(r) = r - r^3/3! + ... ; v(r) = r^2/2! - r^4/4! + ..., with v = 1 - cos.
+    // Carried in (sin, v), not (sin, cos); derivation at dd_math.hpp:sincos.
+    QuadFloat sin_r = r,                       sterm = r;
+    QuadFloat v_r   = divide_scalar(r2, 2.0f), vterm = v_r;
     for (int k = 1; k <= itrmx; ++k) {
         sterm = divide_scalar(multiply(sterm, r2), -(float)((2*k) * (2*k + 1)));
         sin_r = add(sin_r, sterm);
-        cterm = divide_scalar(multiply(cterm, r2), -(float)((2*k - 1) * (2*k)));
-        cos_r = add(cos_r, cterm);
-        if (detail::fabs(sterm.f0) < eps * detail::fabs(sin_r.f0) &&
-            detail::fabs(cterm.f0) < eps) break;
-        // No return on itrmx (converges in ~9 terms at nq=5); fall through.
+        vterm = divide_scalar(multiply(vterm, r2), -(float)((2*k + 1) * (2*k + 2)));
+        v_r   = add(v_r, vterm);
+        // v's test is RELATIVE where cos's was absolute (|cterm| < eps), and it
+        // is `<=` where the sin test beside it is `<`.  Both matter, and the
+        // second one is KI-25's shape: r^2 underflows FP32 to zero for small
+        // |r|, and then vterm and v_r are BOTH exactly 0, so a strict `0 < 0`
+        // would never fire and the loop would run all 100 iterations for an
+        // answer it had after one.  The old absolute test could not hit that
+        // (cterm = 0 < eps was true), so this is a hazard the v-form introduces
+        // and has to answer for.  The sin test stays `<` because sin_r = r != 0
+        // there, which keeps its threshold strictly positive.
+        if (detail::fabs(sterm.f0) <  eps * detail::fabs(sin_r.f0) &&
+            detail::fabs(vterm.f0) <= eps * detail::fabs(v_r.f0)) break;
+        // No return on itrmx; fall through.
     }
 
-    // Doublings: sin(2x)=2 sin x cos x, cos(2x)=cos^2 x - sin^2 x (PORT_NOTES §3a).
-    for (int j = 0; j < nq; ++j) {
-        QuadFloat new_sin = mul_pwr2(multiply(sin_r, cos_r), 2.0f);
-        QuadFloat new_cos = subtract(multiply(cos_r, cos_r), multiply(sin_r, sin_r));
+    // Doublings in (sin, v): sin(2x) = 2 sin x (1-v), v(2x) = 2 sin^2 x
+    // (PORT_NOTES §3a).  At nq = 0 this loop does not execute; kept because nq
+    // is what was measured and a future format may want it back.
+    for (int q = 0; q < nq; ++q) {           // q, not j: j is the quadrant
+        const QuadFloat c_q = subtract(QuadFloat(1.0f), v_r);
+        const QuadFloat new_sin = mul_pwr2(multiply(sin_r, c_q), 2.0f);
+        v_r   = mul_pwr2(multiply(sin_r, sin_r), 2.0f);   // old sin_r
         sin_r = new_sin;
-        cos_r = new_cos;
     }
+    QuadFloat cos_r = subtract(QuadFloat(1.0f), v_r);
 
     // KI-26 codomain guard: outside the slack band -> identity point
     // (sin, cos) = (0, 1), inside it -> clamp, so |sin| <= 1 and |cos| <= 1 hold
@@ -1206,7 +1338,11 @@ XPMATH_INLINE_FUNCTION void sincos(QuadFloat a, QuadFloat& sin_a, QuadFloat& cos
     if (cos_r.f0 >  1.0f || (cos_r.f0 ==  1.0f && cos_r.f1 > 0.0f)) cos_r = QuadFloat( 1.0f);
     if (cos_r.f0 < -1.0f || (cos_r.f0 == -1.0f && cos_r.f1 < 0.0f)) cos_r = QuadFloat(-1.0f);
 
-    sin_a = sin_r; cos_a = cos_r;
+    // Quadrant selection (QF has sin first, cos second)
+    if (j == 0) { sin_a = sin_r;  cos_a = cos_r; }
+    else if (j == 1) { sin_a = cos_r;  cos_a = negate(sin_r); }
+    else if (j == 2) { sin_a = negate(sin_r); cos_a = negate(cos_r); }
+    else { sin_a = negate(cos_r); cos_a = sin_r; }
 }
 
 // tan(a) = sin(a)/cos(a).  QD qd_real.cpp:2473 (sincos then s/c).

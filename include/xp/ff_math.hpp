@@ -75,6 +75,7 @@
 //     forwarded — they are for operators and explicit ADL only.
 
 #include <xp/config.hpp>
+#include <xp/trig_reduction.hpp>
 #include <cstdint>
 #include <cstring>
 #include <cmath>
@@ -103,6 +104,14 @@ XPMATH_INLINE_FUNCTION FloatFloat pow_int(FloatFloat a, int n);
 XPMATH_INLINE_FUNCTION FloatFloat exp(FloatFloat a);
 XPMATH_INLINE_FUNCTION FloatFloat log(FloatFloat a);
 XPMATH_INLINE_FUNCTION FloatFloat pow(FloatFloat a, FloatFloat b);
+XPMATH_INLINE_FUNCTION FloatFloat ff_mul_ext(FloatFloat x, FloatFloat y, float& err);
+XPMATH_INLINE_FUNCTION FloatFloat ff_log_ext(FloatFloat a, float& err);
+XPMATH_INLINE_FUNCTION FloatFloat ff_exp_ext(FloatFloat a, float resid);
+// KI-44: the unevaluated-pair trio behind pow. Defined after the expansion
+// helpers they use (ff_expansion_push / _compress, ~line 1581), which sit below
+// pow in this header; declared here so pow can call them. NOTE these live at
+// namespace scope, NOT in detail:: -- ff_expansion_* are themselves global here
+// (detail closes at ~1508), and the trio is defined beside them.
 XPMATH_INLINE_FUNCTION void   sinhcosh(FloatFloat a, FloatFloat& x, FloatFloat& y);
 XPMATH_INLINE_FUNCTION void   sincos(FloatFloat a, FloatFloat& x, FloatFloat& y);
 XPMATH_INLINE_FUNCTION FloatFloat angle(FloatFloat x, FloatFloat y);
@@ -653,7 +662,28 @@ XPMATH_INLINE_FUNCTION FloatFloat exp(FloatFloat a) {
     FloatFloat s1 = round_to_nearest_int(s0);
     float t1  = s1.hi;
     int nz    = (int)(t1 + detail::copysign(1.0e-6f, t1));
-    s0 = subtract(a, multiply(al2, s1));
+
+    // KI-42: Cody-Waite range reduction. See dd_math.hpp's exp for the full
+    // derivation. |a| < 104 bounds k to [-151, 128], 8 bits, leaving 24-8 = 16
+    // bits per float piece; 0 of 1120 products k*c_i inexact over that range.
+    //
+    // FF takes FOUR pieces, not three. Three is not merely tight, it is
+    // catastrophic -- measured end-to-end over a >= -70.7 (FF's own subnormal
+    // wall, ff_math.hpp:717):
+    //     shipped   1158 rows > 1 ulp, worst 55.19
+    //     3 pieces  1025 rows > 1 ulp, worst  3.844   <- barely an improvement
+    //     4 pieces    11 rows > 1 ulp, worst  1.321
+    // The tail after three 16-bit pieces is 2^-53.3, worth ~3.7 ulps of 2^-48
+    // at kmax; a fourth takes it to 2^-71.1 and 1.7e-05 ulps.
+    const float kLn2_1 =  0x1.62e4p-1f;    // 15 significant bits
+    const float kLn2_2 =  0x1.7f7ep-20f;   // 16
+    const float kLn2_3 = -0x1.c61p-37f;    // 13
+    const float kLn2_4 = -0x1.950ep-54f;   // 16
+    const float kf = (float)nz;            // exact integer, |kf| <= 151
+    s0 = subtract(a,  FloatFloat(kf * kLn2_1));
+    s0 = subtract(s0, FloatFloat(kf * kLn2_2));
+    s0 = subtract(s0, FloatFloat(kf * kLn2_3));
+    s0 = subtract(s0, FloatFloat(kf * kLn2_4));
 
     if (s0.hi == 0.0f) {
         return FloatFloat(ldexpf(1.0f, nz));
@@ -756,12 +786,45 @@ XPMATH_INLINE_FUNCTION FloatFloat log1p(FloatFloat a) {
     return log(add(FloatFloat(1.0f), a));
 }
 
+// KI-43: see dd_math.hpp's exp2 for the derivation.
+// dense [-120,120]: rows > 1 ulp 610 -> 66.
 XPMATH_INLINE_FUNCTION FloatFloat exp2(FloatFloat a) {
-    return exp(multiply(a, FloatFloat_log2()));
+    FloatFloat k = round_to_nearest_int(a);
+    const int ki = (int)k.hi;
+    FloatFloat r = subtract(a, k);                      // EXACT
+    FloatFloat s = (r.hi == 0.0f && r.lo == 0.0f)
+                 ? FloatFloat(1.0f)
+                 : exp(multiply(r, FloatFloat_log2()));
+    if (ki >= -125 && ki <= 127) {
+        const float p2 = ldexpf(1.0f, ki);
+        return FloatFloat(s.hi * p2, s.lo * p2);
+    }
+    return FloatFloat(ldexpf(s.hi, ki), ldexpf(s.lo, ki));
 }
 
+// KI-43: see dd_math.hpp's exp10. FP32 pieces are 16-bit (|k| <= 151);
+// 0 of 1120 products inexact, tail 2^-77.8.
+// dense [-36,36]: rows > 1 ulp 694 -> 60.
 XPMATH_INLINE_FUNCTION FloatFloat exp10(FloatFloat a) {
-    return exp(multiply(a, FloatFloat_log10()));
+    const float kLog2_10 = 3.32192809f;
+    const float kf = detail::rint(a.hi * kLog2_10);
+    if (!(detail::fabs(kf) < 1.0e5f))
+        return exp(multiply(a, FloatFloat_log10()));
+    const int ki = (int)kf;
+    const float kLog10_2_1 =  0x1.3442p-2f;             // 16 significant bits
+    const float kLog10_2_2 = -0x1.95ecp-19f;            // 15
+    const float kLog10_2_3 = -0x1.0c02p-39f;            // 16
+    const float kLog10_2_4 = -0x1.9dc2p-59f;            // 16
+    FloatFloat r = subtract(a,  FloatFloat(kf * kLog10_2_1));
+    r = subtract(r, FloatFloat(kf * kLog10_2_2));
+    r = subtract(r, FloatFloat(kf * kLog10_2_3));
+    r = subtract(r, FloatFloat(kf * kLog10_2_4));
+    FloatFloat s = exp(multiply(r, FloatFloat_log10()));
+    if (ki >= -125 && ki <= 127) {
+        const float p2 = ldexpf(1.0f, ki);
+        return FloatFloat(s.hi * p2, s.lo * p2);
+    }
+    return FloatFloat(ldexpf(s.hi, ki), ldexpf(s.lo, ki));
 }
 
 XPMATH_INLINE_FUNCTION FloatFloat expm1(FloatFloat a) {
@@ -786,7 +849,51 @@ XPMATH_INLINE_FUNCTION FloatFloat expm1(FloatFloat a) {
 // recovery step, which loses relative precision when sin is near zero
 // (i.e. when the answer most needs precision).
 XPMATH_INLINE_FUNCTION void sincos(FloatFloat a, FloatFloat& x, FloatFloat& y) {
-    const int itrmx = 100, nq = 4;
+    // nq = 0: NO SCALE-DOWN.  The series runs at r_mod directly.
+    //
+    // On DD the scale-down is worth keeping (nq stays 5 there) because seven
+    // series terms plus five doublings round better than fourteen terms.  On
+    // the FP32 backends it is not, and the reason is a property of the format
+    // rather than of the series: u = r_mod/2^nq drives the TRAILING limbs of a
+    // multi-float below FLT_MIN = 2^-126 long before the leading one gets
+    // there, so u silently sheds precision the doublings then scale back up by
+    // 2^nq.  A form that fixes the recurrence cannot fix that, because the bits
+    // are already gone when the first term is computed.
+    //
+    // Predicted before it was measured, and confirmed: at nq = 5 the v-form
+    // leaves QF's two worst cells BIT-IDENTICAL to the old code, 1029.8804 and
+    // 405.0246 ulps to the digit, and only nq = 0 moves them.
+    //
+    // The price is series length, and it is real: worst-case terms go 4 -> 8
+    // here (TF 6 -> 10, QF 6 -> 13), against nq fewer doublings.  Measured by
+    // scripts/probe_trig_series.cpp --terms, over that probe's own grid.
+    //
+    // FF IS THE ONE BACKEND WHERE THIS WAS A CLOSE CALL, and the record belongs
+    // here because the obvious "optimisation" back to nq = 2 is a regression in
+    // a place the sweep cannot see.  FF has the least exposure to the mechanism
+    // above -- two limbs, so the trailing one only goes subnormal below
+    // |x| ~ 2^-102 -- and the fewest bits to spare for extra series terms.  The
+    // full scan, sweep at --oracle mpfr, scored real sin/cos/tan rows:
+    //
+    //     nq   worst ulps    max   median   rows >1   at floor   sin @1e-31
+    //          at kappa<=4
+    //      0      4.0216   4.0216  0.0237      286      88.7%       0.0000
+    //      1      4.0216   4.0216  0.0237      290      88.6%       0.0000
+    //      2      3.1691   3.7859  0.0275      298      88.3%       7.8886
+    //      3      3.7780   3.8204  0.0328      372      85.3%       7.8886
+    //      4      3.8415   3.8415  0.0359      402      84.2%       7.8886   (was shipped)
+    //
+    // nq = 2 wins the scored worst case by 0.85 ulps and nothing else.  That
+    // 0.85 rests on a single cell -- the count of rows above 3 ulps is 10 for
+    // nq = 0, 1 and 2 alike -- while nq = 0 wins median, at-floor and the >1
+    // count outright, and is the only setting that holds the small-argument
+    // cells exactly.  The last column decides it: at x = 1e-31 nq = 2 costs
+    // 7.89 ulps where nq = 0 costs none, a bigger effect than the one nq = 2
+    // buys, and it is the SAME subnormal mechanism this comment opened with.
+    // Those rows score state U in the sweep, so they carry no verdict and are
+    // invisible in every other column -- which is exactly why they are written
+    // out here rather than left to the gate.
+    const int itrmx = 100, nq = 0;
     const float eps = 1.0e-15f;
     if (a.hi == 0.0f) { x = FloatFloat(1.0f); y = FloatFloat(0.0f); return; }
     // KI-12 residual.  SMALL-ARGUMENT SHORT CIRCUIT.  The threshold is the
@@ -820,6 +927,13 @@ XPMATH_INLINE_FUNCTION void sincos(FloatFloat a, FloatFloat& x, FloatFloat& y) {
     //     tie on its own domain, and loses money downstream, is not worth
     //     taking; the band below is where the series genuinely cannot do
     //     better, so that is where the cut goes.
+    // The band is written in terms of nq and so it TRACKS nq: at nq = 0 it is
+    // FLT_MIN rather than 2^nq*FLT_MIN, because with no scale-down the only way
+    // the leading word of r can be subnormal is for a itself to be.  That is a
+    // narrowing, not a removal, and it is a no-op on this domain rather than a
+    // behaviour change: for FLT_MIN <= |a| < 2^4*FLT_MIN the series now runs
+    // instead of the short circuit, and it returns the same pair, because r^2
+    // underflows to zero there so sin_r = r = a and v_r = 0 gives cos_r = 1.
     if (detail::fabs(a.hi) < (float)(1 << nq) * 1.17549435e-38f /* 2^nq*FLT_MIN */) {
         x = FloatFloat(1.0f); y = a; return;
     }
@@ -831,53 +945,102 @@ XPMATH_INLINE_FUNCTION void sincos(FloatFloat a, FloatFloat& x, FloatFloat& y) {
         XPMATH_PRINTF("FFCSSNR: argument too large\n");
         x = FloatFloat(1.0f); y = FloatFloat(0.0f); return;      // KI-26
     }
-    FloatFloat pi2 = multiply_scalar(FloatFloat_pi(), 2.0f);
-    FloatFloat s1  = divide(a, pi2);
-    FloatFloat s2  = round_to_nearest_int(s1);
-    FloatFloat s3  = subtract(a, multiply(pi2, s2));
-    if (s3.hi == 0.0f) { x = FloatFloat(1.0f); y = FloatFloat(0.0f); return; }
+    // ARGUMENT REDUCTION — Payne-Hanek.  a = j*(pi/2) + r_mod with |r_mod| <=
+    // pi/4 and j = nint(a*2/pi) mod 4, with n never formed.  Mirrors
+    // dd_math.hpp:sincos; why the old `a - 2pi*nint(a/2pi)` could not be
+    // rescued by a wider constant is measured in
+    // scripts/probe_trig_stages.cpp --widen, and kPhGuardFF / kPhChunksFF come
+    // from scripts/gen_trig_reduction_constants.cpp.
+    //
+    // The old form's `s3.hi == 0 -> (1, 0)` early-out goes with it, and nothing
+    // replaces it, because nothing can now reach that corner: r = r_mod/2^nq is
+    // zero only for |r_mod| < 2^nq * FLT_MIN = 2^-122, and |f| >= 2^-C with
+    // C = 54.741 MEASURED over every FloatFloat
+    // (include/xp/trig_reduction_data.hpp), so |r| >= 2^-59.  The KI-12 band
+    // above covers the only arguments that can underflow r, which is what it
+    // was sized for.
+    int        j;
+    FloatFloat r_mod;
+    if (detail::fabs(a.hi) <= 0.75f) {
+        // Nothing to reduce: r_mod is a itself, exactly.  See dd_math.hpp for
+        // the measurement behind both the branch and the 0.75.
+        j = 0; r_mod = a;
+    } else {
+        const float win[2] = { a.hi, a.lo };
+        float       f[3];
+        j = detail::xp_ph_reduce<float>(win, 2, detail::kPhGuardFF,
+                                        detail::kPhChunksFF, f, 3);
+        // f is exact to 2^-kPhGuardFF ABSOLUTE, i.e. 2^-(p+4) RELATIVE at the
+        // worst cancellation the format admits.  The two products below are
+        // ordinary FF, so r_mod inherits ~2^-48 relative -- proportional to
+        // |r_mod|, where the old form's error was proportional to |a|.
+        FloatFloat pio2 = FloatFloat(detail::xp_ph_pio2_f(0));
+        for (int k = 1; k < detail::kPhPio2WordsF; ++k)
+            pio2 = add(pio2, FloatFloat(detail::xp_ph_pio2_f(k)));
+        FloatFloat ffr = FloatFloat(f[0]);
+        for (int k = 1; k < 3; ++k) ffr = add(ffr, FloatFloat(f[k]));
+        r_mod = multiply(ffr, pio2);
+    }
     float scale = 1.0f / (float)(1 << nq);
-    FloatFloat r  = multiply_scalar(s3, scale);   // r = s3 / 2^nq, |r| < pi/2^nq
+    FloatFloat r  = multiply_scalar(r_mod, scale);   // r = r_mod / 2^nq, |r| < pi/(4*2^nq)
     FloatFloat r2 = multiply(r, r);
 
     // sin(r) = r - r^3/3! + r^5/5! - ...
-    // cos(r) = 1 - r^2/2! + r^4/4! - ...
-    FloatFloat sin_r = r,             cos_r  = FloatFloat(1.0f);
-    FloatFloat sterm = r,             cterm  = FloatFloat(1.0f);
+    // v(r)   =     r^2/2! - r^4/4! + r^6/6! - ...,  v = 1 - cos
+    //
+    // The series is carried in (sin, v), not (sin, cos), and nq is 0 rather than
+    // 4.  Both are measured, by scripts/probe_trig_series.cpp; the full
+    // derivation of the v-form is at dd_math.hpp:sincos and is not repeated.
+    // What is specific to FP32 is why nq went to zero here and stayed at 5 on
+    // DD -- see the nq declaration above.
+    FloatFloat sin_r = r,                     sterm = r;
+    FloatFloat v_r   = divide_scalar(r2, 2.0f), vterm = v_r;
     for (int k = 1; k <= itrmx; ++k) {
         sterm = divide_scalar(multiply(sterm, r2), -(float)((2*k) * (2*k + 1)));
         sin_r = add(sin_r, sterm);
-        cterm = divide_scalar(multiply(cterm, r2), -(float)((2*k - 1) * (2*k)));
-        cos_r = add(cos_r, cterm);
-        // KI-25 (FF exposure, low end).  Two defects in these three lines.
+        vterm = divide_scalar(multiply(vterm, r2), -(float)((2*k + 1) * (2*k + 2)));
+        v_r   = add(v_r, vterm);
+        // KI-25 (FF exposure, low end).  Two defects were fixed in these lines
+        // and BOTH ARE PRESERVED HERE.
         //
         // (1) `<` made the test vacuous once the series had already converged to
-        //     the last bit.  For |a| <~ 1e-19 the scaled residual r is small
-        //     enough that r^2 UNDERFLOWS FP32 to zero, so sterm is exactly 0 —
-        //     and eps * |sin_r.hi| underflows to zero as well, making `0 < 0`
-        //     false forever.  The loop then ran to itrmx on a series that had
-        //     nothing left to add.  `<=` breaks on the first such iteration and
-        //     changes no other outcome: the only newly-accepted case has
+        //     the last bit.  For |a| <~ 1e-19 the residual r is small enough
+        //     that r^2 UNDERFLOWS FP32 to zero, so sterm is exactly 0 — and
+        //     eps * |sin_r.hi| underflows to zero as well, making `0 < 0` false
+        //     forever.  The loop then ran to itrmx on a series that had nothing
+        //     left to add.  `<=` breaks on the first such iteration and changes
+        //     no other outcome: the only newly-accepted case has
         //     sterm == 0 == threshold, where every remaining term is also zero.
+        //     The v test needs `<=` for the same reason and gets it: when r^2
+        //     underflows, v_r and vterm are both exactly 0 and `0 <= 0` holds.
         // (2) the itrmx arm `return`ed with x and y NEVER WRITTEN, so the caller
         //     read uninitialised storage.  That is what made FF atan(1e-30)
         //     come back NaN — angle()'s Newton step calls sincos on a tiny
         //     iterate — a codomain violation for a function bounded by pi/2.
-        //     `break` falls through to the doublings and the assignments, which
-        //     is what dd_math.hpp already does and what qf_math.hpp's
-        //     "no return on itrmx" comment describes.
+        //     `break` falls through to the assignments below, which is what
+        //     dd_math.hpp already does and what qf_math.hpp's "no return on
+        //     itrmx" comment describes.
+        //
+        // v's test is RELATIVE where cos's was absolute (|cterm| <= eps).
+        // Against cos ~ 1 the two agree; against v ~ r^2/2 an absolute test
+        // would stop the v series early and discard the accuracy this form
+        // exists to keep.
         if (detail::fabs(sterm.hi) <= eps * detail::fabs(sin_r.hi) &&
-            detail::fabs(cterm.hi) <= eps) break;
+            detail::fabs(vterm.hi) <= eps * detail::fabs(v_r.hi)) break;
         if (k == itrmx) { XPMATH_PRINTF("FFCSSNR: iteration limit\n"); break; }
     }
 
-    // Doubling: sin(2x) = 2 sin x cos x, cos(2x) = cos^2 x - sin^2 x
-    for (int j = 0; j < nq; ++j) {
-        FloatFloat new_sin = multiply_scalar(multiply(sin_r, cos_r), 2.0f);
-        FloatFloat new_cos = subtract(multiply(cos_r, cos_r), multiply(sin_r, sin_r));
+    // Doubling in (sin, v): sin(2x) = 2 sin x (1 - v), v(2x) = 2 sin^2 x.
+    // At nq = 0 this loop does not execute; it is kept, rather than deleted
+    // with the constant folded away, because nq is the thing that was measured
+    // and a future format may well want it back.
+    for (int q = 0; q < nq; ++q) {           // q, not j: j is the quadrant
+        const FloatFloat c_q = subtract(FloatFloat(1.0f), v_r);
+        const FloatFloat new_sin = multiply_scalar(multiply(sin_r, c_q), 2.0f);
+        v_r   = multiply_scalar(multiply(sin_r, sin_r), 2.0f);   // old sin_r
         sin_r = new_sin;
-        cos_r = new_cos;
     }
+    FloatFloat cos_r = subtract(FloatFloat(1.0f), v_r);
 
     // KI-26 codomain guard: outside the slack band -> identity point, inside it
     // -> clamp, so |sin| <= 1 and |cos| <= 1 hold exactly for every finite
@@ -892,7 +1055,11 @@ XPMATH_INLINE_FUNCTION void sincos(FloatFloat a, FloatFloat& x, FloatFloat& y) {
     if (cos_r.hi >  1.0f || (cos_r.hi ==  1.0f && cos_r.lo > 0.0f)) cos_r = FloatFloat( 1.0f);
     if (cos_r.hi < -1.0f || (cos_r.hi == -1.0f && cos_r.lo < 0.0f)) cos_r = FloatFloat(-1.0f);
 
-    x = cos_r; y = sin_r;
+    // Quadrant selection
+    if (j == 0) { x = cos_r;  y = sin_r; }
+    else if (j == 1) { x = negate(sin_r); y = cos_r; }
+    else if (j == 2) { x = negate(cos_r); y = negate(sin_r); }
+    else { x = sin_r;  y = negate(cos_r); }
 }
 
 XPMATH_INLINE_FUNCTION FloatFloat sin(FloatFloat a) {
@@ -1231,13 +1398,28 @@ XPMATH_INLINE_FUNCTION FloatFloat atanh(FloatFloat a) {
 // Multi-argument operations
 // ============================================================
 
+// KI-44: pow never materialises its exponent as a FloatFloat. See dd_math.hpp's
+// pow for the derivation -- `exp(multiply(log(a), b))` commits two errors that
+// both scale with |L| = |b*ln a| (the product's rounding, and log(a)'s own
+// relative error amplified by |b|), they are the same order, so removing only
+// one caps the gain at ~2x. The exponent is kept as an unevaluated pair end to
+// end instead.
+//
+// Measured over 1648 scored FF rows: median 0.515 -> 0.255 ulps,
+// 608 rows better / 60 worse. Mean, p90 and worst are unchanged because they
+// are owned by FP32 subnormal-wall rows (|a| below FF's -70.7 threshold, where
+// the lo word leaves the normal range) that no reformulation of pow can move.
 XPMATH_INLINE_FUNCTION FloatFloat pow(FloatFloat a, FloatFloat b) {
     if (a.hi <= 0.0f) {
         if (a.hi == 0.0f && b.hi > 0.0f) return FloatFloat(0.0f);
         XPMATH_PRINTF("FFPOW: non-positive base\n");
         return FloatFloat(0.0f);
     }
-    return exp(multiply(log(a), b));
+    float le;
+    const FloatFloat lp = ff_log_ext(a, le);
+    float e1;
+    const FloatFloat p = ff_mul_ext(lp, b, e1);
+    return ff_exp_ext(p, e1 + le * b.hi);
 }
 
 // hypot(a, b) = sqrt(a^2 + b^2), SCALED.  KI-8.
@@ -1520,6 +1702,118 @@ XPMATH_INLINE_FUNCTION void ff_expansion_compress(const float* e, int m,
     }
     h[top++] = q;
     for (int k = 0; k < n; ++k) out[k] = (top - 1 - k >= 0) ? h[top - 1 - k] : 0.0f;
+}
+
+// KI-44, FF. Mirrors dd_math.hpp's dd_mul_ext / dd_log_ext / dd_exp_ext; see
+// there for the derivation. Placed after the expansion helpers above.
+XPMATH_INLINE_FUNCTION FloatFloat ff_mul_ext(FloatFloat x, FloatFloat y, float& err) {
+    const float aw[2] = {x.hi, x.lo};
+    const float bw[2] = {y.hi, y.lo};
+    float e[8];
+    int   m = 0;
+    for (int i = 0; i < 2; ++i)
+        for (int j = 0; j < 2; ++j) {
+            if (aw[i] == 0.0f || bw[j] == 0.0f) continue;
+            const FloatFloat p = two_prod(aw[i], bw[j]);
+            ff_expansion_push(e, m, p.hi);
+            ff_expansion_push(e, m, p.lo);
+        }
+    if (m == 0) { err = 0.0f; return FloatFloat(0.0f); }
+    float d[3];
+    ff_expansion_compress(e, m, d, 3);
+    float lo, hi = ff_quick_two_sum(d[0], d[1], lo);
+    err = d[2];
+    return FloatFloat(hi, lo);
+}
+
+// Binary exponent by the header's own dependency-free loop -- config.hpp's
+// scalar dispatch carries no frexp (dd_math.hpp:964 records why).
+XPMATH_INLINE_FUNCTION int ff_expo_of(float x) {
+    int k = 0;
+    double t = (double)x;
+    while (t >= 18014398509481984.0)    { t *= 5.5511151231257827e-17; k += 54; }
+    while (t <  5.5511151231257827e-17) { t *= 18014398509481984.0;    k -= 54; }
+    while (t >= 2.0) { t *= 0.5; ++k; }
+    while (t <  1.0) { t *= 2.0;  --k; }
+    return k;
+}
+
+// log as an unevaluated pair via the exact split a = m*2^k, m in [1,2), so
+// |ln m| <= 0.693 whatever a is and log's relative error is no longer amplified
+// by |ln a| when a large exponent multiplies it. k*ln2 reuses the KI-42 FF
+// pieces verbatim: |k| <= 149 for FP32 normals, inside the |k| <= 151 range
+// those pieces were already verified over, so no new constants and no
+// re-verification.
+XPMATH_INLINE_FUNCTION FloatFloat ff_log_ext(FloatFloat a, float& err) {
+    err = 0.0f;
+    if (detail::isinf(a.hi)) return a;
+    if (a.hi <= 0.0f) {
+        XPMATH_PRINTF("FFLOGEXT: non-positive argument\n");
+        return FloatFloat(0.0f);
+    }
+    const int k = ff_expo_of(a.hi);
+    const FloatFloat m(ldexpf(a.hi, -k), ldexpf(a.lo, -k));   // exact
+    const FloatFloat lm = log(m);
+    const float kLn2_1 =  0x1.62e4p-1f;      // KI-42 FF pieces, 16 bits each
+    const float kLn2_2 =  0x1.7f7ep-20f;
+    const float kLn2_3 = -0x1.c61p-37f;
+    const float kLn2_4 = -0x1.950ep-54f;
+    const float kd = (float)k;
+    float e[8];
+    int   n = 0;
+    ff_expansion_push(e, n, kd * kLn2_1);
+    ff_expansion_push(e, n, kd * kLn2_2);
+    ff_expansion_push(e, n, kd * kLn2_3);
+    ff_expansion_push(e, n, kd * kLn2_4);
+    ff_expansion_push(e, n, lm.hi);
+    ff_expansion_push(e, n, lm.lo);
+    if (n == 0) return FloatFloat(0.0f);
+    float d[3];
+    ff_expansion_compress(e, n, d, 3);
+    float lo, hi = ff_quick_two_sum(d[0], d[1], lo);
+    err = d[2];
+    return FloatFloat(hi, lo);
+}
+
+// exp() taking a residual on its argument, folded into the Cody-Waite chain
+// where it costs ~0.18 ulps rather than the ~0.5-1 an extra multiply would.
+// Body duplicated from exp() deliberately; keep the two in step.
+XPMATH_INLINE_FUNCTION FloatFloat ff_exp_ext(FloatFloat a, float resid) {
+    const int nq = 4;
+    const float eps = 1.0e-15f;
+    FloatFloat al2 = FloatFloat_log2();
+    if (a.hi > 88.722839f) {
+        XPMATH_PRINTF("FFEXP: overflow\n");
+        return FloatFloat(HUGE_VALF);
+    }
+    if (a.hi < -104.0f) return FloatFloat(0.0f);
+    FloatFloat s1 = round_to_nearest_int(divide(a, al2));
+    const float t1 = s1.hi;
+    const int   nz = (int)(t1 + detail::copysign(1.0e-6f, t1));
+    const float kLn2_1 =  0x1.62e4p-1f;
+    const float kLn2_2 =  0x1.7f7ep-20f;
+    const float kLn2_3 = -0x1.c61p-37f;
+    const float kLn2_4 = -0x1.950ep-54f;
+    const float kf = (float)nz;
+    FloatFloat s0 = subtract(a,  FloatFloat(kf * kLn2_1));
+    s0 = subtract(s0, FloatFloat(kf * kLn2_2));
+    s0 = subtract(s0, FloatFloat(kf * kLn2_3));
+    s0 = subtract(s0, FloatFloat(kf * kLn2_4));
+    if (resid != 0.0f) s0 = add(s0, FloatFloat(resid));
+    // With a residual the result is 2^nz only if BOTH words vanish.
+    if (s0.hi == 0.0f && s0.lo == 0.0f) return FloatFloat(ldexpf(1.0f, nz));
+    s1 = multiply_scalar(s0, ldexpf(1.0f, -nq));
+    FloatFloat s2 = s1, s3 = s1;
+    for (int l1 = 2; l1 <= 100; ++l1) {
+        s0 = multiply(s2, s1);
+        s2 = divide_scalar(s0, (float)l1);
+        s0 = add(s3, s2);
+        s3 = s0;
+        if (detail::fabs(s2.hi) <= eps * detail::fabs(s3.hi)) break;
+    }
+    for (int i = 0; i < nq; ++i) s3 = multiply(s3, add(s3, FloatFloat(2.0f)));
+    s3 = add(FloatFloat(1.0f), s3);
+    return FloatFloat(s3.hi * ldexpf(1.0f, nz), s3.lo * ldexpf(1.0f, nz));
 }
 XPMATH_INLINE_FUNCTION FloatFloat fma(FloatFloat a, FloatFloat b, FloatFloat c) {
     const float p0 = a.hi * b.hi;
