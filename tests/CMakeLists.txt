@@ -491,17 +491,25 @@ add_test(NAME exp_reduction_selftest
 # its own 4000-bit ground truth rather than citing a number it cannot check --
 # see the header comment for why that distinction matters here. No accuracy
 # verdict on sin/cos/tan: this scores the reduction, which the sweep cannot see.
-add_executable(trig_reduction_test trig_reduction_test.cpp)
-target_include_directories(trig_reduction_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_include_directories(trig_reduction_test PRIVATE ${MPFR_INCLUDE_DIR})
-target_link_libraries(trig_reduction_test PRIVATE ${MPFR_LIBRARY} ${GMP_LIBRARY})
-add_test(NAME trig_reduction_test COMMAND trig_reduction_test)
+# MPFR-only: this test recomputes the reduction tables at high precision, so
+# there is nothing it can check without MPFR. Guarded at the TARGET level --
+# linking ${MPFR_LIBRARY} when it is NOTFOUND fails CMake's generate step, which
+# is how a missing libmpfr-dev took down the whole configure on CI.
+if(XPMATH_MPFR_FOUND)
+  add_executable(trig_reduction_test trig_reduction_test.cpp)
+  target_include_directories(trig_reduction_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
+  target_include_directories(trig_reduction_test PRIVATE ${MPFR_INCLUDE_DIR})
+  target_link_libraries(trig_reduction_test PRIVATE ${MPFR_LIBRARY} ${GMP_LIBRARY})
+  add_test(NAME trig_reduction_test COMMAND trig_reduction_test)
+endif()
 
 # ... and the self-test that proves it can fail: four poisons, plus a check
 # that the committed table is byte-identical to what the generator emits.
+if(XPMATH_MPFR_FOUND)
 add_test(NAME trig_reduction_selftest
          COMMAND ${CMAKE_SOURCE_DIR}/validation/trig_reduction_selftest.sh
                  ${CMAKE_CURRENT_BINARY_DIR})
+endif()
 
 # The MPFR oracle's __float128 <-> mpfr conversions must be EXACT, not merely
 # round-trippable. The sweep has no oracle-error term, so a reference that is
@@ -509,9 +517,11 @@ add_test(NAME trig_reduction_selftest
 # 1.28e11 ulps on precisely the large-|x| trig rows --oracle=mpfr exists to
 # measure. Runs the check, then poisons it four ways and requires each to fail.
 add_test(NAME oracle_conv_test COMMAND sweep_accuracy --oracle-selftest)
+if(XPMATH_MPFR_FOUND)
 add_test(NAME oracle_conv_selftest
          COMMAND ${CMAKE_SOURCE_DIR}/validation/oracle_conv_selftest.sh
                  ${CMAKE_CURRENT_BINARY_DIR})
+endif()
 
 # The generated domain document must be what the generator currently emits from
 # the committed baseline. Pure Python, well under a second, no build products.
