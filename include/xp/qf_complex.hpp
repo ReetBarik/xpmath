@@ -1027,6 +1027,32 @@ XPMATH_INLINE_FUNCTION bool xp_sq_underflowed(QuadFloat v) {
     return detail::fabs(v.f0) < 1.1754943508222875e-38f;
 }
 
+// Is the operand handed to sqrt() by Kahan's acosh chain too short to hold the
+// format's width?  The chain forms rp, rm = sqrt((x-+1)/2 + iy/2), so what
+// matters is the SCALE OF THE WHOLE OPERAND, not of y/2 alone.  A narrow y/2 is
+// harmless when the real half dominates -- at z = (2, 1e-30) the operand is
+// (0.5, 5e-31), sqrt() sees a well-scaled number and the tiny imaginary part
+// rides along -- and testing y/2 by itself fired there and made Im WORSE by up
+// to 0.9 digits, invisibly to the modulus-relative sweep metric because Im is
+// dwarfed by Re.  It is fatal only where the real half is gone as well, as at
+// the branch point z = (1, y) where (x-1)/2 is exactly zero and y/2 IS the
+// operand.  Either square root losing its operand is enough, so both are tested.
+XPMATH_INLINE_FUNCTION bool xp_acosh_chain_short(QuadFloat x, QuadFloat y) {
+    const QuadFloat one(1.0f);
+    const float hy = detail::fabs(multiply_scalar(y, 0.5f).f0);
+    const float am = detail::fabs(multiply_scalar(subtract(x, one), 0.5f).f0);
+    const float ap = detail::fabs(multiply_scalar(add(x, one), 0.5f).f0);
+    // NARROW: too small for the format to carry the width it advertises.  An
+    // expansion of 96 bits at magnitude a keeps its trailing word down at
+    // a * 2^-72; once that is below the smallest subnormal 2^-149 the word does
+    // not exist and the value silently holds fewer bits than the type claims.
+    // Bits available are ilogb(a) + 1 - (-149), so a is narrow below 2^-54 =
+    // 5.55e-17.  Zero is narrow by the same reading: it carries nothing.  KI-33's
+    // representational floor as a predicate -- fixed by the format, not tuned.
+    const float narrow = 0x1p-54f;
+    return (am > hy ? am : hy) < narrow || (ap > hy ? ap : hy) < narrow;
+}
+
 // Re atan(x+iy) as 0.5*(atan2(x, 1-y) + atan2(x, 1+y)), from
 // atan(z) = (i/2)[log(1-iz) - log(1+iz)] with the imaginary parts of the two
 // logs taken separately.  Algebraically identical to the primary
@@ -1269,26 +1295,70 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex asinh(QuadFloatComplex z) {
 // log(z + sqrt(z*z - 1)) form was on the wrong sqrt sheet throughout
 // Re(z) < 0, and overflowed above |z| ~ 1.8e19 where z*z leaves FP32 range.
 XPMATH_INLINE_FUNCTION QuadFloatComplex acosh(QuadFloatComplex z) {
-    const QuadFloat one(1.0f);
-    const QuadFloat half_im = multiply_scalar(z.im, 0.5f);
-    QuadFloatComplex rp = sqrt(QuadFloatComplex(
-        multiply_scalar(add(z.re, one), 0.5f), half_im));
-    QuadFloatComplex rm = sqrt(QuadFloatComplex(
-        multiply_scalar(subtract(z.re, one), 0.5f), half_im));
-    QuadFloatComplex lg = log(rp + rm);
-    // KI-11. Re acosh(z) = |Im asin(z)| is an identity (acosh(z) = +-i*acos(z)
-    // and Im acos = -Im asin), and 2*log|rp+rm| has exactly the disease
+    // acosh IS acos, rotated.  acosh(z) = +-i acos(z), and i(A + iB) = -B + iA,
+    // so Re acosh = -Im acos = |Im asin| and Im acosh = Re acos.  Both halves
+    // are taken from the acos reformulation; nothing here is a formula of its
+    // own.
+    //
+    // KI-11, the real part.  Re acosh(z) = |Im asin(z)| is that identity, and
+    // 2*log|rp+rm| -- what Kahan's chain computes -- has exactly the disease
     // xp_asin_imag_mag() exists to cure: |rp+rm| -> 1 all along the real segment
-    // [-1,1], so at z = 0.5 + 1e-30i it scored 0.12 of 29.00. The imaginary part
-    // is Kahan's and stays -- it is the well-conditioned one here.
-        // KI-11. acosh(conj z) = conj acosh(z) and the principal strip is
-    // Im acosh in (-pi, pi], so sign(Im acosh z) = sign(Im z) EVERYWHERE,
-    // signed zeros on the cut included (C99 Annex G). Kahan's form got that
-    // sign from a chain of sqrt/log that drops -0.0 on the FP32-word backends:
-    // QF and TF returned acosh(-0.1 - 0i) = +1.670964i, the wrong sheet and
-    // 0.00 digits, while DD and FF happened to keep it. Taking the magnitude
-    // and re-attaching the sign from copysign(Im z) is exact and cannot drift.
-    QuadFloat im_ = multiply_scalar(lg.im, 2.0f);
+    // [-1,1], so at z = 0.5 + 1e-30i it scored 0.12 of 29.00.
+    //
+    // THE IMAGINARY PART is 2*Im log(rp + rm) with rp, rm = sqrt((x+-1)/2 + iy/2)
+    // -- the other half of Kahan's chain -- EXCEPT where that chain's own sqrt
+    // operand is too short to hold 96 bits, which xp_acosh_chain_short() decides.
+    //
+    // WHAT GOES WRONG, and it is not the halving.  Traced step by step against
+    // MPC at the worst point on the grid, QF at z = (1, 1e-30) (point 894):
+    // y/2 is EXACT, 0 ulps, and so is (x-1)/2.  The 2.56e14 ulps appear two
+    // steps later, inside sqrt(rm), and arg() then faithfully reports an operand
+    // that is already destroyed -- arg of the COMPUTED sum is right to 0.249
+    // ulps.  The reason is magnitude, not arithmetic: a QuadFloat at 5e-31 wants
+    // its fourth word at 5e-31 * 2^-72 = 1.1e-52, far under 2^-149 = 1.4e-45, so
+    // the operand handed to sqrt() holds about 49 bits, not 96.  The ANSWER
+    // there is ~sqrt(y)(1+i), both components ~1e-15 and comfortably normal,
+    // with a representational floor of 0.079 ulps -- the formula loses the
+    // answer in an intermediate it never had to form.  scripts/probe_acosh_imag.cpp
+    // --trace 894 prints the step table.
+    //
+    // atan2(leg, x) is Re acos, which is Im acosh by the rotation above, and it
+    // forms no such intermediate.  It is used ONLY where the predicate fires, so
+    // the substitution is confined to the points where the chain provably cannot
+    // work.  Measured over the whole complex grid against MPC, the predicate is
+    // true at 40 of the 42 points where the chain reads above 8 ulps on the
+    // sweep's modulus-relative metric (the other 2 are an FF pair at 8.408 that
+    // the rotation does not improve either), and NO row is made worse on either
+    // metric -- modulus-relative or per-component -- on any backend.  On this
+    // backend it fires on 154 grid rows and the cell maximum goes 1.2589e8 -> 5.364,
+    // with the 16 rows above 8 ulps going to zero.
+    //
+    // WHY NOT EVERYWHERE.  The rotation is also better ON AVERAGE off the
+    // predicate -- unguarded it would take rows above 1 ulp from 1187 to 407 --
+    // but it is not better POINTWISE: unguarded it costs 629 rows across the
+    // four backends and the monotone gate rejects it (decreased: 132, worst drop
+    // 2.03 digits, all DD).  Ablation, both poisons and the signed-zero cases
+    // are in scripts/probe_acosh_imag.cpp.
+    //
+    // THE SHEET.  acosh(conj z) = conj acosh(z) and the principal strip is
+    // Im acosh in (-pi, pi], so sign(Im acosh z) = sign(Im z) everywhere, signed
+    // zeros on the cut included (C99 Annex G).  Both branches below are checked
+    // against 12 signed-zero cases on all four backends by the probe, including
+    // z = -0.1 -+ 0i and z = -0 + 0i; both pass, so the branch taken cannot move
+    // the sheet.  atan2(leg, x) with leg a magnitude lands in [0, pi] by
+    // construction, so re-attaching the sign from copysign(Im z) is exact.
+    QuadFloat im_;
+    if (xp_acosh_chain_short(z.re, z.im)) {
+        QuadFloat leg = xp_asin_real_leg(xp_abs_word(z.re), xp_abs_word(z.im));
+        if (leg.f0 == 0.0f) leg = QuadFloat(0.0f);   // never -0; see SIGNED ZEROS above
+        im_ = atan2(leg, z.re);
+    } else {
+        const QuadFloat one(1.0f);
+        const QuadFloat half_im = multiply_scalar(z.im, 0.5f);
+        const QuadFloatComplex rp = sqrt(QuadFloatComplex(multiply_scalar(add(z.re, one), 0.5f), half_im));
+        const QuadFloatComplex rm = sqrt(QuadFloatComplex(multiply_scalar(subtract(z.re, one), 0.5f), half_im));
+        im_ = multiply_scalar(log(rp + rm).im, 2.0f);
+    }
     if (im_.f0 < 0.0f) im_ = negate(im_);
     if (detail::copysign(1.0f, z.im.f0) < 0.0f) im_ = negate(im_);
     return QuadFloatComplex(xp_asin_imag_mag(xp_abs_word(z.re), xp_abs_word(z.im)), im_);
