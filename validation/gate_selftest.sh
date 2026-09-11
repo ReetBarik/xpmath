@@ -149,24 +149,54 @@ absolute)
 
   run clean pass --ulp --register "$reg"
 
-  # A registered defect deleted: the point is still above bound, so it is now
-  # an unlisted above-bound point -- a NEW defect as far as the gate knows.
-  awk '/^[^#[:space:]]/ && !done {done=1; next} {print}' "$reg" > "$work/deleted.txt"
-  cmp -s "$reg" "$work/deleted.txt" \
-    && { echo "  FAIL  fixture: nothing was deleted from the register" >&2; fails=$((fails+1)); }
-  run entry-deleted fail --ulp --register "$work/deleted.txt"
+  # DIRECTION A -- an above-bound point that the register does not list.
+  #
+  # This used to be poisoned by deleting a line from the register, which only
+  # works while the register still HAS a line: it borrowed a real open defect
+  # as its fixture, so the day the last defect was fixed the poison would have
+  # become a no-op and the case would have gone quietly green on nothing. It
+  # did become a no-op -- the register is empty as of the Payne-Hanek work.
+  #
+  # So the above-bound point is manufactured instead, by collapsing the slack
+  # multiplier the gate allows. Nothing about the library or the register is
+  # borrowed, and the case keeps biting at an empty register. `slack` asserts
+  # the fixture: at this allowance there must BE unlisted above-bound points,
+  # or the poison is not a poison.
+  slack=0.001
+  "$bin" --quiet --ulp --ulp-allowance "$slack" --register "$reg" \
+      > "$work/no-slack.probe" 2>&1
+  grep -qE '^ *NEW \(unlisted\): *[1-9]' "$work/no-slack.probe" \
+    || { echo "  FAIL  fixture: allowance $slack left no unlisted above-bound point" >&2
+         fails=$((fails+1)); }
+  run no-slack fail --ulp --ulp-allowance "$slack" --register "$reg"
 
-  # A bogus entry added: a point that is not above bound is listed as if it
-  # were, so the register has rotted and must shrink.
+  # DIRECTION B -- a listed point that is not above bound, i.e. a register that
+  # has rotted and must shrink. Independent of how many real entries there are.
   cp "$reg" "$work/added.txt"
   echo "DD r add 999999" >> "$work/added.txt"
   run bogus-added fail --ulp --register "$work/added.txt"
 
-  # An empty register: every one of the ~1000 real above-bound points is
-  # unlisted. A gate that reads "no exceptions listed" as "no exceptions" is
-  # the same blindness in the other file.
-  : > "$work/empty.txt"
-  run register-emptied fail --ulp --register "$work/empty.txt"
+  # The two register-shaped poisons below only exist while the register is
+  # non-empty. They are strictly extra -- direction A is covered by `no-slack`
+  # and direction B by `bogus-added` either way -- and they are SKIPPED rather
+  # than run vacuously, because a poison that cannot poison must not print ok.
+  if grep -qE '^[^#[:space:]]' "$reg"; then
+    # A registered defect deleted: the point is still above bound, so it is now
+    # an unlisted above-bound point -- a NEW defect as far as the gate knows.
+    awk '/^[^#[:space:]]/ && !done {done=1; next} {print}' "$reg" > "$work/deleted.txt"
+    cmp -s "$reg" "$work/deleted.txt" \
+      && { echo "  FAIL  fixture: nothing was deleted from the register" >&2; fails=$((fails+1)); }
+    run entry-deleted fail --ulp --register "$work/deleted.txt"
+
+    # An empty register: every real above-bound point is unlisted. A gate that
+    # reads "no exceptions listed" as "no exceptions" is the same blindness in
+    # the other file.
+    : > "$work/empty.txt"
+    run register-emptied fail --ulp --register "$work/empty.txt"
+  else
+    printf '  skip  %-22s register is empty; no-slack covers this direction\n' "entry-deleted"
+    printf '  skip  %-22s register is empty; no-slack covers this direction\n' "register-emptied"
+  fi
   ;;
 
 *)
