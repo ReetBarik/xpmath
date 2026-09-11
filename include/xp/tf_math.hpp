@@ -62,6 +62,7 @@
 //   * Math functions are ADL-findable via the argument's namespace.
 
 #include <xp/config.hpp>
+#include <xp/trig_reduction.hpp>
 #include <cstdint>
 #include <cstring>
 #include <cmath>
@@ -980,13 +981,12 @@ XPMATH_INLINE_FUNCTION TripleFloat pow(TripleFloat a, TripleFloat b) {
     return detail::tf_exp_ext(p, e1 + le * b.f0);
 }
 
-// sin/cos: joint computation via argument reduction mod 2π, divide-by-k Taylor
-// on the residual, and joint angle-doubling formulas (PORT_NOTES.md §3a).
-// With nq = 4, r = s3/2^4, and sin(r)/cos(r) Taylor converges in ~7 terms to
-// reach TF width. Four joint doublings recover sin(s3)/cos(s3).
+// sin/cos: joint computation via Payne-Hanek reduction mod π/2, divide-by-k
+// Taylor on the residual, and joint angle-doubling formulas (PORT_NOTES.md
+// §3a).  With nq = 4, r = r_mod/2^4, and sin(r)/cos(r) Taylor converges in ~7
+// terms to reach TF width.  Four joint doublings recover sin/cos of r_mod, and
+// the quadrant tables map that back onto a.
 XPMATH_INLINE_FUNCTION void sincos(TripleFloat a, TripleFloat& sin_a, TripleFloat& cos_a) {
-    const TripleFloat k_2pi = mul_pwr2(TripleFloat_pi(), 2.0f);
-
     if (a.f0 == 0.0f) {
         sin_a = TripleFloat(0.0f);
         cos_a = TripleFloat(1.0f);
@@ -995,7 +995,7 @@ XPMATH_INLINE_FUNCTION void sincos(TripleFloat a, TripleFloat& sin_a, TripleFloa
     // KI-12 residual.  Small-argument short circuit over the degenerate
     // reduction band only; full derivation at ff_math.hpp:sincos.  TF's limbs
     // are FP32 too, so the band is the same shape: below 2^nq * FLT_MIN the
-    // leading word of r = s3/2^nq is subnormal and sheds bits before the first
+    // leading word of r = r_mod/2^nq is subnormal and sheds bits before the first
     // Taylor term (and is 0 outright for subnormal |a|).  Measured before:
     // TF sin(1e-40) = 9.99967e-41 for an argument of 9.99995e-41, and
     // TF sin(1e-44) = 0.  Above the band the series is already correct and a
@@ -1007,19 +1007,43 @@ XPMATH_INLINE_FUNCTION void sincos(TripleFloat a, TripleFloat& sin_a, TripleFloa
         return;
     }
 
-    // Reduce mod 2π
-    TripleFloat z = round_to_nearest_int(divide(a, k_2pi));
-    TripleFloat s3 = subtract(a, multiply(k_2pi, z));
-
-    // Mod pi/2 reduction
-    TripleFloat pi_half = mul_pwr2(TripleFloat_pi(), 0.5f);
-    TripleFloat n_exact = divide(s3, pi_half);
-    TripleFloat n = round_to_nearest_int(n_exact);
-    int j = ((int)n.f0) & 3;
-    TripleFloat r_mod = subtract(s3, multiply(pi_half, n));
+    // ARGUMENT REDUCTION — Payne-Hanek.  a = j*(pi/2) + r_mod with |r_mod| <=
+    // pi/4 and j = nint(a*2/pi) mod 4, with n never formed.  Mirrors
+    // dd_math.hpp:sincos; why the old `a - 2pi*nint(a/2pi)` could not be
+    // rescued by a wider constant is measured in
+    // scripts/probe_trig_stages.cpp --widen, and kPhGuardTF / kPhChunksTF come
+    // from scripts/gen_trig_reduction_constants.cpp.
+    //
+    // r = r_mod/2^nq below can no longer underflow: it is zero only for
+    // |r_mod| < 2^nq * FLT_MIN = 2^-122, and |f| >= 2^-C with C = 78.649
+    // MEASURED over every TripleFloat (include/xp/trig_reduction_data.hpp),
+    // giving |r| >= 2^-83.  The KI-12 band above covers the only arguments that
+    // can, which is what it was sized for.
+    const int nq = 4;
+    int         j;
+    TripleFloat r_mod;
+    if (detail::fabs(a.f0) <= 0.75f) {
+        // Nothing to reduce: r_mod is a itself, exactly.  See dd_math.hpp for
+        // the measurement behind both the branch and the 0.75.
+        j = 0; r_mod = a;
+    } else {
+        const float win[3] = { a.f0, a.f1, a.f2 };
+        float       f[4];
+        j = detail::xp_ph_reduce<float>(win, 3, detail::kPhGuardTF,
+                                        detail::kPhChunksTF, f, 4);
+        // f is exact to 2^-kPhGuardTF ABSOLUTE, i.e. 2^-(p+4) RELATIVE at the
+        // worst cancellation the format admits, so r_mod inherits ~2^-72
+        // relative -- proportional to |r_mod|, where the old form's error was
+        // proportional to |a|.
+        TripleFloat pio2 = TripleFloat(detail::xp_ph_pio2_f(0));
+        for (int k = 1; k < detail::kPhPio2WordsF; ++k)
+            pio2 = add(pio2, TripleFloat(detail::xp_ph_pio2_f(k)));
+        TripleFloat fr = TripleFloat(f[0]);
+        for (int k = 1; k < 4; ++k) fr = add(fr, TripleFloat(f[k]));
+        r_mod = multiply(fr, pio2);
+    }
 
     // Reduce by 2^nq
-    const int nq = 4;
     TripleFloat r = divide_scalar(r_mod, float(1 << nq));
 
     // Taylor: sin(r) = r - r^3/3! + ..., cos(r) = 1 - r^2/2! + ...

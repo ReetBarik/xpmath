@@ -415,7 +415,7 @@ for each cell that has any:
 | `tan` | DD | 31.00 | 30.51 | 0 .. 1e+04 | 97% | above 1e+04: 0.00 | 12 | UNRESOLVED |
 | `tan` | QF | 29.00 | 26.00 | 1 .. 2 | 72% | below 1: 13.84; above 10: 13.31 | 56 | UNRESOLVED |
 | `tan` | TF | 21.70 | 20.49 | 1e-27 .. 0.1 | 85% | above 10: 10.52 | 48 | UNRESOLVED |
-| `tan` | FF | 14.00 | 13.43 | 0 .. 2.236 | 95% | above 1e+04: 0.00 | 40 | OPEN DEFECT (**4 above bound**) |
+| `tan` | FF | 14.00 | 13.43 | 0 .. 2.236 | 95% | above 1e+04: 0.00 | 40 | UNRESOLVED |
 | `sinh` | DD | 31.00 | 29.43 | 0 .. 100 | 95% | above 1000: 0.00 | 83 | UNRESOLVED |
 | `sinh` | QF | 29.00 | 23.70 | 1 .. 2 | 70% | below 1: 13.80; above 2: 13.77 | 233 | UNRESOLVED |
 | `sinh` | TF | 21.70 | 18.60 | 1e-27 .. 0.1 | 80% | above 100: 0.00 | 215 | UNRESOLVED |

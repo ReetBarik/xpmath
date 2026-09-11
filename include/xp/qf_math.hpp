@@ -72,6 +72,7 @@
 //     forwarded — they are for operators and explicit ADL only.
 
 #include <xp/config.hpp>
+#include <xp/trig_reduction.hpp>
 #include <cstdint>
 #include <cstring>
 #include <cmath>
@@ -1191,15 +1192,17 @@ XPMATH_INLINE_FUNCTION QuadFloat expm1(QuadFloat a) {
 // ============================================================
 
 // sincos(a): writes sin_a = sin(a), cos_a = cos(a).  Mathematical mirror of
-// sincos(qd_real), QD 2.3.24 qd_real.cpp:2298-2360 (same reduce-mod-2pi
-// skeleton), BUT structured like ff_math.hpp:445 / dd_math.hpp:439 — a
-// divide-by-k Taylor on r = s3/2^nq followed by nq angle-doublings — instead of
-// QD's pi/1024 table lookup (see block header).  PORT_NOTES §3a: sin and cos are
-// tracked JOINTLY through the doublings (sin(2x)=2 sin x cos x,
-// cos(2x)=cos^2 x - sin^2 x) so no sqrt(1-cos^2) recovery loses relative
-// precision near multiples of pi.  QF's 4-word _2pi (accurate to ~2^-96) makes
-// the mod-2pi reduction good enough that near-pi sin/cos are distinguishable
-// from noise (the T3.6 goal FF §5 could not reach with 2-word pi).
+// sincos(qd_real), after QD 2.3.24 qd_real.cpp:2298-2360, BUT structured like
+// ff_math.hpp:445 / dd_math.hpp:439 — a divide-by-k Taylor on r = r_mod/2^nq
+// followed by nq angle-doublings — instead of QD's pi/1024 table lookup (see
+// block header).  PORT_NOTES §3a: sin and cos are tracked JOINTLY through the
+// doublings (sin(2x)=2 sin x cos x, cos(2x)=cos^2 x - sin^2 x) so no
+// sqrt(1-cos^2) recovery loses relative precision near multiples of pi.
+//
+// QD's reduce-mod-2pi skeleton is NOT kept: a single stored 2pi, however wide,
+// leaves an error proportional to |a| rather than to |r_mod|, and QF's 4-word
+// constant only moves the magnitude at which that becomes visible.  The
+// reduction below is Payne-Hanek; see the comment at the call site.
 XPMATH_INLINE_FUNCTION void sincos(QuadFloat a, QuadFloat& sin_a, QuadFloat& cos_a) {
     const int   itrmx = 100, nq = 5;
     const float eps = 1.0e-28f;
@@ -1207,7 +1210,7 @@ XPMATH_INLINE_FUNCTION void sincos(QuadFloat a, QuadFloat& sin_a, QuadFloat& cos
     // KI-12 residual.  Small-argument short circuit over the degenerate
     // reduction band only; full derivation at ff_math.hpp:sincos.  QF's limbs
     // are FP32 too, so the band is the same shape: below 2^nq * FLT_MIN the
-    // leading word of r = s3/2^nq is subnormal and sheds bits before the first
+    // leading word of r = r_mod/2^nq is subnormal and sheds bits before the first
     // Taylor term (and is 0 outright for subnormal |a|).  Measured before:
     // QF sin(1e-40) = 9.99967e-41 for an argument of 9.99995e-41, and
     // QF sin(1e-44) = 0.  Above the band the series is already correct and a
@@ -1219,19 +1222,42 @@ XPMATH_INLINE_FUNCTION void sincos(QuadFloat a, QuadFloat& sin_a, QuadFloat& cos
         XPMATH_PRINTF("QFCSSNR: argument too large\n");
         sin_a = QuadFloat(0.0f); cos_a = QuadFloat(1.0f); return;   // KI-26
     }
-    // Reduce mod 2pi (QD qd_real.cpp:2306-2308: z = nint(a/2pi); t = a - 2pi*z).
-    QuadFloat pi2 = mul_pwr2(QuadFloat_pi(), 2.0f);   // 2pi, exact from 4-word pi
-    QuadFloat s1  = divide(a, pi2);
-    QuadFloat s2  = round_to_nearest_int(s1);
-    QuadFloat s3  = subtract(a, multiply(pi2, s2));   // |s3| <= pi
-    if (s3.f0 == 0.0f) { sin_a = QuadFloat(0.0f); cos_a = QuadFloat(1.0f); return; }
-
-    // Mod pi/2 reduction
-    QuadFloat pi_half = mul_pwr2(QuadFloat_pi(), 0.5f);
-    QuadFloat n_exact = divide(s3, pi_half);
-    QuadFloat n = round_to_nearest_int(n_exact);
-    int j = ((int)n.f0) & 3;
-    QuadFloat r_mod = subtract(s3, multiply(pi_half, n));
+    // ARGUMENT REDUCTION — Payne-Hanek, replacing QD's z = nint(a/2pi);
+    // t = a - 2pi*z (qd_real.cpp:2306-2308) and the mod-pi/2 stage that
+    // followed it.  a = j*(pi/2) + r_mod with |r_mod| <= pi/4 and
+    // j = nint(a*2/pi) mod 4, with n never formed.  Mirrors dd_math.hpp:sincos;
+    // why the old form could not be rescued by a wider constant (QF's 4-word
+    // 2pi included) is measured in scripts/probe_trig_stages.cpp --widen, and
+    // kPhGuardQF / kPhChunksQF come from
+    // scripts/gen_trig_reduction_constants.cpp.
+    //
+    // The old `if (s3.f0 == 0)` early-out goes with it and needs no
+    // replacement: r = r_mod/2^nq is zero only for |r_mod| < 2^nq * FLT_MIN =
+    // 2^-121, and |f| >= 2^-C with C = 101.121 MEASURED over every QuadFloat
+    // (include/xp/trig_reduction_data.hpp), so |r| >= 2^-106.  The KI-12 band
+    // above covers the only arguments that can underflow r.
+    int       j;
+    QuadFloat r_mod;
+    if (detail::fabs(a.f0) <= 0.75f) {
+        // Nothing to reduce: r_mod is a itself, exactly.  See dd_math.hpp for
+        // the measurement behind both the branch and the 0.75.
+        j = 0; r_mod = a;
+    } else {
+        const float win[4] = { a.f0, a.f1, a.f2, a.f3 };
+        float       f[5];
+        j = detail::xp_ph_reduce<float>(win, 4, detail::kPhGuardQF,
+                                        detail::kPhChunksQF, f, 5);
+        // f is exact to 2^-kPhGuardQF ABSOLUTE, i.e. 2^-(p+4) RELATIVE at the
+        // worst cancellation the format admits, so r_mod inherits ~2^-96
+        // relative -- proportional to |r_mod|, where the old form's error was
+        // proportional to |a|.
+        QuadFloat pio2 = QuadFloat(detail::xp_ph_pio2_f(0));
+        for (int k = 1; k < detail::kPhPio2WordsF; ++k)
+            pio2 = add(pio2, QuadFloat(detail::xp_ph_pio2_f(k)));
+        QuadFloat fr = QuadFloat(f[0]);
+        for (int k = 1; k < 5; ++k) fr = add(fr, QuadFloat(f[k]));
+        r_mod = multiply(fr, pio2);
+    }
 
     QuadFloat r  = mul_pwr2(r_mod, ldexpf(1.0f, -nq));   // r = r_mod / 2^nq, |r| < pi/(4*2^nq)
     QuadFloat r2 = multiply(r, r);

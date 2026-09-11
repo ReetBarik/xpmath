@@ -13,17 +13,22 @@
 #
 # WHAT IS IN HERE:
 #
-#  c tan, 4 points, FF only  (grid 1648-1651, z = +-1e15 on the real axis)
-#      Argument reduction at |x| = 1e15 needs n = x/(pi/2) = 6.37e14, which is
-#      49.2 bits and does not fit one FP32 limb. kappa = |x/(sin x cos x)| is
-#      2.27e15 there. DD holds n in its 53-bit limb and passes at 7.41x; QF and
-#      TF also pass (5.07x, 1.60x) on total precision; FF's 48 bits leave
-#      nothing after the amplification and it scores 0.00 digits at 36x bound.
-#      NOT YET DERIVED: whether FF's bound should carry the reduction-multiple
-#      term explicitly. Until that derivation exists this stays a defect rather
-#      than being closed as inherent.
+#  Nothing. The register is empty.
 #
 # CLEARED (do not re-add without measurement):
+#
+#  c tan, 4 points, FF only  (grid 1648-1651, z = +-1e15 on the real axis)
+#      Was: argument reduction at |x| = 1e15 needs n = x/(pi/2) = 6.37e14,
+#      which is 49.2 bits and does not fit one FP32 limb. kappa =
+#      |x/(sin x cos x)| is 2.27e15 there, and FF's 48 bits left nothing after
+#      the amplification -- 8.62947e14 ulps against a derived bound of
+#      2.393e13, i.e. 36x, at 0.00 digits.
+#      Closed by Payne-Hanek (include/xp/trig_reduction.hpp): n is never
+#      formed, so the limb width it would need stopped mattering. Same run,
+#      same --oracle=mpfr: 1.26143 ulps, 5.3e-14 of the bound. This is a fix,
+#      not a re-derivation -- the "NOT YET DERIVED: whether FF's bound should
+#      carry the reduction-multiple term explicitly" question this entry used
+#      to carry is now moot, because the reduction no longer has a multiple.
 #
 #  c log / c log10 / c pow, 82 points x 4 backends = 984, and
 #  c atanh, 16 points x 3 backends = 48
@@ -43,7 +48,3 @@
 # Counts by cell are printed by the gate itself; the grouping above is the
 # diagnosis, and the per-mechanism history is in docs/history/KNOWN_ISSUES.md.
 #
-FF c tan 1648
-FF c tan 1649
-FF c tan 1650
-FF c tan 1651

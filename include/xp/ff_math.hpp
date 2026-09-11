@@ -75,6 +75,7 @@
 //     forwarded — they are for operators and explicit ADL only.
 
 #include <xp/config.hpp>
+#include <xp/trig_reduction.hpp>
 #include <cstdint>
 #include <cstring>
 #include <cmath>
@@ -893,17 +894,42 @@ XPMATH_INLINE_FUNCTION void sincos(FloatFloat a, FloatFloat& x, FloatFloat& y) {
         XPMATH_PRINTF("FFCSSNR: argument too large\n");
         x = FloatFloat(1.0f); y = FloatFloat(0.0f); return;      // KI-26
     }
-    FloatFloat pi2 = multiply_scalar(FloatFloat_pi(), 2.0f);
-    FloatFloat s1  = divide(a, pi2);
-    FloatFloat s2  = round_to_nearest_int(s1);
-    FloatFloat s3  = subtract(a, multiply(pi2, s2));
-    if (s3.hi == 0.0f) { x = FloatFloat(1.0f); y = FloatFloat(0.0f); return; }
-    // Mod pi/2 reduction
-    FloatFloat pi_half = multiply_scalar(FloatFloat_pi(), 0.5f);
-    FloatFloat n_exact = divide(s3, pi_half);
-    FloatFloat n = round_to_nearest_int(n_exact);
-    int j = ((int)n.hi) & 3;
-    FloatFloat r_mod = subtract(s3, multiply(pi_half, n));
+    // ARGUMENT REDUCTION — Payne-Hanek.  a = j*(pi/2) + r_mod with |r_mod| <=
+    // pi/4 and j = nint(a*2/pi) mod 4, with n never formed.  Mirrors
+    // dd_math.hpp:sincos; why the old `a - 2pi*nint(a/2pi)` could not be
+    // rescued by a wider constant is measured in
+    // scripts/probe_trig_stages.cpp --widen, and kPhGuardFF / kPhChunksFF come
+    // from scripts/gen_trig_reduction_constants.cpp.
+    //
+    // The old form's `s3.hi == 0 -> (1, 0)` early-out goes with it, and nothing
+    // replaces it, because nothing can now reach that corner: r = r_mod/2^nq is
+    // zero only for |r_mod| < 2^nq * FLT_MIN = 2^-122, and |f| >= 2^-C with
+    // C = 54.741 MEASURED over every FloatFloat
+    // (include/xp/trig_reduction_data.hpp), so |r| >= 2^-59.  The KI-12 band
+    // above covers the only arguments that can underflow r, which is what it
+    // was sized for.
+    int        j;
+    FloatFloat r_mod;
+    if (detail::fabs(a.hi) <= 0.75f) {
+        // Nothing to reduce: r_mod is a itself, exactly.  See dd_math.hpp for
+        // the measurement behind both the branch and the 0.75.
+        j = 0; r_mod = a;
+    } else {
+        const float win[2] = { a.hi, a.lo };
+        float       f[3];
+        j = detail::xp_ph_reduce<float>(win, 2, detail::kPhGuardFF,
+                                        detail::kPhChunksFF, f, 3);
+        // f is exact to 2^-kPhGuardFF ABSOLUTE, i.e. 2^-(p+4) RELATIVE at the
+        // worst cancellation the format admits.  The two products below are
+        // ordinary FF, so r_mod inherits ~2^-48 relative -- proportional to
+        // |r_mod|, where the old form's error was proportional to |a|.
+        FloatFloat pio2 = FloatFloat(detail::xp_ph_pio2_f(0));
+        for (int k = 1; k < detail::kPhPio2WordsF; ++k)
+            pio2 = add(pio2, FloatFloat(detail::xp_ph_pio2_f(k)));
+        FloatFloat ffr = FloatFloat(f[0]);
+        for (int k = 1; k < 3; ++k) ffr = add(ffr, FloatFloat(f[k]));
+        r_mod = multiply(ffr, pio2);
+    }
     float scale = 1.0f / (float)(1 << nq);
     FloatFloat r  = multiply_scalar(r_mod, scale);   // r = r_mod / 2^nq, |r| < pi/(4*2^nq)
     FloatFloat r2 = multiply(r, r);
