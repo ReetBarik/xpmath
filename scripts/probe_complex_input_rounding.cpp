@@ -58,7 +58,20 @@
 // measurement and one verdict and this is neither.  It is a diagnosis of rows
 // the sweep has already judged.
 //
-// POISONS, all three of which must pass before believing a number here.
+// IS 1 ULP EVEN A DEFECT?  ulps_ideal answers that.  It is the CORRECTLY
+// ROUNDED answer -- the best any implementation could possibly return -- put
+// through the same modulus-relative metric.  It is not zero, because that
+// metric charges each component's half-ulp against the MODULUS.  Measured over
+// the 80,972 scored complex-trig rows that have a representable answer:
+//
+//     max 0.492018    mean 0.0786    p99 0.407    rows above 0.5: 0
+//
+// So a perfect library reads at most half an ulp here, and the sweep's 1-ulp
+// line sits at twice the worst possible correctly-rounded reading.  The metric
+// is not the thing that is wrong: rows above 1 ulp are real library error.
+// That had to be established before any of them was called a defect.
+//
+// POISONS, all four of which must pass before believing a number here.
 //
 //   --poison        replaces every library result with ref_stored * (1 + 2^-p),
 //                   computed at 400 bits.  Every ulps_stored reading must then
@@ -79,6 +92,13 @@
 //                   REPRESENTATIONAL FLOOR count must fall to zero, proving the
 //                   classification is driven by FP32's actual subnormal limit
 //                   and not by kFloorSlack being generous.  Measured: 36 -> 0.
+//
+//   --poison-ideal  drops the bottom limb in round_to_format.  ulps_ideal must
+//                   then break the analytic ceiling 2 + 2^p*D/|ref| derived at
+//                   the check itself.  Measured: 78,818 rows over it, worst
+//                   4.41e15x.  An EARLIER VERSION OF THIS POISON WAS VACUOUS --
+//                   it compared ulps_mpc(ideal) against itself and could not
+//                   fail.  The ceiling replaced it because it can.
 //
 // BUILD.  -DXPMATH_ENABLE_DIAGNOSTICS=0 silences the ~40 domain-diagnostic
 // printfs (config.hpp:121 -- return values are unaffected); the outer grid radii
@@ -136,6 +156,9 @@ bool g_drop_sign = false;   // --poison-sign: revert widen() to the plain sum
 // floor classification must then catch NOTHING, which is what proves it is
 // driven by the actual subnormal limit and not by kFloorSlack being generous.
 bool g_poison_floor = false;
+// --poison-ideal: drop the bottom limb in round_to_format.  ulps_ideal must
+// then break its 0.5 ceiling -- see the CEILING check below.
+bool g_poison_ideal = false;
 
 // ---------------------------------------------------------------- backends
 
@@ -147,6 +170,7 @@ struct Tr<xp::DoubleDouble> {
     static const char* name() { return "DD"; }
     static int sig_bits() { return 106; }   // sweep_accuracy.cpp:2025
     static int denorm_exp() { return -1074; }   // FP64 smallest subnormal
+    static bool is_fp32() { return false; }
     static int nlimb() { return 2; }
     static double limb(const xp::DoubleDouble& v, int i) { return i ? v.lo : v.hi; }
 };
@@ -156,6 +180,7 @@ struct Tr<xp::FloatFloat> {
     static const char* name() { return "FF"; }
     static int sig_bits() { return 48; }    // sweep_accuracy.cpp:2031
     static int denorm_exp() { return -149; }   // FP32 smallest subnormal
+    static bool is_fp32() { return true; }
     static int nlimb() { return 2; }
     static double limb(const xp::FloatFloat& v, int i) { return i ? v.lo : v.hi; }
 };
@@ -165,6 +190,7 @@ struct Tr<xp::QuadFloat> {
     static const char* name() { return "QF"; }
     static int sig_bits() { return 96; }    // sweep_accuracy.cpp:2037
     static int denorm_exp() { return -149; }   // FP32 smallest subnormal
+    static bool is_fp32() { return true; }
     static int nlimb() { return 4; }
     static double limb(const xp::QuadFloat& v, int i) {
         return i == 0 ? v.f0 : i == 1 ? v.f1 : i == 2 ? v.f2 : v.f3;
@@ -176,6 +202,7 @@ struct Tr<xp::TripleFloat> {
     static const char* name() { return "TF"; }
     static int sig_bits() { return 72; }    // sweep_accuracy.cpp:2043
     static int denorm_exp() { return -149; }   // FP32 smallest subnormal
+    static bool is_fp32() { return true; }
     static int nlimb() { return 3; }
     static double limb(const xp::TripleFloat& v, int i) {
         return i == 0 ? v.f0 : i == 1 ? v.f1 : v.f2;
@@ -197,6 +224,51 @@ template <class T>
 void widen_c(const typename Tr<T>::C& z, mpc_ptr out) {
     widen(z.re, mpc_realref(out));
     widen(z.im, mpc_imagref(out));
+}
+
+// Round an exact value to the backend's format, the way the backend itself
+// holds a number: greedily peel off the nearest IEEE word, subtract, repeat.
+// The result is returned as MPFR (the exact sum of the limbs) rather than as a
+// T, so no assumption is made about which constructors renormalise.
+//
+// This is the CORRECTLY ROUNDED answer -- the best any implementation of the
+// function could return.  Measuring it through the same metric gives
+// ulps_ideal: the reading the sweep would produce for a perfect library.  It is
+// not zero, because a modulus-relative metric charges each component's
+// half-ulp, and it is what "1 ulp" has to be judged against.
+//
+// Greedy peeling is what these formats produce, not provably the closest
+// representable value in every case; where the two differ they differ by less
+// than a bottom-word ulp, which is below everything this probe concludes.
+bool g_unrep = false;   // set when the leading word overflows the format
+
+template <class T>
+void round_to_format(mpfr_srcptr x, mpfr_ptr out) {
+    static bool init = false;
+    static mpfr_t rem;
+    if (!init) { mpfr_init2(rem, kPrec); init = true; }
+    mpfr_set(rem, x, MPFR_RNDN);
+    mpfr_set_zero(out, mpfr_signbit(x) ? -1 : 1);
+    const int n = Tr<T>::nlimb() - (g_poison_ideal ? 1 : 0);
+    for (int i = 0; i < n; ++i) {
+        const double w =
+            Tr<T>::is_fp32() ? (double)mpfr_get_flt(rem, MPFR_RNDN) : mpfr_get_d(rem, MPFR_RNDN);
+        if (!std::isfinite(w)) {
+            // |x| is past the format's largest finite value.  There is no
+            // correctly rounded answer to measure; the caller drops the row.
+            if (i == 0) g_unrep = true;
+            break;
+        }
+        if (w == 0.0) break;   // underflow; covered by the D term in the ceiling
+        mpfr_add_d(out, out, w, MPFR_RNDN);
+        mpfr_sub_d(rem, rem, w, MPFR_RNDN);
+    }
+}
+
+template <class T>
+void round_c(mpc_srcptr z, mpc_ptr out) {
+    round_to_format<T>(mpc_realref(z), mpc_realref(out));
+    round_to_format<T>(mpc_imagref(z), mpc_imagref(out));
 }
 
 // ---------------------------------------------------------------- ops
@@ -308,7 +380,7 @@ struct Row {
     const char* op;
     int pt;
     const char* family;
-    double u_grid, u_stored;
+    double u_grid, u_stored, u_ideal;
     double floor_u;   // 2^p * D / |ref_stored| -- see THE SECOND FLOOR
     double xfloor() const { return floor_u > 0 ? u_stored / floor_u : 0.0; }
 };
@@ -325,6 +397,10 @@ double modulus(mpc_srcptr z) {
 std::vector<Row> g_rows;
 int g_poison_bad = 0;
 double g_poison_worst = 0.0;
+long g_ideal_over = 0;       // rows above the analytic ceiling 2 + 2^p D / M
+long g_ideal_over_half = 0;  // rows above a flat 0.5 -- reported, not a failure
+long g_ideal_unrep = 0;      // rows whose correctly rounded answer overflows
+double g_ideal_worst = 0.0;  // worst ratio to the ceiling
 long g_sign_moved = 0, g_sign_seen = 0;
 
 template <class T>
@@ -333,7 +409,8 @@ void run_backend(const std::vector<Pt>& grid, const char* only_bk, const char* o
     const int p = Tr<T>::sig_bits();
     if (only_bk && std::strcmp(only_bk, Tr<T>::name())) return;
 
-    mpc_t zg, zs, rg, rs, lib;
+    mpc_t zg, zs, rg, rs, lib, ideal;
+    mpc_init2(ideal, kPrec);
     mpc_init2(zg, kPrec);
     mpc_init2(zs, kPrec);
     mpc_init2(rg, kPrec);
@@ -365,6 +442,50 @@ void run_backend(const std::vector<Pt>& grid, const char* only_bk, const char* o
 
             widen_c<T>(r, lib);
 
+            // 2^p * D / M, entirely in the exponent so it does not underflow.
+            const double M = modulus(rs);
+            const int de = g_poison_floor ? -1074 : Tr<T>::denorm_exp();
+            const double fl_raw =
+                (M > 0 && std::isfinite(M)) ? std::ldexp(1.0, p + de) / M : 0.0;
+
+            // The correctly rounded answer, measured through the same metric.
+            g_unrep = false;
+            round_c<T>(rs, ideal);
+            const double ui = g_unrep ? -1.0 : ulps_mpc(ideal, rs, p);
+            if (g_unrep) ++g_ideal_unrep;
+
+            // CEILING.  Rounding a component c to the format costs at most half
+            // its last representable increment.  Two regimes:
+            //
+            //   normal    the increment is the bottom word's ulp.  For an nlimb
+            //             expansion of a p-bit budget that is |c| * 2^-p, but
+            //             only when the top word sits at the bottom of its
+            //             binade; a value just below a power of two rounds its
+            //             top word UP, and the bottom word's ulp is then taken
+            //             relative to 2^(e+1) while |c| is barely above 2^e.
+            //             That costs a factor of 4 in the worst alignment, so
+            //             the honest per-component bound is 2 * |c| * 2^-p.
+            //   subnormal below the smallest normal the increment stops shrinking
+            //             and is D, the smallest subnormal, so the bound is D/2.
+            //
+            //   err_c <= max(2 |c| 2^-p, D/2)
+            //   |err| <= 2 * 2^-p * hypot(Re,Im) + (D/2) * sqrt(2)  <  2 M 2^-p + D
+            //
+            // Dividing by M * 2^-p, the metric's own scale:
+            //
+            //   ulps_ideal <= 2 + 2^p D / M  =  2 + fl_raw
+            //
+            // fl_raw is the RAW floor, not the 8x-slack one used to classify --
+            // the ceiling must not inherit a tolerance from a classifier.  This
+            // is a live test of round_to_format, not a restatement of it:
+            // dropping one limb (--poison-ideal) costs 24 or 53 bits and lands
+            // six to sixteen orders of magnitude above it.
+            const double ceil_u = 2.0 + fl_raw;
+            if (ui >= 0 && ui > ceil_u) {
+                ++g_ideal_over;
+                g_ideal_worst = std::max(g_ideal_worst, ui / ceil_u);
+            }
+            if (ui >= 0 && ui > 0.5) ++g_ideal_over_half;
             if (g_poison) {
                 // Replace the library answer with the stored reference nudged by
                 // exactly one ulp of the format.  ulps_stored must read 1.000000.
@@ -380,16 +501,12 @@ void run_backend(const std::vector<Pt>& grid, const char* only_bk, const char* o
             const double ug = ulps_mpc(lib, rg, p);
             const double us = ulps_mpc(lib, rs, p);
             if (ug < 0 || us < 0) continue;
-            // 2^p * D / M, entirely in the exponent so it does not underflow.
-            const double M = modulus(rs);
-            const int de = g_poison_floor ? -1074 : Tr<T>::denorm_exp();
-            const double fl =
-                (M > 0 && std::isfinite(M)) ? std::ldexp(1.0, p + de) / M : 0.0;
-            g_rows.push_back(
-                {Tr<T>::name(), kOps[o].name, pt.idx, pt.family.c_str(), ug, us, fl});
+            g_rows.push_back({Tr<T>::name(), kOps[o].name, pt.idx, pt.family.c_str(), ug,
+                              us, ui, fl_raw});
         }
     }
     mpfr_clear(k);
+    mpc_clear(ideal);
     mpc_clear(zg);
     mpc_clear(zs);
     mpc_clear(rg);
@@ -433,6 +550,7 @@ int main(int argc, char** argv) {
         if (!std::strcmp(argv[i], "--poison")) g_poison = true;
         else if (!std::strcmp(argv[i], "--poison-sign")) sign_mode = true;
         else if (!std::strcmp(argv[i], "--poison-floor")) g_poison_floor = true;
+        else if (!std::strcmp(argv[i], "--poison-ideal")) g_poison_ideal = true;
         else if (!std::strcmp(argv[i], "--above") && i + 1 < argc) above = std::atof(argv[++i]);
         else if (!std::strcmp(argv[i], "--list") && i + 1 < argc) list = std::atoi(argv[++i]);
         else if (!std::strcmp(argv[i], "--csv") && i + 1 < argc) csv = argv[++i];
@@ -467,6 +585,26 @@ int main(int argc, char** argv) {
     run_backend<xp::QuadFloat>(grid, only_bk, only_op);
     run_backend<xp::TripleFloat>(grid, only_bk, only_op);
 
+    if (g_poison_ideal) {
+        std::printf("POISON-IDEAL: round_to_format is one limb short.  ulps_ideal must\n"
+                    "then break its analytic ceiling of 2 + 2^p*D/|ref|.\n");
+        std::printf("  rows above the ceiling: %ld   worst ratio to it: %.6g\n",
+                    g_ideal_over, g_ideal_worst);
+        std::printf("%s\n", g_ideal_over > 0
+                    ? "PASS -- the ceiling is a live check, not a restatement."
+                    : "FAIL -- dropping a limb changed nothing; the check is vacuous.");
+        return g_ideal_over > 0 ? 0 : 1;
+    }
+    if (g_ideal_over) {
+        std::printf("\nCEILING VIOLATED: %ld rows exceed 2 + 2^p*D/|ref| (worst %.6gx).\n"
+                    "round_to_format is not producing a representable value; every\n"
+                    "ulps_ideal below is suspect.\n", g_ideal_over, g_ideal_worst);
+        return 3;
+    }
+    std::printf("ulps_ideal: %zu rows within the analytic ceiling 2 + 2^p*D/|ref|;\n"
+                "  %ld above a flat 0.5 (the subnormal regime, not a failure),\n"
+                "  %ld dropped -- correctly rounded answer overflows the format.\n",
+                g_rows.size(), g_ideal_over_half, g_ideal_unrep);
     if (g_poison) {
         std::printf("POISON: one injected ulp read back on ulps_stored.\n");
         std::printf("  misses (>1e-9 relative): %d   worst relative miss: %.3g\n",
@@ -478,10 +616,11 @@ int main(int argc, char** argv) {
     if (csv) {
         FILE* f = std::fopen(csv, "w");
         if (!f) { std::perror(csv); return 2; }
-        std::fprintf(f, "backend,op,point,family,ulps_grid,ulps_stored,floor_ulps,xfloor\n");
+        std::fprintf(f, "backend,op,point,family,ulps_grid,ulps_stored,ulps_ideal,"
+                        "floor_ulps,xfloor\n");
         for (const Row& r : g_rows)
-            std::fprintf(f, "%s,%s,%d,%s,%.6g,%.6g,%.6g,%.6g\n", r.bk, r.op, r.pt,
-                         r.family, r.u_grid, r.u_stored, r.floor_u, r.xfloor());
+            std::fprintf(f, "%s,%s,%d,%s,%.6g,%.6g,%.6g,%.6g,%.6g\n", r.bk, r.op, r.pt,
+                         r.family, r.u_grid, r.u_stored, r.u_ideal, r.floor_u, r.xfloor());
         std::fclose(f);
         std::printf("wrote %zu rows to %s\n", g_rows.size(), csv);
     }
