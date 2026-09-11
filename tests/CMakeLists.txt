@@ -516,7 +516,13 @@ endif()
 # wrong reads as a library that is wrong -- and the old conversion was wrong by
 # 1.28e11 ulps on precisely the large-|x| trig rows --oracle=mpfr exists to
 # measure. Runs the check, then poisons it four ways and requires each to fail.
-add_test(NAME oracle_conv_test COMMAND sweep_accuracy --oracle-selftest)
+# MPFR-only, like the tests below it. Without MPFR the binary returns 77
+# ("nothing to check"), and ctest reports that as a FAILURE -- so register
+# the test only where it can actually check something, rather than leaving a
+# red mark that means "inapplicable".
+if(XPMATH_MPFR_FOUND)
+  add_test(NAME oracle_conv_test COMMAND sweep_accuracy --oracle-selftest)
+endif()
 if(XPMATH_MPFR_FOUND)
 add_test(NAME oracle_conv_selftest
          COMMAND ${CMAKE_SOURCE_DIR}/validation/oracle_conv_selftest.sh
