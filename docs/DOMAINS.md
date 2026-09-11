@@ -247,38 +247,37 @@ for each cell that has any:
 
 | op | backend | cap | mean | trusted \|x\| | at cap | boundary (digits) | fails | verdict |
 |---|---|---:|---:|---|---:|---|---:|---|
-| `sin` | DD | 31.00 | 21.38 | 0 .. 3.1 | 34% | above 3.142: 15.42 | 88 | UNRESOLVED |
-| `sin` | QF | 29.00 | 19.01 | 3e-28 .. 3.1 | 33% | below 3e-30: 14.31; above 3.142: 13.46 | 538 | UNRESOLVED |
-| `sin` | TF | 21.70 | 11.89 | 3e-28 .. 3.1 | 33% | below 1e-323: 0.00; above 3.142: 7.15 | 1096 | UNRESOLVED |
-| `sin` | FF | 14.00 | 4.70 | 1e-30 .. 3.05 | 32% | below 1e-323: 0.00; above 3.142: 0.00 | 1120 | UNRESOLVED |
-| `cos` | DD | 31.00 | 29.36 | 12.57 .. 316.2 | 91% | below 1.571: 15.24; above 5e+08: 15.33 | 76 | UNRESOLVED |
-| `cos` | QF | 29.00 | 27.27 | 12.57 .. 316.2 | 91% | below 11: 13.79; above 344: 14.27 | 104 | UNRESOLVED |
-| `cos` | TF | 21.70 | 20.26 | 12.57 .. 316.2 | 91% | below 11: 6.98; above 344: 7.08 | 118 | UNRESOLVED |
-| `cos` | FF | 14.00 | 12.71 | 12.57 .. 316.2 | 90% | below 11: 0.00; above 344: 0.00 | 138 | UNRESOLVED |
-| `tan` | DD | 31.00 | 21.03 | 0 .. 1.55 | 32% | above 1.571: 15.24 | 108 | UNRESOLVED |
-| `tan` | QF | 29.00 | 18.58 | 3e-28 .. 1.55 | 31% | below 3e-30: 14.31; above 1.571: 13.90 | 576 | UNRESOLVED |
-| `tan` | TF | 21.70 | 11.50 | 3e-28 .. 1.55 | 30% | below 1e-323: 0.00; above 1.571: 6.84 | 1138 | UNRESOLVED |
-| `tan` | FF | 14.00 | 4.42 | 1e-30 .. 1.55 | 30% | below 1e-323: 0.00; above 1.571: 0.00 | 1152 | UNRESOLVED |
-| `asin` | DD | 31.00 | 30.90 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
-| `asin` | QF | 29.00 | 28.46 | 3e-28 .. 1e+28 | 98% | below 3e-30: 14.35; above 3e+29: 14.48 | 18 | UNRESOLVED |
-| `asin` | TF | 21.70 | 21.43 | 3e-28 .. 1e+28 | 98% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
-| `asin` | FF | 14.00 | 13.79 | 1 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
-| `acos` | DD | 31.00 | 30.99 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
-| `acos` | QF | 29.00 | 28.94 | 1.001 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `sin` | DD | 31.00 | 30.89 | 0 .. 1e+30 | 100% | above 4e+151: 0.00 | 6 | UNRESOLVED |
+| `sin` | QF | 29.00 | 28.79 | 1e-30 .. 3e+29 | 99% | below 1e-323: 0.00; above 1e+30: 0.00 | 12 | UNRESOLVED |
+| `sin` | TF | 21.70 | 21.57 | 1e-30 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `sin` | FF | 14.00 | 6.85 | 1e-30 .. 3.1 | 48% | below 1e-323: 0.00; above 3.142: 0.00 | 872 | UNRESOLVED |
+| `cos` | DD | 31.00 | 30.90 | 0 .. 1e+30 | 100% | above 4e+151: 5.33 | 6 | UNRESOLVED |
+| `cos` | QF | 29.00 | 28.88 | 0 .. 3e+29 | 100% | above 1e+30: 0.00 | 8 | UNRESOLVED |
+| `cos` | TF | 21.70 | 21.64 | 0 .. 1e+30 | 100% | above 4e+151: 5.33 | 6 | UNRESOLVED |
+| `cos` | FF | 14.00 | 13.34 | 12.57 .. 314.2 | 94% | below 11: 0.00; above 3e+09: 6.86 | 82 | UNRESOLVED |
+| `tan` | DD | 31.00 | 30.89 | 0 .. 1e+30 | 100% | above 4e+151: 0.00 | 6 | UNRESOLVED |
+| `tan` | QF | 29.00 | 28.79 | 1e-30 .. 3e+29 | 99% | below 1e-323: 0.00; above 1e+30: 0.00 | 12 | UNRESOLVED |
+| `tan` | TF | 21.70 | 21.57 | 1e-30 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `tan` | FF | 14.00 | 6.72 | 1e-30 .. 1.55 | 47% | below 1e-323: 0.00; above 1.571: 0.14 | 886 | UNRESOLVED |
+| `asin` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `asin` | QF | 29.00 | 28.79 | 1e-30 .. 1e+29 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `asin` | TF | 21.70 | 21.55 | 1e-30 .. 1e+29 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `asin` | FF | 14.00 | 13.89 | 1 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `acos` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `acos` | QF | 29.00 | 28.97 | 1.001 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
 | `acos` | TF | 21.70 | 21.66 | 1 .. 5e+255 | 99% | -- | 0 | UNRESOLVED |
-| `acos` | FF | 14.00 | 13.95 | 1.01 .. 5e+255 | 99% | -- | 0 | UNRESOLVED |
-| `atan` | DD | 31.00 | 30.98 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
-| `atan` | QF | 29.00 | 28.69 | 3e-28 .. 1e+30 | 99% | below 3e-30: 14.35; above 4e+151: 0.00 | 14 | UNRESOLVED |
-| `atan` | TF | 21.70 | 21.52 | 3e-28 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
-| `atan` | FF | 14.00 | 13.90 | 1e-30 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `acos` | FF | 14.00 | 13.96 | 1.01 .. 5e+255 | 99% | -- | 0 | UNRESOLVED |
+| `atan` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
+| `atan` | QF | 29.00 | 28.83 | 1e-30 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `atan` | TF | 21.70 | 21.57 | 1e-30 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `atan` | FF | 14.00 | 13.92 | 1e-30 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
 
 **Where the failures sit.** The grid family carrying the most failures
 for each cell that has any:
 
-- `sin` — DD 88 pts (log sweep, |x| = 10^e); QF 538 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 1096 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 1120 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `cos` — DD 76 pts (log sweep, |x| = 10^e); QF 104 pts (log sweep, |x| = 10^e); TF 118 pts (log sweep, |x| = 10^e); FF 138 pts (log sweep, |x| = 10^e)
-- `tan` — DD 108 pts (log sweep, |x| = 10^e); QF 576 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); TF 1138 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); FF 1152 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `asin` — QF 18 pts (log sweep, |x| = 10^e)
+- `sin` — FF 872 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
+- `cos` — FF 82 pts (log sweep, |x| = 10^e)
+- `tan` — FF 886 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
 
 ---
 
@@ -349,10 +348,10 @@ for each cell that has any:
 | `conj` | QF | 29.00 | 29.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
 | `conj` | TF | 21.70 | 21.70 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
 | `conj` | FF | 14.00 | 14.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
-| `polar` | DD | 31.00 | 30.74 | 0 .. 1e+04 | 98% | -- | 0 | UNRESOLVED |
-| `polar` | QF | 29.00 | 27.44 | 1 .. 2 | 86% | below 1: 13.77; above 2: 13.77 | 21 | UNRESOLVED |
-| `polar` | TF | 21.70 | 21.08 | 1 .. 2 | 90% | -- | 0 | UNRESOLVED |
-| `polar` | FF | 14.00 | 13.75 | 0 .. 1000 | 97% | above 1e+08: 6.53 | 12 | UNRESOLVED |
+| `polar` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
+| `polar` | QF | 29.00 | 28.20 | 10 .. 1e+15 | 91% | below 1e-08: 13.11 | 1 | UNRESOLVED |
+| `polar` | TF | 21.70 | 21.49 | 10 .. 1e+15 | 96% | -- | 0 | UNRESOLVED |
+| `polar` | FF | 14.00 | 13.89 | 0 .. 1000 | 98% | above 1e+08: 6.62 | 4 | UNRESOLVED |
 
 **Where the failures sit.** The grid family carrying the most failures
 for each cell that has any:
@@ -361,7 +360,7 @@ for each cell that has any:
 - `sub` — QF 6 pts (perpendicular approach to the real axis); TF 6 pts (perpendicular approach to the real axis); FF 96 pts (perpendicular approach to the real axis)
 - `mul` — QF 76 pts (perpendicular approach to the real axis); TF 63 pts (perpendicular approach to the real axis); FF 45 pts (perpendicular approach to the real axis)
 - `div` — DD 7 pts (polar shells); QF 113 pts (perpendicular approach to the real axis); TF 80 pts (perpendicular approach to the real axis); FF 189 pts (perpendicular approach to the real axis)
-- `polar` — QF 21 pts (perpendicular approach to the real axis); FF 12 pts (polar shells)
+- `polar` — QF 1 pts (polar shells); FF 4 pts (polar shells)
 
 ---
 
@@ -369,22 +368,22 @@ for each cell that has any:
 
 | op | backend | cap | mean | trusted \|z\| | at cap | boundary (digits) | fails | verdict |
 |---|---|---:|---:|---|---:|---|---:|---|
-| `exp` | DD | 31.00 | 29.81 | 0 .. 100 | 96% | above 1000: 0.00 | 61 | UNRESOLVED |
-| `exp` | QF | 29.00 | 24.60 | 1 .. 2 | 79% | below 1: 13.77; above 2: 13.82 | 219 | UNRESOLVED |
-| `exp` | TF | 21.70 | 19.00 | 1e-27 .. 0.1 | 84% | above 100: 1.77 | 193 | UNRESOLVED |
-| `exp` | FF | 14.00 | 12.40 | 0 .. 2.236 | 89% | above 100: 1.77 | 193 | UNRESOLVED |
-| `log` | DD | 31.00 | 28.80 | 1 .. 1e+15 | 84% | below 0: 0.00 | 2 | UNRESOLVED |
-| `log` | QF | 29.00 | 25.85 | 1e-30 .. 0.1 | 79% | below 0: 0.00; above 0.5: 13.95 | 167 | UNRESOLVED |
-| `log` | TF | 21.70 | 19.46 | 1e-30 .. 0.1 | 80% | below 0: 0.00; above 1: 6.91 | 138 | UNRESOLVED |
-| `log` | FF | 14.00 | 12.33 | 1.01 .. 10.05 | 78% | below 1: 0.00 | 126 | UNRESOLVED |
-| `log10` | DD | 31.00 | 28.80 | 1 .. 1e+15 | 84% | below 0: 0.00 | 2 | UNRESOLVED |
-| `log10` | QF | 29.00 | 25.63 | 1e-30 .. 0.1 | 77% | below 0: 0.00; above 0.5: 13.92 | 167 | UNRESOLVED |
-| `log10` | TF | 21.70 | 19.42 | 1e-30 .. 0.1 | 79% | below 0: 0.00; above 1: 6.91 | 138 | UNRESOLVED |
-| `log10` | FF | 14.00 | 12.34 | 1.01 .. 10.05 | 78% | below 1: 0.00 | 126 | UNRESOLVED |
-| `pow` | DD | 31.00 | 30.37 | 1e-30 .. 1 | 98% | below 0: 0.00 | 1 | UNRESOLVED |
-| `pow` | QF | 29.00 | 27.32 | 2 .. 2.002 | 92% | below 2: 14.11; above 2.236: 8.92 | 47 | UNRESOLVED |
-| `pow` | TF | 21.70 | 20.75 | 2 .. 2.002 | 93% | below 1.1: 7.92; above 2.236: 8.92 | 35 | UNRESOLVED |
-| `pow` | FF | 14.00 | 13.10 | 2 .. 2 | 79% | below 1: 6.89; above 10: 3.48 | 8 | UNRESOLVED |
+| `exp` | DD | 31.00 | 29.94 | 0 .. 100 | 97% | above 1000: 0.00 | 61 | UNRESOLVED |
+| `exp` | QF | 29.00 | 24.92 | 1 .. 2 | 79% | above 2: 14.26 | 205 | UNRESOLVED |
+| `exp` | TF | 21.70 | 19.11 | 0 .. 0.1 | 85% | above 100: 1.77 | 193 | UNRESOLVED |
+| `exp` | FF | 14.00 | 12.48 | 0 .. 2.236 | 89% | above 100: 1.77 | 193 | UNRESOLVED |
+| `log` | DD | 31.00 | 28.81 | 1 .. 1e+15 | 84% | below 0: 0.00 | 2 | UNRESOLVED |
+| `log` | QF | 29.00 | 26.01 | 1e-30 .. 0.9999 | 80% | below 0: 0.00; above 1: 12.97 | 155 | UNRESOLVED |
+| `log` | TF | 21.70 | 19.52 | 1e-30 .. 0.999 | 81% | below 0: 0.00; above 1: 6.91 | 138 | UNRESOLVED |
+| `log` | FF | 14.00 | 12.35 | 1.01 .. 1e+15 | 79% | below 1: 0.00 | 126 | UNRESOLVED |
+| `log10` | DD | 31.00 | 28.81 | 1 .. 1e+15 | 84% | below 0: 0.00 | 2 | UNRESOLVED |
+| `log10` | QF | 29.00 | 25.72 | 1e-30 .. 0.1 | 77% | below 0: 0.00; above 1: 12.97 | 159 | UNRESOLVED |
+| `log10` | TF | 21.70 | 19.45 | 1e-30 .. 0.1 | 79% | below 0: 0.00; above 1: 6.91 | 138 | UNRESOLVED |
+| `log10` | FF | 14.00 | 12.36 | 1.01 .. 1e+15 | 79% | below 1: 0.00 | 126 | UNRESOLVED |
+| `pow` | DD | 31.00 | 30.60 | 1e-30 .. 1 | 98% | below 0: 0.00 | 1 | UNRESOLVED |
+| `pow` | QF | 29.00 | 27.70 | 2 .. 2.002 | 92% | below 2: 14.11; above 2.236: 8.92 | 44 | UNRESOLVED |
+| `pow` | TF | 21.70 | 20.92 | 2 .. 2.002 | 93% | below 1.1: 7.92; above 2.236: 8.92 | 35 | UNRESOLVED |
+| `pow` | FF | 14.00 | 13.32 | 1.01 .. 1.1 | 85% | below 1: 6.89; above 10: 3.48 | 8 | UNRESOLVED |
 | `sqrt` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
 | `sqrt` | QF | 29.00 | 27.74 | 1 .. 2 | 86% | -- | 0 | UNRESOLVED |
 | `sqrt` | TF | 21.70 | 21.39 | 1e-25 .. 0.1 | 94% | -- | 0 | UNRESOLVED |
@@ -393,10 +392,10 @@ for each cell that has any:
 **Where the failures sit.** The grid family carrying the most failures
 for each cell that has any:
 
-- `exp` — DD 61 pts (polar shells); QF 219 pts (perpendicular approach to the real axis); TF 193 pts (perpendicular approach to the real axis); FF 193 pts (perpendicular approach to the real axis)
-- `log` — DD 2 pts (perpendicular approach to the real axis); QF 167 pts (perpendicular approach to the real axis); TF 138 pts (perpendicular approach to the real axis); FF 126 pts (perpendicular approach to the real axis)
-- `log10` — DD 2 pts (perpendicular approach to the real axis); QF 167 pts (perpendicular approach to the real axis); TF 138 pts (perpendicular approach to the real axis); FF 126 pts (perpendicular approach to the real axis)
-- `pow` — DD 1 pts (perpendicular approach to the real axis); QF 47 pts (perpendicular approach to the real axis); TF 35 pts (perpendicular approach to the real axis); FF 8 pts (perpendicular approach to the real axis)
+- `exp` — DD 61 pts (polar shells); QF 205 pts (perpendicular approach to the real axis); TF 193 pts (perpendicular approach to the real axis); FF 193 pts (perpendicular approach to the real axis)
+- `log` — DD 2 pts (perpendicular approach to the real axis); QF 155 pts (perpendicular approach to the real axis); TF 138 pts (perpendicular approach to the real axis); FF 126 pts (perpendicular approach to the real axis)
+- `log10` — DD 2 pts (perpendicular approach to the real axis); QF 159 pts (perpendicular approach to the real axis); TF 138 pts (perpendicular approach to the real axis); FF 126 pts (perpendicular approach to the real axis)
+- `pow` — DD 1 pts (perpendicular approach to the real axis); QF 44 pts (perpendicular approach to the real axis); TF 35 pts (perpendicular approach to the real axis); FF 8 pts (perpendicular approach to the real axis)
 
 ---
 
@@ -404,40 +403,40 @@ for each cell that has any:
 
 | op | backend | cap | mean | trusted \|z\| | at cap | boundary (digits) | fails | verdict |
 |---|---|---:|---:|---|---:|---|---:|---|
-| `sin` | DD | 31.00 | 30.08 | 0 .. 1000 | 96% | above 1e+04: 0.00 | 30 | UNRESOLVED |
-| `sin` | QF | 29.00 | 26.12 | 1 .. 2 | 75% | below 1: 13.80; above 2: 13.77 | 46 | UNRESOLVED |
-| `sin` | TF | 21.70 | 20.49 | 1e-27 .. 0.1 | 87% | above 1e+04: 0.00 | 42 | UNRESOLVED |
-| `sin` | FF | 14.00 | 13.31 | 0 .. 100 | 95% | above 1e+04: 0.00 | 58 | UNRESOLVED |
-| `cos` | DD | 31.00 | 30.09 | 0 .. 1000 | 96% | above 1e+04: 0.00 | 30 | UNRESOLVED |
-| `cos` | QF | 29.00 | 26.21 | 1 .. 2 | 76% | below 1: 13.77; above 2: 13.77 | 47 | UNRESOLVED |
-| `cos` | TF | 21.70 | 20.54 | 1 .. 2 | 87% | above 1e+04: 0.00 | 42 | UNRESOLVED |
-| `cos` | FF | 14.00 | 13.32 | 0 .. 100 | 95% | above 1e+04: 0.00 | 58 | UNRESOLVED |
-| `tan` | DD | 31.00 | 30.51 | 0 .. 1e+04 | 97% | above 1e+04: 0.00 | 12 | UNRESOLVED |
-| `tan` | QF | 29.00 | 26.00 | 1 .. 2 | 72% | below 1: 13.84; above 10: 13.31 | 56 | UNRESOLVED |
-| `tan` | TF | 21.70 | 20.49 | 1e-27 .. 0.1 | 85% | above 10: 10.52 | 48 | UNRESOLVED |
-| `tan` | FF | 14.00 | 13.43 | 0 .. 2.236 | 95% | above 1e+04: 0.00 | 40 | UNRESOLVED |
-| `sinh` | DD | 31.00 | 29.43 | 0 .. 100 | 95% | above 1000: 0.00 | 83 | UNRESOLVED |
-| `sinh` | QF | 29.00 | 23.70 | 1 .. 2 | 70% | below 1: 13.80; above 2: 13.77 | 233 | UNRESOLVED |
-| `sinh` | TF | 21.70 | 18.60 | 1e-27 .. 0.1 | 80% | above 100: 0.00 | 215 | UNRESOLVED |
-| `sinh` | FF | 14.00 | 12.22 | 0 .. 10.05 | 88% | above 100: 0.00 | 215 | UNRESOLVED |
-| `cosh` | DD | 31.00 | 29.43 | 0 .. 100 | 95% | above 1000: 0.00 | 83 | UNRESOLVED |
-| `cosh` | QF | 29.00 | 23.73 | 1 .. 2 | 70% | below 1: 13.77; above 2: 13.77 | 232 | UNRESOLVED |
-| `cosh` | TF | 21.70 | 18.62 | 1 .. 2 | 80% | above 100: 0.00 | 215 | UNRESOLVED |
-| `cosh` | FF | 14.00 | 12.22 | 0 .. 10.05 | 88% | above 100: 0.00 | 215 | UNRESOLVED |
-| `tanh` | DD | 31.00 | 30.58 | 0 .. 1000 | 99% | above 1e+04: 0.00 | 12 | UNRESOLVED |
-| `tanh` | QF | 29.00 | 24.47 | 1 .. 2 | 72% | below 1: 13.84; above 10: 13.31 | 178 | UNRESOLVED |
-| `tanh` | TF | 21.70 | 19.27 | 1e-27 .. 0.1 | 82% | above 10: 10.52 | 156 | UNRESOLVED |
-| `tanh` | FF | 14.00 | 12.71 | 0 .. 2.236 | 91% | above 100: 0.00 | 136 | UNRESOLVED |
+| `sin` | DD | 31.00 | 30.48 | 0 .. 1000 | 98% | above 1e+04: 0.00 | 30 | UNRESOLVED |
+| `sin` | QF | 29.00 | 26.76 | 1 .. 2 | 78% | above 1e+04: 0.00 | 30 | UNRESOLVED |
+| `sin` | TF | 21.70 | 20.93 | 0 .. 0.1 | 91% | above 1e+04: 0.00 | 30 | UNRESOLVED |
+| `sin` | FF | 14.00 | 13.76 | 0 .. 1000 | 98% | above 1e+04: 0.00 | 30 | UNRESOLVED |
+| `cos` | DD | 31.00 | 30.48 | 0 .. 1000 | 98% | above 1e+04: 0.00 | 30 | UNRESOLVED |
+| `cos` | QF | 29.00 | 26.74 | 1 .. 2 | 78% | below 1e-08: 13.11; above 1e+04: 0.00 | 31 | UNRESOLVED |
+| `cos` | TF | 21.70 | 20.93 | 1 .. 2 | 90% | above 1e+04: 0.00 | 30 | UNRESOLVED |
+| `cos` | FF | 14.00 | 13.76 | 0 .. 1000 | 98% | above 1e+04: 0.00 | 30 | UNRESOLVED |
+| `tan` | DD | 31.00 | 30.79 | 0 .. 1e+04 | 99% | above 1e+04: 0.00 | 12 | UNRESOLVED |
+| `tan` | QF | 29.00 | 26.44 | 1 .. 2 | 76% | above 2: 14.28 | 52 | UNRESOLVED |
+| `tan` | TF | 21.70 | 20.84 | 0 .. 0.1 | 89% | above 10: 10.52 | 32 | UNRESOLVED |
+| `tan` | FF | 14.00 | 13.80 | 0 .. 2.236 | 98% | above 1e+04: 0.00 | 12 | UNRESOLVED |
+| `sinh` | DD | 31.00 | 29.55 | 0 .. 100 | 95% | above 1000: 0.00 | 83 | UNRESOLVED |
+| `sinh` | QF | 29.00 | 23.98 | 1 .. 2 | 71% | above 100: 0.00 | 215 | UNRESOLVED |
+| `sinh` | TF | 21.70 | 18.74 | 0 .. 0.1 | 81% | above 100: 0.00 | 215 | UNRESOLVED |
+| `sinh` | FF | 14.00 | 12.31 | 0 .. 10.05 | 88% | above 100: 0.00 | 215 | UNRESOLVED |
+| `cosh` | DD | 31.00 | 29.55 | 0 .. 100 | 95% | above 1000: 0.00 | 83 | UNRESOLVED |
+| `cosh` | QF | 29.00 | 23.96 | 1 .. 2 | 71% | below 1e-08: 13.11; above 100: 0.00 | 216 | UNRESOLVED |
+| `cosh` | TF | 21.70 | 18.73 | 1 .. 2 | 81% | above 100: 0.00 | 215 | UNRESOLVED |
+| `cosh` | FF | 14.00 | 12.31 | 0 .. 10.05 | 88% | above 100: 0.00 | 215 | UNRESOLVED |
+| `tanh` | DD | 31.00 | 30.79 | 0 .. 1000 | 99% | above 1e+04: 0.00 | 12 | UNRESOLVED |
+| `tanh` | QF | 29.00 | 24.73 | 1 .. 2 | 72% | above 2: 14.28 | 176 | UNRESOLVED |
+| `tanh` | TF | 21.70 | 19.39 | 0 .. 0.1 | 83% | above 10: 10.52 | 156 | UNRESOLVED |
+| `tanh` | FF | 14.00 | 12.83 | 0 .. 2.236 | 91% | above 100: 0.00 | 136 | UNRESOLVED |
 
 **Where the failures sit.** The grid family carrying the most failures
 for each cell that has any:
 
-- `sin` — DD 30 pts (polar shells); QF 46 pts (polar shells); TF 42 pts (polar shells); FF 58 pts (polar shells)
-- `cos` — DD 30 pts (polar shells); QF 47 pts (polar shells); TF 42 pts (polar shells); FF 58 pts (polar shells)
-- `tan` — DD 12 pts (polar shells); QF 56 pts (perpendicular approach to the imaginary axis); TF 48 pts (perpendicular approach to the imaginary axis); FF 40 pts (the real axis on a geometric ladder)
-- `sinh` — DD 83 pts (the real axis on a geometric ladder); QF 233 pts (perpendicular approach to the real axis); TF 215 pts (perpendicular approach to the real axis); FF 215 pts (perpendicular approach to the real axis)
-- `cosh` — DD 83 pts (the real axis on a geometric ladder); QF 232 pts (perpendicular approach to the real axis); TF 215 pts (perpendicular approach to the real axis); FF 215 pts (perpendicular approach to the real axis)
-- `tanh` — DD 12 pts (polar shells); QF 178 pts (perpendicular approach to the real axis); TF 156 pts (perpendicular approach to the real axis); FF 136 pts (perpendicular approach to the real axis)
+- `sin` — DD 30 pts (polar shells); QF 30 pts (polar shells); TF 30 pts (polar shells); FF 30 pts (polar shells)
+- `cos` — DD 30 pts (polar shells); QF 31 pts (polar shells); TF 30 pts (polar shells); FF 30 pts (polar shells)
+- `tan` — DD 12 pts (polar shells); QF 52 pts (perpendicular approach to the imaginary axis); TF 32 pts (perpendicular approach to the imaginary axis); FF 12 pts (polar shells)
+- `sinh` — DD 83 pts (the real axis on a geometric ladder); QF 215 pts (perpendicular approach to the real axis); TF 215 pts (perpendicular approach to the real axis); FF 215 pts (perpendicular approach to the real axis)
+- `cosh` — DD 83 pts (the real axis on a geometric ladder); QF 216 pts (perpendicular approach to the real axis); TF 215 pts (perpendicular approach to the real axis); FF 215 pts (perpendicular approach to the real axis)
+- `tanh` — DD 12 pts (polar shells); QF 176 pts (perpendicular approach to the real axis); TF 156 pts (perpendicular approach to the real axis); FF 136 pts (perpendicular approach to the real axis)
 
 ---
 
@@ -445,40 +444,40 @@ for each cell that has any:
 
 | op | backend | cap | mean | trusted \|z\| | at cap | boundary (digits) | fails | verdict |
 |---|---|---:|---:|---|---:|---|---:|---|
-| `asin` | DD | 31.00 | 30.97 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
-| `asin` | QF | 29.00 | 27.64 | 10 .. 1e+15 | 87% | below 10: 13.77 | 20 | UNRESOLVED |
-| `asin` | TF | 21.70 | 21.30 | 10 .. 1e+15 | 94% | -- | 0 | UNRESOLVED |
-| `asin` | FF | 14.00 | 13.90 | 1.005 .. 1e+15 | 98% | -- | 0 | UNRESOLVED |
-| `acos` | DD | 31.00 | 30.81 | 0 .. 1e+04 | 99% | -- | 0 | UNRESOLVED |
-| `acos` | QF | 29.00 | 27.86 | 1 .. 2 | 90% | below 1: 14.49; above 2: 14.12 | 14 | UNRESOLVED |
-| `acos` | TF | 21.70 | 21.28 | 1e-28 .. 0.1 | 94% | -- | 0 | UNRESOLVED |
-| `acos` | FF | 14.00 | 13.73 | 1.005 .. 10.05 | 96% | above 1e+08: 6.93 | 5 | UNRESOLVED |
-| `atan` | DD | 31.00 | 30.99 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
-| `atan` | QF | 29.00 | 27.80 | 1 .. 2 | 88% | below 1e-30: 13.95; above 10: 13.51 | 20 | UNRESOLVED |
-| `atan` | TF | 21.70 | 21.35 | 1e-28 .. 0.1 | 95% | -- | 0 | UNRESOLVED |
-| `atan` | FF | 14.00 | 13.96 | 0 .. 10.05 | 100% | -- | 0 | UNRESOLVED |
-| `asinh` | DD | 31.00 | 30.96 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
-| `asinh` | QF | 29.00 | 27.32 | 1 .. 2 | 84% | below 1: 14.10; above 2: 14.46 | 36 | UNRESOLVED |
-| `asinh` | TF | 21.70 | 21.21 | 1e-27 .. 0.1 | 92% | -- | 0 | UNRESOLVED |
-| `asinh` | FF | 14.00 | 13.94 | 0 .. 10.05 | 100% | -- | 0 | UNRESOLVED |
-| `acosh` | DD | 31.00 | 30.89 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
-| `acosh` | QF | 29.00 | 27.94 | 1 .. 2 | 91% | above 2: 14.12 | 12 | UNRESOLVED |
-| `acosh` | TF | 21.70 | 21.40 | 1e-28 .. 0.1 | 96% | -- | 0 | UNRESOLVED |
-| `acosh` | FF | 14.00 | 13.82 | 1.005 .. 10.05 | 98% | -- | 0 | UNRESOLVED |
-| `atanh` | DD | 31.00 | 30.99 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
-| `atanh` | QF | 29.00 | 28.12 | 1 .. 2 | 91% | below 0.5: 14.25; above 10: 13.51 | 10 | UNRESOLVED |
-| `atanh` | TF | 21.70 | 21.48 | 10 .. 1e+15 | 96% | -- | 0 | UNRESOLVED |
-| `atanh` | FF | 14.00 | 13.92 | 1 .. 1e+15 | 98% | -- | 0 | UNRESOLVED |
+| `asin` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
+| `asin` | QF | 29.00 | 27.97 | 10 .. 1e+15 | 89% | below 10: 14.23 | 4 | UNRESOLVED |
+| `asin` | TF | 21.70 | 21.43 | 10 .. 1e+15 | 95% | -- | 0 | UNRESOLVED |
+| `asin` | FF | 14.00 | 13.93 | 1.005 .. 1e+15 | 98% | -- | 0 | UNRESOLVED |
+| `acos` | DD | 31.00 | 30.92 | 0 .. 1e+04 | 99% | -- | 0 | UNRESOLVED |
+| `acos` | QF | 29.00 | 28.06 | 1 .. 2 | 90% | below 1: 14.49; above 2: 13.78 | 9 | UNRESOLVED |
+| `acos` | TF | 21.70 | 21.34 | 1e-28 .. 0.1 | 94% | -- | 0 | UNRESOLVED |
+| `acos` | FF | 14.00 | 13.82 | 1.005 .. 10.05 | 96% | above 1e+08: 6.93 | 5 | UNRESOLVED |
+| `atan` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
+| `atan` | QF | 29.00 | 27.93 | 1 .. 2 | 89% | above 10: 13.51 | 16 | UNRESOLVED |
+| `atan` | TF | 21.70 | 21.40 | 0 .. 0.1 | 95% | -- | 0 | UNRESOLVED |
+| `atan` | FF | 14.00 | 13.99 | 0 .. 10.05 | 100% | -- | 0 | UNRESOLVED |
+| `asinh` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
+| `asinh` | QF | 29.00 | 27.64 | 1 .. 2 | 85% | below 1: 14.41; above 2: 14.27 | 12 | UNRESOLVED |
+| `asinh` | TF | 21.70 | 21.33 | 1e-28 .. 0.1 | 94% | -- | 0 | UNRESOLVED |
+| `asinh` | FF | 14.00 | 13.98 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
+| `acosh` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
+| `acosh` | QF | 29.00 | 28.18 | 1 .. 2 | 91% | above 10: 14.13 | 6 | UNRESOLVED |
+| `acosh` | TF | 21.70 | 21.47 | 1e-28 .. 0.1 | 96% | -- | 0 | UNRESOLVED |
+| `acosh` | FF | 14.00 | 13.92 | 1.005 .. 1e+15 | 98% | -- | 0 | UNRESOLVED |
+| `atanh` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
+| `atanh` | QF | 29.00 | 28.24 | 1 .. 2 | 91% | above 10: 13.51 | 4 | UNRESOLVED |
+| `atanh` | TF | 21.70 | 21.52 | 10 .. 1e+15 | 97% | -- | 0 | UNRESOLVED |
+| `atanh` | FF | 14.00 | 13.93 | 1 .. 1e+15 | 98% | -- | 0 | UNRESOLVED |
 
 **Where the failures sit.** The grid family carrying the most failures
 for each cell that has any:
 
-- `asin` — QF 20 pts (perpendicular approach to the imaginary axis)
-- `acos` — QF 14 pts (perpendicular approach to the real axis); FF 5 pts (polar shells)
-- `atan` — QF 20 pts (perpendicular approach to the real axis)
-- `asinh` — QF 36 pts (perpendicular approach to the real axis)
-- `acosh` — QF 12 pts (perpendicular approach to the real axis)
-- `atanh` — QF 10 pts (perpendicular approach to the real axis)
+- `asin` — QF 4 pts (perpendicular approach to the imaginary axis)
+- `acos` — QF 9 pts (perpendicular approach to the real axis); FF 5 pts (polar shells)
+- `atan` — QF 16 pts (perpendicular approach to the real axis)
+- `asinh` — QF 12 pts (perpendicular approach to the real axis)
+- `acosh` — QF 6 pts (perpendicular approach to the real axis)
+- `atanh` — QF 4 pts (perpendicular approach to the imaginary axis)
 
 ---
 
