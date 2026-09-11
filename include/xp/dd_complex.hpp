@@ -793,94 +793,78 @@ XPMATH_INLINE_FUNCTION DoubleDoubleComplex asin(DoubleDoubleComplex z) {
     if (detail::copysign(1.0, z.im.hi) < 0.0) im = negate(im);
     return DoubleDoubleComplex(re, im);
 }
-// Principal sqrt of (u, v) with the sign of a ZERO v respected. The header's
-// complex sqrt above tests `z.im.hi < 0.0`, which is false for -0.0, so for u < 0
-// it puts BOTH zero conventions on the +i sheet. That is the same class of defect
-// as KI-5(d) and it is corrected locally here rather than inside sqrt itself,
-// which would move every other caller (acosh included) in one undocumented step.
-// The general sqrt defect was recorded in docs/KNOWN_ISSUES.md as part of KI-11
-// and HAS since been fixed at source (sqrt now reads the sheet off copysign), so
-// this local helper is now belt-and-braces rather than the only correct path.
-// `vsign` is +1/-1, the intended sign of v when v is a zero: multiply_scalar does
-// NOT carry a signed zero through (it renormalizes, and quick_two_sum(-0,+0) is
-// +0), so the caller passes the sign it read off the original Im(z) rather than
-// trusting the halved copy.
-XPMATH_INLINE_FUNCTION DoubleDoubleComplex sqrt_signed_cut(DoubleDouble u, DoubleDouble v,
-                                                           double vsign) {
-    DoubleDoubleComplex r = sqrt(DoubleDoubleComplex(u, v));
-    if (v.hi == 0.0 && u.hi < 0.0 && vsign != detail::copysign(1.0, r.im.hi))
-        r.im = negate(r.im);
-    return r;
-}
-// KI-5(c) fix. acos(z) = -2i * log( sqrt((1+z)/2) + i*sqrt((1-z)/2) ) -- Kahan
-// 1987, the exact companion of the acosh form adopted for KI-1 below.
+// KI-5(c), second cut.
 //
-// The old body was `pi/2 - asin(z)`, which is unconditionally stable nowhere near
-// z = 1: acos(1) = 0, so as z -> 1 the difference cancels two quantities that
-// both tend to pi/2 and the ANSWER's own magnitude tends to 0. Every digit of
-// the result is a digit the subtraction destroyed. It is worse off the real axis
-// -- acos(2 + 1e-20i) scored 11.31 on DD, 0.00 on FF -- because asin there is
-// itself computed through 1 - z^2, so the loss compounds.
+//     Re(acos z) = atan2( sqrt(a^2 - x^2), Re z ),   x = |Re z|, y = |Im z|
+//     Im(acos z) = -Im(asin z)                       <- exact identity, pi/2 is real
 //
-// Why Kahan's log form and not his other one, acos(z) = 2*atan(sqrt((1-z)/(1+z))).
-// Both are well conditioned at z -> 1. The log form was chosen because (a) it is
-// structurally identical to the acosh already in this header, so the two share a
-// verified branch layout and one reader's understanding covers both, (b) it needs
-// only sqrt/log, which are the two best-tested primitives here, where the atan
-// form adds a complex atan on top of a complex divide by (1+z) -- a divide that
-// is singular at z = -1, the OTHER end of the principal interval, so that form
-// simply moves the bad point rather than removing it, and (c) it never forms z^2
-// or 1/(1+z), hence no overflow at large |z| and no singularity at either end.
+// on the Hull/Fairgrove/Tang r-s-a parametrisation Re asin already uses, reusing
+// xp_asin_real_leg() verbatim: Re asin = atan2(x, leg) and Re acos = atan2(leg, x)
+// are the SAME two arguments in the opposite order. The leg is even in x, so
+// |Re z| goes into the leg and the SIGNED Re z into the atan2 -- that is the
+// whole of the quadrant logic, with no case split.
 //
-// BUT THE PURE LOG FORM IS ONLY HALF RIGHT, and the monotone gate is what said
-// so. Writing w for the bracket, Im(acos z) = -2*ln|w|, and |w| -> 1 exactly
-// where Im(acos z) -> 0, i.e. for z near the real segment [-1,1]. There the log
-// is taken of a number whose information sits below the leading 1 -- the same
-// disease as KI-5(b), relocated. Measured: 4016 sweep points down across the
-// four backends, worst 31.00 -> 1.23 on DD at z = 0 + 1e-30i. Strictly worse
-// than the defect being fixed.
+// HISTORY. Two earlier forms, both worth not re-trying.
 //
-// SO THIS IS PER-COMPONENT, and the split is exact rather than a compromise.
-// Im(acos z) = -Im(asin z) is an IDENTITY (pi/2 is real), so the pi/2 - asin
-// cancellation was only ever in the real part:
+// (1) `pi/2 - asin(z)` is stable nowhere near z = 1: acos(1) = 0, so as z -> 1
+// the difference cancels two quantities that both tend to pi/2 while the
+// ANSWER's magnitude tends to 0. Every digit is one the subtraction destroyed.
+// It is worse off the real axis -- acos(2 + 1e-20i) scored 11.31 on DD, 0.00 on
+// FF -- because asin there went through 1 - z^2 and the loss compounded.
+// Replaced for KI-5(c).
 //
-//     Re(acos z) = 2*arg( sqrt((1+z)/2) + i*sqrt((1-z)/2) )   <- Kahan, stable
-//     Im(acos z) = -Im(asin z)                                <- exact identity
+// (2) Kahan 1987's log form, acos(z) = -2i*log(sqrt((1+z)/2) + i*sqrt((1-z)/2)),
+// which shipped from KI-5(c) until this commit -- as the REAL PART ONLY. Taking
+// Im through the same log costs 4016 sweep points (|w| -> 1 exactly where
+// Im(acos z) -> 0, the KI-5(b) disease relocated), so pairing it with the exact
+// identity above was never a compromise: it is each form's good component and
+// neither's bad one. That pairing survives this commit unchanged.
 //
-// Each form's good component, neither's bad one. This also inherits KI-5(d)'s
-// cut fix on the imaginary part for free. Decreases fell from 4016 to 949.
+// What does not survive is the log form's real part. It carried a KNOWN,
+// ACCEPTED loss: for |z| >> 1 with arg(z) < 0 the two roots satisfy rm ~ -i*rp,
+// so w = rp + i*rm is a difference of NEAR-EQUAL roots and arg(w) loses about
+// log10|z|/2 digits -- up to 7.85 on the |z| = 1e8 polar ring. Documenting it
+// was not the same as proving it inherent, and it was not: acosh forms rp + rm,
+// a SUM, at the same points. acos(z) = +-i*acosh(z) gives the two the same
+// modulus, and the sweep's complex metric is modulus-relative, so the sibling's
+// error transfers one for one. Measured over the sweep grid: 280 of the 1,268
+// acos rows above 1 ulp were more than 2x their acosh sibling at the same point,
+// 136 more than 10x, and 101 of the 149 rows above 8 ulps had an acosh sibling
+// BELOW 8 and more than 100x smaller (DD point 374: acos 6.62e6, acosh 0.0739).
+// A formulation defect, not conditioning and not the format. The leg form forms
+// no difference anywhere -- a - x is a sum of non-negative terms at every x.
 //
-// ACCEPTED LOSS, recorded in docs/KNOWN_ISSUES.md KI-5(c): for |z| >> 1 with
-// arg(z) < 0 the two roots satisfy rm ~ -i*rp, so w = rp + i*rm is a difference
-// of near-equal roots and arg(w) loses about log10|z|/2 digits -- up to 7.85 on
-// the |z| = 1e8 polar ring. Reflecting by acos(conj z) = conj(acos z) should
-// remove it and was tried both ways; both measured WORSE (1915 and 1648
-// decreases against 949), so no reflection ships. See the KNOWN_ISSUES entry
-// before retrying it.
+// Reflecting the log form by acos(conj z) = conj(acos z) was tried both ways and
+// measured WORSE (1915 and 1648 decreases against 949). Moot now, but the
+// KNOWN_ISSUES entry should not be read as an open invitation.
 //
-// This is NOT routed through acosh even though acos(z) = +-i*acosh(z) holds. The
-// sign of that relation flips with the half-plane AND with the side of each cut,
-// so sharing the body would mean reintroducing exactly the case analysis Kahan's
-// form exists to avoid; the two functions are three lines each and stay separate.
+// Still NOT routed through acosh, even though acos(z) = +-i*acosh(z) holds: that
+// sign flips with the half-plane AND with the side of each cut, so sharing the
+// body would reintroduce exactly the case analysis this form avoids. The two are
+// three lines each and stay separate. The identity is used to MEASURE, above,
+// which is a different thing from using it to compute.
+//
+// SIGNED ZEROS. The leg is a magnitude, and on the real cut (|Re z| > 1,
+// Im z = +-0) it is exactly zero. atan2's sign of zero then decides the entire
+// real part: atan2(+0, x < 0) is +pi, atan2(-0, x < 0) is -pi, and only +pi is
+// principal. xp_abs_word() tests v.hi < 0.0 and so leaves -0.0 alone, meaning a
+// -0 imaginary part does reach the leg; whether the sign then survives multiply()
+// depends on whether renormalisation absorbed it ((-0) + (+0) = +0, the KI-10
+// trap). Depend on neither outcome -- the zero is forced positive below. The old
+// body needed sqrt_signed_cut() for the same job, a local complex sqrt that put
+// the sign of a zero imaginary part on the correct sheet; with no complex sqrt
+// left on this path it has no callers left and is deleted with the form it
+// served.
 //
 // BRANCH CHECK (each verified against the __complex128 oracle, both half-planes
 // and both sides of both cuts): z=0 -> pi/2; z=1 -> 0; z=-1 -> pi;
 // z=2+0i -> -1.3170i; z=2-0i -> +1.3170i; z=-2+0i -> pi-1.3170i;
-// z=-2-0i -> pi+1.3170i. The last four are the cut points, and they are why
-// sqrt_signed_cut exists: at z = 2+-0i the argument of the SECOND root is
-// negative-real with a signed zero imaginary part, and at z = -2+-0i it is the
-// FIRST root, so both calls need the corrected sheet.
+// z=-2-0i -> pi+1.3170i. Now checked mechanically, on all four backends and
+// including the sign of every zero component, by scripts/probe_acos_branch.cpp.
 XPMATH_INLINE_FUNCTION DoubleDoubleComplex acos(DoubleDoubleComplex z) {
-    const DoubleDouble one(1.0);
-    const DoubleDouble half_im = multiply_scalar(z.im, 0.5);
-    const double s_im = detail::copysign(1.0, z.im.hi);
-    DoubleDoubleComplex rp = sqrt_signed_cut(
-        multiply_scalar(add(one, z.re), 0.5), half_im, s_im);
-    DoubleDoubleComplex rm = sqrt_signed_cut(
-        multiply_scalar(subtract(one, z.re), 0.5), negate(half_im), -s_im);
-    // w = rp + i*rm, with i*(a+bi) = -b + ai
-    DoubleDoubleComplex w(subtract(rp.re, rm.im), add(rp.im, rm.re));
-    return DoubleDoubleComplex(multiply_scalar(atan2(w.im, w.re), 2.0), negate(asin(z).im));
+    DoubleDouble leg = xp_asin_real_leg(xp_abs_word(z.re), xp_abs_word(z.im));
+    if (leg.hi == 0.0) leg = DoubleDouble(0.0);   // never -0; see SIGNED ZEROS above
+    return DoubleDoubleComplex(atan2(leg, z.re), negate(asin(z).im));
 }
 // log(a^2 + b^2), formed without ever squaring the larger operand -- used by the
 // two-log branches of atan()/atanh() below. Writing it as log(a*a + b*b) is what
