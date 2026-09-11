@@ -311,6 +311,7 @@ uint64_t stream_seed(uint64_t base, const char* name, unsigned kind) {
 // machine actually differ.
 // ---------------------------------------------------------------------------
 extern bool g_oracle_mpfr;
+uint64_t mpfr_oracle_fingerprint(uint64_t h);   // defined with the MPFR oracle
 uint64_t oracle_fingerprint() {
   // Seeded by WHICH oracle is in use: an MPFR-scored baseline and a
   // libquadmath-scored one are not comparable, and the fingerprint is the
@@ -332,6 +333,11 @@ uint64_t oracle_fingerprint() {
     mixc(casinq(z)); mixc(cacosq(z)); mixc(cacoshq(z));
     mixc(casinhq(z)); mixc(catanhq(z)); mixc(cpowq(z, z));
   }
+  // Seeding by WHICH oracle is in use stops being enough once the oracle itself
+  // can change. When MPFR is selected, hash values that have actually travelled
+  // the q_to_mpfr -> mpfr -> mpfr_to_q chain, so a change in the conversions
+  // moves the fingerprint instead of silently rescoring the sweep.
+  if (g_oracle_mpfr) h = mpfr_oracle_fingerprint(h);
   return h;
 }
 
@@ -718,29 +724,364 @@ __float128 reference_real_q_quad(int id, __float128 a, __float128 b, __float128 
 static const mpfr_prec_t kOraclePrec = 400;
 bool g_oracle_mpfr = false;
 
-// __float128 <-> mpfr without going through double. quadmath_snprintf at 40
-// significant digits round-trips p=113 exactly (113 bits ~ 34.0 decimal
-// digits), and mpfr_get_str/strtoflt128 does the same in reverse.
+// ---------------------------------------------------------------------------
+// __float128 <-> mpfr, EXACTLY. No decimal string anywhere on this path.
+//
+// WHAT WAS HERE BEFORE, AND WHY IT WAS WRONG. The first version formatted the
+// input with quadmath_snprintf("%.40Qe") and parsed it with mpfr_set_str, on
+// the grounds that 41 significant digits round-trip binary128 (113 bits ~ 34.0
+// decimal digits). They do — and that is the wrong property. Round-tripping
+// says q -> string -> binary128 is the identity. The oracle never goes back to
+// binary128: it EVALUATES AT the 400-bit number mpfr_set_str produced, which
+// differs from the input by up to 2^-136 relative.
+//
+// For a well-conditioned op that is invisible. For sin near a multiple of pi/2
+// it is the entire answer, because the condition number there is |x/tan(x)|,
+// which is unbounded: the derivative is |cos| = 1 while the value is |sin| ~ 0,
+// so a relative perturbation of the ARGUMENT becomes a much larger relative
+// perturbation of the RESULT.
+//
+// MEASURED, at the DD real grid point x = 182.21237390820801 (= 116*(pi/2) to
+// within 1.2e-15, where sin(x) = 2.4759e-18): the string route put the
+// reference 1.28e11 DD ulps off, and reported a library result that is right
+// to 0.356 ulps as the worst point in the entire sweep. That is why this is no
+// longer three lines. The population this matters for — near-zeros of trig at
+// large |x| — is exactly the population --oracle=mpfr was added to measure.
+//
+// The reverse direction is now a single correct rounding to the format's own
+// precision followed by an exact read, replacing a 45-digit string round trip
+// that was very nearly but not quite correctly rounded.
+//
+// XPMATH_POISON_ORACLE_CONV selects a deliberately broken conversion; see
+// validation/oracle_conv_selftest.sh.
+// ---------------------------------------------------------------------------
+#ifndef XPMATH_POISON_ORACLE_CONV
+#define XPMATH_POISON_ORACLE_CONV 0
+#endif
+
+static_assert(sizeof(unsigned long) == 8,
+              "the 113-bit split below hands mpfr two 64-bit halves");
+static const int kQMantBits = 113;                 // FLT128_MANT_DIG
+
 void q_to_mpfr(mpfr_t out, __float128 v) {
+#if XPMATH_POISON_ORACLE_CONV == 1
+  // POISON 1: the decimal round trip this function replaced.
   char buf[160];
   quadmath_snprintf(buf, sizeof buf, "%.40Qe", v);
   mpfr_set_str(out, buf, 10, MPFR_RNDN);
+  return;
+#else
+  if (isnanq(v))          { mpfr_set_nan(out); return; }
+  if (isinfq(v))          { mpfr_set_inf(out, v > 0 ? 1 : -1); return; }
+  if (v == (__float128)0) { mpfr_set_zero(out, signbitq(v) ? -1 : 1); return; }
+
+  int        e = 0;
+  __float128 m = frexpq(v, &e);        // |m| in [0.5,1); normalises subnormals
+  m = ldexpq(m, kQMantBits);           // integral, |m| < 2^113. Both exact.
+  e -= kQMantBits;
+  const bool        neg = m < (__float128)0;
+  unsigned __int128 um  = (unsigned __int128)(neg ? -m : m);
+#if XPMATH_POISON_ORACLE_CONV == 2
+  um &= ~(unsigned __int128)1;         // POISON 2: drop the last significand
+                                       // bit — the smallest corruption the
+                                       // format admits, and 2^25 times finer
+                                       // than the string route's.
+#endif
+  // 113 bits do not fit one unsigned long, so set the top half and shift it up.
+  // Every step below is exact at kOraclePrec: a 113-bit integer, then powers
+  // of two.
+  mpfr_set_ui(out, (unsigned long)(uint64_t)(um >> 64), MPFR_RNDN);  // < 2^49
+  mpfr_mul_2ui(out, out, 64, MPFR_RNDN);
+  mpfr_add_ui(out, out, (unsigned long)(uint64_t)um, MPFR_RNDN);
+  mpfr_mul_2si(out, out, e, MPFR_RNDN);
+  if (neg) mpfr_neg(out, out, MPFR_RNDN);
+#endif
 }
+
 __float128 mpfr_to_q(mpfr_srcptr v) {
   if (mpfr_nan_p(v))  return nanq("");
   if (mpfr_inf_p(v))  return mpfr_sgn(v) > 0 ?  HUGE_VALQ : -HUGE_VALQ;
-  char* s = nullptr;
-  mpfr_exp_t e = 0;
-  s = mpfr_get_str(nullptr, &e, 10, 45, v, MPFR_RNDN);
-  if (!s) return (__float128)0;
-  // mpfr_get_str gives a mantissa string and a base-10 exponent: value is
-  // 0.<digits> * 10^e. Rebuild that as a parseable literal.
-  const bool neg = (s[0] == '-');
-  const char* digits = neg ? s + 1 : s;
-  char buf[192];
-  std::snprintf(buf, sizeof buf, "%s0.%sE%ld", neg ? "-" : "", digits, (long)e);
-  mpfr_free_str(s);
-  return strtoflt128(buf, nullptr);
+  if (mpfr_zero_p(v)) return mpfr_signbit(v) ? -(__float128)0 : (__float128)0;
+#if XPMATH_POISON_ORACLE_CONV == 3
+  {
+    // POISON 3: the 45-digit string round trip this function replaced.
+    char*      s = nullptr;
+    mpfr_exp_t e = 0;
+    s = mpfr_get_str(nullptr, &e, 10, 45, v, MPFR_RNDN);
+    if (!s) return (__float128)0;
+    const bool  neg    = (s[0] == '-');
+    const char* digits = neg ? s + 1 : s;
+    char        buf[192];
+    std::snprintf(buf, sizeof buf, "%s0.%sE%ld", neg ? "-" : "", digits, (long)e);
+    mpfr_free_str(s);
+    return strtoflt128(buf, nullptr);
+  }
+#else
+  // Round ONCE, to the format's own precision — the rounding binary128 would
+  // do itself — and then read the result exactly.
+#if XPMATH_POISON_ORACLE_CONV == 4
+  const int prec = kQMantBits - 1;     // POISON 4: one bit short
+#else
+  const int prec = kQMantBits;
+#endif
+  mpfr_t t;
+  mpfr_init2(t, prec);
+  mpfr_set(t, v, MPFR_RNDN);
+  // Scale into double's exponent range so the three-double read is always
+  // available: exp() references in this sweep reach 1e434, far past DBL_MAX.
+  long shift = (long)mpfr_get_exp(t);
+  if (shift >  1000000) shift =  1000000;
+  if (shift < -1000000) shift = -1000000;
+  mpfr_mul_2si(t, t, -shift, MPFR_RNDN);      // exact; t is now in [0.5,1)
+  // 113 bits fit in three doubles (3 x 53 = 159), each residual is exactly
+  // representable, and the three-term sum equals t — which has 113 bits — so
+  // the accumulation in binary128 is exact too.
+  __float128 acc = 0;
+  for (int i = 0; i < 3 && !mpfr_zero_p(t); ++i) {
+    const double d = mpfr_get_d(t, MPFR_RNDN);
+    acc += (__float128)d;
+    mpfr_sub_d(t, t, d, MPFR_RNDN);
+  }
+  mpfr_clear(t);
+  // The only remaining rounding, and only for binary128 overflow/subnormals.
+  // The sweep's references never reach 1e-4900, so it never fires in practice.
+  return ldexpq(acc, (int)shift);
+#endif
+}
+
+uint64_t mpfr_oracle_fingerprint(uint64_t h) {
+  auto mix = [&h](__float128 v) {
+    unsigned char b[sizeof(__float128)];
+    std::memcpy(b, &v, sizeof(b));
+    for (size_t i = 0; i < sizeof(b); ++i) { h ^= b[i]; h *= 1099511628211ull; }
+  };
+  // Arguments where the conversion's exactness IS the answer: real grid points
+  // sitting within a double ulp of a multiple of pi/2, where sin is 1e-18 and
+  // the reference's own error is amplified by 1/|sin|.
+  static const double hard[] = {
+      182.21237390820801, 91.106186954104004, 344.00439556808237,
+      1.5707963267948966, 0.70710678118654757, 3.0, 1e40, 1e60,
+  };
+  mpfr_t a, r;
+  mpfr_inits2(kOraclePrec, a, r, (mpfr_ptr)0);
+  for (double x : hard) {
+    q_to_mpfr(a, (__float128)x);
+    mpfr_sin(r, a, MPFR_RNDN); mix(mpfr_to_q(r));
+    mpfr_cos(r, a, MPFR_RNDN); mix(mpfr_to_q(r));
+    mpfr_tan(r, a, MPFR_RNDN); mix(mpfr_to_q(r));
+    mpfr_log(r, a, MPFR_RNDN); mix(mpfr_to_q(r));
+  }
+  mpfr_clears(a, r, (mpfr_ptr)0);
+  return h;
+}
+
+// ---------------------------------------------------------------------------
+// --oracle-selftest: the two conversions above, checked against routes that
+// share no mechanism with them.
+//
+// The defect this exists to catch was silent for a reason: the old conversion
+// satisfied the property it was documented against (binary128 round trip) and
+// violated the one that mattered (equality at 400 bits). Nothing in the sweep
+// could see the difference, because the sweep has no oracle-error term — it
+// treats the reference as exact by construction. So the check has to be here,
+// and it has to be poisoned; see validation/oracle_conv_selftest.sh.
+// ---------------------------------------------------------------------------
+
+// Split v into three doubles and hand mpfr one at a time. Shares nothing with
+// q_to_mpfr: no frexpq, no 128-bit integer, no decimal. Three doubles cover
+// 113 bits (3 x 53 = 159) and each residual of a binary128 after its leading
+// double is exactly representable, so this is exact — but ONLY while the whole
+// 113-bit span stays inside double, i.e. 2^-961 <= |v| <= 2^1023. Outside that
+// the trailing doubles go subnormal and lose bits, which is not a hypothetical:
+// at 4e-302 the second double is 2.2e-318 and the third is zero, leaving a
+// residual of 1.4e-324. Callers keep to the range; check B covers the rest.
+void q_to_mpfr_by_doubles(mpfr_t out, __float128 v) {
+  const double     d0 = (double)v;
+  const __float128 r0 = v - (__float128)d0;
+  const double     d1 = (double)r0;
+  const __float128 r1 = r0 - (__float128)d1;
+  const double     d2 = (double)r1;
+  mpfr_set_d(out, d0, MPFR_RNDN);
+  mpfr_add_d(out, out, d1, MPFR_RNDN);
+  mpfr_add_d(out, out, d2, MPFR_RNDN);
+}
+
+int oracle_conv_selftest() {
+  int fails = 0;
+  auto bad = [&fails](const char* what, const char* detail) {
+    std::printf("  FAIL  %-28s %s\n", what, detail);
+    ++fails;
+  };
+  auto qstr = [](__float128 v) {
+    static char b[4][64]; static int k = 0; k = (k + 1) & 3;
+    quadmath_snprintf(b[k], 64, "%.36Qe", v);
+    return b[k];
+  };
+  auto same_bits = [](__float128 a, __float128 b) {
+    return std::memcmp(&a, &b, sizeof a) == 0;
+  };
+
+  // Values the independent route can represent: the whole 113-bit span has to
+  // stay inside double, so the third double does not underflow. That is
+  // |v| >= 2^-961 and |v| <= 2^1023, MEASURED — at 4e-302 the second double is
+  // already subnormal and the third is zero, leaving a residual of 1.4e-324,
+  // and route A would then be flagging its own reference. The first three
+  // entries are the real grid points that exposed the defect.
+  const __float128 one = (__float128)1;
+  std::vector<__float128> exact_checkable = {
+      (__float128)182.21237390820801,
+      (__float128)91.106186954104004,
+      (__float128)344.00439556808237,
+      (__float128)1.5707963267948966,
+      one, -one, (__float128)0.5,
+      one + ldexpq(one, -112),                     // last significand bit set
+      one - ldexpq(one, -113),                     // just below 1
+      (__float128)2 / (__float128)3,               // 113 bits, none of them nice
+      -((__float128)7 / (__float128)11),
+      ldexpq(one, -960) * ((__float128)3 / (__float128)7),
+      ldexpq(one, 1000) * ((__float128)3 / (__float128)7),
+  };
+  // Round trip only: either outside double's range entirely (exp() references
+  // in this sweep reach 1e434) or with a 113-bit span that reaches below
+  // 2^-1074. An exponent error of even one bit still breaks the round trip, so
+  // B is what covers the extremes A cannot reach.
+  std::vector<__float128> wide = {
+      expq((__float128)1000), expq((__float128)-1000),
+      ldexpq(one, 16000) + ldexpq(one, 16000 - 112),
+      ldexpq(one, -16000),
+      ldexpq(one, -16440),                         // binary128 subnormal
+      ldexpq(one, -1000) * ((__float128)3 / (__float128)7),
+      (__float128)5e-324,                          // smallest double subnormal
+  };
+
+  mpfr_t m, m2;
+  mpfr_inits2(kOraclePrec, m, m2, (mpfr_ptr)0);
+
+  // A. q_to_mpfr must be EXACT, not merely round-trippable.
+  for (__float128 v : exact_checkable) {
+    q_to_mpfr(m, v);
+    q_to_mpfr_by_doubles(m2, v);
+    if (mpfr_cmp(m, m2) != 0) bad("A q_to_mpfr not exact", qstr(v));
+  }
+
+  // B. Round trip, bit for bit, including where the independent route cannot go.
+  for (const std::vector<__float128>* set : {&exact_checkable, &wide}) {
+    for (__float128 v : *set) {
+      q_to_mpfr(m, v);
+      const __float128 back = mpfr_to_q(m);
+      if (!same_bits(back, v)) bad("B round trip", qstr(v));
+    }
+  }
+
+  // C. END TO END, at the arguments where it went wrong: the oracle's own
+  // answer through the shipped chain, against the same answer through the
+  // independent input route, BIT FOR BIT. Under the old conversion the sin
+  // column here is wrong in the 21st digit, which at x = 182.2... is 1.28e11
+  // ulps of the DD format being measured.
+  //
+  // The arguments are PAIRS, not bare doubles. A bare double is a WEAK
+  // argument here: its binary128 image has 60 trailing zero significand bits,
+  // so any defect confined to the low bits of the conversion is invisible on
+  // it -- poison 2 is exactly that defect, and it is also why the sweep's own
+  // real trig rows, whose oracle argument IS a bare double, could never have
+  // exposed it. Each base value is therefore driven twice: once as the DD pair
+  // the sweep would build, and once as hi + 2^(exp(hi)-113). The second form
+  // has its last significand bit set BY CONSTRUCTION -- the added term sits
+  // below every bit of hi, so there is no carry to reason about. hi + hi*2^-60
+  // was the first attempt and was silently useless: all six of these doubles
+  // have even significands, so the shifted copy stops one bit short.
+  //
+  // C is deliberately blind to the OUTPUT side: both chains end in the same
+  // mpfr_to_q, so it cannot see a defect there. B and D cover that direction.
+  {
+    static const double hard[][2] = {
+        {182.21237390820801,   1.1e-15},   // 116*(pi/2) to within 1.2e-15
+        {91.106186954104004,  -3.3e-16},
+        {344.00439556808237,   7.7e-15},
+        {116.23892818282235,   0.0},
+        {1.5707963267948966,   6.123233995736766e-17},   // pi/2 as a DD pair
+        {7.65,                 0.0},
+    };
+    mpfr_t r, r2;
+    mpfr_inits2(kOraclePrec, r, r2, (mpfr_ptr)0);
+    std::vector<__float128> args;
+    for (const double* p : hard) {
+      args.push_back((__float128)p[0] + (__float128)p[1]);
+      int ex = 0;
+      frexpq((__float128)p[0], &ex);
+      args.push_back((__float128)p[0] + ldexpq(one, ex - kQMantBits));
+    }
+    for (const __float128 x : args) {
+      q_to_mpfr(m, x);
+      q_to_mpfr_by_doubles(m2, x);
+      if (mpfr_cmp(m, m2) != 0) bad("C argument not exact", qstr(x));
+      for (int op = 0; op < 3; ++op) {
+        if (op == 0) { mpfr_sin(r, m, MPFR_RNDN); mpfr_sin(r2, m2, MPFR_RNDN); }
+        if (op == 1) { mpfr_cos(r, m, MPFR_RNDN); mpfr_cos(r2, m2, MPFR_RNDN); }
+        if (op == 2) { mpfr_tan(r, m, MPFR_RNDN); mpfr_tan(r2, m2, MPFR_RNDN); }
+        if (!same_bits(mpfr_to_q(r), mpfr_to_q(r2))) {
+          char d[160];
+          std::snprintf(d, sizeof d, "x=%s op=%d", qstr(x), op);
+          bad("C end to end", d);
+        }
+      }
+    }
+    mpfr_clears(r, r2, (mpfr_ptr)0);
+  }
+
+  // D. mpfr_to_q must round CORRECTLY, not nearly. Each value below sits inside
+  // the rounding interval of a known binary128 q but only by 2^-40 of an ulp —
+  // finer than any decimal shortcut can resolve, and the direction it lands is
+  // then whatever the shortcut's own rounding happens to do.
+  {
+    mpfr_t u, off, p;
+    mpfr_inits2(kOraclePrec, u, off, p, (mpfr_ptr)0);
+    mpfr_set_d(off, 0.5 - ldexp(1.0, -40), MPFR_RNDN);
+    for (int k = 0; k < 64; ++k) {
+      const __float128 base = (__float128)(1.0 + (double)k * 0.0137);  // [1,2)
+      const __float128 q =
+          ldexpq(base + ldexpq(one, -112), k - 32);    // last bit set, spread
+      q_to_mpfr_by_doubles(m, q);
+      mpfr_set_ui(u, 1, MPFR_RNDN);
+      mpfr_mul_2si(u, u, (long)mpfr_get_exp(m) - kQMantBits, MPFR_RNDN);
+      mpfr_mul(p, off, u, MPFR_RNDN);                  // (0.5 - 2^-40) * ulp(q)
+      for (int s = -1; s <= 1; s += 2) {
+        if (s < 0) mpfr_sub(u, m, p, MPFR_RNDN); else mpfr_add(u, m, p, MPFR_RNDN);
+        if (!same_bits(mpfr_to_q(u), q)) {
+          char d[128];
+          std::snprintf(d, sizeof d, "k=%d s=%+d  %s", k, s, qstr(q));
+          bad("D not correctly rounded", d);
+        }
+      }
+    }
+    mpfr_clears(u, off, p, (mpfr_ptr)0);
+  }
+
+  // E. Specials, both directions.
+  {
+    const __float128 pz = (__float128)0, nz = -(__float128)0;
+    q_to_mpfr(m, pz);
+    if (!mpfr_zero_p(m) || mpfr_signbit(m))  bad("E +0 -> mpfr", "");
+    if (!same_bits(mpfr_to_q(m), pz))        bad("E +0 round trip", "");
+    q_to_mpfr(m, nz);
+    if (!mpfr_zero_p(m) || !mpfr_signbit(m)) bad("E -0 -> mpfr", "");
+    if (!same_bits(mpfr_to_q(m), nz))        bad("E -0 round trip", "");
+    q_to_mpfr(m, HUGE_VALQ);
+    if (!mpfr_inf_p(m) || mpfr_sgn(m) < 0)   bad("E +inf -> mpfr", "");
+    if (mpfr_to_q(m) != HUGE_VALQ)           bad("E +inf round trip", "");
+    q_to_mpfr(m, -HUGE_VALQ);
+    if (!mpfr_inf_p(m) || mpfr_sgn(m) > 0)   bad("E -inf -> mpfr", "");
+    if (mpfr_to_q(m) != -HUGE_VALQ)          bad("E -inf round trip", "");
+    q_to_mpfr(m, nanq(""));
+    if (!mpfr_nan_p(m))                      bad("E nan -> mpfr", "");
+    if (!isnanq(mpfr_to_q(m)))               bad("E nan round trip", "");
+  }
+
+  mpfr_clears(m, m2, (mpfr_ptr)0);
+  std::printf("oracle conversion selftest: %s (%d failure%s)  poison=%d\n",
+              fails ? "FAIL" : "PASS", fails, fails == 1 ? "" : "s",
+              XPMATH_POISON_ORACLE_CONV);
+  return fails ? 1 : 0;
 }
 
 __float128 reference_real_mpfr(int id, __float128 a, __float128 b, __float128 c) {
@@ -3096,6 +3437,12 @@ void usage(const char* argv0) {
     "                    magnitudes are scored against a broken reference.\n"
     "                    --oracle=mpfr uses MPFR at 400 bits for the REAL path;\n"
     "                    complex stays on libquadmath.\n"
+    "  --oracle-selftest check that the __float128 <-> mpfr conversions are\n"
+    "                    EXACT, against routes sharing no mechanism with them,\n"
+    "                    and exit. Runs nothing else. A conversion that merely\n"
+    "                    round-trips binary128 is not enough: the oracle\n"
+    "                    evaluates AT the 400-bit value, and near a zero of sin\n"
+    "                    a 2^-136 argument error is 1e11 ulps of reference error.\n"
     "  --seed N          RNG seed for the derived operands (default %llu)\n"
     "  --summary         print the per-(backend, op) table (implied unless --quiet)\n"
     "  --quiet           suppress the per-(backend, op) table\n"
@@ -3158,6 +3505,7 @@ int main(int argc, char** argv) {
       else if (v == "quadmath")  g_oracle_mpfr = false;
       else { std::fprintf(stderr, "--oracle must be quadmath or mpfr\n"); return 2; }
     }
+    else if (s == "--oracle-selftest") { return oracle_conv_selftest(); }
     else if (s == "--baseline")  { baseline = need("--baseline"); }
     else if (s == "--ulp")       { ulp_gate = true; }
     else if (s == "--ulp-allowance") { ulp_allowance = std::atof(need("--ulp-allowance")); }

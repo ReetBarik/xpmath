@@ -480,6 +480,16 @@ add_test(NAME trig_reduction_selftest
          COMMAND ${CMAKE_SOURCE_DIR}/validation/trig_reduction_selftest.sh
                  ${CMAKE_CURRENT_BINARY_DIR})
 
+# The MPFR oracle's __float128 <-> mpfr conversions must be EXACT, not merely
+# round-trippable. The sweep has no oracle-error term, so a reference that is
+# wrong reads as a library that is wrong -- and the old conversion was wrong by
+# 1.28e11 ulps on precisely the large-|x| trig rows --oracle=mpfr exists to
+# measure. Runs the check, then poisons it four ways and requires each to fail.
+add_test(NAME oracle_conv_test COMMAND sweep_accuracy --oracle-selftest)
+add_test(NAME oracle_conv_selftest
+         COMMAND ${CMAKE_SOURCE_DIR}/validation/oracle_conv_selftest.sh
+                 ${CMAKE_CURRENT_BINARY_DIR})
+
 # The generated domain document must be what the generator currently emits from
 # the committed baseline. Pure Python, well under a second, no build products.
 add_test(NAME domains_fresh
@@ -489,3 +499,5 @@ set_tests_properties(sweep_absolute_gate sweep_monotone_gate
                      PROPERTIES TIMEOUT 600)
 set_tests_properties(sweep_absolute_gate_selftest sweep_monotone_gate_selftest
                      PROPERTIES TIMEOUT 1200)
+# Five compiles of sweep_accuracy.cpp.
+set_tests_properties(oracle_conv_selftest PROPERTIES TIMEOUT 600)
