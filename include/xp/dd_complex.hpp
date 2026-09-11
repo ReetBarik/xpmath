@@ -910,6 +910,27 @@ XPMATH_INLINE_FUNCTION DoubleDouble xp_atan2_safe(DoubleDouble a, DoubleDouble b
     }
     return atan2(a, b);
 }
+// A squared operand whose LEADING WORD has left the format's normal range --
+// zero, or subnormal, where a double word carries only a handful of bits.  Such a
+// product has lost essentially all of its information.
+XPMATH_INLINE_FUNCTION bool xp_sq_underflowed(DoubleDouble v) {
+    return detail::fabs(v.hi) < 2.2250738585072014e-308;
+}
+
+// Re atan(x+iy) as 0.5*(atan2(x, 1-y) + atan2(x, 1+y)), from
+// atan(z) = (i/2)[log(1-iz) - log(1+iz)] with the imaginary parts of the two
+// logs taken separately.  Algebraically identical to the primary
+// 0.5*atan2(2x, (1-y)(1+y) - x^2) form, but it never squares x, so nothing
+// underflows; and both terms carry the sign of x, so the sum never cancels.
+// Used ONLY where the primary form has provably lost its x^2 -- see the call
+// sites in atan() and atanh(), which explain when that is.
+XPMATH_INLINE_FUNCTION DoubleDouble xp_atan_re_split(DoubleDouble x, DoubleDouble y) {
+    const DoubleDouble one_(1.0);
+    return multiply_scalar(add(xp_atan2_safe(x, subtract(one_, y)),
+                               xp_atan2_safe(x, add(one_, y))),
+                           0.5);
+}
+
 // KI-11 + KI-18 fix. The old body was
 //     atan(z) = (i/2) * log( (1 - iz) / (1 + iz) )
 // and it has two independent defects, both repaired here by moving to the
@@ -991,9 +1012,29 @@ XPMATH_INLINE_FUNCTION DoubleDoubleComplex atan(DoubleDoubleComplex z) {
         // -- exactly the atan branch cut -- the tiny x^2 that survives is left
         // with only word-0 precision. The factored form is exact there
         // (Sterbenz on both factors) and costs one extra multiply.
-        const DoubleDouble d2 =
-            subtract(multiply(subtract(one, z.im), add(one, z.im)), x2);
-        DoubleDouble re = multiply_scalar(xp_atan2_safe(twox, d2), 0.5);
+        const DoubleDouble omy2 = multiply(subtract(one, z.im), add(one, z.im));
+        const DoubleDouble d2 = subtract(omy2, x2);
+        // WHEN THE x^2 IS GONE.  On the cut |y| = 1 the factored product above
+        // is exactly zero, so d2 IS the -x^2 and nothing else.  For |x| below
+        // sqrt of the format's smallest normal -- 1.1e-19 on the FP32 backends
+        // -- that square underflows to zero or to a two-bit subnormal, d2
+        // collapses to 0, and atan2(2x, 0) returns pi/2 whatever x was.  At
+        // z = (1e-23, -1) that puts QF's real part on pi/4 instead of
+        // pi/4 + 2.5e-24: measured 2.522e5 component ulps, against a
+        // representational floor for pi/4 of 1.4e-16 ulps, so the answer is
+        // representable and only the intermediate is not.  The split form does
+        // not square x at all.  BOTH conditions are required: an underflowed
+        // x^2 is harmless wherever (1-y)(1+y) is O(1), because there the term
+        // really is negligible and dropping it is correct -- gating on the
+        // square alone made z = (6.1e-25, 1e-08) 6x worse for nothing.
+        // Measured over the whole complex grid, this leaves DD and FF
+        // bit-identical, moves 48 QF rows (80.04 -> 0.019, 11064 -> 0.0088,
+        // 252191 -> 0.035) and 4 TF rows (0.136 -> 0.182, both far below 1).
+        DoubleDouble re;
+        if (z.re.hi != 0.0 && xp_sq_underflowed(x2) && xp_sq_underflowed(omy2))
+            re = xp_atan_re_split(z.re, z.im);
+        else
+            re = multiply_scalar(xp_atan2_safe(twox, d2), 0.5);
         // ON THE CUT (Re(z) a zero, |Im z| > 1) the sheet is chosen by the SIGN
         // of that zero -- atan(+0 + 2i) = +pi/2 + 0.5493i, atan(-0 + 2i) =
         // -pi/2 + 0.5493i. atan2() is handed the zero verbatim above but does
@@ -1281,8 +1322,14 @@ XPMATH_INLINE_FUNCTION DoubleDoubleComplex atanh(DoubleDoubleComplex z) {
         }
         DoubleDouble twoy = multiply_scalar(z.im, 2.0);
         if (z.im.hi == 0.0) twoy = z.im;          // keep the signed zero
-        r.im = multiply_scalar(
-            xp_atan2_safe(twoy, subtract(multiply(subtract(one, z.re), add(one, z.re)), y2)), 0.5);
+        // Im atanh(x+iy) is Re atan(y+ix) -- atanh(z) = i atan(-iz) -- so it is
+        // the same expression with the roles of x and y exchanged, and it loses
+        // the y^2 in exactly the same way on its own cut |x| = 1.  Same guard.
+        const DoubleDouble omx2 = multiply(subtract(one, z.re), add(one, z.re));
+        if (z.im.hi != 0.0 && xp_sq_underflowed(y2) && xp_sq_underflowed(omx2))
+            r.im = xp_atan_re_split(z.im, z.re);
+        else
+            r.im = multiply_scalar(xp_atan2_safe(twoy, subtract(omx2, y2)), 0.5);
     } else {
         DoubleDoubleComplex lg = log((DoubleDoubleComplex(one) + z) / (DoubleDoubleComplex(one) - z));
         r.re = multiply_scalar(lg.re, 0.5);
