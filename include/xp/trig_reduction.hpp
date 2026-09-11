@@ -23,13 +23,30 @@
 // this: widening to q bits merely moves the wall to |a| * 2^-q, and the wall
 // must be beaten for every |a| the format can express, not for one of them.
 //
+// That is the negative control for this whole file, and it is MEASURED, not
+// argued: `scripts/probe_trig_stages.cpp --widen` gives the old form an exact
+// n and exact 4096-bit arithmetic, leaving q as the only error source, and
+// reports bits = q - log2(|x|/|r|) at every point it probes. Widening buys bit
+// for bit and never closes the gap, because the gap belongs to x. Covering
+// every DoubleDouble needs q >= p + 4 + D = 1239 bits, D = 1129.4 measured
+// (include/xp/trig_reduction_data.hpp) -- i.e. the same 2/pi string the table
+// below already is, 52 chunks x 24 = 1248 bits. The difference is not the
+// string. It is that Payne-Hanek reads a WINDOW of it, guard/24 = 10 chunks
+// wide, while `a - 2pi*n` has to multiply the whole thing by n.
+//
 // Payne-Hanek removes the multiply entirely. Instead of forming n = round(x *
 // 2/pi) as a number and subtracting n * (pi/2), it computes the FRACTIONAL
 // part of x * (2/pi) directly, from a bit-string of 2/pi long enough that the
 // bits which survive the cancellation are still exact. `n` is never formed —
-// which matters here for a second, independent reason: round_to_nearest_int
-// SATURATES (DD at 2^105, FF at 2^47), so above those magnitudes the old
-// reduction could not have worked even with a perfect constant.
+// which matters here for a second, independent reason: n does not FIT. It
+// needs log2|n| ~ log2|x| - 2.65 bits of integer, and the quotient carries p
+// of significand, so `nint(a / 2pi)` is simply the wrong integer above
+// |x| ~ 2^108.7 whatever constant it is fed -- the same probe measures it off
+// by 2^909 at the argument that pins the table. An earlier draft of this
+// comment blamed round_to_nearest_int for saturating instead; that was wrong
+// and unmeasured. round_to_nearest_int is exact at every magnitude (its 2^105
+// cap returns a.hi + rint(a.lo), dd_math.hpp:492; FF's 2^47 cap likewise,
+// ff_math.hpp) since the KI-14 sibling audit. The defect is in the DIVIDE.
 //
 // THE ALGORITHM
 // -------------
