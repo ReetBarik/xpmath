@@ -170,9 +170,14 @@
 // CONCLUSION.  Phase 1's stop condition — "sqrt has headroom iff some arm drops
 // the DD/FF >1 ulp rate to TF/QF's level (<= 3%) with max <= 2 ulps" — is MET,
 // by karp8, karp6, karp3 and heron4.  On the tie-break ("cheapest arm wins")
-// karp8 wins outright: it is the most accurate arm on every operand source AND
-// the only one that adds no format-level divide.  It is in fact CHEAPER than
-// what ships, trading sqrt+divide+multiply for a single hardware sqrt.
+// karp8 is the most accurate arm on every operand source, and the cheapest of
+// the arms that meet the condition (it needs no full format-level divide, only
+// divide_scalar).  It is NOT cheaper than what ships, which an earlier revision
+// of this comment claimed on an operation count alone: measured afterwards with
+// kokkos_ep_bench_cost it is about 2x SLOWER (DD 0.06x -> 0.13x f128, FF 7.0x ->
+// 14.3x FP64), because divide_scalar is a two-word division with a renormalize
+// where the shipped correction was one multiply.  Accuracy per unit cost is a
+// separate question from accuracy, and this probe only measures accuracy.
 // ===========================================================================
 
 #include <xp/dd_math.hpp>

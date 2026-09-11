@@ -502,12 +502,35 @@ XPMATH_INLINE_FUNCTION DoubleDouble sqrt(DoubleDouble a) {
         XPMATH_PRINTF("DDSQRT: negative argument\n");
         return DoubleDouble(0.0);
     }
-    double t1 = 1.0 / detail::sqrt(a.hi);
-    double t2 = a.hi * t1;
-    DoubleDouble s0 = two_prod(t2, t2);
-    DoubleDouble s1 = subtract(a, s0);
-    double t3  = 0.5 * s1.hi * t1;
-    return add(DoubleDouble(t2), DoubleDouble(t3));
+    // One Newton correction, whose residue is the quadratic term d^2/(2 sqrt a)
+    // with d = t2 - sqrt(a).  So t2's accuracy squares straight into the answer,
+    // and it is the only lever that matters here.
+    //
+    // The QD form seeds a reciprocal root and multiplies back up --
+    // t1 = 1/sqrt(a.hi); t2 = a.hi*t1 -- which leaves d ~ 3u (1.5u from the
+    // reciprocal root, 1u from the multiply, 0.5u from a.hi standing in for a),
+    // hence ~4.5u^2, i.e. ~4.5 ulps at p = 106 on ordinary inputs.  Taking the
+    // hardware sqrt directly makes t2 correctly rounded, d <= 0.5u, and cuts
+    // that ~36x.
+    //
+    // COST: this is NOT free, contrary to a first reading of the operation
+    // count.  Measured with kokkos_ep_bench_cost, DD sqrt goes 0.06x -> 0.13x
+    // f128 and FF sqrt 7.0x -> 14.3x FP64, i.e. about 2x SLOWER.  The seed
+    // change alone would be roughly neutral; the cost is divide_scalar, a full
+    // two-word division with renormalization, replacing a single multiply.
+    //
+    // The correction is formed by divide_scalar, not 0.5*s1.hi/t2, so s1.lo is
+    // carried; dropping it costs FloatFloat real rows and DoubleDouble nothing,
+    // because a double operand lands in DD exactly but must be split by FF.
+    //
+    // Measured by scripts/probe_sqrt_iter.cpp against MPFR at 400 bits, on the
+    // sweep's own operands: rows above 1 ulp in 1e-10..1e10 go DD 370 -> 0
+    // (max 0.7955) and FF 400 -> 0 (max 0.9799).  The QD form is what the plan
+    // called the "seed" defect; it is not -- an exact seed measures no better.
+    double t2 = detail::sqrt(a.hi);
+    DoubleDouble s0 = two_prod(t2, t2);      // exact
+    DoubleDouble s1 = subtract(a, s0);       // exact residual
+    return add(DoubleDouble(t2), divide_scalar(s1, 2.0 * t2));
 }
 
 // Integer power

@@ -606,12 +606,21 @@ XPMATH_INLINE_FUNCTION FloatFloat sqrt(FloatFloat a) {
         XPMATH_PRINTF("FFSQRT: negative argument\n");
         return FloatFloat(0.0f);
     }
-    float t1 = 1.0f / detail::sqrt(a.hi);
-    float t2 = a.hi * t1;
-    FloatFloat s0 = two_prod(t2, t2);
-    FloatFloat s1 = subtract(a, s0);
-    float t3  = 0.5f * s1.hi * t1;
-    return add(FloatFloat(t2), FloatFloat(t3));
+    // See dd_math.hpp sqrt() for the derivation; this is the same change at
+    // FP32.  One Newton correction leaves d^2/(2 sqrt a) with d = t2 - sqrt(a),
+    // so the correctly rounded hardware sqrt (d <= 0.5u) replaces the QD
+    // reciprocal-root seed (d ~ 3u) and cuts the residue ~36x.  It costs about
+    // 2x (7.0x -> 14.3x FP64 in kokkos_ep_bench_cost); divide_scalar, not the
+    // seed change, is what is expensive.
+    // divide_scalar keeps s1.lo, which matters more here than on DD: a double
+    // grid operand is exact in DoubleDouble but must be split by FloatFloat.
+    //
+    // Measured (scripts/probe_sqrt_iter.cpp, MPFR 400 bits, the sweep's own
+    // operands): rows above 1 ulp in 1e-10..1e10 go 400 -> 0, max 4.511 -> 0.9799.
+    float t2 = detail::sqrt(a.hi);
+    FloatFloat s0 = two_prod(t2, t2);        // exact
+    FloatFloat s1 = subtract(a, s0);         // exact residual
+    return add(FloatFloat(t2), divide_scalar(s1, 2.0f * t2));
 }
 
 // Integer power
