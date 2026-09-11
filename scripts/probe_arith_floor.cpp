@@ -112,13 +112,20 @@
 // <= 0.5 BY CONSTRUCTION, so if the oracle were not really being consulted it
 // is the cell most likely to stay quiet.
 //
-// WHAT THIS PROBE DOES NOT SETTLE.  horner-sin is measured here in isolation.
-// Shipping it means nq = 0 (Horner evaluates the unreduced r directly), and
-// nq = 0 on DD was measured ON THE SWEEP to cut DD+FF real trig only 24.9%
-// (898 -> 674 rows above 1 ulp) while REGRESSING DD complex pow by up to
-// +30.85 ulps (point 251: 6.136 -> 36.98).  Complex pow reads cos's low bits
-// through exp(w*log z).  So the number in row 4 above is an upper bound on an
-// isolated stage, not a shippable delta.
+// WHAT THIS PROBE DOES NOT SETTLE.  horner-sin is measured here in isolation,
+// at the unreduced r.  Horner and nq are ORTHOGONAL -- nothing stops a Horner
+// series being evaluated at the scaled-down u = r/2^nq and then doubled back --
+// so row 4 is not, by itself, an argument for nq = 0.  The argument for nq = 0
+// is row 5: double-x5 says the doublings ALONE cost DD 24.50% above 1 ulp, so
+// Horner at nq = 5 would still read ~24% and the series would not be what is
+// left to fix.  But nq = 0 on DD was measured ON THE SWEEP to cut DD+FF real
+// trig only 24.9% (898 -> 674 rows above 1 ulp) while REGRESSING DD complex pow
+// by up to +30.85 ulps (point 251: 6.136 -> 36.98).  Complex pow reads cos's low
+// bits through exp(w*log z) -- probe_cpow.cpp later showed why that coupling is
+// so tight: exp maps an ABSOLUTE perturbation of its argument to a RELATIVE one,
+// so cos's low bits are amplified by 2^p, and with exact inputs the residual of
+// complex pow on DD is 259 rows at max 3.41 ulps against a worst shipped sin of
+// 3.326.  So row 4 is an upper bound on an isolated stage, not a shippable delta.
 
 #include <xp/dd_math.hpp>
 #include <xp/ff_math.hpp>
