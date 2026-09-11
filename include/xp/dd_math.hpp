@@ -959,35 +959,110 @@ XPMATH_INLINE_FUNCTION void sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble
     }
     DoubleDouble r2 = multiply(r, r);
 
+    // THE SERIES IS CARRIED IN (sin, v) WITH v = 1 - cos, NOT IN (sin, cos).
+    //
+    // Why.  cos(r) is 1 - O(r^2) and the doubling below is applied nq times.
+    // Written on cos, one doubling is cos' = cos^2 - sin^2: while cos ~ 1 the
+    // squaring DOUBLES the relative error of cos, so nq of them multiply it by
+    // 2^nq, and sin' = 2*sin*cos then inherits every bit of that.  The error is
+    // not in the series at all -- it is manufactured by the recurrence.  Measured
+    // on DD at a = 1: the series answers to 0.137 ulps, and the five doublings
+    // take it to 0.323, 0.247, 2.205, 10.366, 44.913.
+    //
+    // v = 1 - cos is O(r^2), so it is a SMALL quantity held to its own relative
+    // accuracy, and the leading 1 -- which carries no information and against
+    // which every bit of the residual cancels -- never enters an arithmetic
+    // operation.  The doubling identities in v are exact rewrites:
+    //     cos(2x) = 1 - 2 sin^2 x   =>   v(2x)   = 2 sin^2 x
+    //     sin(2x) = 2 sin x cos x   =>   sin(2x) = 2 sin x (1 - v)
+    // v' = 2 sin^2 is a squaring of a small quantity, so it doubles the relative
+    // error of something already ~2^-p SMALL, not of something ~1.  The 2^nq
+    // amplification is gone; cos is reconstituted once, at the end.
+    //
+    // MEASURED, not derived.  Two independent grids agree, and they are named
+    // separately because they are NOT the same grid -- the probe builds its own
+    // (scripts/probe_trig_series.cpp:build_grid) and the sweep is the
+    // measurement of record.  Both are ulps vs MPFR@400 at condition number
+    // <= 4; near-zeros of sin/cos are excluded because relative error
+    // legitimately diverges there and no series can help.
+    //
+    //   probe's grid, worst of sin and cos, MAX OVER ALL FOUR of its families
+    //   (linear, log, ulp, hardred -- the probe tabulates them separately and
+    //   the worst family is not the same one for every arm, so a single-family
+    //   figure understates: this form reads 1.54 on linear alone, 1.74 on log):
+    //     shipped (sin, cos) form   42.44 ulps
+    //     factored (c-s)(c+s)       60.33      -- REJECTED, worse in every family
+    //     this (sin, v) form         1.74
+    //
+    //   sweep, scored real rows, --oracle mpfr:
+    //                       sin            cos            tan
+    //     shipped        42.45           33.85           4.31
+    //     this form       1.74            2.47           4.18
+    //   and unrestricted over all scored real sin/cos/tan rows, max ulps
+    //   46.19 -> 4.18, median 0.3884 -> 0.2400, at-or-below 1 ulp 71.8% -> 87.5%.
+    //
+    // tan is sin/cos and is bounded by them plus the DD divide; it is not a
+    // separate mechanism.  The (sin, v) form is also free: the convergence test
+    // still stops at 7 terms, exactly as the (sin, cos) form does.
+    //
     // sin(r) = r - r^3/3! + r^5/5! - ...
-    // cos(r) = 1 - r^2/2! + r^4/4! - ...
-    DoubleDouble sin_r = r,               cos_r = DoubleDouble(1.0);
-    DoubleDouble sterm = r,               cterm = DoubleDouble(1.0);
+    // v(r)   =     r^2/2! - r^4/4! + r^6/6! - ...
+    DoubleDouble sin_r = r, sterm = r;
+    DoubleDouble v_r = divide_scalar(r2, 2.0), vterm = v_r;
     for (int k = 1; k <= itrmx; ++k) {
         sterm = divide_scalar(multiply(sterm, r2), -(double)((2*k) * (2*k + 1)));
         sin_r = add(sin_r, sterm);
-        cterm = divide_scalar(multiply(cterm, r2), -(double)((2*k - 1) * (2*k)));
-        cos_r = add(cos_r, cterm);
-        if (detail::fabs(sterm.hi) < eps * detail::fabs(sin_r.hi) &&
-            detail::fabs(cterm.hi) < eps) break;
+        vterm = divide_scalar(multiply(vterm, r2), -(double)((2*k + 1) * (2*k + 2)));
+        v_r   = add(v_r, vterm);
+        // v's test is RELATIVE, where the cos form's was absolute
+        // (|cterm| < eps).  Against cos ~ 1 the two agree; against v ~ r^2/2 an
+        // absolute test would stop the v series early and throw away the
+        // accuracy this whole form exists to keep.
+        //
+        // AND IT IS `<=`, WHICH THE SIN TEST BESIDE IT DOES NOT NEED.  This is
+        // KI-25's shape again, arrived at from the other direction.  r^2
+        // underflows FP64 to zero for |a| < ~2^-532, well above the KI-12 band
+        // at 2^nq*DBL_MIN ~ 2^-1017, and then vterm and v_r are BOTH exactly 0,
+        // so a strict `0 < 0` is false forever and the loop runs to itrmx.  The
+        // old absolute test could not hit this: cterm = 0 < eps was true.  The
+        // sin test is safe with `<` because sin_r = r != 0 there (r == 0 is
+        // returned above), so its threshold is strictly positive.
+        //
+        // Measured, because the sweep cannot see it: the real grid's log family
+        // stops at 1e-30 and its `ulp` family sits inside the KI-12 band, so no
+        // scored row enters the band at all.  With `<`, DD sincos(1e-200)
+        // printed "DDCSSNR: iteration limit" and ran 1000 iterations for an
+        // answer it had after one.
+        //
+        // A NARROWER CASE OF THE SAME THING SURVIVES, AND IT IS NOT NEW: below
+        // |a| ~ 1e-292 the THRESHOLD eps*|sin_r| underflows to zero too, so the
+        // sin test is `0 < 0` and stalls whatever the v test does.  HEAD does
+        // this identically -- sincos(1e-300) prints the same iteration limit
+        // before this commit and after it -- so it is the DD exposure of KI-25,
+        // which ff_math.hpp fixed for FF with `<=` and DD never did.  It is a
+        // behaviour change of its own and does not belong bundled in here; the
+        // answer is correct either way, the cost is 1000 wasted iterations.
+        if (detail::fabs(sterm.hi) <  eps * detail::fabs(sin_r.hi) &&
+            detail::fabs(vterm.hi) <= eps * detail::fabs(v_r.hi)) break;
         // break, not return: returning here would leave x/y unassigned.
         if (k == itrmx) { XPMATH_PRINTF("DDCSSNR: iteration limit\n"); break; }
     }
 
-    // Joint doubling nq times: sin(2x) = 2*sin(x)*cos(x), cos(2x) = cos^2(x) - sin^2(x).
-    // Both series are carried through; the sine is never reconstructed from the
-    // cosine via +/-sqrt(1 - cos^2). That reconstruction (a) was only sign-correct
-    // for |r_mod| < pi, which the old round_to_nearest_int reduction did not
-    // guarantee at half-integer near-ties -- Payne-Hanek does, |r_mod| <= pi/4 by
-    // construction -- and (b) amplifies the relative error of cos by cot^2(r_mod),
-    // which diverges as r_mod -> 0. (b) alone still rules it out, and the joint
-    // form matches ff/qf/tf_math.hpp. See KI-4.
-    for (int j = 0; j < nq; ++j) {
-        DoubleDouble new_sin = multiply_scalar(multiply(sin_r, cos_r), 2.0);
-        DoubleDouble new_cos = subtract(multiply(cos_r, cos_r), multiply(sin_r, sin_r));
+    // Joint doubling nq times, in (sin, v).  Both series are carried through;
+    // the sine is never reconstructed from the cosine via +/-sqrt(1 - cos^2).
+    // That reconstruction (a) was only sign-correct for |r_mod| < pi, which the
+    // old round_to_nearest_int reduction did not guarantee at half-integer
+    // near-ties -- Payne-Hanek does, |r_mod| <= pi/4 by construction -- and
+    // (b) amplifies the relative error of cos by cot^2(r_mod), which diverges
+    // as r_mod -> 0. (b) alone still rules it out.  See KI-4.
+    for (int q = 0; q < nq; ++q) {           // q, not j: j is the quadrant
+        const DoubleDouble c_q = subtract(DoubleDouble(1.0), v_r);
+        const DoubleDouble new_sin = multiply_scalar(multiply(sin_r, c_q), 2.0);
+        v_r   = multiply_scalar(multiply(sin_r, sin_r), 2.0);   // old sin_r
         sin_r = new_sin;
-        cos_r = new_cos;
     }
+    // The single place the leading 1 is reintroduced, after all amplification.
+    DoubleDouble cos_r = subtract(DoubleDouble(1.0), v_r);
 
     // KI-26.  CODOMAIN GUARD.  sin and cos are bounded by 1 for every finite
     // input; a value outside [-1, 1] — and above all inf or NaN — is wrong under

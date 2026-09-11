@@ -67,7 +67,14 @@
 //       scripts/probe_trig_series.cpp -o /tmp/probe_trig_series -lmpfr -lgmp
 //   /tmp/probe_trig_series            # all backends, all arms, all families
 //   /tmp/probe_trig_series --terms    # series length each arm actually runs
-//   /tmp/probe_trig_series --win-nq 0 --win-ship    # point the third arm elsewhere
+//   /tmp/probe_trig_series --at 91.106186954104   # every arm at ONE argument,
+//                                     # ordinary and exact-reduction, all 3 FP32
+//
+// The knobs exist to point the WINNER arm somewhere else, which is what makes
+// the fidelity check below falsifiable rather than decorative:
+//   --win-nq N        DD winner's nq          (default 5 = shipped)
+//   --win-nq-f32 N    FP32 winners' nq        (default 0 = shipped)
+//   --win-ship        winner reverts to the (sin, cos) form
 //
 // ===========================================================================
 // WHAT IT MEASURED, and what Phase 2 therefore shipped
@@ -120,13 +127,54 @@
 //    (Run at `vform nq=0` the same arm DOES show headroom — 2.4552 -> 1.0298 at
 //    x = 3.5 — so the check is not vacuous.)
 //
-// FIDELITY CHECK.  The `ship` arm is compared limb-for-limb against xp::sincos
-// on every grid point, because an arm that is not actually the shipped code
-// makes every row above meaningless.  It reports 8/1636 (FF), 6/1636 (TF),
-// 8/1636 (QF) mismatches, ALL of them at the FP32 magnitude bails (first at
-// x = 1e30 for FF/QF, x = 4.0156e151 for TF), which this probe does not
-// replicate.  DD matches everywhere.  Those points are state U in the sweep and
-// carry no verdict, so they cannot inform the choice either way.
+// 5. WHAT SETTLED TF AND FF IS INVISIBLE TO THE SWEEP'S SCORED POPULATION.
+//    At the shipped nq, x = 1e-30 carries 2.6e7 ulps on TF and 1.3e15 on QF;
+//    at nq = 0 both are exactly 0.  Those rows are state U — the sweep gives
+//    them no verdict, so they appear in neither the gate nor any population
+//    statistic (docs/CORRECTNESS.md).  On TF the scored population is a near
+//    tie between nq=0 and the shipped nq, and this is the whole difference.
+//
+//    FF is the genuinely close call and is worth stating against itself.  On
+//    the SWEEP at kappa <= 4, nq=2 wins the scored worst case: 3.1691 vs
+//    4.0216 for nq=0.  It is still rejected, because that 0.85 ulps is one
+//    cell, and at x = 1e-31 nq=2 costs 7.8886 ulps where nq=0 costs none.  FF
+//    also has the weakest subnormal exposure of the three (2nd limb at
+//    2^(e-24), subnormal only below |x| ~ 2^-102), which is exactly why the
+//    margin is thin here and decisive on TF/QF.  Choosing nq=0 for FF is
+//    partly a uniformity call and is labelled as one.
+//
+// 6. QF'S REMAINING 43.3832 IS INHERENT, PROVEN BY MEASUREMENT, NOT DOCUMENTED
+//    AS A LIMITATION.  At x = 91.106186954104 three arms agree to the digit:
+//      vform nq=0                                      43.3832
+//      ^exact nq=0   (same core on the 400-bit exact r_mod)   43.3832
+//      repr r_mod    (ulps of merely ROUNDING that exact
+//                     r_mod into a QuadFloat, no series at all)  43.3832
+//    The argument has already lost that much to the format before any series
+//    sees it, so no core and no reduction can recover it.  Contrast nq=5,
+//    where all three read 1029.8804 — that one was ours, and it went away.
+//
+// FIDELITY CHECK.  The WINNER arm — the one whose numbers are quoted above and
+// shipped — is compared limb-for-limb against xp::sincos on every grid point,
+// because an arm that is not actually the shipped code makes every row above
+// meaningless.  As shipped it is clean: 0 of 1636 (DD) and 0 of 1624 (FF, TF,
+// QF) compared points differ.
+//
+// The 12 skipped FP32 points per backend are guard exits — the |x| >= 1e30
+// magnitude bail (FF/QF) and the KI-26 codomain guard (TF) — which this probe
+// deliberately does not model.  They are counted and printed rather than
+// silently dropped, so the restriction is visible.  An earlier version of this
+// check compared the `ship` arm instead and reported 8/6/8 "mismatches" that
+// were all exactly these guard exits; that was noise, and it is why they are
+// now accounted for explicitly.
+//
+// The check is poisoned three ways and is NOT vacuous.  The MINIMAL
+// perturbation already discriminates, which is the point — moving nq by one is
+// the smallest change that could possibly be made, and it is caught:
+//   --win-nq-f32 1   FF 420, TF 492, QF 1380 of 1624 differ   (DD untouched,
+//                                                              correctly: the
+//                                                              knob is FP32only)
+//   --win-nq-f32 4   FF 448, TF 492, QF 1492
+//   --win-ship       all four mismatch: DD 482/1636, FF 312, TF 284, QF 332
 
 #include <xp/dd_math.hpp>
 #include <xp/ff_math.hpp>
@@ -494,13 +542,15 @@ struct QFTraits {
 
 template <class Tr>
 static void fp32_core_ship(typename Tr::T r_mod, int nq, bool fact,
-                           typename Tr::T& s, typename Tr::T& c) {
+                           typename Tr::T& s, typename Tr::T& c,
+                           int* terms = nullptr) {
     using T = typename Tr::T;
     T r  = Tr::scale_down(r_mod, nq);
     T r2 = Tr::square(r);
     s = r;              c  = T(1.0f);
     T st = r,           ct = T(1.0f);
-    for (int k = 1; k <= 100; ++k) {
+    int k = 1;
+    for (; k <= 100; ++k) {
         st = divide_scalar(multiply(st, r2), -(float)((2*k) * (2*k + 1)));
         s  = add(s, st);
         ct = divide_scalar(multiply(ct, r2), -(float)((2*k - 1) * (2*k)));
@@ -508,6 +558,7 @@ static void fp32_core_ship(typename Tr::T r_mod, int nq, bool fact,
         if (detail::fabs(Tr::lead(st)) <= Tr::eps * detail::fabs(Tr::lead(s)) &&
             detail::fabs(Tr::lead(ct)) <= Tr::eps) break;
     }
+    if (terms) *terms = k;
     for (int d = 0; d < nq; ++d) {
         const T ns = Tr::dbl(multiply(s, c));
         const T nc = fact ? multiply(subtract(c, s), add(c, s))
@@ -518,7 +569,8 @@ static void fp32_core_ship(typename Tr::T r_mod, int nq, bool fact,
 
 template <class Tr>
 static void fp32_core_vform(typename Tr::T r_mod, int nq,
-                            typename Tr::T& s, typename Tr::T& c) {
+                            typename Tr::T& s, typename Tr::T& c,
+                            int* terms = nullptr) {
     using T = typename Tr::T;
     T r  = Tr::scale_down(r_mod, nq);
     T r2 = Tr::square(r);
@@ -526,7 +578,8 @@ static void fp32_core_vform(typename Tr::T r_mod, int nq,
     T v  = vt;
     T st = r;
     s = r;
-    for (int k = 1; k <= 100; ++k) {
+    int k = 1;
+    for (; k <= 100; ++k) {
         st = divide_scalar(multiply(st, r2), -(float)((2*k) * (2*k + 1)));
         s  = add(s, st);
         vt = divide_scalar(multiply(vt, r2), -(float)((2*k + 1) * (2*k + 2)));
@@ -534,6 +587,7 @@ static void fp32_core_vform(typename Tr::T r_mod, int nq,
         if (detail::fabs(Tr::lead(st)) <= Tr::eps * detail::fabs(Tr::lead(s)) &&
             detail::fabs(Tr::lead(vt)) <= Tr::eps * detail::fabs(Tr::lead(v))) break;
     }
+    if (terms) *terms = k;
     for (int d = 0; d < nq; ++d) {
         const T cc = subtract(T(1.0f), v);
         const T ns = Tr::dbl(multiply(s, cc));
@@ -547,7 +601,8 @@ static void fp32_core_vform(typename Tr::T r_mod, int nq,
 // band (2^nq * FLT_MIN) and none of them carries DD's 1e60 magnitude bail.
 template <class Tr>
 static void fp32_eval(double xd, int nq, bool vform, bool fact,
-                      typename Tr::T& cosa, typename Tr::T& sina) {
+                      typename Tr::T& cosa, typename Tr::T& sina,
+                      int* terms = nullptr) {
     using T = typename Tr::T;
     // T(double), not T((float)xd): sweep_accuracy builds its argument with the
     // double constructor, which SPLITS across the limbs.  Truncating to one
@@ -555,12 +610,74 @@ static void fp32_eval(double xd, int nq, bool vform, bool fact,
     // one it is scored on, and the reference below is taken from the stored
     // limbs for the same reason (the sweep's LAYER 0, f(x_stored)).
     const T a(xd);
+    if (terms) *terms = 0;
     if (Tr::lead(a) == 0.0f) { cosa = T(1.0f); sina = T(0.0f); return; }
     if (detail::fabs(Tr::lead(a)) < (float)(1 << nq) * 1.17549435e-38f) {
         cosa = T(1.0f); sina = a; return;
     }
     T r_mod;
     const int j = Tr::reduce(a, r_mod);
+    T s, c;
+    if (vform) fp32_core_vform<Tr>(r_mod, nq, s, c, terms);
+    else       fp32_core_ship <Tr>(r_mod, nq, fact, s, c, terms);
+    if (j == 0)      { cosa = c;         sina = s; }
+    else if (j == 1) { cosa = negate(s); sina = c; }
+    else if (j == 2) { cosa = negate(c); sina = negate(s); }
+    else             { cosa = s;         sina = negate(c); }
+}
+
+// The FP32 third arm, exactly analogous to dd_eval_exactred: same core, but on
+// the r_mod computed at 400 bits from the exact stored limbs and rounded once
+// into the backend's own format, instead of on xp_ph_reduce's r_mod.  If a
+// residual does not move, the reduction has no headroom left at that point and
+// what remains belongs to the core or to the format.  Needed because Phase 2's
+// residual on QF sits at a near-zero of sin (kappa ~ 7e19), where "the series"
+// and "not enough guard words in the reduction" predict the same symptom and
+// only this arm separates them.
+template <class Tr>
+static typename Tr::T mpfr_to_T(mpfr_srcptr src) {
+    // Peel one float per limb.  mpfr_get_flt rounds 400 bits straight to float;
+    // going via mpfr_get_d and casting would double-round the last limb.
+    mpfr_t t;
+    mpfr_init2(t, kPrec);
+    mpfr_set(t, src, MPFR_RNDN);
+    typename Tr::T r(0.0f);
+    for (int i = 0; i < Tr::words; ++i) {
+        const float f = mpfr_get_flt(t, MPFR_RNDN);
+        if (f == 0.0f) break;
+        r = add(r, typename Tr::T(f));
+        mpfr_sub_d(t, t, (double)f, MPFR_RNDN);
+    }
+    mpfr_clear(t);
+    return r;
+}
+
+template <class Tr>
+static void fp32_eval_exactred(double xd, int nq, bool vform, bool fact,
+                               typename Tr::T& cosa, typename Tr::T& sina) {
+    using T = typename Tr::T;
+    const T a(xd);
+    if (Tr::lead(a) == 0.0f) { cosa = T(1.0f); sina = T(0.0f); return; }
+    mpfr_t X, Q, P;
+    mpfr_inits2(kPrec, X, Q, P, (mpfr_ptr)0);
+    double aw[4];
+    Tr::limbs(a, aw);
+    exact_of(X, aw, Tr::words);
+    mpfr_const_pi(P, MPFR_RNDN);
+    mpfr_div_2ui(P, P, 1, MPFR_RNDN);              // P = pi/2 at 400 bits
+    mpfr_div(Q, X, P, MPFR_RNDN);
+    mpfr_rint(Q, Q, MPFR_RNDN);
+    mpfr_t M, F;
+    mpfr_inits2(kPrec, M, F, (mpfr_ptr)0);
+    mpfr_set_ui(F, 4, MPFR_RNDN);
+    mpfr_fmod(M, Q, F, MPFR_RNDN);
+    long n = mpfr_get_si(M, MPFR_RNDN);
+    mpfr_clears(M, F, (mpfr_ptr)0);
+    mpfr_mul(Q, Q, P, MPFR_RNDN);
+    mpfr_sub(X, X, Q, MPFR_RNDN);                  // X = exact r_mod
+    const T r_mod = mpfr_to_T<Tr>(X);
+    mpfr_clears(X, Q, P, (mpfr_ptr)0);
+    const int j = (int)(((n % 4) + 4) % 4);
     T s, c;
     if (vform) fp32_core_vform<Tr>(r_mod, nq, s, c);
     else       fp32_core_ship <Tr>(r_mod, nq, fact, s, c);
@@ -596,6 +713,64 @@ struct ArmSpec { const char* name; int nq; Arm arm; bool vform; };
 // any candidate without a rebuild.
 static int  kWinNq    = 5;
 static bool kWinVform = true;
+// The FP32 backends chose a different nq from DD, so the fidelity check needs
+// its own knob.  --win-nq-f32 N re-points it, and that is exactly how it is
+// poisoned: at any N but the shipped 0 every FP32 line must read MISMATCH.
+static int  kWinNqF32 = 0;
+
+// --at X: everything this probe knows about ONE argument, for one FP32
+// backend, with the exact-reduction twin of every arm beside it.  Added
+// because the FF choice came down to single cells that the aggregate tables
+// cannot explain: a residual that survives `exact red` is the series, one that
+// does not is reduction headroom and belongs to Phase 3, and the two are
+// indistinguishable in a max.
+template <class Tr>
+static void report_at(const char* be, double x) {
+    mpfr_t X, S, C;
+    mpfr_inits2(kPrec, X, S, C, (mpfr_ptr)0);
+    const typename Tr::T a(x);
+    double aw[4];
+    Tr::limbs(a, aw);
+    exact_of(X, aw, Tr::words);
+    mpfr_t K, TN;
+    mpfr_inits2(kPrec, K, TN, (mpfr_ptr)0);
+    mpfr_tan(TN, X, MPFR_RNDN);
+    mpfr_div(K, X, TN, MPFR_RNDN); mpfr_abs(K, K, MPFR_RNDN);
+    const double ks = mpfr_get_d(K, MPFR_RNDN);
+    mpfr_mul(K, X, TN, MPFR_RNDN); mpfr_abs(K, K, MPFR_RNDN);
+    const double kc = mpfr_get_d(K, MPFR_RNDN);
+    mpfr_clears(K, TN, (mpfr_ptr)0);
+    std::printf("=== %s at x=%.17g   (kappa: sin %.4g, cos %.4g) ===\n",
+                be, x, ks, kc);
+    std::printf("  %-14s %10s %10s %10s %8s\n",
+                "arm", "sin ulps", "cos ulps", "tan ulps", "terms");
+    for (int nq = 0; nq <= Tr::ship_nq; ++nq) {
+        for (int xr = 0; xr < 2; ++xr) {
+            typename Tr::T cc, ss;
+            int nterms = 0;
+            if (xr) fp32_eval_exactred<Tr>(x, nq, true, false, cc, ss);
+            else    fp32_eval<Tr>(x, nq, true, false, cc, ss, &nterms);
+            double sw[4], cw[4], tw[4];
+            Tr::limbs(ss, sw); Tr::limbs(cc, cw);
+            const typename Tr::T t = divide(ss, cc);
+            Tr::limbs(t, tw);
+            mpfr_sin(S, X, MPFR_RNDN);
+            mpfr_cos(C, X, MPFR_RNDN);
+            const double us = ulps_of(S, sw, Tr::words, Tr::p);
+            const double uc = ulps_of(C, cw, Tr::words, Tr::p);
+            mpfr_tan(C, X, MPFR_RNDN);
+            const double ut = ulps_of(C, tw, Tr::words, Tr::p);
+            char nm[32];
+            std::snprintf(nm, sizeof nm, "%svform nq=%d", xr ? "^exact " : "", nq);
+            if (xr) std::printf("  %-14s %10.4f %10.4f %10.4f %8s\n",
+                                nm, us, uc, ut, "-");
+            else    std::printf("  %-14s %10.4f %10.4f %10.4f %8d\n",
+                                nm, us, uc, ut, nterms);
+        }
+    }
+    std::printf("\n");
+    mpfr_clears(X, S, C, (mpfr_ptr)0);
+}
 
 int main(int argc, char** argv) {
     bool terms_mode = false;
@@ -604,6 +779,15 @@ int main(int argc, char** argv) {
         else if (std::strcmp(argv[i], "--win-ship") == 0) kWinVform = false;
         else if (std::strcmp(argv[i], "--win-nq") == 0 && i + 1 < argc)
             kWinNq = std::atoi(argv[++i]);
+        else if (std::strcmp(argv[i], "--win-nq-f32") == 0 && i + 1 < argc)
+            kWinNqF32 = std::atoi(argv[++i]);
+        else if (std::strcmp(argv[i], "--at") == 0 && i + 1 < argc) {
+            const double x = std::atof(argv[++i]);
+            report_at<FFTraits>("FF", x);
+            report_at<TFTraits>("TF", x);
+            report_at<QFTraits>("QF", x);
+            return 0;
+        }
     }
 
     const std::vector<Pt> grid = build_grid();
@@ -644,6 +828,38 @@ int main(int argc, char** argv) {
             }
             std::printf("  %-12s %8d %8d\n", dd_arms[i].name, worst, dd_arms[i].nq);
         }
+        // The FP32 backends set their own eps, so their term counts do not
+        // follow from DD's -- the exp work already proved piece counts do not
+        // transfer by derivation.  nq = 0 buys accuracy with series length, and
+        // this is where that price is read off rather than estimated.
+        std::printf("\n  %-6s %-8s %8s %8s\n", "be", "arm", "max k", "+nq");
+        auto tcount = [&](auto tr_tag, const char* be, int nq, bool vform,
+                          const char* label) {
+            using Tr = decltype(tr_tag);
+            int worst = 0;
+            for (const Pt& p : grid) {
+                // |x| < 1e30 is FF's and QF's shipped magnitude bail, and above
+                // it this probe has no bail of its own: the reduction returns
+                // garbage, every comparison against a NaN is false, and the
+                // loop runs to its cap.  Counting those would report 101 terms
+                // for arms that in fact stop at 6, which is a cost figure for
+                // code that never executes.
+                if (!(std::fabs(p.x) < 1.0e30)) continue;
+                typename Tr::T cc, ss; int k = 0;
+                fp32_eval<Tr>(p.x, nq, vform, false, cc, ss, &k);
+                worst = std::max(worst, k);
+            }
+            std::printf("  %-6s %-8s %8d %8d\n", be, label, worst, nq);
+        };
+        tcount(FFTraits{}, "FF", FFTraits::ship_nq, false, "ship");
+        tcount(FFTraits{}, "FF", FFTraits::ship_nq, true,  "vform");
+        tcount(FFTraits{}, "FF", 0,                 true,  "vform0");
+        tcount(TFTraits{}, "TF", TFTraits::ship_nq, false, "ship");
+        tcount(TFTraits{}, "TF", TFTraits::ship_nq, true,  "vform");
+        tcount(TFTraits{}, "TF", 0,                 true,  "vform0");
+        tcount(QFTraits{}, "QF", QFTraits::ship_nq, false, "ship");
+        tcount(QFTraits{}, "QF", QFTraits::ship_nq, true,  "vform");
+        tcount(QFTraits{}, "QF", 0,                 true,  "vform0");
         mpfr_clears(X, S, C, (mpfr_ptr)0);
         return 0;
     }
@@ -750,12 +966,65 @@ int main(int argc, char** argv) {
         }
         std::printf("--- fidelity: WINNER (%s nq=%d) vs xp::sincos, limb for "
                     "limb ---\n", kWinVform ? "vform" : "ship", kWinNq);
-        std::printf("  DD  %s  (%d of %zu points differ%s)\n\n",
+        std::printf("  DD  %s  (%d of %zu points differ%s)\n",
                     bad ? "MISMATCH -- dd_math.hpp is NOT running this core"
                         : "identical -- dd_math.hpp runs exactly this core",
                     bad, grid.size(),
                     bad ? (std::string(", first at x=") +
                            std::to_string(first_x)).c_str() : "");
+
+        // The same check for the three FP32 headers, against the arm each one
+        // shipped after Phase 2: v-form at nq = 0.  Same purpose as the DD line
+        // -- without it every FP32 number below is a statement about this file
+        // rather than about ff/tf/qf_math.hpp.  --win-nq re-points it, which is
+        // how it gets poisoned: at any nq but 0 it must report MISMATCH.
+        //
+        // Out-param order is NOT uniform and is taken from each header rather
+        // than assumed: DD and FF write cos into the first parameter, TF and QF
+        // write sin.  Getting it backwards would make the check compare cos
+        // against sin and fail loudly, which is the safe direction, but it
+        // would also be a false alarm.
+        auto fid = [&](auto tr_tag, const char* be, bool sin_first) {
+            using Tr = decltype(tr_tag);
+            using T = typename Tr::T;
+            int nbad = 0, nskip = 0; double fx = 0.0;
+            for (const Pt& p : grid) {
+                T cc, ss, o1, o2;
+                const T a(p.x);
+                xp::sincos(a, o1, o2);
+                // The headers carry guards this file's arm deliberately does
+                // not model: FF and QF bail above 1e30, and all three can exit
+                // through the KI-26 codomain guard, both of which return the
+                // (cos, sin) = (1, 0) identity point.  Those exits are not the
+                // series, so comparing them here would test the wrong thing;
+                // they are SKIPPED and counted, so the restriction is visible
+                // rather than silent.
+                const T& gs = sin_first ? o1 : o2;
+                const T& gc = sin_first ? o2 : o1;
+                if (!(std::fabs(p.x) < 1.0e30) ||
+                    (p.x != 0.0 && Tr::lead(gc) == 1.0f
+                                && Tr::lead(gs) == 0.0f)) { ++nskip; continue; }
+                fp32_eval<Tr>(p.x, kWinNqF32, kWinVform, false, cc, ss);
+                double sw[4], cw[4], gsw[4], gcw[4];
+                Tr::limbs(ss, sw);  Tr::limbs(cc, cw);
+                Tr::limbs(gs, gsw); Tr::limbs(gc, gcw);
+                bool diff = false;
+                for (int w = 0; w < Tr::words; ++w)
+                    if (sw[w] != gsw[w] || cw[w] != gcw[w]) diff = true;
+                if (diff) { if (!nbad) fx = p.x; ++nbad; }
+            }
+            std::printf("  %-3s %s  (%d of %zu compared differ%s; "
+                        "%d skipped at a guard exit)\n", be,
+                        nbad ? "MISMATCH -- header is NOT running this core"
+                             : "identical -- header runs exactly this core",
+                        nbad, grid.size() - (size_t)nskip,
+                        nbad ? (std::string(", first at x=") +
+                                std::to_string(fx)).c_str() : "", nskip);
+        };
+        fid(FFTraits{}, "FF", false);   // ff_math.hpp: cos, sin
+        fid(TFTraits{}, "TF", true);    // tf_math.hpp: sin, cos
+        fid(QFTraits{}, "QF", true);    // qf_math.hpp: sin, cos
+        std::printf("\n");
     }
 
     // ---------------------------------------------------------------------
@@ -777,47 +1046,19 @@ int main(int argc, char** argv) {
         struct FA { const char* name; int nq; bool vform; bool fact; };
         std::printf("FP32 BACKENDS -- same arms, each at its own p.\n\n");
 
-        // FIDELITY CHECK, and it is not a formality.  Every number in the
-        // tables below is a comparison against the `ship` arm, so if that arm
-        // is not the shipped code the whole comparison is void.  This asserts
-        // it limb-for-limb against xp::sincos itself over the entire grid.
-        // The FP32 backends do not share one loop shape -- TF tests
-        // convergence BEFORE the update in a while loop while FF and QF test
-        // after, in a for loop -- so the generic arm above is a transcription
-        // and transcriptions are exactly what this repo has been burned by.
-        std::printf("--- fidelity: `ship nq=S` vs xp::sincos, limb for limb ---\n");
-        auto fidelity = [&](auto tr_tag, const char* be) {
-            using Tr = decltype(tr_tag);
-            using T  = typename Tr::T;
-            int bad = 0; double worst_x = 0.0;
-            for (const Pt& p : grid) {
-                T cc, ss;
-                fp32_eval<Tr>(p.x, Tr::ship_nq, false, false, cc, ss);
-                T sc, ss2;
-                const T a(p.x);
-                // DD/FF write cos into the FIRST out-param, TF/QF sin first.
-                if (Tr::p == 48) xp::sincos(a, sc, ss2);
-                else             xp::sincos(a, ss2, sc);
-                double w1[4], w2[4], w3[4], w4[4];
-                Tr::limbs(ss, w1); Tr::limbs(ss2, w2);
-                Tr::limbs(cc, w3); Tr::limbs(sc,  w4);
-                for (int i = 0; i < Tr::words; ++i)
-                    if (w1[i] != w2[i] || w3[i] != w4[i]) {
-                        if (!bad) worst_x = p.x;
-                        ++bad; break;
-                    }
-            }
-            std::printf("  %-3s %s  (%d of %zu points differ%s)\n", be,
-                        bad ? "MISMATCH -- the arm is NOT the shipped code"
-                            : "identical",
-                        bad, grid.size(),
-                        bad ? (std::string(", first at x=") +
-                               std::to_string(worst_x)).c_str() : "");
-        };
-        fidelity(FFTraits{}, "FF");
-        fidelity(TFTraits{}, "TF");
-        fidelity(QFTraits{}, "QF");
-        std::printf("\n");
+        // The `ship nq=S` arm below is now a HISTORICAL RECORD, not the
+        // shipped code: after Phase 2 the three FP32 headers run the v-form at
+        // nq = 0.  The check that used to live here compared that arm against
+        // xp::sincos limb-for-limb, and it can only report MISMATCH now, so it
+        // has been retired rather than left to cry wolf.  Its job -- proving
+        // the numbers below describe ff/tf/qf_math.hpp and not this file -- is
+        // done by the fidelity block further up, which compares the WINNING
+        // arm against the headers and is poisoned with --win-nq-f32.
+        //
+        // What the retirement costs: the pre-Phase-2 columns are no longer
+        // pinned to a header that exists.  They were pinned at the time they
+        // were measured (0 of 1636 differ, recorded in the header block above),
+        // and git has the code they were pinned to.
 
         auto run = [&](auto tr_tag, const char* be) {
             using Tr = decltype(tr_tag);
@@ -897,16 +1138,23 @@ int main(int argc, char** argv) {
         std::printf("  %-11s %12s %12s %12s %12s\n", "arm",
                     "sin 91.106", "tan 91.106", "sin 182.21", "tan 182.21");
         const double qpts[2] = { 91.106186954104004, 182.21237390820801 };
+        // `exact red` rows use the 400-bit r_mod; a row that matches its
+        // ordinary twin has no reduction headroom left at that argument.
         const FA qarms[] = {
             { "ship  nq=5", 5, false, false }, { "vform nq=5", 5, true, false },
             { "vform nq=3", 3, true,  false }, { "vform nq=1", 1, true, false },
             { "vform nq=0", 0, true,  false }, { "ship  nq=0", 0, false, false },
+            { "^exact nq=5", 5, true, false }, { "^exact nq=0", 0, true, false },
         };
         for (const FA& A : qarms) {
+            const bool xred = A.name[0] == '^';
             double col[4];
             for (int i = 0; i < 2; ++i) {
                 QuadFloat cc, ss;
-                fp32_eval<QFTraits>(qpts[i], A.nq, A.vform, A.fact, cc, ss);
+                if (xred) fp32_eval_exactred<QFTraits>(qpts[i], A.nq, A.vform,
+                                                       A.fact, cc, ss);
+                else      fp32_eval<QFTraits>(qpts[i], A.nq, A.vform, A.fact,
+                                              cc, ss);
                 const QuadFloat a(qpts[i]);
                 double aw[4]; QFTraits::limbs(a, aw);
                 exact_of(X, aw, 4);
@@ -923,6 +1171,35 @@ int main(int argc, char** argv) {
             }
             std::printf("  %-11s %12.4f %12.4f %12.4f %12.4f\n",
                         A.name, col[0], col[1], col[2], col[3]);
+        }
+        // The floor under all of the above: what it COSTS QuadFloat merely to
+        // hold the reduced argument.  r_mod at 91.106 is ~1.2e-18, so a
+        // QuadFloat's fourth limb sits near 2^-132 -- under FLT_MIN=2^-126 --
+        // and the bits below that are simply not representable.  If this row
+        // matches `^exact nq=0`, no series and no reduction can do better,
+        // because the input to both has already lost exactly that much.
+        {
+            double rep[2];
+            for (int i = 0; i < 2; ++i) {
+                mpfr_t Xr, Qr, Pr;
+                mpfr_inits2(kPrec, Xr, Qr, Pr, (mpfr_ptr)0);
+                const QuadFloat a(qpts[i]);
+                double aw[4]; QFTraits::limbs(a, aw);
+                exact_of(Xr, aw, 4);
+                mpfr_const_pi(Pr, MPFR_RNDN);
+                mpfr_div_2ui(Pr, Pr, 1, MPFR_RNDN);
+                mpfr_div(Qr, Xr, Pr, MPFR_RNDN);
+                mpfr_rint(Qr, Qr, MPFR_RNDN);
+                mpfr_mul(Qr, Qr, Pr, MPFR_RNDN);
+                mpfr_sub(Xr, Xr, Qr, MPFR_RNDN);          // exact r_mod
+                const QuadFloat rq = mpfr_to_T<QFTraits>(Xr);
+                double rw[4]; QFTraits::limbs(rq, rw);
+                rep[i] = ulps_of(Xr, rw, 4, 96);          // cost of holding it
+                mpfr_clears(Xr, Qr, Pr, (mpfr_ptr)0);
+            }
+            std::printf("  %-11s %12.4f %12s %12.4f %12s   <- FORMAT FLOOR: ulps\n"
+                        "%56sof rounding the exact r_mod into QuadFloat\n",
+                        "repr r_mod", rep[0], "-", rep[1], "-", "");
         }
         std::printf("\n");
     }
