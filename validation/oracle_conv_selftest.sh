@@ -42,7 +42,10 @@ fail=0
 build_and_run() {   # <tag> <extra-defines...>
   local tag="$1"; shift
   local exe="${work}/sw_${tag}"
-  if ! "${CXX}" -O2 -std=c++17 -DNDEBUG -fext-numeric-literals -I "${inc}" \
+  # -DXPMATH_HAVE_MPFR is REQUIRED here: the MPFR oracle is compiled
+  # conditionally, and without this define every poisoned build would report
+  # "built without MPFR; nothing to check" and the poison would never fire.
+  if ! "${CXX}" -O2 -std=c++17 -DNDEBUG -DXPMATH_HAVE_MPFR=1 -fext-numeric-literals -I "${inc}" \
        "$@" "${src}" -o "${exe}" -lquadmath -lmpfr -lgmp \
        > "${work}/${tag}.build.log" 2>&1; then
     echo "  ${tag}: COMPILE FAILED (see ${work}/${tag}.build.log)"

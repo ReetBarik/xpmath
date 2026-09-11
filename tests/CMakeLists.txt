@@ -379,6 +379,23 @@ kokkos_ep_add_eft_test_contract_on(tf_fma_guard_test)  # -> tf_fma_guard_test_co
 # Both run the same binary over the same 428,592 points in about eight seconds,
 # so `ctest` alone is the whole correctness answer.
 #
+# MPFR is an OPTIONAL measurement dependency, not a library one. The headers
+# in include/xp/ never use it; only the sweep's alternate oracle and the trig
+# reduction table test do. CI runners do not carry libmpfr-dev, and making it
+# mandatory broke every build on a machine without it (see sweep_accuracy.cpp
+# :250). Find it, use it when present, and degrade honestly when absent.
+find_path(MPFR_INCLUDE_DIR mpfr.h)
+find_library(MPFR_LIBRARY NAMES mpfr)
+find_library(GMP_LIBRARY NAMES gmp)
+if(MPFR_INCLUDE_DIR AND MPFR_LIBRARY AND GMP_LIBRARY)
+  set(XPMATH_MPFR_FOUND TRUE)
+  message(STATUS "MPFR found: ${MPFR_LIBRARY} -- the --oracle=mpfr arm is available")
+else()
+  set(XPMATH_MPFR_FOUND FALSE)
+  message(STATUS "MPFR NOT found -- building without the --oracle=mpfr arm; "
+                 "trig_reduction_test and oracle_conv_test will be skipped")
+endif()
+
 # sweep_accuracy is a host-only tool: it needs libquadmath for the oracle and it
 # has no Kokkos in it. It is built here rather than in scripts/ so that a stale
 # hand-compiled binary in the source tree can never be what the gate runs.
@@ -388,7 +405,12 @@ target_compile_features(sweep_accuracy PRIVATE cxx_std_17)
 target_compile_options(sweep_accuracy PRIVATE -fext-numeric-literals)
 # MPFR is the alternate oracle (--oracle=mpfr): libquadmath mis-reduces
 # trig above ~1e40, so large-|x| rows need a reference that does not.
-target_link_libraries(sweep_accuracy PRIVATE quadmath mpfr gmp)
+target_link_libraries(sweep_accuracy PRIVATE quadmath)
+if(XPMATH_MPFR_FOUND)
+  target_include_directories(sweep_accuracy PRIVATE ${MPFR_INCLUDE_DIR})
+  target_link_libraries(sweep_accuracy PRIVATE ${MPFR_LIBRARY} ${GMP_LIBRARY})
+  target_compile_definitions(sweep_accuracy PRIVATE XPMATH_HAVE_MPFR=1)
+endif()
 
 add_test(NAME sweep_absolute_gate
          COMMAND sweep_accuracy --ulp
@@ -471,7 +493,8 @@ add_test(NAME exp_reduction_selftest
 # verdict on sin/cos/tan: this scores the reduction, which the sweep cannot see.
 add_executable(trig_reduction_test trig_reduction_test.cpp)
 target_include_directories(trig_reduction_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(trig_reduction_test PRIVATE mpfr gmp)
+target_include_directories(trig_reduction_test PRIVATE ${MPFR_INCLUDE_DIR})
+target_link_libraries(trig_reduction_test PRIVATE ${MPFR_LIBRARY} ${GMP_LIBRARY})
 add_test(NAME trig_reduction_test COMMAND trig_reduction_test)
 
 # ... and the self-test that proves it can fail: four poisons, plus a check

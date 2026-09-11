@@ -247,7 +247,10 @@
 #include "../include/xp/tf_complex.hpp"
 
 #include <quadmath.h>
+#if defined(XPMATH_HAVE_MPFR)
 #include <mpfr.h>
+#endif
+
 
 #include <cmath>
 #include <cstdint>
@@ -311,7 +314,9 @@ uint64_t stream_seed(uint64_t base, const char* name, unsigned kind) {
 // machine actually differ.
 // ---------------------------------------------------------------------------
 extern bool g_oracle_mpfr;
+#if defined(XPMATH_HAVE_MPFR)
 uint64_t mpfr_oracle_fingerprint(uint64_t h);   // defined with the MPFR oracle
+#endif
 uint64_t oracle_fingerprint() {
   // Seeded by WHICH oracle is in use: an MPFR-scored baseline and a
   // libquadmath-scored one are not comparable, and the fingerprint is the
@@ -337,7 +342,9 @@ uint64_t oracle_fingerprint() {
   // can change. When MPFR is selected, hash values that have actually travelled
   // the q_to_mpfr -> mpfr -> mpfr_to_q chain, so a change in the conversions
   // moves the fingerprint instead of silently rescoring the sweep.
+#if defined(XPMATH_HAVE_MPFR)
   if (g_oracle_mpfr) h = mpfr_oracle_fingerprint(h);
+#endif
   return h;
 }
 
@@ -706,6 +713,7 @@ __float128 round_ties_even_q(__float128 a) {
   return t + copysignq((__float128)1.0, a);
 }
 
+#if defined(XPMATH_HAVE_MPFR)
 // ---------------------------------------------------------------------------
 // MPFR ORACLE (real path only), enabled with --oracle=mpfr.
 //
@@ -906,6 +914,7 @@ void q_to_mpfr_by_doubles(mpfr_t out, __float128 v) {
   mpfr_add_d(out, out, d2, MPFR_RNDN);
 }
 
+#if defined(XPMATH_HAVE_MPFR)
 int oracle_conv_selftest() {
   int fails = 0;
   auto bad = [&fails](const char* what, const char* detail) {
@@ -1083,6 +1092,8 @@ int oracle_conv_selftest() {
               XPMATH_POISON_ORACLE_CONV);
   return fails ? 1 : 0;
 }
+#endif
+
 
 __float128 reference_real_mpfr(int id, __float128 a, __float128 b, __float128 c) {
   mpfr_t ma, mb, mc, r;
@@ -1141,6 +1152,17 @@ __float128 reference_real_mpfr(int id, __float128 a, __float128 b, __float128 c)
   mpfr_clears(ma, mb, mc, r, (mpfr_ptr)0);
   return out;
 }
+
+#else
+// Built without MPFR. --oracle=mpfr is refused at startup rather than
+// silently falling back to libquadmath: a run that LOOKS like it used the
+// better oracle but did not is worse than one that will not start.
+bool g_oracle_mpfr = false;
+__float128 reference_real_q_quad(int id, __float128 a, __float128 b, __float128 c);
+__float128 reference_real_mpfr(int id, __float128 a, __float128 b, __float128 c) {
+  return reference_real_q_quad(id, a, b, c);
+}
+#endif  // XPMATH_HAVE_MPFR
 
 // The quad-argument form. --classify needs to evaluate the oracle at PERTURBED
 // inputs, which are quad and not exactly representable as double, so the body
@@ -3501,11 +3523,28 @@ int main(int argc, char** argv) {
     else if (s == "--grid-out")  { grid_out = need("--grid-out"); }
     else if (s == "--oracle") {
       const std::string v = need("--oracle");
+#if defined(XPMATH_HAVE_MPFR)
       if (v == "mpfr")           g_oracle_mpfr = true;
+#else
+      if (v == "mpfr") {
+        std::fprintf(stderr,
+            "--oracle=mpfr: this binary was built without MPFR.\n"
+            "  Install libmpfr-dev and reconfigure; refusing to run rather\n"
+            "  than score against libquadmath while claiming otherwise.\n");
+        return 2;
+      }
+#endif
       else if (v == "quadmath")  g_oracle_mpfr = false;
       else { std::fprintf(stderr, "--oracle must be quadmath or mpfr\n"); return 2; }
     }
+#if defined(XPMATH_HAVE_MPFR)
     else if (s == "--oracle-selftest") { return oracle_conv_selftest(); }
+#else
+    else if (s == "--oracle-selftest") {
+      std::fprintf(stderr, "--oracle-selftest: built without MPFR; nothing to check.\n");
+      return 77;   // ctest SKIP, not a pass
+    }
+#endif
     else if (s == "--baseline")  { baseline = need("--baseline"); }
     else if (s == "--ulp")       { ulp_gate = true; }
     else if (s == "--ulp-allowance") { ulp_allowance = std::atof(need("--ulp-allowance")); }
