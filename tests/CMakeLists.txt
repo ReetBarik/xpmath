@@ -532,5 +532,9 @@ set_tests_properties(sweep_absolute_gate sweep_monotone_gate
                      PROPERTIES TIMEOUT 600)
 set_tests_properties(sweep_absolute_gate_selftest sweep_monotone_gate_selftest
                      PROPERTIES TIMEOUT 1200)
-# Five compiles of sweep_accuracy.cpp.
-set_tests_properties(oracle_conv_selftest PROPERTIES TIMEOUT 600)
+# Five compiles of sweep_accuracy.cpp. Guarded with the test itself: setting a
+# property on an unregistered test is a hard CMake error, which is how the
+# no-MPFR configure died at tests/CMakeLists.txt:536.
+if(XPMATH_MPFR_FOUND)
+  set_tests_properties(oracle_conv_selftest PROPERTIES TIMEOUT 600)
+endif()
