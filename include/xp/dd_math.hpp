@@ -63,6 +63,7 @@
 //     and explicit ADL only.
 
 #include <xp/config.hpp>
+#include <xp/trig_reduction.hpp>
 #include <cstdint>
 #include <cstring>
 #include <cmath>
@@ -847,7 +848,7 @@ XPMATH_INLINE_FUNCTION void sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble
     // KI-12 residual.  Small-argument short circuit over the degenerate
     // reduction band only; full derivation at ff_math.hpp:sincos.  DD's limbs
     // are FP64, so the band is |a| < 2^nq * DBL_MIN: below it the leading word
-    // of r = s3/2^nq is subnormal and sheds bits before the first Taylor term.
+    // of r = r_mod/2^nq is subnormal and sheds bits before the first Taylor term.
     // This strictly contains the r.hi == 0 guard further down (kept: it costs
     // nothing and documents the same corner from the other side) and adds the
     // shed-bits half of the band, which that guard misses.  A wider cut — at
@@ -857,6 +858,24 @@ XPMATH_INLINE_FUNCTION void sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble
         x = DoubleDouble(1.0); y = a; return;
     }
     // KI-12 audit: |a.hi|, not a.hi — see ff_math.hpp:sincos.
+    //
+    // THIS BAIL IS NOW A PURE LOSS, KEPT DELIBERATELY AND MEASURED.  It exists
+    // because the pre-Payne-Hanek reduction produced nothing usable out here.
+    // Payne-Hanek does: over 3995 random arguments drawn log-uniformly across
+    // [1e60, DBL_MAX], the reduction below answers to a worst 50.79 ulps (sin)
+    // and 51.14 ulps (cos), while this bail's identity point is wrong on
+    // 3995 of 3995 of them, by up to 8.11e31 (sin) and 1.66e36 (cos) ulps.
+    // Reproduce with
+    //   scripts/probe_trig_stages.cpp --range 1e60 1.7976931348623157e308 4000
+    // The sweep sees the same at the only 6 grid points out here, the hardred
+    // pairs +/-4.0156e151, +/-1.8327e198 and +/-5.3194e255: all 18 DD trig
+    // rows read state U, sin and tan at 8.11296e31 ulps and cos from 3.5e25
+    // to 1.7e50.
+    //
+    // Removing it is a one-line change and it costs no scored row either way
+    // (all 18 of those rows are unscorable), so it is NOT bundled into the
+    // Payne-Hanek commit: it is a behaviour change in its own right and
+    // belongs in its own commit with its own before/after.
     if (detail::fabs(a.hi) >= 1.0e60) {
         XPMATH_PRINTF("DDCSSNR: argument too large\n");
         // KI-26: (0, 0) is not a point on the unit circle.  See the
@@ -864,17 +883,51 @@ XPMATH_INLINE_FUNCTION void sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble
         // the fallback everywhere in this family.
         x = DoubleDouble(1.0); y = DoubleDouble(0.0); return;
     }
-    DoubleDouble pi2 = multiply_scalar(DoubleDouble_pi(), 2.0);
-    DoubleDouble s1  = divide(a, pi2);
-    DoubleDouble s2  = round_to_nearest_int(s1);
-    DoubleDouble s3  = subtract(a, multiply(pi2, s2));
-    if (s3.hi == 0.0) { x = DoubleDouble(1.0); y = DoubleDouble(0.0); return; }
-    // Mod pi/2 reduction
-    DoubleDouble pi_half = multiply_scalar(DoubleDouble_pi(), 0.5);
-    DoubleDouble n_exact = divide(s3, pi_half);
-    DoubleDouble n = round_to_nearest_int(n_exact);
-    int j = ((int)n.hi) & 3;
-    DoubleDouble r_mod = subtract(s3, multiply(pi_half, n));
+    // ARGUMENT REDUCTION — Payne-Hanek.  a = j*(pi/2) + r_mod with |r_mod| <=
+    // pi/4 and j = nint(a*2/pi) mod 4.  See include/xp/trig_reduction.hpp for
+    // why the old `a - 2pi*nint(a/2pi)` could not be made to work by widening
+    // the constant, and scripts/gen_trig_reduction_constants.cpp for where
+    // kPhGuardDD and kPhChunksDD come from.
+    int          j;
+    DoubleDouble r_mod;
+    if (detail::fabs(a.hi) <= 0.75) {
+        // Nothing to reduce: |a| <= 0.75*(1+2^-53) < pi/4, so nint(a*2/pi) is
+        // 0 and r_mod is a itself, EXACTLY.  Taking the general path here would
+        // route an already-exact argument through a*(2/pi) and back through
+        // pi/2 and charge it two DD roundings for no reduction at all.
+        //
+        // Both the branch and its threshold are MEASURED, by rebuilding the
+        // sweep with this line changed and re-running `--oracle mpfr`:
+        //   branch removed      1590 scored rows worse, 708 better.  Among the
+        //                       2174 scored DD trig rows at |x| < 1: 429 worse
+        //                       against 149 better, median 1.2013 -> 1.2121
+        //                       ulps, and DD c tan at the cut-re points of
+        //                       modulus 0.5 goes 0.186 -> 2.016 ulps.
+        //   cut widened to pi/4  50 worse, 35 better, 85 rows moved -- so the
+        //                       wider cut is not a free improvement.  (The 8
+        //                       grid points strictly inside (0.75, pi/4) are
+        //                       all complex `polar`; the only points AT 0.75
+        //                       are r 387 and r 417, which this branch takes.)
+        // 0.75 also keeps the bound true for the PAIR without a one-ulp fudge:
+        // a.lo adds at most 2^-54 to a.hi = 0.75, and pi/4 is 0.0354 away.
+        j = 0; r_mod = a;
+    } else {
+        const double win[2] = { a.hi, a.lo };
+        double       f[3];
+        j = detail::xp_ph_reduce<double>(win, 2, detail::kPhGuardDD,
+                                         detail::kPhChunksDD, f, 3);
+        // f is exact to 2^-kPhGuardDD ABSOLUTE, which is 2^-(p+4) RELATIVE at
+        // the worst cancellation the format admits.  Both products below are
+        // ordinary DD, so r_mod inherits ~2^-106 relative -- proportional to
+        // |r_mod|, where the old form's error was proportional to |a|.
+        const DoubleDouble pio2 =
+            add(add(DoubleDouble(detail::xp_ph_pio2_d(0)),
+                    DoubleDouble(detail::xp_ph_pio2_d(1))),
+                DoubleDouble(detail::xp_ph_pio2_d(2)));
+        const DoubleDouble fdd =
+            add(add(DoubleDouble(f[0]), DoubleDouble(f[1])), DoubleDouble(f[2]));
+        r_mod = multiply(fdd, pio2);
+    }
     double scale = 1.0 / (double)(1 << nq);
     DoubleDouble r  = multiply_scalar(r_mod, scale);   // r = r_mod / 2^nq, |r| < pi/(4*2^nq)
     // For subnormal |a| the scaling underflows r to zero, and then the relative
@@ -886,8 +939,15 @@ XPMATH_INLINE_FUNCTION void sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble
     // pair is (sin_r, cos_r) = (r_mod, 1) -- and it MUST still go through
     // the quadrant table. Returning a hand-made answer here was the
     // Phase 1 defect: for a = pi the mod-pi/2 stage correctly yields
-    // r_mod = 0 with j = 2, and the old guard returned y = s3 = pi as if
-    // it were sin(pi).
+    // r_mod = 0 with j = 2, and the old guard returned the mod-2pi residual
+    // (which at a = pi is pi itself) as if it were sin(pi).
+    //
+    // This guard also subsumes the separate `mod-2pi residual == 0 -> (1, 0)`
+    // early-out the old reduction carried.  That one was answering a question
+    // Payne-Hanek does not ask: it fired when `a - 2pi*nint(a/2pi)` rounded to
+    // zero, which is a statement about DD cancellation, not about a.  Here
+    // r_mod == 0 means the FRACTION f is zero, j is already correct, and the
+    // quadrant table produces the same (1, 0) at j == 0 without asserting it.
     if (r.hi == 0.0) {
         const DoubleDouble s0 = r_mod;
         const DoubleDouble c0 = DoubleDouble(1.0);
@@ -916,10 +976,12 @@ XPMATH_INLINE_FUNCTION void sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble
 
     // Joint doubling nq times: sin(2x) = 2*sin(x)*cos(x), cos(2x) = cos^2(x) - sin^2(x).
     // Both series are carried through; the sine is never reconstructed from the
-    // cosine via +/-sqrt(1 - cos^2). That reconstruction (a) is only sign-correct
-    // for |s3| < pi, which round_to_nearest_int does not guarantee at half-integer
-    // near-ties, and (b) amplifies the relative error of cos by cot^2(s3), which
-    // diverges as s3 -> +/-pi. Matches ff/qf/tf_math.hpp. See KI-4.
+    // cosine via +/-sqrt(1 - cos^2). That reconstruction (a) was only sign-correct
+    // for |r_mod| < pi, which the old round_to_nearest_int reduction did not
+    // guarantee at half-integer near-ties -- Payne-Hanek does, |r_mod| <= pi/4 by
+    // construction -- and (b) amplifies the relative error of cos by cot^2(r_mod),
+    // which diverges as r_mod -> 0. (b) alone still rules it out, and the joint
+    // form matches ff/qf/tf_math.hpp. See KI-4.
     for (int j = 0; j < nq; ++j) {
         DoubleDouble new_sin = multiply_scalar(multiply(sin_r, cos_r), 2.0);
         DoubleDouble new_cos = subtract(multiply(cos_r, cos_r), multiply(sin_r, sin_r));
@@ -930,23 +992,32 @@ XPMATH_INLINE_FUNCTION void sincos(DoubleDouble a, DoubleDouble& x, DoubleDouble
     // KI-26.  CODOMAIN GUARD.  sin and cos are bounded by 1 for every finite
     // input; a value outside [-1, 1] — and above all inf or NaN — is wrong under
     // any error model, at any argument, and a caller cannot defend against it.
-    // Argument reduction is only meaningful while nint(a/2pi) is an exactly
-    // representable integer of the format.  Past that the integer part needs
-    // more bits than the expansion carries, the per-word nint saturates
-    // ("DDNINT: argument too large"), and the Taylor series ran on a garbage
-    // residual: DD returned NaN at 1e35 and 3.4e38, TF from 3.16e25 upward.
+    // WHY IT WAS ADDED, and what has changed under it.  The reduction this
+    // guard was written against was `a - 2pi*nint(a/2pi)`, which is only
+    // meaningful while nint(a/2pi) is an exactly representable integer of the
+    // format.  Past that the integer part needs more bits than the expansion
+    // carries, the per-word nint saturates ("DDNINT: argument too large"), and
+    // the Taylor series ran on a garbage residual: DD returned NaN at 1e35 and
+    // 3.4e38, TF from 3.16e25 upward.  The accuracy loss that came with it was
+    // documented here as inherent — "reduction against a finite-precision pi
+    // cannot do better".  That was true of THAT reduction and is no longer true
+    // of this one: Payne-Hanek never forms nint(a/2pi), so it never saturates,
+    // and the reduced argument is now accurate to the format's own p = 106
+    // (measured: 42.42 bits -> 107.49 at x = 182.21237390820801, 53.88 -> 108.63
+    // at 1.20557e16; scripts/probe_trig_stages.cpp reproduces the table).
     //
-    // The ACCURACY loss at those arguments is legitimate and is deliberately NOT
-    // addressed here — reduction against a finite-precision pi cannot do better,
-    // and the sweep's in_delta = |x| bound (docs/ULP_METRIC.md) accounts for it.
-    // Only the codomain violation is fixed.
+    // The guard STAYS anyway.  It is a codomain guard, not a reduction guard:
+    // it asserts a property of the answer that must hold whatever produced it.
+    // A guard removed because the current implementation cannot trip it is a
+    // guard that will not be there for the next implementation.
     //
     // Testing the RESULT rather than the reduced argument is deliberate, and
-    // measured: a first attempt gated on |s3| <= 4 and cost DD sin/cos/tan at
-    // ±1e27 seven digits apiece, because nint's residual there is 4.317 — past
-    // pi, yet the doublings still recover ~7 correct digits from it.  The result
-    // test cannot make that mistake: it fires only where the answer is already
-    // unusable.  Its `!(… <= …)` spelling catches inf and NaN too.
+    // measured: a first attempt gated on the reduced argument at |r| <= 4 and
+    // cost DD sin/cos/tan at ±1e27 seven digits apiece, because nint's residual
+    // there is 4.317 — past pi, yet the doublings still recover ~7 correct
+    // digits from it.  The result test cannot make that mistake: it fires only
+    // where the answer is already unusable.  Its `!(… <= …)` spelling catches
+    // inf and NaN too.
     //
     // Two tiers.  Outside the slack band the answer carries no information, so
     // return the identity point (cos, sin) = (1, 0): in codomain, on the unit
