@@ -1000,8 +1000,18 @@ XPMATH_INLINE_FUNCTION void sincos(TripleFloat a, TripleFloat& sin_a, TripleFloa
     // TF sin(1e-40) = 9.99967e-41 for an argument of 9.99995e-41, and
     // TF sin(1e-44) = 0.  Above the band the series is already correct and a
     // wider cut was measured to cost complex-op digits -- see ff_math.hpp.
-    // nq is declared below (== 4); the constant is 2^4 * FLT_MIN spelled out.
-    if (detail::fabs(a.f0) < 1.8807842e-37f /* 2^4 * FLT_MIN */) {
+    // nq is declared below and is now 0, so the band is FLT_MIN and not
+    // 2^4 * FLT_MIN: with no scale-down the only way the leading word of r can
+    // be subnormal is for a itself to be.  This is a NARROWING of the guard,
+    // not a removal, and it is a no-op on the vacated strip rather than a
+    // behaviour change -- for FLT_MIN <= |a| < 2^4*FLT_MIN the series now runs
+    // and returns the same pair, because r^2 underflows to zero there, leaving
+    // sin_r = r = a and v_r = 0 so cos_r = 1.
+    //
+    // The constant was spelled out literally when it was 2^4 * FLT_MIN and a
+    // reader had to trust that 1.8807842e-37f was that product.  It is written
+    // against nq now so it cannot drift from it again.
+    if (detail::fabs(a.f0) < float(1 << 0) * 1.17549435e-38f /* 2^nq * FLT_MIN */) {
         sin_a = a;
         cos_a = TripleFloat(1.0f);
         return;
@@ -1019,7 +1029,10 @@ XPMATH_INLINE_FUNCTION void sincos(TripleFloat a, TripleFloat& sin_a, TripleFloa
     // MEASURED over every TripleFloat (include/xp/trig_reduction_data.hpp),
     // giving |r| >= 2^-83.  The KI-12 band above covers the only arguments that
     // can, which is what it was sized for.
-    const int nq = 4;
+    // nq = 0: no scale-down.  The FP32 subnormal mechanism and the measurement
+    // behind it are at ff_math.hpp:sincos; TF's own worst cell moved from
+    // 2.6e7 ulps to 0.59 on it, and its series length went 6 -> 10 terms.
+    const int nq = 0;
     int         j;
     TripleFloat r_mod;
     if (detail::fabs(a.f0) <= 0.75f) {
@@ -1046,31 +1059,44 @@ XPMATH_INLINE_FUNCTION void sincos(TripleFloat a, TripleFloat& sin_a, TripleFloa
     // Reduce by 2^nq
     TripleFloat r = divide_scalar(r_mod, float(1 << nq));
 
-    // Taylor: sin(r) = r - r^3/3! + ..., cos(r) = 1 - r^2/2! + ...
+    // Taylor: sin(r) = r - r^3/3! + ..., v(r) = r^2/2! - r^4/4! + ..., v = 1-cos.
+    // Carried in (sin, v) rather than (sin, cos); derivation at dd_math.hpp:sincos.
+    //
+    // v STARTS ONE TERM IN.  The cos series began at term_cos = 1, so its loop
+    // body produced -r^2/2 on the first pass; v_r is initialised TO r^2/2, so
+    // the first pass must produce -r^4/4! instead.  That is why the ratio below
+    // is -(2k+1)(2k+2) where the cos ratio was -(2k-1)(2k) -- same terms, index
+    // shifted by one, not a different series.
     TripleFloat r2 = sqr(r);
     TripleFloat sin_r = r;
-    TripleFloat cos_r = TripleFloat(1.0f);
     TripleFloat term_sin = r;
-    TripleFloat term_cos = TripleFloat(1.0f);
+    TripleFloat v_r = divide_scalar(r2, 2.0f);
+    TripleFloat term_v = v_r;
     int k = 1;
 
+    // TF alone tests convergence BEFORE the update, in a while loop, where FF
+    // and QF test after in a for loop.  That is preserved verbatim: the v test
+    // simply replaces the cos test in the same position, and it is relative
+    // (against v_r) exactly as the cos test was relative (against cos_r).
     while (k < 64 && (abs(term_sin).f0 > 1.0e-21f * abs(sin_r).f0 ||
-                      abs(term_cos).f0 > 1.0e-21f * abs(cos_r).f0)) {
+                      abs(term_v).f0   > 1.0e-21f * abs(v_r).f0)) {
         term_sin = divide_scalar(multiply(term_sin, r2), -float((2*k) * (2*k+1)));
-        term_cos = divide_scalar(multiply(term_cos, r2), -float((2*k-1) * (2*k)));
+        term_v   = divide_scalar(multiply(term_v,   r2), -float((2*k+1) * (2*k+2)));
         sin_r = add(sin_r, term_sin);
-        cos_r = add(cos_r, term_cos);
+        v_r   = add(v_r, term_v);
         k++;
     }
 
-    // Joint angle-doubling: sin(2θ) = 2·sin(θ)·cos(θ), cos(2θ) = cos²(θ) - sin²(θ)
+    // Joint angle-doubling in (sin, v): sin(2θ) = 2·sin(θ)·(1-v), v(2θ) = 2·sin²(θ).
+    // At nq = 0 this loop does not execute; kept because nq is what was measured.
     for (int i = 0; i < nq; i++) {
-        TripleFloat s = multiply(sin_r, cos_r);
+        const TripleFloat c_i = subtract(TripleFloat(1.0f), v_r);
+        TripleFloat s = multiply(sin_r, c_i);
         s = add(s, s);
-        TripleFloat c = subtract(sqr(cos_r), sqr(sin_r));
+        v_r   = add(sqr(sin_r), sqr(sin_r));    // 2 sin^2, from the OLD sin_r
         sin_r = s;
-        cos_r = c;
     }
+    TripleFloat cos_r = subtract(TripleFloat(1.0f), v_r);
 
     // KI-26 codomain guard: outside the slack band -> identity point
     // (sin, cos) = (0, 1), inside it -> clamp, so |sin| <= 1 and |cos| <= 1 hold

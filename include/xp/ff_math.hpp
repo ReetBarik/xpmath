@@ -849,7 +849,51 @@ XPMATH_INLINE_FUNCTION FloatFloat expm1(FloatFloat a) {
 // recovery step, which loses relative precision when sin is near zero
 // (i.e. when the answer most needs precision).
 XPMATH_INLINE_FUNCTION void sincos(FloatFloat a, FloatFloat& x, FloatFloat& y) {
-    const int itrmx = 100, nq = 4;
+    // nq = 0: NO SCALE-DOWN.  The series runs at r_mod directly.
+    //
+    // On DD the scale-down is worth keeping (nq stays 5 there) because seven
+    // series terms plus five doublings round better than fourteen terms.  On
+    // the FP32 backends it is not, and the reason is a property of the format
+    // rather than of the series: u = r_mod/2^nq drives the TRAILING limbs of a
+    // multi-float below FLT_MIN = 2^-126 long before the leading one gets
+    // there, so u silently sheds precision the doublings then scale back up by
+    // 2^nq.  A form that fixes the recurrence cannot fix that, because the bits
+    // are already gone when the first term is computed.
+    //
+    // Predicted before it was measured, and confirmed: at nq = 5 the v-form
+    // leaves QF's two worst cells BIT-IDENTICAL to the old code, 1029.8804 and
+    // 405.0246 ulps to the digit, and only nq = 0 moves them.
+    //
+    // The price is series length, and it is real: worst-case terms go 4 -> 8
+    // here (TF 6 -> 10, QF 6 -> 13), against nq fewer doublings.  Measured by
+    // scripts/probe_trig_series.cpp --terms, over that probe's own grid.
+    //
+    // FF IS THE ONE BACKEND WHERE THIS WAS A CLOSE CALL, and the record belongs
+    // here because the obvious "optimisation" back to nq = 2 is a regression in
+    // a place the sweep cannot see.  FF has the least exposure to the mechanism
+    // above -- two limbs, so the trailing one only goes subnormal below
+    // |x| ~ 2^-102 -- and the fewest bits to spare for extra series terms.  The
+    // full scan, sweep at --oracle mpfr, scored real sin/cos/tan rows:
+    //
+    //     nq   worst ulps    max   median   rows >1   at floor   sin @1e-31
+    //          at kappa<=4
+    //      0      4.0216   4.0216  0.0237      286      88.7%       0.0000
+    //      1      4.0216   4.0216  0.0237      290      88.6%       0.0000
+    //      2      3.1691   3.7859  0.0275      298      88.3%       7.8886
+    //      3      3.7780   3.8204  0.0328      372      85.3%       7.8886
+    //      4      3.8415   3.8415  0.0359      402      84.2%       7.8886   (was shipped)
+    //
+    // nq = 2 wins the scored worst case by 0.85 ulps and nothing else.  That
+    // 0.85 rests on a single cell -- the count of rows above 3 ulps is 10 for
+    // nq = 0, 1 and 2 alike -- while nq = 0 wins median, at-floor and the >1
+    // count outright, and is the only setting that holds the small-argument
+    // cells exactly.  The last column decides it: at x = 1e-31 nq = 2 costs
+    // 7.89 ulps where nq = 0 costs none, a bigger effect than the one nq = 2
+    // buys, and it is the SAME subnormal mechanism this comment opened with.
+    // Those rows score state U in the sweep, so they carry no verdict and are
+    // invisible in every other column -- which is exactly why they are written
+    // out here rather than left to the gate.
+    const int itrmx = 100, nq = 0;
     const float eps = 1.0e-15f;
     if (a.hi == 0.0f) { x = FloatFloat(1.0f); y = FloatFloat(0.0f); return; }
     // KI-12 residual.  SMALL-ARGUMENT SHORT CIRCUIT.  The threshold is the
@@ -883,6 +927,13 @@ XPMATH_INLINE_FUNCTION void sincos(FloatFloat a, FloatFloat& x, FloatFloat& y) {
     //     tie on its own domain, and loses money downstream, is not worth
     //     taking; the band below is where the series genuinely cannot do
     //     better, so that is where the cut goes.
+    // The band is written in terms of nq and so it TRACKS nq: at nq = 0 it is
+    // FLT_MIN rather than 2^nq*FLT_MIN, because with no scale-down the only way
+    // the leading word of r can be subnormal is for a itself to be.  That is a
+    // narrowing, not a removal, and it is a no-op on this domain rather than a
+    // behaviour change: for FLT_MIN <= |a| < 2^4*FLT_MIN the series now runs
+    // instead of the short circuit, and it returns the same pair, because r^2
+    // underflows to zero there so sin_r = r = a and v_r = 0 gives cos_r = 1.
     if (detail::fabs(a.hi) < (float)(1 << nq) * 1.17549435e-38f /* 2^nq*FLT_MIN */) {
         x = FloatFloat(1.0f); y = a; return;
     }
@@ -935,43 +986,61 @@ XPMATH_INLINE_FUNCTION void sincos(FloatFloat a, FloatFloat& x, FloatFloat& y) {
     FloatFloat r2 = multiply(r, r);
 
     // sin(r) = r - r^3/3! + r^5/5! - ...
-    // cos(r) = 1 - r^2/2! + r^4/4! - ...
-    FloatFloat sin_r = r,             cos_r  = FloatFloat(1.0f);
-    FloatFloat sterm = r,             cterm  = FloatFloat(1.0f);
+    // v(r)   =     r^2/2! - r^4/4! + r^6/6! - ...,  v = 1 - cos
+    //
+    // The series is carried in (sin, v), not (sin, cos), and nq is 0 rather than
+    // 4.  Both are measured, by scripts/probe_trig_series.cpp; the full
+    // derivation of the v-form is at dd_math.hpp:sincos and is not repeated.
+    // What is specific to FP32 is why nq went to zero here and stayed at 5 on
+    // DD -- see the nq declaration above.
+    FloatFloat sin_r = r,                     sterm = r;
+    FloatFloat v_r   = divide_scalar(r2, 2.0f), vterm = v_r;
     for (int k = 1; k <= itrmx; ++k) {
         sterm = divide_scalar(multiply(sterm, r2), -(float)((2*k) * (2*k + 1)));
         sin_r = add(sin_r, sterm);
-        cterm = divide_scalar(multiply(cterm, r2), -(float)((2*k - 1) * (2*k)));
-        cos_r = add(cos_r, cterm);
-        // KI-25 (FF exposure, low end).  Two defects in these three lines.
+        vterm = divide_scalar(multiply(vterm, r2), -(float)((2*k + 1) * (2*k + 2)));
+        v_r   = add(v_r, vterm);
+        // KI-25 (FF exposure, low end).  Two defects were fixed in these lines
+        // and BOTH ARE PRESERVED HERE.
         //
         // (1) `<` made the test vacuous once the series had already converged to
-        //     the last bit.  For |a| <~ 1e-19 the scaled residual r is small
-        //     enough that r^2 UNDERFLOWS FP32 to zero, so sterm is exactly 0 —
-        //     and eps * |sin_r.hi| underflows to zero as well, making `0 < 0`
-        //     false forever.  The loop then ran to itrmx on a series that had
-        //     nothing left to add.  `<=` breaks on the first such iteration and
-        //     changes no other outcome: the only newly-accepted case has
+        //     the last bit.  For |a| <~ 1e-19 the residual r is small enough
+        //     that r^2 UNDERFLOWS FP32 to zero, so sterm is exactly 0 — and
+        //     eps * |sin_r.hi| underflows to zero as well, making `0 < 0` false
+        //     forever.  The loop then ran to itrmx on a series that had nothing
+        //     left to add.  `<=` breaks on the first such iteration and changes
+        //     no other outcome: the only newly-accepted case has
         //     sterm == 0 == threshold, where every remaining term is also zero.
+        //     The v test needs `<=` for the same reason and gets it: when r^2
+        //     underflows, v_r and vterm are both exactly 0 and `0 <= 0` holds.
         // (2) the itrmx arm `return`ed with x and y NEVER WRITTEN, so the caller
         //     read uninitialised storage.  That is what made FF atan(1e-30)
         //     come back NaN — angle()'s Newton step calls sincos on a tiny
         //     iterate — a codomain violation for a function bounded by pi/2.
-        //     `break` falls through to the doublings and the assignments, which
-        //     is what dd_math.hpp already does and what qf_math.hpp's
-        //     "no return on itrmx" comment describes.
+        //     `break` falls through to the assignments below, which is what
+        //     dd_math.hpp already does and what qf_math.hpp's "no return on
+        //     itrmx" comment describes.
+        //
+        // v's test is RELATIVE where cos's was absolute (|cterm| <= eps).
+        // Against cos ~ 1 the two agree; against v ~ r^2/2 an absolute test
+        // would stop the v series early and discard the accuracy this form
+        // exists to keep.
         if (detail::fabs(sterm.hi) <= eps * detail::fabs(sin_r.hi) &&
-            detail::fabs(cterm.hi) <= eps) break;
+            detail::fabs(vterm.hi) <= eps * detail::fabs(v_r.hi)) break;
         if (k == itrmx) { XPMATH_PRINTF("FFCSSNR: iteration limit\n"); break; }
     }
 
-    // Doubling: sin(2x) = 2 sin x cos x, cos(2x) = cos^2 x - sin^2 x
-    for (int j = 0; j < nq; ++j) {
-        FloatFloat new_sin = multiply_scalar(multiply(sin_r, cos_r), 2.0f);
-        FloatFloat new_cos = subtract(multiply(cos_r, cos_r), multiply(sin_r, sin_r));
+    // Doubling in (sin, v): sin(2x) = 2 sin x (1 - v), v(2x) = 2 sin^2 x.
+    // At nq = 0 this loop does not execute; it is kept, rather than deleted
+    // with the constant folded away, because nq is the thing that was measured
+    // and a future format may well want it back.
+    for (int q = 0; q < nq; ++q) {           // q, not j: j is the quadrant
+        const FloatFloat c_q = subtract(FloatFloat(1.0f), v_r);
+        const FloatFloat new_sin = multiply_scalar(multiply(sin_r, c_q), 2.0f);
+        v_r   = multiply_scalar(multiply(sin_r, sin_r), 2.0f);   // old sin_r
         sin_r = new_sin;
-        cos_r = new_cos;
     }
+    FloatFloat cos_r = subtract(FloatFloat(1.0f), v_r);
 
     // KI-26 codomain guard: outside the slack band -> identity point, inside it
     // -> clamp, so |sin| <= 1 and |cos| <= 1 hold exactly for every finite

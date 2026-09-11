@@ -1204,7 +1204,32 @@ XPMATH_INLINE_FUNCTION QuadFloat expm1(QuadFloat a) {
 // constant only moves the magnitude at which that becomes visible.  The
 // reduction below is Payne-Hanek; see the comment at the call site.
 XPMATH_INLINE_FUNCTION void sincos(QuadFloat a, QuadFloat& sin_a, QuadFloat& cos_a) {
-    const int   itrmx = 100, nq = 5;
+    // nq = 0: no scale-down.  QF is where the FP32 subnormal mechanism bites
+    // hardest -- a QuadFloat's fourth limb sits at 2^(e-nq-72), under FLT_MIN
+    // once e < -49 -- and it is the backend on which the prediction was
+    // checked: at nq = 5 the v-form leaves the two worst cells BIT-IDENTICAL to
+    // the old code, 1029.8804 and 405.0246 ulps to the digit, because the bits
+    // are gone before the first term.  Full account at ff_math.hpp:sincos.
+    // Series length goes 6 -> 13 terms against five fewer doublings.
+    //
+    // WHAT IS LEFT AT nq = 0 IS THE FORMAT, AND THAT IS MEASURED RATHER THAN
+    // ASSUMED.  x = 91.106186954104004 is the worst scored QF trig cell in the
+    // sweep and still reads 43.3832 ulps.  It sits a hair from 29*pi, so
+    // r_mod ~ 1.2e-18 (kappa ~ 7.4e19) and a QuadFloat's fourth limb lands near
+    // 2^-132, below FLT_MIN.  Three arms of scripts/probe_trig_series.cpp, all
+    // agreeing to the digit:
+    //     vform nq=0                                        43.3832
+    //     the same core on the EXACT 400-bit r_mod           43.3832   <- no
+    //         (`^exact nq=0`)                                            reduction
+    //                                                                    headroom
+    //     the cost of merely ROUNDING that exact r_mod       43.3832   <- the floor
+    //         into a QuadFloat (`repr r_mod`)
+    // The third line is the point: the argument has already lost that much
+    // before any series sees it, so no series and no wider reduction can
+    // recover it.  This is inherent to 4xFP32 at this magnitude, not a defect,
+    // and the implementation now reaches the floor exactly.  For contrast the
+    // same three arms at nq = 5 all read 1029.8804 -- that one WAS ours.
+    const int   itrmx = 100, nq = 0;
     const float eps = 1.0e-28f;
     if (a.f0 == 0.0f) { sin_a = QuadFloat(0.0f); cos_a = QuadFloat(1.0f); return; }
     // KI-12 residual.  Small-argument short circuit over the degenerate
@@ -1215,6 +1240,9 @@ XPMATH_INLINE_FUNCTION void sincos(QuadFloat a, QuadFloat& sin_a, QuadFloat& cos
     // QF sin(1e-40) = 9.99967e-41 for an argument of 9.99995e-41, and
     // QF sin(1e-44) = 0.  Above the band the series is already correct and a
     // wider cut was measured to cost complex-op digits -- see ff_math.hpp.
+    // Written in terms of nq, so at nq = 0 it is FLT_MIN: a narrowing, and a
+    // no-op on the strip it gives up, because there r^2 underflows and the
+    // series returns the same (1, a).  See ff_math.hpp:sincos.
     if (detail::fabs(a.f0) < (float)(1 << nq) * 1.17549435e-38f /* 2^nq*FLT_MIN */) {
         sin_a = a; cos_a = QuadFloat(1.0f); return;
     }
@@ -1262,26 +1290,39 @@ XPMATH_INLINE_FUNCTION void sincos(QuadFloat a, QuadFloat& sin_a, QuadFloat& cos
     QuadFloat r  = mul_pwr2(r_mod, ldexpf(1.0f, -nq));   // r = r_mod / 2^nq, |r| < pi/(4*2^nq)
     QuadFloat r2 = multiply(r, r);
 
-    // sin(r) = r - r^3/3! + ... ; cos(r) = 1 - r^2/2! + ...
-    QuadFloat sin_r = r,             cos_r = QuadFloat(1.0f);
-    QuadFloat sterm = r,             cterm = QuadFloat(1.0f);
+    // sin(r) = r - r^3/3! + ... ; v(r) = r^2/2! - r^4/4! + ..., with v = 1 - cos.
+    // Carried in (sin, v), not (sin, cos); derivation at dd_math.hpp:sincos.
+    QuadFloat sin_r = r,                       sterm = r;
+    QuadFloat v_r   = divide_scalar(r2, 2.0f), vterm = v_r;
     for (int k = 1; k <= itrmx; ++k) {
         sterm = divide_scalar(multiply(sterm, r2), -(float)((2*k) * (2*k + 1)));
         sin_r = add(sin_r, sterm);
-        cterm = divide_scalar(multiply(cterm, r2), -(float)((2*k - 1) * (2*k)));
-        cos_r = add(cos_r, cterm);
-        if (detail::fabs(sterm.f0) < eps * detail::fabs(sin_r.f0) &&
-            detail::fabs(cterm.f0) < eps) break;
-        // No return on itrmx (converges in ~9 terms at nq=5); fall through.
+        vterm = divide_scalar(multiply(vterm, r2), -(float)((2*k + 1) * (2*k + 2)));
+        v_r   = add(v_r, vterm);
+        // v's test is RELATIVE where cos's was absolute (|cterm| < eps), and it
+        // is `<=` where the sin test beside it is `<`.  Both matter, and the
+        // second one is KI-25's shape: r^2 underflows FP32 to zero for small
+        // |r|, and then vterm and v_r are BOTH exactly 0, so a strict `0 < 0`
+        // would never fire and the loop would run all 100 iterations for an
+        // answer it had after one.  The old absolute test could not hit that
+        // (cterm = 0 < eps was true), so this is a hazard the v-form introduces
+        // and has to answer for.  The sin test stays `<` because sin_r = r != 0
+        // there, which keeps its threshold strictly positive.
+        if (detail::fabs(sterm.f0) <  eps * detail::fabs(sin_r.f0) &&
+            detail::fabs(vterm.f0) <= eps * detail::fabs(v_r.f0)) break;
+        // No return on itrmx; fall through.
     }
 
-    // Doublings: sin(2x)=2 sin x cos x, cos(2x)=cos^2 x - sin^2 x (PORT_NOTES §3a).
-    for (int j = 0; j < nq; ++j) {
-        QuadFloat new_sin = mul_pwr2(multiply(sin_r, cos_r), 2.0f);
-        QuadFloat new_cos = subtract(multiply(cos_r, cos_r), multiply(sin_r, sin_r));
+    // Doublings in (sin, v): sin(2x) = 2 sin x (1-v), v(2x) = 2 sin^2 x
+    // (PORT_NOTES §3a).  At nq = 0 this loop does not execute; kept because nq
+    // is what was measured and a future format may want it back.
+    for (int q = 0; q < nq; ++q) {           // q, not j: j is the quadrant
+        const QuadFloat c_q = subtract(QuadFloat(1.0f), v_r);
+        const QuadFloat new_sin = mul_pwr2(multiply(sin_r, c_q), 2.0f);
+        v_r   = mul_pwr2(multiply(sin_r, sin_r), 2.0f);   // old sin_r
         sin_r = new_sin;
-        cos_r = new_cos;
     }
+    QuadFloat cos_r = subtract(QuadFloat(1.0f), v_r);
 
     // KI-26 codomain guard: outside the slack band -> identity point
     // (sin, cos) = (0, 1), inside it -> clamp, so |sin| <= 1 and |cos| <= 1 hold
