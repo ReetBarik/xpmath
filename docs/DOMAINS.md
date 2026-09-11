@@ -226,7 +226,7 @@ for each cell that has any:
 | `sqrt` | DD | 31.00 | 30.98 | 1e-30 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
 | `sqrt` | QF | 29.00 | 28.60 | 3e-20 .. 1e+30 | 97% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
 | `sqrt` | TF | 21.70 | 21.52 | 3e-26 .. 1e+30 | 98% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
-| `sqrt` | FF | 14.00 | 13.91 | 1e-30 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `sqrt` | FF | 14.00 | 13.92 | 1e-30 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
 
 **Where the failures sit.** The grid family carrying the most failures
 for each cell that has any:
@@ -262,7 +262,7 @@ for each cell that has any:
 | `asin` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
 | `asin` | QF | 29.00 | 28.79 | 1e-30 .. 1e+29 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
 | `asin` | TF | 21.70 | 21.55 | 1e-30 .. 1e+29 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
-| `asin` | FF | 14.00 | 13.89 | 1 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
+| `asin` | FF | 14.00 | 13.91 | 1 .. 1e+30 | 99% | below 1e-323: 0.00; above 4e+151: 0.00 | 10 | UNRESOLVED |
 | `acos` | DD | 31.00 | 31.00 | 0 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
 | `acos` | QF | 29.00 | 28.97 | 1.001 .. 5e+255 | 100% | -- | 0 | UNRESOLVED |
 | `acos` | TF | 21.70 | 21.66 | 1 .. 5e+255 | 99% | -- | 0 | UNRESOLVED |
@@ -372,18 +372,18 @@ for each cell that has any:
 | `exp` | QF | 29.00 | 24.92 | 1 .. 2 | 79% | above 2: 14.26 | 205 | UNRESOLVED |
 | `exp` | TF | 21.70 | 19.11 | 0 .. 0.1 | 85% | above 100: 1.77 | 193 | UNRESOLVED |
 | `exp` | FF | 14.00 | 12.48 | 0 .. 2.236 | 89% | above 100: 1.77 | 193 | UNRESOLVED |
-| `log` | DD | 31.00 | 28.81 | 1 .. 1e+15 | 84% | below 0: 0.00 | 2 | UNRESOLVED |
+| `log` | DD | 31.00 | 28.99 | 1 .. 1e+15 | 85% | below 0: 0.00 | 2 | UNRESOLVED |
 | `log` | QF | 29.00 | 26.01 | 1e-30 .. 0.9999 | 80% | below 0: 0.00; above 1: 12.97 | 155 | UNRESOLVED |
 | `log` | TF | 21.70 | 19.52 | 1e-30 .. 0.999 | 81% | below 0: 0.00; above 1: 6.91 | 138 | UNRESOLVED |
-| `log` | FF | 14.00 | 12.35 | 1.01 .. 1e+15 | 79% | below 1: 0.00 | 126 | UNRESOLVED |
-| `log10` | DD | 31.00 | 28.81 | 1 .. 1e+15 | 84% | below 0: 0.00 | 2 | UNRESOLVED |
+| `log` | FF | 14.00 | 12.41 | 1.005 .. 1e+15 | 81% | below 1: 0.00 | 126 | UNRESOLVED |
+| `log10` | DD | 31.00 | 28.99 | 1 .. 1e+15 | 85% | below 0: 0.00 | 2 | UNRESOLVED |
 | `log10` | QF | 29.00 | 25.72 | 1e-30 .. 0.1 | 77% | below 0: 0.00; above 1: 12.97 | 159 | UNRESOLVED |
 | `log10` | TF | 21.70 | 19.45 | 1e-30 .. 0.1 | 79% | below 0: 0.00; above 1: 6.91 | 138 | UNRESOLVED |
-| `log10` | FF | 14.00 | 12.36 | 1.01 .. 1e+15 | 79% | below 1: 0.00 | 126 | UNRESOLVED |
-| `pow` | DD | 31.00 | 30.60 | 1e-30 .. 1 | 98% | below 0: 0.00 | 1 | UNRESOLVED |
+| `log10` | FF | 14.00 | 12.41 | 1.005 .. 1e+15 | 81% | below 1: 0.00 | 126 | UNRESOLVED |
+| `pow` | DD | 31.00 | 30.70 | 1e-30 .. 1 | 99% | below 0: 0.00 | 1 | UNRESOLVED |
 | `pow` | QF | 29.00 | 27.70 | 2 .. 2.002 | 92% | below 2: 14.11; above 2.236: 8.92 | 44 | UNRESOLVED |
 | `pow` | TF | 21.70 | 20.92 | 2 .. 2.002 | 93% | below 1.1: 7.92; above 2.236: 8.92 | 35 | UNRESOLVED |
-| `pow` | FF | 14.00 | 13.32 | 1.01 .. 1.1 | 85% | below 1: 6.89; above 10: 3.48 | 8 | UNRESOLVED |
+| `pow` | FF | 14.00 | 13.34 | 1.005 .. 1.1 | 86% | below 1: 6.89; above 10: 3.48 | 8 | UNRESOLVED |
 | `sqrt` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
 | `sqrt` | QF | 29.00 | 27.74 | 1 .. 2 | 86% | -- | 0 | UNRESOLVED |
 | `sqrt` | TF | 21.70 | 21.39 | 1e-25 .. 0.1 | 94% | -- | 0 | UNRESOLVED |
@@ -447,25 +447,25 @@ for each cell that has any:
 | `asin` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
 | `asin` | QF | 29.00 | 27.97 | 10 .. 1e+15 | 89% | below 10: 14.23 | 4 | UNRESOLVED |
 | `asin` | TF | 21.70 | 21.43 | 10 .. 1e+15 | 95% | -- | 0 | UNRESOLVED |
-| `asin` | FF | 14.00 | 13.93 | 1.005 .. 1e+15 | 98% | -- | 0 | UNRESOLVED |
+| `asin` | FF | 14.00 | 13.95 | 1.005 .. 1e+15 | 98% | -- | 0 | UNRESOLVED |
 | `acos` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
 | `acos` | QF | 29.00 | 28.32 | 0.5 .. 2 | 93% | above 10: 14.13 | 4 | UNRESOLVED |
 | `acos` | TF | 21.70 | 21.52 | 0.5 .. 2 | 97% | -- | 0 | UNRESOLVED |
-| `acos` | FF | 14.00 | 13.92 | 1.005 .. 1e+15 | 98% | -- | 0 | UNRESOLVED |
+| `acos` | FF | 14.00 | 13.93 | 1.005 .. 1e+15 | 98% | -- | 0 | UNRESOLVED |
 | `atan` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
-| `atan` | QF | 29.00 | 27.93 | 1 .. 2 | 89% | above 10: 13.51 | 16 | UNRESOLVED |
+| `atan` | QF | 29.00 | 28.01 | 1 .. 2 | 90% | above 10: 13.51 | 16 | UNRESOLVED |
 | `atan` | TF | 21.70 | 21.40 | 0 .. 0.1 | 95% | -- | 0 | UNRESOLVED |
 | `atan` | FF | 14.00 | 13.99 | 0 .. 10.05 | 100% | -- | 0 | UNRESOLVED |
 | `asinh` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
 | `asinh` | QF | 29.00 | 27.64 | 1 .. 2 | 85% | below 1: 14.41; above 2: 14.27 | 12 | UNRESOLVED |
 | `asinh` | TF | 21.70 | 21.33 | 1e-28 .. 0.1 | 94% | -- | 0 | UNRESOLVED |
-| `asinh` | FF | 14.00 | 13.98 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
+| `asinh` | FF | 14.00 | 13.99 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
 | `acosh` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
-| `acosh` | QF | 29.00 | 28.18 | 1 .. 2 | 91% | above 10: 14.13 | 6 | UNRESOLVED |
-| `acosh` | TF | 21.70 | 21.47 | 1e-28 .. 0.1 | 96% | -- | 0 | UNRESOLVED |
-| `acosh` | FF | 14.00 | 13.92 | 1.005 .. 1e+15 | 98% | -- | 0 | UNRESOLVED |
+| `acosh` | QF | 29.00 | 28.30 | 0.5 .. 2 | 93% | above 10: 14.13 | 6 | UNRESOLVED |
+| `acosh` | TF | 21.70 | 21.50 | 0.5 .. 2 | 97% | -- | 0 | UNRESOLVED |
+| `acosh` | FF | 14.00 | 13.93 | 1.005 .. 1e+15 | 98% | -- | 0 | UNRESOLVED |
 | `atanh` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
-| `atanh` | QF | 29.00 | 28.24 | 1 .. 2 | 91% | above 10: 13.51 | 4 | UNRESOLVED |
+| `atanh` | QF | 29.00 | 28.31 | 1 .. 2 | 93% | above 10: 13.51 | 4 | UNRESOLVED |
 | `atanh` | TF | 21.70 | 21.52 | 10 .. 1e+15 | 97% | -- | 0 | UNRESOLVED |
 | `atanh` | FF | 14.00 | 13.93 | 1 .. 1e+15 | 98% | -- | 0 | UNRESOLVED |
 
