@@ -448,10 +448,10 @@ for each cell that has any:
 | `asin` | QF | 29.00 | 27.97 | 10 .. 1e+15 | 89% | below 10: 14.23 | 4 | UNRESOLVED |
 | `asin` | TF | 21.70 | 21.43 | 10 .. 1e+15 | 95% | -- | 0 | UNRESOLVED |
 | `asin` | FF | 14.00 | 13.93 | 1.005 .. 1e+15 | 98% | -- | 0 | UNRESOLVED |
-| `acos` | DD | 31.00 | 30.92 | 0 .. 1e+04 | 99% | -- | 0 | UNRESOLVED |
-| `acos` | QF | 29.00 | 28.06 | 1 .. 2 | 90% | below 1: 14.49; above 2: 13.78 | 9 | UNRESOLVED |
-| `acos` | TF | 21.70 | 21.34 | 1e-28 .. 0.1 | 94% | -- | 0 | UNRESOLVED |
-| `acos` | FF | 14.00 | 13.82 | 1.005 .. 10.05 | 96% | above 1e+08: 6.93 | 5 | UNRESOLVED |
+| `acos` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
+| `acos` | QF | 29.00 | 28.32 | 0.5 .. 2 | 93% | above 10: 14.13 | 4 | UNRESOLVED |
+| `acos` | TF | 21.70 | 21.52 | 0.5 .. 2 | 97% | -- | 0 | UNRESOLVED |
+| `acos` | FF | 14.00 | 13.92 | 1.005 .. 1e+15 | 98% | -- | 0 | UNRESOLVED |
 | `atan` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
 | `atan` | QF | 29.00 | 27.93 | 1 .. 2 | 89% | above 10: 13.51 | 16 | UNRESOLVED |
 | `atan` | TF | 21.70 | 21.40 | 0 .. 0.1 | 95% | -- | 0 | UNRESOLVED |
@@ -473,7 +473,7 @@ for each cell that has any:
 for each cell that has any:
 
 - `asin` — QF 4 pts (perpendicular approach to the imaginary axis)
-- `acos` — QF 9 pts (perpendicular approach to the real axis); FF 5 pts (polar shells)
+- `acos` — QF 4 pts (perpendicular approach to the real axis)
 - `atan` — QF 16 pts (perpendicular approach to the real axis)
 - `asinh` — QF 12 pts (perpendicular approach to the real axis)
 - `acosh` — QF 6 pts (perpendicular approach to the real axis)
