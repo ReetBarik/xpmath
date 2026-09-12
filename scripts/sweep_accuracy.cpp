@@ -317,11 +317,15 @@ uint64_t stream_seed(uint64_t base, const char* name, unsigned kind) {
 extern bool g_oracle_mpfr;
 #if defined(XPMATH_HAVE_MPFR)
 uint64_t mpfr_oracle_fingerprint(uint64_t h);   // defined with the MPFR oracle
+uint64_t mpc_oracle_fingerprint(uint64_t h);    // defined with the MPC oracle
 #endif
 uint64_t oracle_fingerprint() {
   // Seeded by WHICH oracle is in use: an MPFR-scored baseline and a
   // libquadmath-scored one are not comparable, and the fingerprint is the
   // mechanism that says so.
+  // Seeded by WHICH PAIR of oracles is in use. A single bool was enough when
+  // only the real arm could change; with a complex arm too there are four
+  // pairings and a baseline has to say which one produced it.
   uint64_t h = g_oracle_mpfr ? 0xc3a5c85c97cb3127ull : 1469598103934665603ull;
   auto mix = [&h](__float128 v) {
     unsigned char b[sizeof(__float128)];
@@ -344,7 +348,13 @@ uint64_t oracle_fingerprint() {
   // the q_to_mpfr -> mpfr -> mpfr_to_q chain, so a change in the conversions
   // moves the fingerprint instead of silently rescoring the sweep.
 #if defined(XPMATH_HAVE_MPFR)
-  if (g_oracle_mpfr) h = mpfr_oracle_fingerprint(h);
+  if (g_oracle_mpfr) {
+    h = mpfr_oracle_fingerprint(h);
+    // The complex arm travels its own conversions, so it contributes its own
+    // hash. Without this an MPC-scored baseline and a quadmath-complex one
+    // carry the SAME fingerprint and the file cannot say which produced it.
+    h = mpc_oracle_fingerprint(h);
+  }
 #endif
   return h;
 }
@@ -1501,6 +1511,54 @@ void mpc_to_q(mpc_srcptr v, __float128& out_re, __float128& out_im) {
 }
 #endif
 
+// The complex oracle's contribution to the fingerprint.
+//
+// Mirrors mpfr_oracle_fingerprint for the real arm: hash values that have
+// actually travelled q_to_mpc -> mpc_op -> mpc_to_q, so a change in the COMPLEX
+// conversions moves the fingerprint instead of silently rescoring the sweep.
+//
+// The fixtures are chosen for the complex failure modes specifically, not for
+// coverage: the signed-zero branch cuts, |z| = 1 where log cancels to nothing,
+// and a badly conditioned divide. A fixture set of well-conditioned points
+// would hash fine and detect nothing.
+#if defined(XPMATH_HAVE_MPFR)
+uint64_t mpc_oracle_fingerprint(uint64_t h) {
+  auto mix = [&h](__float128 v) {
+    unsigned char b[sizeof(__float128)];
+    std::memcpy(b, &v, sizeof(b));
+    for (size_t i = 0; i < sizeof(b); ++i) { h ^= b[i]; h *= 1099511628211ull; }
+  };
+  const __float128 one_ = (__float128)1;
+  const __float128 pz = (__float128)0.0;
+  const __float128 nz = -(__float128)0.0;
+  struct { __float128 re, im; } fix[] = {
+      {-(__float128)100, pz}, {-(__float128)100, nz},   // sqrt/log cut, both sheets
+      {-one_, pz},            {-one_, nz},
+      {pz, -one_},            {nz, -one_},
+      {one_ + ldexpq(one_, -60), ldexpq(one_, -60)},    // |z| ~ 1: log cancels
+      {(__float128)4.84e8, one_},                       // the KI-36 divide point
+  };
+  mpc_t z, r;
+  mpc_init2(z, kMpcPrec);
+  mpc_init2(r, kMpcPrec);
+  for (const auto& f : fix) {
+    q_to_mpc(z, f.re, f.im);
+    for (int op = 0; op < 4; ++op) {
+      if (op == 0) mpc_sqrt(r, z, MPC_RNDNN);
+      if (op == 1) mpc_log (r, z, MPC_RNDNN);
+      if (op == 2) mpc_exp (r, z, MPC_RNDNN);
+      if (op == 3) mpc_asin(r, z, MPC_RNDNN);
+      __float128 a = 0, b = 0;
+      mpc_to_q(r, a, b);
+      mix(a); mix(b);
+    }
+  }
+  mpc_clear(z);
+  mpc_clear(r);
+  return h;
+}
+#endif
+
 // C_Polar under the MPFR arm. NOT an MPC op: polar(r, theta) takes two REAL
 // arguments -- the grid packs r into the operand's real slot and theta into its
 // imaginary slot (see the C_Polar case in the backend dispatch, which calls
@@ -1601,6 +1659,106 @@ void reference_complex_q(int id, __float128 are, __float128 aim,
   out_im = cimagq(r);
 }
 
+// The complex oracle under MPC.
+//
+// WHAT IS NOT HERE, AND WHY.
+//
+//   C_Polar  takes two REAL arguments and is handled by reference_polar_mpfr
+//            above. There is no complex number to convert.
+//   C_Conj   is exact negation of the imaginary part. It joins copysign / fmax
+//            / fmin / fdim in the deferral list for the reason stated there:
+//            an exact bit operation has no rounding to improve on, and
+//            reimplementing its signed-zero and NaN corner cases in a second
+//            place is how you get two behaviours instead of one.
+//
+// Everything else routes to mpc_*. C_Abs is the one that needs care: its result
+// is REAL, so it takes the real rail out (an mpfr_t through mpfr_to_q) and
+// writes an EXACT +0.0 imaginary. The ulp scorer never consults an is_real
+// flag -- it computes hypot(e_re, e_im) / hypot(ref_re, ref_im) -- and
+// degenerates to a real measurement only because both imaginary parts are
+// exactly zero. A tiny nonzero imaginary part would silently rewrite the metric
+// for every C_Abs row and nothing else in the suite would notice. POISON 7 is
+// exactly that, and check H is its only guard.
+//
+// MPC GRINDS on some arguments: tan with a large imaginary part and tanh with a
+// large real part both drive an internal exp() past the point where the binary128
+// result carries any information, and MPC will sit there computing it. The
+// ceiling below is ported from scripts/probe_complex_oracle.cpp, which measured
+// it. A skipped point falls back to libquadmath AND IS COUNTED -- a silent
+// per-point fallback would be a hybrid oracle that nothing declares.
+#if defined(XPMATH_HAVE_MPFR)
+static const double kMpcGrindCeiling = 5700.0;   // probe_complex_oracle.cpp
+long g_mpc_fallbacks = 0;
+
+bool mpc_would_grind(int id, __float128 are, __float128 aim) {
+  const double re = (double)fabsq(are), im = (double)fabsq(aim);
+  if (id == C_Tan  && im > kMpcGrindCeiling) return true;
+  if (id == C_Tanh && re > kMpcGrindCeiling) return true;
+  return false;
+}
+
+void reference_complex_mpc(int id, __float128 are, __float128 aim,
+                           __float128 bre, __float128 bim,
+                           __float128& out_re, __float128& out_im) {
+  if (mpc_would_grind(id, are, aim)) {
+    ++g_mpc_fallbacks;
+    reference_complex_q(id, are, aim, bre, bim, out_re, out_im);
+    return;
+  }
+
+  mpc_t za, zb, r;
+  mpc_init2(za, kMpcPrec);
+  mpc_init2(zb, kMpcPrec);
+  mpc_init2(r,  kMpcPrec);
+  q_to_mpc(za, are, aim);
+  q_to_mpc(zb, bre, bim);
+  bool handled = true;
+
+  switch (id) {
+    case C_Add:   mpc_add (r, za, zb, MPC_RNDNN); break;
+    case C_Sub:   mpc_sub (r, za, zb, MPC_RNDNN); break;
+    case C_Mul:   mpc_mul (r, za, zb, MPC_RNDNN); break;
+    case C_Div:   mpc_div (r, za, zb, MPC_RNDNN); break;
+    case C_Sqrt:  mpc_sqrt(r, za, MPC_RNDNN); break;
+    case C_Exp:   mpc_exp (r, za, MPC_RNDNN); break;
+    case C_Log:   mpc_log (r, za, MPC_RNDNN); break;
+    case C_Log10: mpc_log10(r, za, MPC_RNDNN); break;
+    case C_Sin:   mpc_sin (r, za, MPC_RNDNN); break;
+    case C_Cos:   mpc_cos (r, za, MPC_RNDNN); break;
+    case C_Tan:   mpc_tan (r, za, MPC_RNDNN); break;
+    case C_Asin:  mpc_asin(r, za, MPC_RNDNN); break;
+    case C_Acos:  mpc_acos(r, za, MPC_RNDNN); break;
+    case C_Atan:  mpc_atan(r, za, MPC_RNDNN); break;
+    case C_Sinh:  mpc_sinh(r, za, MPC_RNDNN); break;
+    case C_Cosh:  mpc_cosh(r, za, MPC_RNDNN); break;
+    case C_Tanh:  mpc_tanh(r, za, MPC_RNDNN); break;
+    case C_Asinh: mpc_asinh(r, za, MPC_RNDNN); break;
+    case C_Acosh: mpc_acosh(r, za, MPC_RNDNN); break;
+    case C_Atanh: mpc_atanh(r, za, MPC_RNDNN); break;
+    case C_Pow:   mpc_pow (r, za, zb, MPC_RNDNN); break;
+    case C_Abs: {
+      // Complex -> REAL. Out on the real rail, with an exact +0.0 imaginary.
+      mpfr_t a;
+      mpfr_init2(a, kMpcPrec);
+      mpc_abs(a, za, MPFR_RNDN);
+      out_re = mpfr_to_q(a);
+      out_im = (__float128)0.0;
+      mpfr_clear(a);
+      mpc_clear(za); mpc_clear(zb); mpc_clear(r);
+      return;
+    }
+    default: handled = false; break;   // C_Conj, C_Polar
+  }
+
+  if (handled) {
+    mpc_to_q(r, out_re, out_im);
+  } else {
+    reference_complex_q(id, are, aim, bre, bim, out_re, out_im);
+  }
+  mpc_clear(za); mpc_clear(zb); mpc_clear(r);
+}
+#endif
+
 // Complex oracle dispatch.
 //
 // Deliberately a separate function from reference_complex_q, which stays a pure
@@ -1613,8 +1771,12 @@ void reference_complex_dispatch(int id, __float128 are, __float128 aim,
                                 __float128 bre, __float128 bim,
                                 __float128& out_re, __float128& out_im) {
 #if defined(XPMATH_HAVE_MPFR)
-  if (g_oracle_mpfr && id == C_Polar) {
-    reference_polar_mpfr(are, aim, out_re, out_im);
+  if (g_oracle_mpfr) {
+    if (id == C_Polar) {
+      reference_polar_mpfr(are, aim, out_re, out_im);
+      return;
+    }
+    reference_complex_mpc(id, are, aim, bre, bim, out_re, out_im);
     return;
   }
 #endif
