@@ -260,6 +260,12 @@ install(FILES
   "${CMAKE_CURRENT_BINARY_DIR}/xpmathConfigVersion.cmake"
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/xpmath")
 
+# The licence ships WITH the headers. A consumer who vendors an install prefix
+# into their own tree gets the terms alongside the code rather than having to
+# go back to a repository they may never have cloned.
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+        DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/xpmath")
+
 # ---- Tests (T0.1: backend-parameterized harness) ----------------------------
 # THIRD_PARTY_INCLUDE (set above) is consumed by tests/CMakeLists.txt.
 option(KOKKOS_EP_BUILD_TESTS "Build the extended-precision test suite" ON)
