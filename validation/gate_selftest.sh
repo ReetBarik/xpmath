@@ -53,13 +53,34 @@ esac
 
 fails=0
 
-# run <name> <expect: pass|fail> <args...>
+# run <name> <expect> <args...>
+#
+# <expect> is `pass`, or an EXACT EXIT CODE. "Nonzero" is not good enough: the
+# gate has four distinct failure doors and a case that starts failing through
+# the wrong one is a case that has stopped testing what it was written for.
+#
+#   1  a point got worse            2  coverage removed / unreadable baseline
+#   3  record drift (bound/digits/state, or a moved oracle fingerprint)
+#   5  improvement drift -- the record is stale in the BETTER direction
+#
+# This is the same discipline as oracle_conv_selftest.sh's why[] table, and it
+# is here for the same reason: when exit 5 was added, `digits-inflated` would
+# have stayed green while silently changing which door it exercised.
+#
+# `fail` is still accepted, meaning "any nonzero", for the absolute-mode cases
+# where the code is not the point.
 run() {
   local name="$1" expect="$2"; shift 2
   local out="$work/$name.log" rc
   "$bin" --quiet "$@" > "$out" 2>&1; rc=$?
-  local got; if [ "$rc" -eq 0 ]; then got=pass; else got=fail; fi
-  if [ "$got" = "$expect" ]; then
+  local got ok
+  if [ "$rc" -eq 0 ]; then got=pass; else got="$rc"; fi
+  case "$expect" in
+    pass) [ "$rc" -eq 0 ] && ok=1 || ok=0 ;;
+    fail) [ "$rc" -ne 0 ] && ok=1 || ok=0 ;;
+    *)    [ "$rc" -eq "$expect" ] && ok=1 || ok=0 ;;
+  esac
+  if [ "$ok" = 1 ]; then
     printf '  ok    %-22s expected %-4s got %s (exit %d)\n' "$name" "$expect" "$got" "$rc"
     grep -E '^RESULT|^  (REGRESSION|RECORD|NEW|STALE)' "$out" | head -3 | sed 's/^/          /'
   else
@@ -90,25 +111,25 @@ monotone)
   # The measurement of record, zeroed. A baseline claiming every point was
   # exact must make the real sweep look catastrophically worse.
   poison_col 6 0 "$work/ulps.csv.gz"
-  run ulps-zeroed fail --baseline "$work/ulps.csv.gz"
+  run ulps-zeroed 1 --baseline "$work/ulps.csv.gz"
 
   # THE ORIGINAL BLIND SPOT: the last numeric column is `bound`, not `ulps`.
   poison_col 7 0 "$work/bound.csv.gz"
-  run bound-zeroed fail --baseline "$work/bound.csv.gz"
+  run bound-zeroed 3 --baseline "$work/bound.csv.gz"
 
   # The other discarded column.
   poison_col 5 0 "$work/digits.csv.gz"
-  run digits-zeroed fail --baseline "$work/digits.csv.gz"
+  run digits-zeroed 3 --baseline "$work/digits.csv.gz"
 
   # A verdict column flipped from scored to unresolved: every point loses its
   # verdict, which is a regression even though no ulp count moved.
   poison_col 8 U "$work/state.csv.gz"
-  run state-flipped fail --baseline "$work/state.csv.gz"
+  run state-flipped 3 --baseline "$work/state.csv.gz"
 
   # Truncation. A short baseline must not be read as agreement on the rows it
   # happens to contain.
   gzip -dc "$base" | head -1000 | gzip > "$work/short.csv.gz"
-  run truncated fail --baseline "$work/short.csv.gz"
+  run truncated 2 --baseline "$work/short.csv.gz"
 
   # ---------------------------------------------------------------------
   # ZERO ROWS. The case `truncated` above CANNOT reach.
@@ -125,15 +146,15 @@ monotone)
   # file with a header and no body, and a stream the decompressor rejects.
   # ---------------------------------------------------------------------
   : | gzip > "$work/empty.csv.gz"
-  run empty-baseline fail --baseline "$work/empty.csv.gz"
+  run empty-baseline 2 --baseline "$work/empty.csv.gz"
 
   gzip -dc "$base" | grep '^#' | gzip > "$work/header_only.csv.gz"
-  run header-only fail --baseline "$work/header_only.csv.gz"
+  run header-only 2 --baseline "$work/header_only.csv.gz"
 
   # Not valid gzip at all: exercises the pclose status path specifically,
   # which used to be discarded outright.
   printf 'this is not gzip data' > "$work/corrupt.csv.gz"
-  run corrupt-gz fail --baseline "$work/corrupt.csv.gz"
+  run corrupt-gz 2 --baseline "$work/corrupt.csv.gz"
 
   # ---------------------------------------------------------------------
   # DIRECTIONAL DIGIT DRIFT.
@@ -154,7 +175,7 @@ monotone)
     | awk -F, -v OFS=, '/^#/ {print; next} /^backend,/ {print; next}
                         {$5 = $5 + 5.0; print}' \
     | gzip > "$work/digits_up.csv.gz"
-  run digits-inflated fail --baseline "$work/digits_up.csv.gz"
+  run digits-inflated 3 --baseline "$work/digits_up.csv.gz"
 
   # And the ulps column inflated on its own: the record says every point was
   # far WORSE than this build measures. Those rows do satisfy "error shrank",
@@ -166,7 +187,44 @@ monotone)
     | awk -F, -v OFS=, '/^#/ {print; next} /^backend,/ {print; next}
                         {$6 = $6 * 1000.0 + 1.0; print}' \
     | gzip > "$work/ulps_inflated.csv.gz"
-  run ulps-inflated pass --baseline "$work/ulps_inflated.csv.gz"
+  # POLARITY FLIPPED BY #9, DELIBERATELY. This case used to assert `pass`, and
+  # that assertion WAS the bug: a baseline claiming every row is 1000x worse
+  # than the build scored `increased: 397409` and exited 0. Measured on the
+  # pre-fix binary before the change landed.
+  #
+  # What it originally pinned must not evaporate: it was written to stop a
+  # SHRINKING error from excusing an arbitrary record through the digit
+  # exemption. It still tests that -- the exemption no longer excuses anything,
+  # because improvement drift now has its own door. The case is the same, the
+  # expected door changed from "none" to 5.
+  run ulps-inflated 5 --baseline "$work/ulps_inflated.csv.gz"
+
+  # ---------------------------------------------------------------------
+  # IMPROVEMENT DRIFT (#9). The record is stale in the BETTER direction.
+  #
+  # `increased` and `drift_digits_up` were computed, printed and then dropped
+  # before the exit code, so no amount of unexplained improvement could fail.
+  # Two cases, because the whole-file version could be satisfied by some future
+  # "N% of rows moved" heuristic and the single-row one cannot.
+  #
+  # Both exited 0 on the pre-fix binary. That was measured, not assumed --
+  # a poison nobody has seen fail is not a poison.
+  # ---------------------------------------------------------------------
+  zcat "$base" | awk -F, -v OFS=, '
+      /^#/{print;next} /^backend,/{print;next}
+      !done && $8=="S" && $6+0>0 { $6=1e6; $5="14.00"; done=1; print; next }
+      {print}' | gzip > "$work/fake_one.csv.gz"
+  run fake-improvement-1row 5 --baseline "$work/fake_one.csv.gz"
+
+  # And the negative: an improvement UNDER the noise floor must stay silent, or
+  # the gate fires on run-to-run wiggle. 1.05x is well inside kNoiseFactor
+  # (1.2589). Digits are left alone here -- moving them would be real drift and
+  # would exit 3 through a different door, which is what a first attempt at this
+  # case actually did.
+  zcat "$base" | awk -F, -v OFS=, '/^#/{print;next} /^backend,/{print;next}
+                                   {$6 = $6*1.05; print}' \
+      | gzip > "$work/subnoise.csv.gz"
+  run improvement-subnoise pass --baseline "$work/subnoise.csv.gz"
   ;;
 
 absolute)
