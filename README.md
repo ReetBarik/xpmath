@@ -1,5 +1,25 @@
 # xpmath — Extended-precision arithmetic library
 
+
+## Using xpmath in your own project
+
+xpmath is a header-only C++17 library and installs as a CMake package:
+
+```cmake
+find_package(xpmath 0.1 REQUIRED)
+target_link_libraries(my_app PRIVATE xpmath::xpmath)
+```
+
+```cpp
+#include <xp/dd_math.hpp>
+xp::DoubleDouble y = xp::sqrt(xp::DoubleDouble(2.0));
+```
+
+The exported package does **not** require Kokkos — the headers in
+`include/xp/` never include one. See [docs/CONSUMING.md](docs/CONSUMING.md)
+for install instructions, the versioning policy, and how to verify an
+install.
+
 [![CI](https://github.com/ReetBarik/xpmath/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ReetBarik/xpmath/actions/workflows/ci.yml)
 
 The badge covers six lanes: generated-doc freshness, the standalone no-Kokkos

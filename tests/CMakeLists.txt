@@ -531,6 +531,42 @@ endif()
 
 # The generated domain document must be what the generator currently emits from
 # the committed baseline. Pure Python, well under a second, no build products.
+# ---------------------------------------------------------------------------
+# THE CONSUMER TEST (packaging)
+# ---------------------------------------------------------------------------
+# Everything else in this file tests the LIBRARY. This one tests the PACKAGE:
+# it installs xpmath to a scratch prefix and builds a separate project against
+# it with find_package(). Nothing else in the build exercises the exported
+# target, the installed header layout or the version file, so all three can be
+# broken while the other 38 targets stay green.
+#
+# It is registered as a ctest target rather than left as a script somebody
+# remembers to run, because validation/strip_timing.sh is already an object
+# lesson in what happens to a check nothing invokes.
+#
+# WHY IT SHELLS OUT TO CMAKE INSTEAD OF BEING A NORMAL TEST. The check requires
+# a completed `cmake --install` of THIS project, which cannot happen during the
+# configure that is registering the test. So the test drives a nested
+# configure/build/install into a scratch prefix at RUN time. That makes it the
+# most expensive target here by wall clock and the only one that recurses into
+# CMake; both are inherent to what it verifies.
+#
+# Skipped (not failed) when the generator is not Makefiles/Ninja, since the
+# nested build inherits the generator and multi-config generators would need a
+# --config argument threaded through.
+add_test(NAME consumer_package
+         COMMAND "${CMAKE_COMMAND}"
+                 -DXPMATH_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+                 -DXPMATH_SCRATCH=${CMAKE_CURRENT_BINARY_DIR}/consumer_scratch
+                 -DXPMATH_GENERATOR=${CMAKE_GENERATOR}
+                 -DXPMATH_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+                 "-DXPMATH_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
+                 -DXPMATH_KOKKOS_DIR=${Kokkos_DIR}
+                 -P "${CMAKE_SOURCE_DIR}/tests/consumer/run_consumer_test.cmake")
+set_tests_properties(consumer_package PROPERTIES
+                     LABELS packaging
+                     TIMEOUT 600)
+
 add_test(NAME domains_fresh
          COMMAND ${CMAKE_SOURCE_DIR}/validation/check_domains_fresh.sh)
 
