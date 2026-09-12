@@ -382,6 +382,58 @@ static EftCount run_device_parity() {
   return R;
 }
 
+// ----------------------------------------------------------------------------
+// Baseline mechanism (ON variant only). Records the observed mismatch count so a
+// LATER build with a different compiler/ISA that changes contraction behavior is
+// caught as drift. WARN-only (never fails) -- the ON variant is a reporter.
+//
+// TF was the one backend without this. DD (T1.5), FF (T2.5) and QF all carried
+// check_baseline() plus a <backend>_fma_guard_baseline.txt; TF carried neither,
+// so tf_fma_guard_test_contract_on ran, printed its counts and exited 0 with
+// nothing compared against anything. A reporter that reports to no one is the
+// same shape of defect as a gate that cannot fail.
+//
+// Deliberately identical in behaviour to the other three: same file format (one
+// integer on the first non-comment line), same graceful degradation when the
+// file is missing or unparseable, same warn-never-fail posture. Four backends,
+// one contract.
+// ----------------------------------------------------------------------------
+#if KOKKOS_EP_CONTRACTION_MODE == 1
+#  ifdef KOKKOS_EP_BASELINE_PATH
+static void check_baseline(long observed) {
+  const char* path = KOKKOS_EP_BASELINE_PATH;
+  std::ifstream f(path);
+  if (!f) {
+    std::printf("  baseline: no file at %s\n", path);
+    std::printf("            record this run by writing \"%ld\" as the first\n", observed);
+    std::printf("            non-comment line of that file to arm drift detection.\n");
+    return;
+  }
+  long baseline = -1;
+  std::string line;
+  bool got = false;
+  while (std::getline(f, line)) {
+    size_t p = line.find_first_not_of(" \t");
+    if (p == std::string::npos || line[p] == '#') continue;   // blank / comment
+    try { baseline = std::stol(line.substr(p)); got = true; } catch (...) {}
+    break;
+  }
+  if (!got) {
+    std::printf("  baseline: %s present but unparseable; skipping drift check\n", path);
+    return;
+  }
+  if (observed == baseline) {
+    std::printf("  baseline: OK — observed mismatch count %ld matches baseline\n", observed);
+  } else {
+    std::printf("  baseline: *** DRIFT *** observed=%ld baseline=%ld\n", observed, baseline);
+    std::printf("            contraction behavior changed since the baseline was\n");
+    std::printf("            recorded (compiler/ISA/flag change). This is a WARNING,\n");
+    std::printf("            not a failure. If the new value is correct, update %s.\n", path);
+  }
+}
+#  endif
+#endif
+
 // ============================================================================
 int main(int argc, char** argv) {
   Kokkos::initialize(argc, argv);
@@ -439,6 +491,15 @@ int main(int argc, char** argv) {
     KOKKOS_EP_ASSERT(F == 0, "OFF: at least one Dekker primitive broke");
     rc = ep_exit_code();
 #else
+    // The drift counter is the ON-mode analogue of the OFF-mode failure count:
+    // zero-but-should-not-be plus nonzero-but-wrong, over both host primitives
+    // and the device pass. Mirrors qf_fma_guard_test's F() = err_zero + err_wrong.
+    const long F_drift = prod_h.zero + prod_h.wrong
+                       + sqr_h.zero  + sqr_h.wrong
+                       + dev.zero    + dev.wrong;
+#  ifdef KOKKOS_EP_BASELINE_PATH
+    check_baseline(F_drift);
+#  endif
     long W_total = prod_h.wrong + sqr_h.wrong + dev.wrong;
     if (W_total > 0) {
       std::printf("\nERROR: ERR_NONZERO_WRONG detected (nonzero but violates Dekker identity)\n");

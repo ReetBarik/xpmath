@@ -3547,16 +3547,48 @@ int main(int argc, char** argv) {
   int         explain_point = -1;
 
   for (int i = 1; i < argc; ++i) {
-    const std::string s = argv[i];
+    std::string s = argv[i];
     auto need = [&](const char* what) -> const char* {
       if (i + 1 >= argc) { std::fprintf(stderr, "Missing value after %s\n", what); std::exit(2); }
       return argv[++i];
     };
+
+    // --flag=VALUE is accepted for every value-taking flag, because that is the
+    // spelling the documentation uses -- this binary's own --help text,
+    // validation/sweep/open_defects.txt and the project handoff all wrote
+    // `--oracle=mpfr`. The parser matched only the bare token and then consumed
+    // the NEXT argv, so the documented form fell through to "Unknown argument"
+    // and exited 2. It failed loudly, so nothing was ever mismeasured -- but
+    // the invocation everyone was told to use was the one that did not work.
+    std::string inline_val;
+    bool have_inline = false;
+    if (s.compare(0, 2, "--") == 0) {
+      const size_t eq = s.find('=');
+      if (eq != std::string::npos) {
+        inline_val  = s.substr(eq + 1);
+        have_inline = true;
+        s           = s.substr(0, eq);
+      }
+    }
+    // Returns the '=' value when there is one, otherwise falls back to `need`
+    // and takes the next argv. `--flag=` with nothing after it is an error
+    // rather than a silent empty string.
+    auto need_v = [&](const char* what) -> std::string {
+      if (have_inline) {
+        if (inline_val.empty()) {
+          std::fprintf(stderr, "Missing value after %s=\n", what);
+          std::exit(2);
+        }
+        return inline_val;
+      }
+      return std::string(need(what));
+    };
+    (void)need_v;
     if (s == "--help" || s == "-h") { usage(argv[0]); return 0; }
-    else if (s == "--out")       { out = need("--out"); out_set = true; }
-    else if (s == "--grid-out")  { grid_out = need("--grid-out"); }
+    else if (s == "--out")       { out = need_v("--out"); out_set = true; }
+    else if (s == "--grid-out")  { grid_out = need_v("--grid-out"); }
     else if (s == "--oracle") {
-      const std::string v = need("--oracle");
+      const std::string v = need_v("--oracle");
 #if defined(XPMATH_HAVE_MPFR)
       if (v == "mpfr")           g_oracle_mpfr = true;
 #else
@@ -3579,14 +3611,14 @@ int main(int argc, char** argv) {
       return 77;   // ctest SKIP, not a pass
     }
 #endif
-    else if (s == "--baseline")  { baseline = need("--baseline"); }
+    else if (s == "--baseline")  { baseline = need_v("--baseline"); }
     else if (s == "--ulp")       { ulp_gate = true; }
-    else if (s == "--ulp-allowance") { ulp_allowance = std::atof(need("--ulp-allowance")); }
-    else if (s == "--ulp-dump") { ulp_dump = need("--ulp-dump"); }
-    else if (s == "--register") { ulp_register = need("--register"); ulp_gate = true; }
+    else if (s == "--ulp-allowance") { ulp_allowance = std::atof(need_v("--ulp-allowance").c_str()); }
+    else if (s == "--ulp-dump") { ulp_dump = need_v("--ulp-dump"); }
+    else if (s == "--register") { ulp_register = need_v("--register"); ulp_gate = true; }
     else if (s == "--dump-terms") { dump_terms = true; ulp_gate = true; }
     else if (s == "--dump-operands") {
-      const std::string v = need("--dump-operands");
+      const std::string v = need_v("--dump-operands");
       const size_t colon = v.rfind(':');
       if (colon == std::string::npos) {
         std::fprintf(stderr, "--dump-operands wants OP:POINT\n"); return 2;
@@ -3596,7 +3628,7 @@ int main(int argc, char** argv) {
       ulp_gate = true;
     }
     else if (s == "--ulp-explain") {
-      const std::string v = need("--ulp-explain");
+      const std::string v = need_v("--ulp-explain");
       const size_t colon = v.rfind(':');
       if (colon == std::string::npos) {
         std::fprintf(stderr, "--ulp-explain wants OP:POINT\n"); return 2;
@@ -3605,7 +3637,7 @@ int main(int argc, char** argv) {
       explain_point = std::atoi(v.c_str() + colon + 1);
       ulp_gate = true;
     }
-    else if (s == "--seed")      { seed = std::strtoull(need("--seed"), nullptr, 10); }
+    else if (s == "--seed")      { seed = std::strtoull(need_v("--seed").c_str(), nullptr, 10); }
     else if (s == "--summary")   { quiet = false; }
     else if (s == "--quiet")     { quiet = true; }
     else { std::fprintf(stderr, "Unknown argument: %s\n", s.c_str()); usage(argv[0]); return 2; }

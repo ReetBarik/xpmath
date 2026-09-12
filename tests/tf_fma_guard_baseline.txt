@@ -1,0 +1,39 @@
+# tf_fma_guard_test contraction-ON baseline
+#
+# The FIRST non-comment line below is the recorded number of Dekker-primitive
+# mismatches observed by tf_fma_guard_test_contract_on (the -ffp-contract=fast /
+# --fmad=true build). It is historical data, not a pass/fail gate: the ON variant
+# always exits 0. On each run the ON variant compares its live count against this
+# number and prints "baseline: OK" if unchanged or "*** DRIFT ***" if it differs.
+#
+# Drift means the compiler's contraction behavior changed since this was recorded
+# (a compiler upgrade, a new -march/ISA target that gained FMA, or a flag change).
+# That is a WARNING to investigate, not a failure. If the new value is correct for
+# the new toolchain, update the number below.
+#
+# WHY THIS FILE ARRIVED LATE. DD (T1.5), FF (T2.5) and QF each had a
+# check_baseline() and a baseline file from the start. TF had neither, so
+# tf_fma_guard_test_contract_on ran, printed its counts, compared them against
+# nothing and exited 0 for as long as it has existed. It was a reporter with no
+# one to report to -- the same shape of defect as a gate that cannot fail.
+#
+# THE NUMBER BELOW WAS MEASURED, NOT ASSUMED. It is what this toolchain actually
+# produced on the run that armed this file, and the drift check was then poisoned
+# (baseline set to a wrong value) and observed to print *** DRIFT *** before being
+# restored. A recorded number nobody has seen disagree is not yet a check.
+#
+# The counter is the ON-mode analogue of the OFF-mode failure count:
+#   err_zero + err_wrong, summed over tf_two_prod, tf_two_sqr and the device pass
+# matching qf_fma_guard_test's F() = err_zero + err_wrong.
+#
+# Recorded environment:
+#   compiler : GCC 13.3.0 (x86_64-suse-linux), -O3 -ffp-contract=fast
+#   ISA      : baseline x86-64 (no -mfma / -march=native), so no FMA emitted
+#   Kokkos   : 5.1.0, Serial backend, LIBQUADMATH ON
+#   result   : 0 mismatches -- GCC did NOT contract the Dekker sequence on this
+#              ISA target, consistent with the DD/FF/QF baselines, which all
+#              record 0 under the same toolchain.
+#   host     : tf_two_prod tested=1511573 trivial=7765 zero=0 wrong=0
+#              tf_two_sqr  tested=1511573 trivial=7765 zero=0 wrong=0
+#   device   : Serial, tested=600000, zero=0, wrong=0
+0
