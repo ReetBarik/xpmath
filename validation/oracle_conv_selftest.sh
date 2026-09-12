@@ -26,7 +26,10 @@
 #
 #   validation/oracle_conv_selftest.sh <build dir>
 #
-# Five compiles of one ~3k-line translation unit; budget ~90s.
+# Nine compiles of one ~3.9k-line translation unit, run four at a time; budget
+# ~60s. The loop used to be sequential at five compiles for ~59s; the builds are
+# independent, so widening the case list from 5 to 9 and running them in
+# parallel costs LESS than the old sequential five.
 set -u
 
 builddir="${1:?usage: oracle_conv_selftest.sh <build dir>}"
@@ -45,8 +48,16 @@ build_and_run() {   # <tag> <extra-defines...>
   # -DXPMATH_HAVE_MPFR is REQUIRED here: the MPFR oracle is compiled
   # conditionally, and without this define every poisoned build would report
   # "built without MPFR; nothing to check" and the poison would never fire.
-  if ! "${CXX}" -O2 -std=c++17 -DNDEBUG -DXPMATH_HAVE_MPFR=1 -fext-numeric-literals -I "${inc}" \
-       "$@" "${src}" -o "${exe}" -lquadmath -lmpfr -lgmp \
+  # -lmpc is required alongside -lmpfr: the complex arm of the oracle is MPC,
+  # and this harness compiles the same TU the gate is built from.
+  #
+  # XPMATH_EXTRA_INC / XPMATH_EXTRA_LIB let the caller pass the include and
+  # library paths CMake actually found. Without them this line only works when
+  # MPFR/MPC sit in the default prefix -- a non-default install passes
+  # find_library() at configure time and then fails all five compiles here.
+  if ! "${CXX}" -O2 -std=c++17 -DNDEBUG -DXPMATH_HAVE_MPFR=1 -fext-numeric-literals \
+       -I "${inc}" ${XPMATH_EXTRA_INC:-} \
+       "$@" "${src}" -o "${exe}" ${XPMATH_EXTRA_LIB:-} -lquadmath -lmpc -lmpfr -lgmp \
        > "${work}/${tag}.build.log" 2>&1; then
     echo "  ${tag}: COMPILE FAILED (see ${work}/${tag}.build.log)"
     return 2
@@ -80,13 +91,49 @@ fi
 # pairs, which is what the sweep actually feeds the oracle. And C can never see
 # poison 4, because both of its chains end in the same mpfr_to_q; B and D are
 # what cover the output direction.
+#
+# 5-8 are the COMPLEX half. The same discipline: each poison is aimed at a
+# specific check, and the harness asserts it is caught by THAT check and not by
+# some unrelated one that happens to also go red.
+#
+# Poison 2 is the load-bearing entry here. q_to_mpc is built ON q_to_mpfr
+# (MPC 1.1.0 has no mpc_set_float128_float128), so a poison aimed at the real
+# input conversion MUST now corrupt complex inputs too -- hence "A B C F". If
+# that F ever disappears from the observed set, someone has given the complex
+# path its own conversion, and this table is what says so.
+#
+# EVERY ENTRY BELOW WAS MEASURED, NOT PREDICTED. The first run of this table
+# disagreed with the author on five of eight rows, which is the entire reason
+# the table asserts a SET rather than "something went red":
+#
+#   1  predicted "A C"      measured "A C F"      q_to_mpc is built on q_to_mpfr
+#   2  predicted "A B C F"  measured "A B C F H"  H's fixture uses q_to_mpfr too
+#   4  predicted "B D"      measured "B D H"      mpc_to_q is built on mpfr_to_q
+#   5  predicted "F"        measured "F G"        cut sheets depend on zero sign
+#   6  predicted "H"        measured "G H"        G reads back through mpc_to_q
+#   8  predicted "G"        measured NOT CAUGHT   G was too weak; G was fixed
+#
+# Rows 1, 2, 4, 6 are the shared-mechanism structure made visible: the complex
+# conversions are DELIBERATELY built on the real ones, and these sets are what
+# says so. If F ever drops out of row 2, someone has written a second
+# conversion.
+#
+# Row 8 was a real hole, not a bookkeeping error: G compared MPC against
+# libquadmath at cut points where both are correctly rounded, so it could not
+# see a working precision with no headroom left. G now also compares the oracle
+# against itself at 2x precision on a cancelling argument. The poison was left
+# in place and re-run until it fired.
 declare -A why=(
-  [1]="A C"      # NOT B: the decimal route round-trips binary128 perfectly
-  [2]="A B C"
+  [1]="A C F"      # F: q_to_mpc is built on q_to_mpfr
+  [2]="A B C F H"
   [3]="D"
-  [4]="B D"      # NOT C: see above
+  [4]="B D H"      # H: mpc_to_q is built on mpfr_to_q
+  [5]="F G"        # zero-sign loss also moves the branch-cut sheet
+  [6]="G H"        # output side; G reads its result back through mpc_to_q
+  [7]="H"          # the C_Abs shape; invisible to every other check
+  [8]="G"          # conversions untouched -- only the headroom arm can see it
 )
-for p in 1 2 3 4; do
+for p in 1 2 3 4 5 6 7 8; do
   echo "=== poison ${p} must be DETECTED (expect checks: ${why[$p]}) ==="
   if build_and_run "poison${p}" "-DXPMATH_POISON_ORACLE_CONV=${p}"; then
     echo "  poison ${p}: NOT DETECTED  <-- the selftest is blind to it"
@@ -99,7 +146,7 @@ for p in 1 2 3 4; do
     # The poison must be caught by the checks it is aimed at, not by some
     # unrelated one that happens to also go red.
     got=""
-    for c in A B C D E; do
+    for c in A B C D E F G H; do
       grep -q "^  FAIL  ${c} " "${work}/poison${p}.log" && got="${got}${got:+ }${c}"
     done
     if [ "${got}" = "${why[$p]}" ]; then

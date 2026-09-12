@@ -249,6 +249,7 @@
 #include <quadmath.h>
 #if defined(XPMATH_HAVE_MPFR)
 #include <mpfr.h>
+#include <mpc.h>   // complex MPFR: the complex half of the --oracle=mpfr arm
 #endif
 
 
@@ -730,6 +731,28 @@ __float128 round_ties_even_q(__float128 a) {
 // than pulling in MPC or hand-rolling branch cuts.
 __float128 reference_real_q_quad(int id, __float128 a, __float128 b, __float128 c);
 static const mpfr_prec_t kOraclePrec = 400;
+// The complex arm's working precision, separate from kOraclePrec ONLY so that
+// POISON 8 can drop it without touching the conversions.
+//
+// 64, NOT 113, AND THE REASON IS A MEASUREMENT. The first version of this
+// poison used 113 -- "the oracle then carries exactly as many bits as the
+// binary128 it is quantised into, so it stops being a reference". That build
+// PASSED every check, including the headroom arm added to G specifically to
+// catch it. The poison was wrong, not the check: MPC is correctly rounded, so
+// at 113 bits of working precision it returns the correctly rounded 113-bit
+// answer, mpc_to_q quantises to binary128 which is also 113 bits, and the two
+// builds agree because there is almost nothing between them. Cancellation in
+// the ARGUMENT does not degrade a correctly-rounded function -- that intuition
+// is what made 113 look damaging, and it is wrong.
+//
+// The defect worth guarding against is a working precision BELOW the format the
+// answer lands in. At 64 bits the oracle cannot represent its own result and is
+// wrong in the low ~49 bits of every nontrivial value.
+#if XPMATH_POISON_ORACLE_CONV == 8
+static const mpfr_prec_t kMpcPrec = 64;
+#else
+static const mpfr_prec_t kMpcPrec = kOraclePrec;
+#endif
 bool g_oracle_mpfr = false;
 
 // ---------------------------------------------------------------------------
@@ -915,6 +938,17 @@ void q_to_mpfr_by_doubles(mpfr_t out, __float128 v) {
 }
 
 #if defined(XPMATH_HAVE_MPFR)
+// Forward declarations for the complex half of the selftest below. The
+// conversions and the libquadmath complex reference are defined further down,
+// next to the oracle they serve; the selftest is up here with the rest of the
+// conversion checking. Declaring rather than reordering keeps each group with
+// the thing it belongs to.
+void q_to_mpc(mpc_t out, __float128 re, __float128 im);
+void mpc_to_q(mpc_srcptr v, __float128& out_re, __float128& out_im);
+void reference_complex_q(int id, __float128 are, __float128 aim,
+                         __float128 bre, __float128 bim,
+                         __float128& out_re, __float128& out_im);
+
 int oracle_conv_selftest() {
   int fails = 0;
   auto bad = [&fails](const char* what, const char* detail) {
@@ -1086,6 +1120,211 @@ int oracle_conv_selftest() {
     if (!isnanq(mpfr_to_q(m)))               bad("E nan round trip", "");
   }
 
+  // -------------------------------------------------------------------------
+  // F, G, H -- the COMPLEX half of the oracle. Same contract as A-E: prove the
+  // conversions are exact, prove the end-to-end answer is right where it is
+  // hardest, prove the output direction rounds correctly.
+  // -------------------------------------------------------------------------
+
+  // F. q_to_mpc exactness, INPUT side.
+  //
+  // Compared against mpc_set_fr_fr of two q_to_mpfr_by_doubles results -- the
+  // independent route, sharing no mechanism with q_to_mpfr, exactly as check A
+  // does for the real path.
+  //
+  // COMPARED BY SIGNBIT, NOT BY VALUE. mpc_cmp compares values and -0.0 == +0.0,
+  // so a value comparison is blind to a lost zero sign by construction. That is
+  // POISON 5, and it is not hypothetical: the angle() `== 0.0` bug -- also true
+  // of negative zero -- produced 1,032 defect points across c log / c log10 /
+  // c pow / c atanh before it was found. The grid writes both +0 and -0 at
+  // every complex anchor, so this is a live mechanism in the inputs this
+  // oracle will actually see.
+  {
+    mpc_t z, z2;
+    mpc_init2(z, kOraclePrec);
+    mpc_init2(z2, kOraclePrec);
+    mpfr_t rr, ii;
+    mpfr_inits2(kOraclePrec, rr, ii, (mpfr_ptr)0);
+
+    const __float128 pz = (__float128)0.0;
+    const __float128 nz = -(__float128)0.0;
+    const __float128 vals[] = {
+        one, -one, pz, nz, (__float128)0.5, -(__float128)100,
+        (__float128)2 / (__float128)3, (__float128)182.21237390820801,
+        one + ldexpq(one, -112),
+    };
+    for (__float128 a : vals) {
+      for (__float128 b : vals) {
+        q_to_mpc(z, a, b);
+        q_to_mpfr_by_doubles(rr, a);
+        q_to_mpfr_by_doubles(ii, b);
+        mpc_set_fr_fr(z2, rr, ii, MPC_RNDNN);
+        if (mpfr_cmp(mpc_realref(z), mpc_realref(z2)) != 0 ||
+            mpfr_cmp(mpc_imagref(z), mpc_imagref(z2)) != 0) {
+          char d[200];
+          std::snprintf(d, sizeof d, "re=%s im=%s", qstr(a), qstr(b));
+          bad("F q_to_mpc not exact", d);
+        }
+        // The signbit assertion. A value comparison above cannot see this.
+        if (mpfr_signbit(mpc_realref(z)) != (int)(signbitq(a) != 0) ||
+            mpfr_signbit(mpc_imagref(z)) != (int)(signbitq(b) != 0)) {
+          char d[200];
+          std::snprintf(d, sizeof d, "re=%s im=%s (zero sign lost)",
+                        qstr(a), qstr(b));
+          bad("F q_to_mpc sign", d);
+        }
+      }
+    }
+    mpfr_clears(rr, ii, (mpfr_ptr)0);
+    mpc_clear(z);
+    mpc_clear(z2);
+  }
+
+  // G. Branch cuts, end to end.
+  //
+  // At a cut the ANSWER depends on which side of a signed zero the argument
+  // sits, so this is where a lost or flipped zero sign stops being invisible
+  // and starts being a wrong number. Require MPC and libquadmath to agree to
+  // well inside the binary128 floor at inputs drawn from the cuts the grid
+  // actually contains.
+  //
+  // This is also the only check that can see POISON 8 (a working precision
+  // dropped to 113 bits with the conversions untouched): a round trip is
+  // byte-identical under that poison, so nothing on the conversion path can
+  // detect it. Whether G catches it is a measurement of G's fixture set, not a
+  // foregone conclusion.
+  {
+    mpc_t z, r;
+    // kMpcPrec, not kOraclePrec: this is the working precision POISON 8 drops.
+    mpc_init2(z, kMpcPrec);
+    mpc_init2(r, kMpcPrec);
+    const __float128 pz = (__float128)0.0;
+    const __float128 nz = -(__float128)0.0;
+    struct { __float128 re, im; } cuts[] = {
+        {-(__float128)100, pz}, {-(__float128)100, nz},
+        {-one,             pz}, {-one,             nz},
+        {pz, -one},             {nz, -one},
+        {-(__float128)2,   pz}, {-(__float128)2,   nz},
+    };
+    for (const auto& c : cuts) {
+      __complex128 zq;
+      __real__ zq = c.re;
+      __imag__ zq = c.im;
+      for (int op = 0; op < 3; ++op) {
+        q_to_mpc(z, c.re, c.im);
+        __complex128 refq;
+        if (op == 0) { mpc_sqrt(r, z, MPC_RNDNN); refq = csqrtq(zq); }
+        if (op == 1) { mpc_log (r, z, MPC_RNDNN); refq = clogq(zq);  }
+        if (op == 2) { mpc_asin(r, z, MPC_RNDNN); refq = casinq(zq); }
+        __float128 gre = 0, gim = 0;
+        mpc_to_q(r, gre, gim);
+        const __float128 dre = fabsq(gre - crealq(refq));
+        const __float128 dim = fabsq(gim - cimagq(refq));
+        const __float128 mag = hypotq(crealq(refq), cimagq(refq));
+        const __float128 tol = (mag > 0 ? mag : one) * ldexpq(one, -100);
+        if (!(dre <= tol) || !(dim <= tol)) {
+          char d[240];
+          std::snprintf(d, sizeof d, "op=%d z=(%s,%s)", op, qstr(c.re), qstr(c.im));
+          bad("G branch cut sheet", d);
+        }
+      }
+    }
+    // G2 -- HEADROOM, not sheet agreement.
+    //
+    // The arm above compares MPC against libquadmath, which pins the branch-cut
+    // SHEET but cannot measure precision: at a well-conditioned cut point both
+    // are correctly rounded and they agree at any working precision >= 113. It
+    // was therefore blind to POISON 8 (working precision dropped to 113 with the
+    // conversions untouched) -- measured, not assumed: the poison ran and G
+    // stayed green.
+    //
+    // So compare the oracle against ITSELF at twice kOraclePrec, on arguments
+    // that CANCEL. log(z) at |z| = 1 + 2^-60 loses ~60 bits to cancellation;
+    // 113 bits of working precision leaves ~53, while 400 leaves ~340. Same
+    // shape as probe_complex_oracle's --selfcheck, promoted from probe to gate.
+    {
+      mpc_t lo, hi, zl, zh;
+      mpc_init2(lo, kMpcPrec);
+      mpc_init2(zl, kMpcPrec);
+      mpc_init2(hi, kOraclePrec * 2);
+      mpc_init2(zh, kOraclePrec * 2);
+      mpfr_t a, b;
+      mpfr_inits2(kOraclePrec * 2, a, b, (mpfr_ptr)0);
+
+      // |z| just above 1: the modulus cancels in log, and the grid deliberately
+      // sits on moduli 0.99 / 1.0 / 1.01 / 1.1, so this is the population the
+      // sweep actually scores, not a contrived corner.
+      for (int k = 40; k <= 80; k += 20) {
+        const __float128 eps = ldexpq(one, -k);
+        const __float128 zre = one + eps;
+        const __float128 zim = eps;
+        q_to_mpc(zl, zre, zim);
+        q_to_mpc(zh, zre, zim);
+        mpc_log(lo, zl, MPC_RNDNN);
+        mpc_log(hi, zh, MPC_RNDNN);
+        // Relative difference of the real parts, which is the cancelling one.
+        mpfr_set(a, mpc_realref(lo), MPFR_RNDN);
+        mpfr_set(b, mpc_realref(hi), MPFR_RNDN);
+        mpfr_sub(a, a, b, MPFR_RNDN);
+        if (!mpfr_zero_p(b)) mpfr_div(a, a, b, MPFR_RNDN);
+        mpfr_abs(a, a, MPFR_RNDN);
+        // Full-precision MPC agrees with itself at 2x to far better than the
+        // binary128 floor the answer is quantised into. A working precision
+        // with no headroom does not.
+        if (mpfr_cmp_d(a, 1e-30) > 0) {
+          char d[200];
+          std::snprintf(d, sizeof d, "log at |z|=1+2^-%d: rel %.3g",
+                        k, mpfr_get_d(a, MPFR_RNDN));
+          bad("G oracle headroom", d);
+        }
+      }
+      mpfr_clears(a, b, (mpfr_ptr)0);
+      mpc_clear(lo); mpc_clear(hi); mpc_clear(zl); mpc_clear(zh);
+    }
+
+    mpc_clear(z);
+    mpc_clear(r);
+  }
+
+  // H. mpc_to_q, OUTPUT side: correct rounding per component, and the C_Abs
+  // shape.
+  //
+  // The per-component half is the analogue of D. The C_Abs half asserts a
+  // SHAPE, not a value: the ulp scorer never consults an is_real flag -- it
+  // computes hypot(e_re, e_im) / hypot(ref_re, ref_im) -- and degenerates to a
+  // real measurement only because both imaginary parts are exactly zero. A
+  // complex-to-real op that emitted a tiny nonzero imaginary part would
+  // silently change the metric for every one of its rows and nothing else in
+  // the suite would notice. POISON 7 is exactly that, and H is its only check.
+  {
+    mpc_t z;
+    mpc_init2(z, kOraclePrec);
+    mpfr_t u, off;
+    mpfr_inits2(kOraclePrec, u, off, (mpfr_ptr)0);
+
+    // A value 2^-40 of an ulp inside a known binary128's rounding interval, in
+    // BOTH components -- finer than any decimal shortcut can resolve.
+    const __float128 base = (__float128)2 / (__float128)3;
+    q_to_mpfr(u, base);
+    mpfr_set_ui_2exp(off, 1, -(kQMantBits + 40), MPFR_RNDN);
+    mpfr_add(u, u, off, MPFR_RNDN);
+    mpc_set_fr_fr(z, u, u, MPC_RNDNN);
+    __float128 hre = 0, him = 0;
+    mpc_to_q(z, hre, him);
+    if (!same_bits(hre, base) || !same_bits(him, base))
+      bad("H mpc_to_q rounding", qstr(base));
+
+    // The C_Abs shape: an exact, positively-signed zero imaginary part.
+    __float128 are_ = 0, aim_ = 0;
+    reference_complex_q(C_Abs, (__float128)3, (__float128)4,
+                        (__float128)0, (__float128)0, are_, aim_);
+    if (!(aim_ == (__float128)0) || signbitq(aim_))
+      bad("H C_Abs imag not exact +0", qstr(aim_));
+
+    mpfr_clears(u, off, (mpfr_ptr)0);
+    mpc_clear(z);
+  }
+
   mpfr_clears(m, m2, (mpfr_ptr)0);
   std::printf("oracle conversion selftest: %s (%d failure%s)  poison=%d\n",
               fails ? "FAIL" : "PASS", fails, fails == 1 ? "" : "s",
@@ -1212,6 +1451,87 @@ __float128 reference_real_q_quad(int id, __float128 a, __float128 b, __float128 
   return (__float128)0.0;
 }
 
+// ---------------------------------------------------------------------------
+// __float128 <-> mpc_t. Exact in both directions, and poisonable.
+//
+// MPC 1.1.0 has no mpc_set_float128_float128, so q_to_mpc is two q_to_mpfr
+// calls plus mpc_set_fr_fr. THAT SHARED BASE IS LOAD-BEARING: a poison aimed at
+// q_to_mpfr must corrupt complex inputs too, and check F below asserts exactly
+// that. If a future edit gives the complex path its own conversion, F stops
+// seeing q_to_mpfr poisons and the why[] table in
+// validation/oracle_conv_selftest.sh fails with a set mismatch -- which is the
+// table catching a second implementation, the defect it exists to catch.
+//
+// SIGNED ZERO. The grid writes both +0 and -0 at every one of its 17 complex
+// anchors, and the angle() `== 0.0` bug -- true of negative zero -- once
+// produced 1,032 defect points across c log / c log10 / c pow / c atanh through
+// exactly this channel (validation/sweep/open_defects.txt). mpfr_set_flt128 via
+// q_to_mpfr preserves the sign of a zero; POISON 5 below normalises it away and
+// check F must catch that by comparing SIGNBITS, not values. `-0.0 == +0.0` is
+// true and mpc_cmp compares values, so a round-trip or mpc_cmp-based check is
+// blind to it by construction.
+#if defined(XPMATH_HAVE_MPFR)
+void q_to_mpc(mpc_t out, __float128 re, __float128 im) {
+  mpfr_t r, i;
+  mpfr_inits2(kOraclePrec, r, i, (mpfr_ptr)0);   // input side is always full
+  q_to_mpfr(r, re);
+  q_to_mpfr(i, im);
+#if XPMATH_POISON_ORACLE_CONV == 5
+  // POISON 5: normalise the sign of a zero component. Invisible to any
+  // value comparison (-0.0 == +0.0) and to any round trip.
+  if (mpfr_zero_p(r)) mpfr_set_zero(r, +1);
+  if (mpfr_zero_p(i)) mpfr_set_zero(i, +1);
+#endif
+  mpc_set_fr_fr(out, r, i, MPC_RNDNN);
+  mpfr_clears(r, i, (mpfr_ptr)0);
+}
+
+void mpc_to_q(mpc_srcptr v, __float128& out_re, __float128& out_im) {
+#if XPMATH_POISON_ORACLE_CONV == 6
+  // POISON 6: read each component as a double instead of taking the exact
+  // three-double route mpfr_to_q uses. A value that happens to be exactly
+  // representable in a double round-trips byte-identically, so this is blind
+  // to any round-trip check; it injects ~2^53 DD ulps everywhere else.
+  out_re = (__float128)mpfr_get_d(mpc_realref(v), MPFR_RNDN);
+  out_im = (__float128)mpfr_get_d(mpc_imagref(v), MPFR_RNDN);
+#else
+  out_re = mpfr_to_q(mpc_realref(v));
+  out_im = mpfr_to_q(mpc_imagref(v));
+#endif
+}
+#endif
+
+// C_Polar under the MPFR arm. NOT an MPC op: polar(r, theta) takes two REAL
+// arguments -- the grid packs r into the operand's real slot and theta into its
+// imaginary slot (see the C_Polar case in the backend dispatch, which calls
+// xp::polar(a.re, a.im)) -- so there is no complex number here to convert and
+// nothing for mpc_* to do.
+//
+// The quadmath reference it replaces is `rad * cosq(th)`, `rad * sinq(th)`:
+// two real transcendentals composed by hand, which is exactly the population
+// the real MPFR arm was added for. At large |theta| the reduction inside
+// cosq/sinq is the limiting term, not the multiply.
+//
+// ARGUMENT ORDER. mpfr_sin_cos(sop, cop, op, rnd) writes SIN first. The
+// library's own sincos(theta, c, s) writes COS first. That swap has cost this
+// project once already; the naming below is deliberately explicit rather than
+// positional.
+#if defined(XPMATH_HAVE_MPFR)
+void reference_polar_mpfr(__float128 rad, __float128 th,
+                          __float128& out_re, __float128& out_im) {
+  mpfr_t mr, mt, ms, mc, prod;
+  mpfr_inits2(kOraclePrec, mr, mt, ms, mc, prod, (mpfr_ptr)0);
+  q_to_mpfr(mr, rad);
+  q_to_mpfr(mt, th);
+  mpfr_sin_cos(ms, mc, mt, MPFR_RNDN);   // ms = sin(th), mc = cos(th)
+  mpfr_mul(prod, mr, mc, MPFR_RNDN);     // real part = rad * cos(th)
+  out_re = mpfr_to_q(prod);
+  mpfr_mul(prod, mr, ms, MPFR_RNDN);     // imag part = rad * sin(th)
+  out_im = mpfr_to_q(prod);
+  mpfr_clears(mr, mt, ms, mc, prod, (mpfr_ptr)0);
+}
+#endif
+
 // Oracle dispatch. Default is libquadmath so this change records no different
 // number until --oracle=mpfr is asked for explicitly.
 __float128 reference_real_q(int id, __float128 a, __float128 b, __float128 c) {
@@ -1234,7 +1554,23 @@ void reference_complex_q(int id, __float128 are, __float128 aim,
     case C_Sub:   r = za - zb;       break;
     case C_Mul:   r = za * zb;       break;
     case C_Div:   r = za / zb;       break;
-    case C_Abs:   out_re = cabsq(za); out_im = (__float128)0.0; return;
+    case C_Abs:
+#if XPMATH_POISON_ORACLE_CONV == 7
+      // POISON 7: route a complex-to-REAL op through the complex output path
+      // instead of writing an exact +0.0 imaginary. The scorer computes
+      // hypot(e_re, e_im) / hypot(ref_re, ref_im) and never consults an
+      // is_real flag, so it degenerates to a real measurement only because
+      // both imaginary parts are exactly zero. A tiny nonzero imaginary part
+      // silently rewrites the metric for every C_Abs row.
+      {
+        const __float128 a_ = cabsq(za);
+        out_re = a_;
+        out_im = a_ * ldexpq((__float128)1, -120);   // not zero, not visible
+        return;
+      }
+#else
+      out_re = cabsq(za); out_im = (__float128)0.0; return;
+#endif
     case C_Conj:  r = conjq(za);     break;
     case C_Sqrt:  r = csqrtq(za);    break;
     case C_Exp:   r = cexpq(za);     break;
@@ -1265,10 +1601,30 @@ void reference_complex_q(int id, __float128 are, __float128 aim,
   out_im = cimagq(r);
 }
 
+// Complex oracle dispatch.
+//
+// Deliberately a separate function from reference_complex_q, which stays a pure
+// libquadmath switch. kappa_complex_numeric calls reference_complex_q BY NAME
+// rather than coming through here, so the condition numbers -- and therefore
+// every complex BOUND -- stay on libquadmath while only the REFERENCES move.
+// That is one-variable-at-a-time for free, and it is why this dispatch is here
+// and not inside reference_complex_q.
+void reference_complex_dispatch(int id, __float128 are, __float128 aim,
+                                __float128 bre, __float128 bim,
+                                __float128& out_re, __float128& out_im) {
+#if defined(XPMATH_HAVE_MPFR)
+  if (g_oracle_mpfr && id == C_Polar) {
+    reference_polar_mpfr(are, aim, out_re, out_im);
+    return;
+  }
+#endif
+  reference_complex_q(id, are, aim, bre, bim, out_re, out_im);
+}
+
 void reference_complex(int id, double are, double aim, double bre, double bim,
                        __float128& out_re, __float128& out_im) {
-  reference_complex_q(id, (__float128)are, (__float128)aim,
-                      (__float128)bre, (__float128)bim, out_re, out_im);
+  reference_complex_dispatch(id, (__float128)are, (__float128)aim,
+                             (__float128)bre, (__float128)bim, out_re, out_im);
 }
 
 // ---------------------------------------------------------------------------
@@ -1788,6 +2144,13 @@ double kappa_complex_numeric(int id, __float128 are, __float128 aim,
       default: pb_im = bim * (1 + h); break;
     }
     __float128 gre = 0, gim = 0;
+    // DELIBERATELY reference_complex_q, not reference_complex_dispatch. The
+    // condition number is differentiated from the reference, so routing this
+    // through the dispatch would move every complex BOUND the moment an
+    // alternate oracle is selected -- which moves `state` S<->U and fires the
+    // monotone gate's state_moved flag across thousands of rows with no library
+    // change. Bounds are a property of the format and kappa, not of which
+    // oracle is in use. Do not "tidy" this into the dispatch.
     reference_complex_q(id, pa_re, pa_im, pb_re, pb_im, gre, gim);
     if (!finiteq(gre) || !finiteq(gim)) return -1.0;
     const __float128 d = hypotq(gre - fre, gim - fim) / (fm * h);

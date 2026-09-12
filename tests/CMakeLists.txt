@@ -384,16 +384,43 @@ kokkos_ep_add_eft_test_contract_on(tf_fma_guard_test)  # -> tf_fma_guard_test_co
 # reduction table test do. CI runners do not carry libmpfr-dev, and making it
 # mandatory broke every build on a machine without it (see sweep_accuracy.cpp
 # :250). Find it, use it when present, and degrade honestly when absent.
+#
+# MPC (complex MPFR) is found in the SAME conjunction rather than behind its own
+# XPMATH_HAVE_MPC. A build where --oracle=mpfr covers the real ops but leaves the
+# complex ops on libquadmath is exactly the split this arm exists to remove; a
+# second guard would make that half-state reachable by configuration and would
+# double the build configurations the CI target-count assertion has to cover.
+# One flag, one meaning: --oracle=mpfr is whole-library or it is unavailable.
 find_path(MPFR_INCLUDE_DIR mpfr.h)
 find_library(MPFR_LIBRARY NAMES mpfr)
 find_library(GMP_LIBRARY NAMES gmp)
-if(MPFR_INCLUDE_DIR AND MPFR_LIBRARY AND GMP_LIBRARY)
+find_path(MPC_INCLUDE_DIR mpc.h)
+find_library(MPC_LIBRARY NAMES mpc)
+if(MPFR_INCLUDE_DIR AND MPFR_LIBRARY AND GMP_LIBRARY
+   AND MPC_INCLUDE_DIR AND MPC_LIBRARY)
   set(XPMATH_MPFR_FOUND TRUE)
-  message(STATUS "MPFR found: ${MPFR_LIBRARY} -- the --oracle=mpfr arm is available")
+  message(STATUS "MPFR found: ${MPFR_LIBRARY}")
+  message(STATUS "MPC  found: ${MPC_LIBRARY} -- the --oracle=mpfr arm is available "
+                 "for BOTH real and complex ops")
 else()
   set(XPMATH_MPFR_FOUND FALSE)
-  message(STATUS "MPFR NOT found -- building without the --oracle=mpfr arm; "
-                 "trig_reduction_test and oracle_conv_test will be skipped")
+  # Name WHICH one is missing. The failure mode this replaces is a bare "NOT
+  # found" followed ten minutes later by a link error naming a library the
+  # operator was never told to install.
+  set(_xp_missing "")
+  if(NOT MPFR_INCLUDE_DIR OR NOT MPFR_LIBRARY)
+    string(APPEND _xp_missing " libmpfr-dev")
+  endif()
+  if(NOT GMP_LIBRARY)
+    string(APPEND _xp_missing " libgmp-dev")
+  endif()
+  if(NOT MPC_INCLUDE_DIR OR NOT MPC_LIBRARY)
+    string(APPEND _xp_missing " libmpc-dev")
+  endif()
+  message(STATUS "MPFR/MPC NOT found (missing:${_xp_missing}) -- building without "
+                 "the --oracle=mpfr arm; trig_reduction_test and oracle_conv_test "
+                 "will be skipped")
+  unset(_xp_missing)
 endif()
 
 # sweep_accuracy is a host-only tool: it needs libquadmath for the oracle and it
@@ -407,8 +434,10 @@ target_compile_options(sweep_accuracy PRIVATE -fext-numeric-literals)
 # trig above ~1e40, so large-|x| rows need a reference that does not.
 target_link_libraries(sweep_accuracy PRIVATE quadmath)
 if(XPMATH_MPFR_FOUND)
-  target_include_directories(sweep_accuracy PRIVATE ${MPFR_INCLUDE_DIR})
-  target_link_libraries(sweep_accuracy PRIVATE ${MPFR_LIBRARY} ${GMP_LIBRARY})
+  target_include_directories(sweep_accuracy PRIVATE ${MPFR_INCLUDE_DIR} ${MPC_INCLUDE_DIR})
+  # MPC before MPFR before GMP: mpc depends on mpfr depends on gmp, and static
+  # link lines are order-sensitive.
+  target_link_libraries(sweep_accuracy PRIVATE ${MPC_LIBRARY} ${MPFR_LIBRARY} ${GMP_LIBRARY})
   target_compile_definitions(sweep_accuracy PRIVATE XPMATH_HAVE_MPFR=1)
 endif()
 

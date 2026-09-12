@@ -249,13 +249,15 @@ jobs:
                      /etc/apt/sources.list.d/*chrome*.list \
                      /etc/apt/sources.list.d/*microsoft*.list || true
           sudo apt-get update || (sleep 15 && sudo apt-get update)
-          # libmpfr-dev/libgmp-dev are what make the MPFR oracle arm exist.
+          # libmpfr-dev/libgmp-dev/libmpc-dev are what make the MPFR oracle arm
+          # exist. MPC is the complex half and is required by the same guard:
+          # --oracle=mpfr is whole-library or it is unavailable.
           # Without them XPMATH_MPFR_FOUND is FALSE and four targets --
           # trig_reduction_test, trig_reduction_selftest, oracle_conv_test and
           # oracle_conv_selftest -- are never registered. Both halves of the
           # oracle self-test are in that set, so CI was validating the sweep
           # against a reference whose conversions it never checked.
-          sudo apt-get install -y g++-13 cmake ninja-build libmpfr-dev libgmp-dev
+          sudo apt-get install -y g++-13 cmake ninja-build libmpfr-dev libgmp-dev libmpc-dev
           g++-13 -dumpfullversion
           cmake --version | head -1
 
