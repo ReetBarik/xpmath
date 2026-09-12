@@ -252,14 +252,27 @@ monotone)
   # (1.2589). Digits are left alone here -- moving them would be real drift and
   # would exit 3 through a different door, which is what a first attempt at this
   # case actually did.
-  zcat "$base" | awk -F, -v OFS=, '/^#/{print;next} /^backend,/{print;next}
-                                   {$6 = $6*1.05; print}' \
+  # BUILT FROM THIS BUILD'S OWN SWEEP, not from the committed baseline.
+  #
+  # The committed baseline was recorded under the toolchain of record. On a
+  # machine whose libquadmath differs, this build ALREADY differs from it by
+  # more than the noise floor on a few hundred rows -- measured on the GitHub
+  # runner: 436 rows, fingerprint 54901e8104607a77 against the committed
+  # 578322f998a329c8. Scaling that by 1.05 does not produce a sub-noise input
+  # there; it produces a real improvement plus noise, and the case correctly
+  # exited 5 against an assertion of pass.
+  #
+  # Stamping the fingerprint (above) fixes ATTRIBUTION. It cannot fix this,
+  # because the ROWS themselves come from a foreign reference. Generating the
+  # control from --out makes "sub-noise" mean sub-noise relative to what this
+  # binary computes, which is the only reading that is portable -- and it is a
+  # stronger control than the old one, which could only ever make a statement
+  # about the committed baseline.
+  "$bin" --quiet --out "$work/self.csv" >/dev/null 2>&1
+  awk -F, -v OFS=, '/^#/{print;next} /^backend,/{print;next}
+                    {$6 = $6*1.05; print}' "$work/self.csv" \
       | gzip > "$work/subnoise.csv.gz"
-  # Stamped too: otherwise on a mismatching runner this passes because the
-  # improvements were suppressed, not because they were sub-noise -- a negative
-  # control that is right for the wrong reason is not a control.
-  stamp "$work/subnoise.csv.gz" "$work/subnoise_fp.csv.gz"
-  run improvement-subnoise pass --baseline "$work/subnoise_fp.csv.gz"
+  run improvement-subnoise pass --baseline "$work/subnoise.csv.gz"
 
   # ---------------------------------------------------------------------
   # A MISMATCHED ORACLE FINGERPRINT IS NOT A FAILURE.
