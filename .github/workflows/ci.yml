@@ -208,7 +208,25 @@ jobs:
           g++-13 -std=c++17 -fext-numeric-literals -O2 -Iinclude \
                  scripts/sweep_accuracy.cpp -lquadmath -o /tmp/sweep_head
           echo "HEAD    $(git rev-parse --short HEAD)"
-          /tmp/sweep_head --baseline /tmp/parent_baseline.csv
+          # Exit 5 is IMPROVEMENT DRIFT, and this lane is the one place it is
+          # not a defect. The parent baseline is regenerated from the parent's
+          # own source on every run (above), so there is no durable record for
+          # an improvement to invalidate -- an improvement here is the commit
+          # doing its job. ctest's sweep_monotone_gate compares against the
+          # COMMITTED baseline, where the same signal means the file is stale
+          # and a re-baseline commit is owed; that lane keeps failing on 5.
+          #
+          # Captured explicitly rather than `|| true`, which would swallow exit
+          # 1 (a real regression) as well. `set -e` is on, so the capture has to
+          # be in the same statement as the call.
+          rc=0
+          /tmp/sweep_head --baseline /tmp/parent_baseline.csv || rc=$?
+          if [ "$rc" -eq 5 ]; then
+            echo "::notice::exit 5 — rows improved against the parent. Expected"
+            echo "::notice::on an accuracy fix; nothing to re-record in this lane."
+          elif [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
       # Informational only. A mismatch here is expected on any runner whose
       # libquadmath differs from the toolchain of record, and says nothing about
       # this commit. Never gate on it; never re-baseline from CI.

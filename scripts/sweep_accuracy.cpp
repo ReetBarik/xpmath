@@ -3645,8 +3645,16 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
     // state U. Requiring state S there left 16 such rows unexplained and failed
     // the gate on a fix. `decreased` keeps its own both_scored guard below, so
     // an exempt row still cannot be counted a regression.
+    // The ulp test is NOISE-AWARE, matching `increased` below and this
+    // function's own stated floor. It used to be a bare `fresh_ulps <
+    // base_ulps`, which counts any improvement however small -- MEASURED: a
+    // baseline with every ulps scaled by 1.05 (4.8% better, well under the
+    // 0.1-digit floor) and every digit count moved reports
+    //   improved rows : 276797     increased : 0
+    // The two predicates disagreed on 276,797 rows of noise. Harmless while
+    // drift_digits_up was only printed; not harmless now that it gates.
     const bool row_improved = (r.digits > dig) && !ulps_worse &&
-                              (fresh_ulps < base_ulps);
+                              (fresh_ulps * kNoiseFactor < base_ulps);
     bool row_moved = false;
     if (st == r.state) {
       const bool bound_ok = within_rel(base_bound, r.bound, kNoiseFactor - 1.0);
@@ -3828,19 +3836,82 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
     std::printf("  note          : ORACLE FINGERPRINT MISMATCH — see the warning above; "
                 "hairline diffs are the reference moving\n");
   const bool drifted = (drift_bound || drift_digits || state_moved);
+  bool return_as_drift = false;
+
+  // IMPROVEMENT DRIFT. `increased` and `drift_digits_up` were computed,
+  // printed, and then dropped before the exit code: drift in the improving
+  // direction could not fail. MEASURED at HEAD before this change -- a baseline
+  // with EVERY row's ulps multiplied by 1000 scored `increased: 397409` and
+  // still exited 0, as did a baseline with ONE row rewritten to 1e6 ulps.
+  //
+  // WHY THIS IS NOT SIMPLY GATED AS DRIFT (exit 3). The leniency above is
+  // deliberate and its scar is real: requiring state S once left 16 rows
+  // unexplained and FAILED THE GATE ON A FIX. A gate that blocks accuracy fixes
+  // gets routed around, and then it protects nothing.
+  //
+  // The resolution is not to guess whether an improvement is "legitimate" --
+  // the gate cannot see intent, and every row-level property was checked and
+  // fails to separate the two cases (magnitude: both unbounded; row count: the
+  // legitimate atan2 fix moved 1032 rows, MORE than the unexplained case;
+  // concentration: both single-cell; state: the div fix is state U, which is
+  // why both_scored was dropped here in the first place).
+  //
+  // What CAN be answered is: does a committed artifact exist that this
+  // improvement just invalidated?
+  //   * ctest's sweep_monotone_gate compares against the committed .gz. An
+  //     improvement means that record is stale, and the remedy -- a re-baseline
+  //     commit -- already exists and is already mandated.
+  //   * CI's monotone lane regenerates the parent baseline from the parent's
+  //     own source on every run. There is nothing durable to re-record, so the
+  //     same signal there is informational.
+  // Same binary, same predicate, two call sites that differ structurally. That
+  // is why this is an exit CODE and not a flag: a flag is asserted per run by
+  // whoever is under pressure, and would be pasted in the first time CI went
+  // red.
+  //
+  // Exit 5 is distinct from 3 on purpose. If CI had to tolerate 3 to accept an
+  // improvement it would also start tolerating drift_bound and state_moved,
+  // which are genuine staleness and must keep failing everywhere. 4 is taken by
+  // the absolute gate's register.
+  bool stale_improved = (increased || drift_digits_up);
+
+  // THE INTERLOCK. A different oracle improves thousands of rows at once and is
+  // NOT a library improvement -- measured: --oracle=mpfr against the committed
+  // baseline yields 1631 ungated improvements. The fingerprint already knows,
+  // but it is warning-only. Without this, exit 5 plus a CI lane that accepts 5
+  // would wave an oracle swap straight through. A mismatched reference is
+  // record drift, full stop.
+  if (stale_improved && fp_seen && !fp_ok) {
+    std::printf("  note          : improvement drift WITH an oracle fingerprint "
+                "mismatch —\n                  the reference moved, so this is "
+                "record drift, not a fix\n");
+    stale_improved = false;
+    drift_bound += 0;            // keep counters untouched; route via `drifted`
+    return_as_drift = true;
+  }
+
   if (decreased)
     std::printf("\nRESULT: FAIL — a point got worse by more than a tenth of a digit\n");
-  else if (drifted)
+  else if (drifted || return_as_drift)
     std::printf("\nRESULT: FAIL — no point got worse, but %ld row(s) do not carry the "
                 "bound,\n        %ld the digit count and %ld the state this build "
                 "derives. The baseline\n        is stale or edited, so it is not a "
                 "record of this code; re-record it\n        under the toolchain of "
                 "record before trusting a PASS from it.\n",
                 drift_bound, drift_digits, state_moved);
+  else if (stale_improved)
+    std::printf("\nRESULT: STALE — no point got worse, but %ld row(s) are BETTER "
+                "than this\n        baseline records"
+                "%s. The file is no longer a record of\n        this build. If a "
+                "fix landed, re-record it in its own commit; if not,\n        find "
+                "out what improved before accepting it.\n",
+                increased ? increased : drift_digits_up,
+                drift_digits_up ? " and its digit counts moved with them" : "");
   else
     std::printf("\nRESULT: PASS — no point above the 0.1-digit noise floor got worse\n");
   if (decreased) return 1;
-  return drifted ? 3 : 0;
+  if (drifted || return_as_drift) return 3;
+  return stale_improved ? 5 : 0;
 }
 
 
@@ -4036,7 +4107,10 @@ void usage(const char* argv0) {
     "                    that a MEASURED IMPROVEMENT explains (error strictly\n"
     "                    smaller, digits up) is reported, not gated, so a fix can\n"
     "                    pass; the reverse direction still exits 3. Exits 2 on\n"
-    "                    a grid or op-inventory change. Writes nothing.\n"
+    "                    a grid or op-inventory change. Exits 5 if no point got\n"
+    "                    worse but some are BETTER than the record -- the file\n"
+    "                    is stale in the improving direction, which is still\n"
+    "                    stale. Writes nothing.\n"
     "  --ulp             score every point in ulps against the derived bound and\n"
     "                    report the worst point per (backend, op). Never a mean.\n"
     "  --register PATH   ABSOLUTE GATE: PATH lists the known above-bound points.\n"

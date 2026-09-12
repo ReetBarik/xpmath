@@ -136,6 +136,34 @@ then exits **3** and asks for a re-baseline, rather than comparing against a
 standard that is no longer the standard. Exit 1 is a regression, exit 2 is a
 grid or op-inventory change, exit 0 is a pass.
 
+**A record can also be stale in the BETTER direction, and that is exit 5.** Rows
+that are *better* than the baseline records mean the file has stopped describing
+this build just as surely as rows that are worse — but the two cannot be treated
+identically, because an accuracy fix legitimately improves rows and a gate that
+blocks fixes gets routed around. The gate cannot tell a fix's own improvement
+from unexplained drift: every row-level property was tried and none separates
+them (magnitude — both unbounded; row count — the legitimate `atan2` fix moved
+1,032 rows, *more* than the unexplained case; concentration — both single-cell;
+state — the complex-div fix is state `U`, which is why `both_scored` was dropped
+from the exemption in the first place).
+
+So the gate stops asking whether the improvement is legitimate and asks instead
+whether a committed artifact was just invalidated. `sweep_monotone_gate` compares
+against the committed `.gz`, where an improvement means the record is stale and
+the remedy — a re-baseline in its own commit — is already mandated; that call
+site fails on 5. CI's monotone lane regenerates the parent baseline from the
+parent's own source every run, so there is nothing durable to re-record and the
+same signal is informational; that call site accepts 5 and still fails 1, 2 and
+3. Same binary, same predicate, two call sites that differ *structurally* — which
+is why this is an exit code and not a flag. A flag is asserted per run by
+whoever is under pressure, and would be pasted in the first time CI went red.
+
+One interlock: a different oracle improves thousands of rows at once and is not
+a library improvement. Measured — `--oracle=mpfr` against the committed baseline
+yields 1,631 ungated improvements. When improvement drift coincides with an
+oracle fingerprint mismatch the gate returns **3**, not 5, because the reference
+moved rather than the library.
+
 This mattered: `digits` and `bound` used to be parsed and discarded, and only
 the *losing* direction of a state move was counted. Rewriting the last numeric
 column — `bound`, not `ulps` — of all 428,592 rows to zero printed
@@ -150,18 +178,37 @@ validation/gate_selftest.sh <sweep_accuracy> monotone|absolute <workdir>
 Both gates are negative assertions, and a negative assertion that has only ever
 been observed passing is indistinguishable from one that cannot fail. So each
 gate is run against deliberately poisoned inputs built in the **build**
-directory — never in `validation/` — and is required to exit nonzero:
+directory — never in `validation/` — and is required to exit with a
+specific, named code:
 
 | mode | poison | must exit |
 |---|---|---|
 | monotone | `ulps` column zeroed | 1 (regression) |
 | monotone | `bound` column zeroed | 3 (record drift) |
 | monotone | `digits` column zeroed | 3 (record drift) |
+| monotone | `digits` column inflated by 5 | 3 (record drift, up-direction) |
 | monotone | `state` column all `U` | 3 (record drift) |
 | monotone | baseline truncated to 1000 rows | 2 (grid changed) |
+| monotone | baseline empty / header-only / not gzip | 2 (nothing to compare) |
+| monotone | `ulps` column inflated x1000 | 5 (stale in the better direction) |
+| monotone | ONE row rewritten to 1e6 ulps | 5 (the smallest unit that must fire) |
+| monotone | `ulps` improved by 1.05x (sub-noise) | 0 — must stay silent |
 | absolute | a registered defect deleted | 4 (unlisted point above bound) |
 | absolute | a bogus entry added | 4 (stale register entry) |
 | absolute | register emptied | 4 (every above-bound point unlisted) |
+
+The self-test asserts the exact **exit code**, not merely nonzero. Four distinct
+failure doors exist, and a case that starts failing through the wrong one has
+stopped testing what it was written for — when exit 5 was added, `digits-inflated`
+would otherwise have stayed green while silently changing which door it
+exercised.
+
+Two of these were measured failing to fire *before* the fix that made them fire:
+the whole-file `ulps` inflation scored `increased: 397409` and exited 0, and the
+single-row case scored `increased: 1` and exited 0. The single-row case is the
+stronger of the two, because it cannot be satisfied by a future "N% of rows
+moved" heuristic. The sub-noise row is the negative control: without it the gate
+would fire on run-to-run wiggle.
 
 Each mode also runs the **real** input and requires exit 0, so a gate wired to
 fail unconditionally does not satisfy the self-test either.
