@@ -698,6 +698,16 @@ static const Target kTargets[] = {
     {"QF", C_Atanh,  871, 0.123369,     1.71082},
     {"QF", C_Abs,     27, 0.0480213,    0.382715},
     {"QF", C_Sqrt,    11, 0.0309759,    0.192617},
+    // The four rows above 1 ulp that a >3.73x filter misses but the monotone
+    // gate does NOT: its factor is kNoiseFactor = 1.2589 (a tenth of a digit),
+    // not 3.73.  Adding them here so --points/--traceall cover every complex
+    // row the gate would actually call a regression.  (The fifth, QF r hypot
+    // 36, is a REAL row: 16916.8 -> 60371 ulps against bound 188310.  It is
+    // out of this probe's complex reach and is reported from the CSVs only.)
+    {"QF", C_Sqrt,   764, 3.79651e+12,  5.55112e+12},
+    {"QF", C_Sqrt,   765, 3.79651e+12,  5.55112e+12},
+    {"TF", C_Sqrt,   764, 226290.0,     330873.0},
+    {"TF", C_Sqrt,   765, 226290.0,     330873.0},
 };
 static const int kNTargets = (int)(sizeof(kTargets) / sizeof(kTargets[0]));
 
@@ -759,6 +769,19 @@ static void report_point(const Target& t, const std::vector<GridPoint>& grid) {
     const bool lf = same_value<T>(got[1].re, got[2].re) && same_value<T>(got[1].im, got[2].im);
     std::printf("    VERDICT lift %s exact-divide   |   wreck moved: %s\n",
                 lf ? "== " : "!= ", (uu[4] != uu[0]) ? "yes" : "NO (hook not on this path!)");
+    // "!=" alone is not a finding.  What matters is HOW MUCH of the caller's
+    // move an exactly-rounded divide takes back: 1.0 would mean the lift is
+    // simply not accurate enough and a better divide fixes the row, 0.0 means
+    // a perfect divide lands exactly where the lift did.  Printed at more
+    // digits than the table above, because on the sqrt rows the two arms agree
+    // to six significant figures and the difference is only visible past them.
+    if (!lf) {
+        const double move = uu[1] - uu[0];
+        std::printf("           exact-divide ulps %.10g vs lift %.10g "
+                    "(recovers %.4g%% of the %.10g-ulp move)\n",
+                    uu[2], uu[1],
+                    (move != 0.0) ? 100.0 * (uu[1] - uu[2]) / move : 0.0, move);
+    }
     // the quantum of the LAST word of the result -- the granularity below
     // which no expansion in this format can move at all
     {

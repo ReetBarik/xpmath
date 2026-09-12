@@ -32,7 +32,20 @@ import sys
 from collections import defaultdict
 
 ALLOWANCE = 8.0          # sweep_accuracy.cpp kUlpAllowance
-MONOTONE = 3.73          # the monotone gate's worse-by factor
+MONOTONE = 3.73          # the ratio this diagnosis reported the 28 rows at.
+                         # NOT the gate's criterion -- see GATE_* below.
+
+# The monotone gate's ACTUAL regression predicate, sweep_accuracy.cpp:3140-3141:
+#
+#     both_scored && fresh_ulps > kSubUlpFloor && fresh_ulps > base * kNoiseFactor
+#
+# Three clauses, and all three matter here.  `both_scored` excludes state-U rows
+# outright: an unresolved row carries no verdict and cannot be a regression.
+# kSubUlpFloor exempts anything landing under one ulp -- "below one ulp the score
+# is a rounding coin-flip, and 0.2 -> 0.4 ulps is not a defect".  kNoiseFactor is
+# 10^0.1, a tenth of a digit, not 3.73.
+GATE_NOISE   = 1.2589254
+GATE_SUB_ULP = 1.0
 
 
 def load(path):
@@ -142,6 +155,39 @@ def main():
           % ", ".join("%s->%s: %d" % (a, b, n) for (a, b), n in sorted(st_count.items())))
     print("   rows carrying a verdict (state S after): %d of %d"
           % (sum(n for (a, b), n in st_count.items() if b == "S"), len(regressed_rows)))
+    print()
+
+    # -- 3b. the same rows under the GATE's own predicate ------------------
+    print("== 3b. the monotone gate's ACTUAL predicate "
+          "(both S, ulps > %.1f, grew by > %.4fx) ==" % (GATE_SUB_ULP, GATE_NOISE))
+    gate_reg = []
+    gate_imp = 0
+    for k in sorted(common):
+        u0, b0, s0 = base[k]
+        u1, b1, s1 = after[k]
+        both_s = (s0 == "S" and s1 == "S")
+        if both_s and u1 > GATE_SUB_ULP and u1 > u0 * GATE_NOISE:
+            gate_reg.append(k)
+        elif s0 == "S" and s1 != "S":
+            gate_reg.append(k)          # lost a verdict: a regression outright
+        elif both_s and u1 * GATE_NOISE < u0:
+            gate_imp += 1
+    print("   rows the gate would call REGRESSIONS: %d" % len(gate_reg))
+    for k in sorted(gate_reg):
+        u0, _, _ = base[k]
+        u1, b1, _ = after[k]
+        print("      %-3s %s %-6s %-5d  %12.6g -> %-12.6g ulps   bound %-12.6g "
+              "gate ceiling %.6g" % (k[0], k[1], k[2], k[3], u0, u1, b1, b1 * ALLOWANCE))
+    print("   rows the gate would call improvements: %d" % gate_imp)
+    excluded_u = [k for k in regressed_rows if base[k][2] != "S" or after[k][2] != "S"]
+    excluded_sub = [k for k in regressed_rows
+                    if k not in excluded_u and after[k][0] <= GATE_SUB_ULP]
+    print("   of the %d rows worse by >%.2fx: %d excluded as state U (no verdict), "
+          "%d excluded under the 1-ulp floor"
+          % (len(regressed_rows), MONOTONE, len(excluded_u), len(excluded_sub)))
+    for k in excluded_sub:
+        print("      sub-ulp: %-3s %s %-6s %-5d  %.6g -> %.6g ulps"
+              % (k[0], k[1], k[2], k[3], base[k][0], after[k][0]))
     print()
 
     # -- 4. census cross-tab ----------------------------------------------
