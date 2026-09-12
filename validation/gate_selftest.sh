@@ -106,6 +106,35 @@ monotone)
   echo "=== sweep_monotone_gate self-test ==============================="
 
   # The control. If this does not pass, nothing below means anything.
+  # THIS BUILD'S FINGERPRINT, asked of the binary rather than assumed.
+  #
+  # Every poison below is derived from the committed baseline, which carries the
+  # fingerprint of the TOOLCHAIN OF RECORD. On any machine whose libquadmath
+  # differs -- every GitHub runner -- that mismatches, and the gate correctly
+  # refuses to attribute improvements to the library when the reference itself
+  # moved. Which means an exit-5 poison built from the committed header CANNOT
+  # FIRE there: measured, `ulps-inflated` and `fake-improvement-1row` both
+  # passed on the runner while passing here, because "here" is the one place the
+  # fingerprint matches.
+  #
+  # So the poisons that are meant to be ATTRIBUTABLE are stamped with the
+  # fingerprint this build actually produces. Then they mean "same reference,
+  # better rows" everywhere, which is the condition exit 5 is for.
+  "$bin" --quiet --out "$work/fp_probe.csv" >/dev/null 2>&1
+  self_fp="$(sed -n 's/^# oracle-fingerprint: //p' "$work/fp_probe.csv" | head -1)"
+  if [ -z "$self_fp" ]; then
+    echo "  FAIL  could not read this build's oracle fingerprint" >&2
+    fails=$((fails + 1))
+    self_fp=0000000000000000
+  fi
+  echo "  note  this build's oracle fingerprint: $self_fp"
+
+  # stamp <src.gz> <dst.gz> -- rewrite the fingerprint header to this build's.
+  stamp() {
+    zcat "$1" | sed "s/^# oracle-fingerprint: .*/# oracle-fingerprint: ${self_fp}/" \
+      | gzip > "$2"
+  }
+
   run clean pass --baseline "$base"
 
   # The measurement of record, zeroed. A baseline claiming every point was
@@ -197,7 +226,8 @@ monotone)
   # exemption. It still tests that -- the exemption no longer excuses anything,
   # because improvement drift now has its own door. The case is the same, the
   # expected door changed from "none" to 5.
-  run ulps-inflated 5 --baseline "$work/ulps_inflated.csv.gz"
+  stamp "$work/ulps_inflated.csv.gz" "$work/ulps_inflated_fp.csv.gz"
+  run ulps-inflated 5 --baseline "$work/ulps_inflated_fp.csv.gz"
 
   # ---------------------------------------------------------------------
   # IMPROVEMENT DRIFT (#9). The record is stale in the BETTER direction.
@@ -214,7 +244,8 @@ monotone)
       /^#/{print;next} /^backend,/{print;next}
       !done && $8=="S" && $6+0>0 { $6=1e6; $5="14.00"; done=1; print; next }
       {print}' | gzip > "$work/fake_one.csv.gz"
-  run fake-improvement-1row 5 --baseline "$work/fake_one.csv.gz"
+  stamp "$work/fake_one.csv.gz" "$work/fake_one_fp.csv.gz"
+  run fake-improvement-1row 5 --baseline "$work/fake_one_fp.csv.gz"
 
   # And the negative: an improvement UNDER the noise floor must stay silent, or
   # the gate fires on run-to-run wiggle. 1.05x is well inside kNoiseFactor
@@ -224,7 +255,11 @@ monotone)
   zcat "$base" | awk -F, -v OFS=, '/^#/{print;next} /^backend,/{print;next}
                                    {$6 = $6*1.05; print}' \
       | gzip > "$work/subnoise.csv.gz"
-  run improvement-subnoise pass --baseline "$work/subnoise.csv.gz"
+  # Stamped too: otherwise on a mismatching runner this passes because the
+  # improvements were suppressed, not because they were sub-noise -- a negative
+  # control that is right for the wrong reason is not a control.
+  stamp "$work/subnoise.csv.gz" "$work/subnoise_fp.csv.gz"
+  run improvement-subnoise pass --baseline "$work/subnoise_fp.csv.gz"
 
   # ---------------------------------------------------------------------
   # A MISMATCHED ORACLE FINGERPRINT IS NOT A FAILURE.
