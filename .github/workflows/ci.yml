@@ -9,7 +9,12 @@
 #                   macOS/ARM?  (The macOS leg is the evidence for the upstream
 #                   claim that the core is not x86_64-dependent.)
 #   monotone-gate   Did any of the 428,592 scored sweep points get LESS accurate?
-#   build-and-test  Does the full Kokkos build + 31-test ctest suite pass?
+#   build-and-test  Does the full Kokkos build + the WHOLE ctest suite pass?
+#                   "Whole" is asserted, not assumed: the lane installs
+#                   libmpfr-dev/libgmp-dev and then checks the registered
+#                   target count against XPMATH_EXPECTED_TESTS below. Four
+#                   targets sit behind if(XPMATH_MPFR_FOUND) and this lane used
+#                   to run 34 of 38 while reporting "31 tests" and green.
 #   device-nvcc     Does each of the eight headers compile for a CUDA device?
 #   device-hip      Same for HIP/ROCm.  UNVERIFIED — see `continue-on-error`.
 #
@@ -228,7 +233,7 @@ jobs:
   #    Kokkos.
   # ==========================================================================
   build-and-test:
-    name: Kokkos build + ctest (31 tests)
+    name: Kokkos build + ctest (full suite, MPFR arm included)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -244,7 +249,13 @@ jobs:
                      /etc/apt/sources.list.d/*chrome*.list \
                      /etc/apt/sources.list.d/*microsoft*.list || true
           sudo apt-get update || (sleep 15 && sudo apt-get update)
-          sudo apt-get install -y g++-13 cmake ninja-build
+          # libmpfr-dev/libgmp-dev are what make the MPFR oracle arm exist.
+          # Without them XPMATH_MPFR_FOUND is FALSE and four targets --
+          # trig_reduction_test, trig_reduction_selftest, oracle_conv_test and
+          # oracle_conv_selftest -- are never registered. Both halves of the
+          # oracle self-test are in that set, so CI was validating the sweep
+          # against a reference whose conversions it never checked.
+          sudo apt-get install -y g++-13 cmake ninja-build libmpfr-dev libgmp-dev
           g++-13 -dumpfullversion
           cmake --version | head -1
 
@@ -298,6 +309,36 @@ jobs:
 
       - name: Build
         run: cmake --build build -j"$(nproc)"
+
+      # A SUITE THAT SHRINKS SILENTLY IS A SUITE THAT PASSES SILENTLY.
+      #
+      # Optional dependencies gate targets with if(...), and a missing one
+      # removes coverage without removing green. That is how this lane came to
+      # run 34 targets while its own name said 31 and nothing anywhere
+      # disagreed. The count is now asserted against the number registered by a
+      # configure that has every optional dependency present.
+      #
+      # NOTE: 38 is the count on main. The packaging branch adds consumer_package
+      # and must bump this to 39 in the same commit that merges it.
+      #
+      # When you deliberately add or remove a ctest target, this number changes
+      # with it, in the same commit. That is the point: the count is part of the
+      # contract, not a fact about the runner.
+      - name: Assert the full suite is registered
+        run: |
+          set -euo pipefail
+          expected=38
+          actual=$(ctest --test-dir build -N | awk '/^Total Tests: /{print $3}')
+          echo "registered targets: ${actual} (expected ${expected})"
+          if [ "${actual}" != "${expected}" ]; then
+            echo "::error::ctest registered ${actual} targets, expected ${expected}."
+            echo "::error::A gated target is missing -- most likely an optional"
+            echo "::error::dependency (MPFR/GMP) did not install, which removes"
+            echo "::error::coverage while leaving this lane green. Refusing to"
+            echo "::error::report a pass over a smaller suite."
+            ctest --test-dir build -N
+            exit 1
+          fi
 
       - name: ctest
         run: ctest --test-dir build -j4 --timeout 1800 --output-on-failure

@@ -295,7 +295,7 @@ src/
     demo_qf_complex.cpp    QF complex-operation demo   -> kokkos_ep_demo_qf_complex
     bench_cost.cpp         cost benchmark harness      -> kokkos_ep_bench_cost
 
-tests/                 31-test ctest suite covering all four backends
+tests/                 38-target ctest suite covering all four backends
 docs/                  TEST_SUITE_PLAN.md, PORT_NOTES_QF.md
 scripts/               build helpers, coefficient generators, run-all scripts
 PORT_NOTES.md          port-specific fixes and design lessons
@@ -328,7 +328,10 @@ The suite is 31 ctest tests spanning all four backends:
   `qf_cancellation_test`, `tf_cancellation_test`.
 - **Foundational** — `hello_test`, `corpus_test`.
 
-All 31 tests pass on `main`.
+All 38 targets pass on `main`. Four of them (the trig-reduction and
+oracle-conversion tests and their poison self-tests) are registered only
+when MPFR is present; CI installs libmpfr-dev and asserts the full count
+so a missing optional dependency cannot quietly shrink the suite.
 
 Tests are exercised on the Serial Kokkos execution space; the type headers are
 `KOKKOS_INLINE_FUNCTION` throughout so they compile for device execution spaces
