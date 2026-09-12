@@ -225,6 +225,41 @@ monotone)
                                    {$6 = $6*1.05; print}' \
       | gzip > "$work/subnoise.csv.gz"
   run improvement-subnoise pass --baseline "$work/subnoise.csv.gz"
+
+  # ---------------------------------------------------------------------
+  # A MISMATCHED ORACLE FINGERPRINT IS NOT A FAILURE.
+  #
+  # ci.yml records that the GitHub runner's libquadmath differs from the
+  # toolchain of record, so the fingerprint mismatches there on EVERY run. The
+  # repo has decided that is expected and non-gating: it says the reference
+  # moved, not that this commit regressed.
+  #
+  # This case exists because nothing asserted it. Every other monotone case runs
+  # on the toolchain of record, where the fingerprint matches by construction,
+  # so the harness was structurally blind to the one condition CI experiences on
+  # every single run. The first #9 interlock keyed on `fp_seen && !fp_ok`, went
+  # 13/13 green here, and turned 436 hairline improvements into a hard CI
+  # failure of both this self-test and sweep_monotone_gate.
+  #
+  # Simulating it costs one sed: the fingerprint is a header line.
+  # ---------------------------------------------------------------------
+  zcat "$base" \
+    | sed 's/^# oracle-fingerprint: .*/# oracle-fingerprint: deadbeefdeadbeef/' \
+    | gzip > "$work/fp_mismatch.csv.gz"
+  run fingerprint-mismatch pass --baseline "$work/fp_mismatch.csv.gz"
+
+  # And with improvements on top of the mismatch -- the exact shape CI hits. The
+  # improvements are real and sub-noise-free, so the honest answer is 5 (the
+  # record is stale in the better direction); the mismatched fingerprint must
+  # NOT escalate that to 3, because on a runner whose libquadmath differs it is
+  # the normal state of the world.
+  zcat "$base" \
+    | sed 's/^# oracle-fingerprint: .*/# oracle-fingerprint: deadbeefdeadbeef/' \
+    | awk -F, -v OFS=, '
+        /^#/{print;next} /^backend,/{print;next}
+        !done && $8=="S" && $6+0>0 { $6=1e6; $5="14.00"; done=1; print; next }
+        {print}' | gzip > "$work/fp_mismatch_improved.csv.gz"
+  run fingerprint-mismatch-improved 5 --baseline "$work/fp_mismatch_improved.csv.gz"
   ;;
 
 absolute)

@@ -3877,16 +3877,30 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
 
   // THE INTERLOCK. A different oracle improves thousands of rows at once and is
   // NOT a library improvement -- measured: --oracle=mpfr against the committed
-  // baseline yields 1631 ungated improvements. The fingerprint already knows,
-  // but it is warning-only. Without this, exit 5 plus a CI lane that accepts 5
-  // would wave an oracle swap straight through. A mismatched reference is
-  // record drift, full stop.
-  if (stale_improved && fp_seen && !fp_ok) {
-    std::printf("  note          : improvement drift WITH an oracle fingerprint "
-                "mismatch —\n                  the reference moved, so this is "
-                "record drift, not a fix\n");
+  // baseline yields 1631 ungated improvements. Without this, exit 5 plus a CI
+  // lane that accepts 5 would wave an oracle swap straight through.
+  //
+  // KEYED ON THE SELECTED ORACLE, NOT ON THE FINGERPRINT. The first version of
+  // this tested `fp_seen && !fp_ok` and it broke CI on the first push. The
+  // GitHub runner's libquadmath differs from the toolchain of record, so the
+  // fingerprint mismatches there on EVERY run -- the repo documents that as the
+  // expected state and deliberately does not gate on it. Keying the interlock
+  // there turned a handful of hairline improvements (measured: increased: 436)
+  // into a hard failure of both sweep_monotone_gate and its self-test.
+  //
+  // Every check that "verified" the first version ran on the toolchain of
+  // record, where the fingerprint matches by construction, so the whole test
+  // matrix was blind to the condition it depended on.
+  //
+  // The hazard is a run that DELIBERATELY SELECTED a different reference. That
+  // is a property of this process and is known exactly. A drifting toolchain is
+  // a different thing: it has its own warning above, and not gating on it is a
+  // decision this repo has already made and must keep.
+  if (stale_improved && g_oracle_mpfr) {
+    std::printf("  note          : improvement drift under a NON-DEFAULT oracle "
+                "(--oracle=mpfr) —\n                  the reference was changed, "
+                "so this is record drift, not a fix\n");
     stale_improved = false;
-    drift_bound += 0;            // keep counters untouched; route via `drifted`
     return_as_drift = true;
   }
 
