@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(kokkos-extended-precision-demo LANGUAGES CXX)
+# The project is named xpmath because that is the name a consumer writes in
+# find_package(). The repository directory keeps its historical name; nothing
+# in the build depended on the old project() name (verified: no reference to
+# PROJECT_NAME or CMAKE_PROJECT_NAME anywhere in the tree).
+project(xpmath VERSION 0.1.0 LANGUAGES CXX)
+
+# Included here, not next to the install rules, because CMAKE_INSTALL_BINDIR is
+# used by the demo install() further down -- before the package block. An
+# undefined CMAKE_INSTALL_* expands to the empty string and silently installs
+# to the prefix root.
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -185,7 +196,69 @@ install(TARGETS kokkos_ep_demo
                 kokkos_ep_demo_tf
                 kokkos_ep_bench_cost
                 ${XP_COMPLEX_DEMO_TARGETS}
-        RUNTIME DESTINATION bin)
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+# ---- Installable package (header-only core) ---------------------------------
+#
+# WHAT IS INSTALLED, AND WHY IT IS NOT THE WHOLE REPO.
+#
+# xpmath the LIBRARY is the 11 headers in include/xp/. They are header-only and
+# they do not include or require Kokkos -- every mention of Kokkos in them is a
+# comment (verified: `grep -n Kokkos include/xp/*.hpp` matches only comment
+# lines). tests/standalone/*_no_kokkos_smoke.cpp already compiles them with a
+# bare g++ and an include path containing only include/.
+#
+# So the exported package deliberately does NOT find_package(Kokkos). A consumer
+# who wants the numeric core gets it with zero TPLs; a consumer who wants device
+# execution brings their own Kokkos and uses it alongside. Making Kokkos a hard
+# requirement of the export would impose a dependency the headers do not have.
+#
+# third_party/include/ is the Kokkos COMPAT WRAPPER, not the library. It is not
+# installed: it exists so this repo's own Kokkos demos can include <xp/...>
+# through the old Kokkos-facing names.
+
+add_library(xpmath INTERFACE)
+add_library(xpmath::xpmath ALIAS xpmath)
+
+target_include_directories(xpmath INTERFACE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+
+# C++17 is a real requirement of the headers (if constexpr, inline variables),
+# not a project style choice, so it travels with the exported target.
+target_compile_features(xpmath INTERFACE cxx_std_17)
+
+install(TARGETS xpmath EXPORT xpmathTargets)
+
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/xp"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        FILES_MATCHING PATTERN "*.hpp")
+
+install(EXPORT xpmathTargets
+        FILE xpmathTargets.cmake
+        NAMESPACE xpmath::
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/xpmath")
+
+configure_package_config_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/xpmathConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/xpmathConfig.cmake"
+  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/xpmath")
+
+# SameMajorVersion with a major version of 0: under CMake's rules every 0.x is
+# then incompatible with every other 0.x. That is the honest setting for a
+# library whose API has never been consumed by anyone -- find_package(xpmath 0.1)
+# passes, find_package(xpmath 0.2) fails, and no compatibility is promised that
+# this project has not earned.
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/xpmathConfigVersion.cmake"
+  VERSION "${PROJECT_VERSION}"
+  COMPATIBILITY SameMajorVersion
+  ARCH_INDEPENDENT)
+
+install(FILES
+  "${CMAKE_CURRENT_BINARY_DIR}/xpmathConfig.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/xpmathConfigVersion.cmake"
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/xpmath")
 
 # ---- Tests (T0.1: backend-parameterized harness) ----------------------------
 # THIRD_PARTY_INCLUDE (set above) is consumed by tests/CMakeLists.txt.

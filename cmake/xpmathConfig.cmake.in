@@ -1,0 +1,11 @@
+@PACKAGE_INIT@
+
+# xpmath is a header-only C++17 library. The headers in include/xp/ do not
+# include or require Kokkos -- every mention of Kokkos in them is a comment.
+# So this config deliberately does NOT find_package(Kokkos): a consumer who
+# wants the numeric core gets it with no TPL at all, and a consumer who wants
+# device execution brings their own Kokkos and uses it alongside.
+
+include("${CMAKE_CURRENT_LIST_DIR}/xpmathTargets.cmake")
+
+check_required_components(xpmath)
