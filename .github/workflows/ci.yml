@@ -318,8 +318,6 @@ jobs:
       # disagreed. The count is now asserted against the number registered by a
       # configure that has every optional dependency present.
       #
-      # NOTE: 38 is the count on main. The packaging branch adds consumer_package
-      # and must bump this to 39 in the same commit that merges it.
       #
       # When you deliberately add or remove a ctest target, this number changes
       # with it, in the same commit. That is the point: the count is part of the
@@ -327,7 +325,7 @@ jobs:
       - name: Assert the full suite is registered
         run: |
           set -euo pipefail
-          expected=38
+          expected=39
           actual=$(ctest --test-dir build -N | awk '/^Total Tests: /{print $3}')
           echo "registered targets: ${actual} (expected ${expected})"
           if [ "${actual}" != "${expected}" ]; then
