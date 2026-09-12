@@ -704,7 +704,47 @@ XPMATH_INLINE_FUNCTION QuadFloat sqr(QuadFloat a) {
 // [FLT_MAX, (2-2^-24)·2^127) rounds q0 up to inf and is reported as overflow.
 // That band is 2^-24 relative wide at the very top of the format; a QuadFloat
 // whose leading word is FLT_MAX cannot carry a meaningful tail anyway.
-XPMATH_INLINE_FUNCTION QuadFloat divide(QuadFloat a, QuadFloat b) {
+namespace detail {
+XPMATH_INLINE_FUNCTION QuadFloat qf_pow2_scale(QuadFloat a, float s);   // defined below
+
+// KI-41 at the UNDERFLOW end (the guards above and in dd/ff_math.hpp are all
+// splitter-OVERFLOW guards at the other end of the range; nothing in any of the
+// four real divides looked downward until now).
+//
+// qf_divide_core forms  r = subtract(a, multiply_scalar(b, q0))  and takes the
+// next quotient digit from r.f0.  multiply_scalar's result is a 4-word
+// expansion whose words are spaced 2^-24 apart, so its LOWEST word sits at
+// |b·q0|·2^-72 ≈ |a|·2^-72, and the two_prod halves that build it reach one
+// further word down, |a|·2^-96.  Once that is below FLT_MIN the word is
+// subnormal and carries a couple of bits instead of 24, so the residual the
+// next digit is computed from is quietly truncated — and every later digit
+// inherits it.  Measured at QF r div point 8: 4.76e7 ulps, against a format
+// floor (the exact quotient merely rounded into QuadFloat) of 2.67e-8.
+//
+// a/b is invariant under scaling BOTH operands by powers of two, and a pow2
+// scale of an expansion is exact: every word's exponent shifts and no bit
+// moves.  So lift each operand until its own residual tail clears FLT_MIN,
+// divide unchanged, and unscale by the exact ratio.  This is bit-for-bit the
+// remedy already deployed for COMPLEX divide at qf_complex.hpp:325.
+//
+// The predicate tests the operand's own expansion spacing (2^-24·(n-1) = 2^-72)
+// while the lift targets one word deeper (2^-96, the two_prod tail).  That
+// asymmetry is deliberate and is why the loops cannot leave the predicate true
+// on their result: exiting at pa·2^-96 >= FLT_MIN·4 implies pa·2^-72 > that,
+// so a lifted pair never re-enters.  Measured: targeting only 2^-72 recovers
+// point 8 to 1.6e-3 ulps, targeting 2^-96 recovers it to 2.67e-8 — the floor.
+//
+// The step cap is not decoration.  sa is a single float, so an unbounded loop
+// on a fully-subnormal leading word overflows it to inf and the "exact" rescale
+// silently stops being exact.  Capping at 2^120 gives up some recovery on
+// operands below ~2^-121 in exchange for never lying about exactness.
+XPMATH_INLINE_FUNCTION bool qf_div_lift_wanted(QuadFloat a, QuadFloat b) {
+    const float a0 = detail::fabs(a.f0), b0 = detail::fabs(b.f0);
+    if (a0 == 0.0f || b0 == 0.0f) return false;
+    const float m = (a0 < b0) ? a0 : b0;
+    return m * 0x1p-72f < 1.17549435e-38f * 4.0f;
+}
+XPMATH_INLINE_FUNCTION QuadFloat qf_divide_core(QuadFloat a, QuadFloat b) {
     float q0, q1, q2, q3;
     QuadFloat r;
 
@@ -722,6 +762,24 @@ XPMATH_INLINE_FUNCTION QuadFloat divide(QuadFloat a, QuadFloat b) {
 
     renorm(q0, q1, q2, q3);
     return QuadFloat(q0, q1, q2, q3);
+}
+}  // namespace detail
+
+XPMATH_INLINE_FUNCTION QuadFloat divide(QuadFloat a, QuadFloat b) {
+    if (!detail::qf_div_lift_wanted(a, b)) return detail::qf_divide_core(a, b);
+    const float step = 0x1p24f, target = 1.17549435e-38f * 4.0f, cap = 0x1p120f;
+    float sa = 1.0f, sb = 1.0f;
+    float pa = detail::fabs(a.f0), pb = detail::fabs(b.f0);
+    // KI-41's own loop shape (qf_complex.hpp:325-352), not a paraphrase of it:
+    // target the PRODUCT and lift whichever operand is currently smaller.  That
+    // keeps sa/sb minimal, so the closing unscale moves the quotient as little
+    // as the mechanism allows.
+    for (int k = 0; k < 16 && (pa * pb) * 0x1p-96f < target && sa < cap && sb < cap; ++k) {
+        if (pa < pb) { sa *= step; pa *= step; } else { sb *= step; pb *= step; }
+    }
+    const QuadFloat q = detail::qf_divide_core(detail::qf_pow2_scale(a, sa),
+                                               detail::qf_pow2_scale(b, sb));
+    return detail::qf_pow2_scale(q, sb / sa);   // exact: both are powers of two
 }
 
 // Long division by a plain FP32 scalar.  Same four-quotient-digit structure as

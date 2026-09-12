@@ -287,7 +287,22 @@ XPMATH_INLINE_FUNCTION FloatFloat multiply(FloatFloat a, FloatFloat b) {
     return FloatFloat(hi * ua * ub, lo * ua * ub);
 }
 
-XPMATH_INLINE_FUNCTION FloatFloat divide(FloatFloat a, FloatFloat b) {
+namespace detail {
+XPMATH_INLINE_FUNCTION FloatFloat ff_pow2_scale(FloatFloat a, float s);   // defined below
+
+// KI-41 at the UNDERFLOW end.  Every guard in ff_divide_core below — B8, B9,
+// B10 — is a splitter-OVERFLOW guard at the TOP of the range; this is the
+// bottom.  Same defect, same remedy and same derivation as qf_math.hpp:divide,
+// read it there.  FF is two words, so the residual's low word sits at |a|·2^-24
+// and its Dekker tail one word further down at |a|·2^-48; the predicate tests
+// 2^-24 and the lift targets 2^-48.  Cap 2^72, for the reason qf_math.hpp gives.
+XPMATH_INLINE_FUNCTION bool ff_div_lift_wanted(FloatFloat a, FloatFloat b) {
+    const float a0 = detail::fabs(a.hi), b0 = detail::fabs(b.hi);
+    if (a0 == 0.0f || b0 == 0.0f) return false;
+    const float m = (a0 < b0) ? a0 : b0;
+    return m * 0x1p-24f < 1.17549435e-38f * 4.0f;
+}
+XPMATH_INLINE_FUNCTION FloatFloat ff_divide_core(FloatFloat a, FloatFloat b) {
     // §B8 extension: a NON-FINITE DIVISOR must never reach the Dekker splitter.
     // B8's divisor guard below classifies on |b.hi| > kSplitOverflowThresh, which
     // is TRUE for b.hi = ±inf, so it scales by 2^-64 — and inf * 2^-64 is still
@@ -409,6 +424,24 @@ XPMATH_INLINE_FUNCTION FloatFloat divide(FloatFloat a, FloatFloat b) {
     // un, as two separate exact powers of two. Both are 1.0f on the non-hazard
     // path, where `hi * 1.0f * 1.0f == hi` bit-for-bit.
     return FloatFloat(hi * s * un, lo * s * un);
+}
+}  // namespace detail
+
+XPMATH_INLINE_FUNCTION FloatFloat divide(FloatFloat a, FloatFloat b) {
+    if (!detail::ff_div_lift_wanted(a, b)) return detail::ff_divide_core(a, b);
+    const float step = 0x1p24f, target = 1.17549435e-38f * 4.0f, cap = 0x1p72f;
+    float sa = 1.0f, sb = 1.0f;
+    float pa = detail::fabs(a.hi), pb = detail::fabs(b.hi);
+    // KI-41's own loop shape (qf_complex.hpp:325-352), not a paraphrase of it:
+    // target the PRODUCT and lift whichever operand is currently smaller.  That
+    // keeps sa/sb minimal, so the closing unscale moves the quotient as little
+    // as the mechanism allows.
+    for (int k = 0; k < 16 && (pa * pb) * 0x1p-48f < target && sa < cap && sb < cap; ++k) {
+        if (pa < pb) { sa *= step; pa *= step; } else { sb *= step; pb *= step; }
+    }
+    const FloatFloat q = detail::ff_divide_core(detail::ff_pow2_scale(a, sa),
+                                                detail::ff_pow2_scale(b, sb));
+    return detail::ff_pow2_scale(q, sb / sa);   // exact: both are powers of two
 }
 
 XPMATH_INLINE_FUNCTION FloatFloat multiply_scalar(FloatFloat a, float b) {

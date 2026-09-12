@@ -341,7 +341,27 @@ XPMATH_INLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b) {
 // Zone B (b.hi subnormal) is ~7e-40, i.e. ~4e-59 after scaling — 249 binades
 // clear of the subnormal floor.  B8 and B10 remain mutually exclusive for the
 // reason ff_math.hpp gives: the divisor guard forces |s1| <= split+1.
-XPMATH_INLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b) {
+namespace detail {
+XPMATH_INLINE_FUNCTION DoubleDouble dd_pow2_scale(DoubleDouble a, double s);   // defined below
+
+// KI-41 at the UNDERFLOW end.  KI-19's three zones below are all splitter-
+// OVERFLOW guards at the TOP of the range; this is the bottom.  Same defect,
+// same remedy and same derivation as qf_math.hpp:divide, read it there.  DD is
+// two words, so the residual's low word sits at |a|·2^-53 and its Dekker tail
+// one word further down at |a|·2^-106; the predicate tests 2^-53 and the lift
+// targets 2^-106.  Cap 2^159, for the reason qf_math.hpp gives.
+//
+// DD's cliff is at |operand| ~ 7.2e-276, so this fires on far fewer rows than
+// the FP32 backends' — 27 and 50 of 1200 in the probe's two low bands, against
+// QF's 483 and 577.  It is here because the defect is the same one and DD is
+// not exempt from it, not because DD's sweep rows were visibly wrong.
+XPMATH_INLINE_FUNCTION bool dd_div_lift_wanted(DoubleDouble a, DoubleDouble b) {
+    const double a0 = detail::fabs(a.hi), b0 = detail::fabs(b.hi);
+    if (a0 == 0.0 || b0 == 0.0) return false;
+    const double m = (a0 < b0) ? a0 : b0;
+    return m * 0x1p-53 < 2.2250738585072014e-308 * 4.0;
+}
+XPMATH_INLINE_FUNCTION DoubleDouble dd_divide_core(DoubleDouble a, DoubleDouble b) {
     const double split = 134217729.0;
     if (!detail::isfinite(b.hi)) return DoubleDouble(a.hi / b.hi, 0.0);
     const double kSplitOverflowThresh = 1.3393857e300;   // DBL_MAX / (split + 1)
@@ -378,6 +398,24 @@ XPMATH_INLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b) {
     // by un, as two separate exact powers of two.  Both are 1.0 on the
     // non-hazard path, where `hi * 1.0 * 1.0 == hi` bit-for-bit.
     return DoubleDouble(hi * sd * un, lo * sd * un);
+}
+}  // namespace detail
+
+XPMATH_INLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b) {
+    if (!detail::dd_div_lift_wanted(a, b)) return detail::dd_divide_core(a, b);
+    const double step = 0x1p53, target = 2.2250738585072014e-308 * 4.0, cap = 0x1p159;
+    double sa = 1.0, sb = 1.0;
+    double pa = detail::fabs(a.hi), pb = detail::fabs(b.hi);
+    // KI-41's own loop shape (qf_complex.hpp:325-352), not a paraphrase of it:
+    // target the PRODUCT and lift whichever operand is currently smaller.  That
+    // keeps sa/sb minimal, so the closing unscale moves the quotient as little
+    // as the mechanism allows.
+    for (int k = 0; k < 16 && (pa * pb) * 0x1p-106 < target && sa < cap && sb < cap; ++k) {
+        if (pa < pb) { sa *= step; pa *= step; } else { sb *= step; pb *= step; }
+    }
+    const DoubleDouble q = detail::dd_divide_core(detail::dd_pow2_scale(a, sa),
+                                                  detail::dd_pow2_scale(b, sb));
+    return detail::dd_pow2_scale(q, sb / sa);   // exact: both are powers of two
 }
 
 XPMATH_INLINE_FUNCTION DoubleDouble multiply_scalar(DoubleDouble a, double b) {

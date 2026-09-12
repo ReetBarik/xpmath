@@ -196,6 +196,47 @@
 // 5.404 / QF 6.744 maxima on the sweep) and it is a DIFFERENT mechanism from
 // the one measured here — the lift is a provable no-op on exactly these rows.
 // Not chased.
+//
+// ===========================================================================
+// OUTCOME OF SHIPPING IT (P5.1): KILLED BY ITS OWN STOP CONDITION.
+//
+// This probe's verdict held everywhere this probe can see.  The shipped lift
+// reproduces the `lift` arm bit-for-bit: after the header change `lib` and
+// `lift` print the same value at every point in every band, the four points
+// come back at 2.67e-8 / 4.25e-4 / 5.43e-6 / 6.22e-3 ulps, the fully-precise
+// band stays 1200/1200 bit-identical with the guard firing 0 times on all four
+// backends, and the poison arm moves 0 rows.  On the div ops themselves the
+// full 436,080-row sweep agrees: QF r div 110 -> 88 rows above 1 ulp, TF r div
+// 107 -> 93, QF c div 89 -> 84 with its worst row 2.992e11 -> 2.732e11, no new
+// defect anywhere, open_defects.txt still empty.
+//
+// What killed it is a population this probe never samples: the DOWNSTREAM
+// complex transcendentals that call real divide.  28 of them regress by more
+// than the plan's 3.73x allowance — QF c asin/asinh 1.36e-4 -> 4.44 ulps (12
+// rows), QF c atan/atanh 0.123 -> 1.71 (8 rows), QF/TF c asin/asinh 0 ->
+// 2.22e7 / 1.32 at U-state points (12 rows) — against a stop condition that
+// pre-accepted FOUR.  The repo's own sweep_monotone_gate fails independently
+// (19 regressions), and qf_property_test's B1_sqrt_sq identity drops to 27.88
+// mean digits against a 27.90 tolerance.
+//
+// THE REGRESSION SET IS NOT A TUNING ARTEFACT, WHICH IS THE FINDING.  Three
+// different lift policies were measured over the full sweep:
+//     per-operand factors, each operand lifted to its own target ... 28 rows
+//     one common factor for both, so the unscale is exactly 1.0 ..... 40 rows
+//     KI-41's own shape: target the product, lift the smaller ....... 28 rows
+// and the two 28-row sets are the SAME 28 rows.  Lift depth does not move them
+// either (n and n-1 give the identical set).  So the regressions follow from
+// the guard firing at all on those paths, not from how far it scales — which
+// means no parameter choice inside this mechanism reaches the stop condition,
+// and the next move is a scope question for the repo owner, not another sweep.
+//
+// COST, measured with kokkos_ep_bench_cost --op div --batch 200000 --repeats 7,
+// median of 3 runs, NOT inferred from an operation count:
+//     FF  16.9x -> 18.7x FP64      (+10.7%)
+//     DD  0.28x -> 0.31x f128      (+10.7%)
+//     QF  6.45x -> 6.62x f128      (+2.6%)
+// Well short of the ~2x the sqrt arm cost.  The guard is one compare on the
+// path that does not fire.
 // ===========================================================================
 
 #include <xp/dd_math.hpp>
@@ -458,7 +499,7 @@ static void ref_of(mpfr_t out, mpfr_t truth, const T& sa, const T& sb) {
 
 template <class T> static void run_points() {
     std::printf("\n  %s  --  the four load-bearing points (raw grid doubles)\n", Fmt<T>::name());
-    std::printf("    pt   committed        lib         lift        lift2      lift0(poison)    floor      guard\n");
+    std::printf("    pt   committed        lib         lift       liftm1      lift0(poison)    floor      guard\n");
     for (int i = 0; i < kNPts; ++i) {
         const double ad = std::strtod(kPts[i].a, nullptr);
         const double bd = std::strtod(kPts[i].b, nullptr);
@@ -466,8 +507,8 @@ template <class T> static void run_points() {
         mpfr_t ref, truth; mpfr_init2(ref, kPrec); mpfr_init2(truth, kPrec);
         ref_of<T>(ref, truth, sa, sb);
         const double u_lib   = ulps<T>(arm_lib<T>(sa, sb), ref);
-        const double u_lift  = ulps<T>(arm_lift<T>(sa, sb, true,  Fmt<T>::n - 1), ref);
-        const double u_lift2 = ulps<T>(arm_lift<T>(sa, sb, true,  Fmt<T>::n), ref);
+        const double u_lift  = ulps<T>(arm_lift<T>(sa, sb, true,  Fmt<T>::n), ref);
+        const double u_lift2 = ulps<T>(arm_lift<T>(sa, sb, true,  Fmt<T>::n - 1), ref);
         const double u_lift0 = ulps<T>(arm_lift<T>(sa, sb, false, Fmt<T>::n - 1), ref);
         const double u_floor = ulps<T>(arm_floor<T>(truth), ref);
         std::printf("    %3d  %11.5g %11.5g %11.5g %11.5g   %11.5g  %11.5g   %s\n",
@@ -503,8 +544,8 @@ static void run_band(const char* label, int ex, int n, uint64_t seed) {
         ref_of<T>(ref, truth, sa, sb);
 
         const T q_lib   = arm_lib<T>(sa, sb);
-        const T q_lift  = arm_lift<T>(sa, sb, true,  Fmt<T>::n - 1);
-        const T q_lift2 = arm_lift<T>(sa, sb, true,  Fmt<T>::n);
+        const T q_lift  = arm_lift<T>(sa, sb, true,  Fmt<T>::n);        // SHIPPED depth
+        const T q_lift2 = arm_lift<T>(sa, sb, true,  Fmt<T>::n - 1);    // guard-predicate depth
         const T q_lift0 = arm_lift<T>(sa, sb, false, Fmt<T>::n - 1);
         const double u_lib  = ulps<T>(q_lib, ref);
         const double u_lift = ulps<T>(q_lift, ref);
@@ -543,7 +584,7 @@ static void run_band(const char* label, int ex, int n, uint64_t seed) {
     }
 
     std::printf("    %-14s %-4s n=%-5d fires=%-5zu nonfin=%-5zu | lib med %-9.4g max %-10.4g >1u %-5zu"
-                " | lift med %-9.4g max %-10.4g >1u %-5zu | lift2 >1u %-5zu | floor >1u %-5zu max %-10.4g"
+                " | lift med %-9.4g max %-10.4g >1u %-5zu | liftm1 >1u %-5zu | floor >1u %-5zu max %-10.4g"
                 " | ident %-5zu better %-4zu worse %-4zu maxgrowth %-7.4g"
                 " | POISON moved %zu\n",
                 label, Fmt<T>::name(), n, fires, nonfinite,

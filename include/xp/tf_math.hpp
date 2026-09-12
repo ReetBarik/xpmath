@@ -670,7 +670,21 @@ XPMATH_INLINE_FUNCTION TripleFloat sqr(TripleFloat a) {
 // smallest subnormal, NaN only for 0/0, inf/inf and NaN operands.  Without the
 // branch, q0 = inf propagated into subtract(a, inf) = -inf and renorm collapsed
 // the pair to NaN.
-XPMATH_INLINE_FUNCTION TripleFloat divide(TripleFloat a, TripleFloat b) {
+namespace detail {
+XPMATH_INLINE_FUNCTION TripleFloat tf_pow2_scale(TripleFloat a, float s);   // defined below
+
+// KI-41 at the UNDERFLOW end.  Same defect, same remedy and same derivation as
+// qf_math.hpp:divide — read it there.  TF's expansion is three words, so the
+// residual's lowest word sits at |a|·2^-48 and its two_prod tail one word
+// further down at |a|·2^-72; the predicate tests 2^-48 and the lift targets
+// 2^-72.  Cap 2^96, for the reason qf_math.hpp gives.
+XPMATH_INLINE_FUNCTION bool tf_div_lift_wanted(TripleFloat a, TripleFloat b) {
+    const float a0 = detail::fabs(a.f0), b0 = detail::fabs(b.f0);
+    if (a0 == 0.0f || b0 == 0.0f) return false;
+    const float m = (a0 < b0) ? a0 : b0;
+    return m * 0x1p-48f < 1.17549435e-38f * 4.0f;
+}
+XPMATH_INLINE_FUNCTION TripleFloat tf_divide_core(TripleFloat a, TripleFloat b) {
     float q0, q1, q2;
     TripleFloat r;
 
@@ -685,6 +699,24 @@ XPMATH_INLINE_FUNCTION TripleFloat divide(TripleFloat a, TripleFloat b) {
 
     renorm(q0, q1, q2);
     return TripleFloat(q0, q1, q2);
+}
+}  // namespace detail
+
+XPMATH_INLINE_FUNCTION TripleFloat divide(TripleFloat a, TripleFloat b) {
+    if (!detail::tf_div_lift_wanted(a, b)) return detail::tf_divide_core(a, b);
+    const float step = 0x1p24f, target = 1.17549435e-38f * 4.0f, cap = 0x1p96f;
+    float sa = 1.0f, sb = 1.0f;
+    float pa = detail::fabs(a.f0), pb = detail::fabs(b.f0);
+    // KI-41's own loop shape (qf_complex.hpp:325-352), not a paraphrase of it:
+    // target the PRODUCT and lift whichever operand is currently smaller.  That
+    // keeps sa/sb minimal, so the closing unscale moves the quotient as little
+    // as the mechanism allows.
+    for (int k = 0; k < 16 && (pa * pb) * 0x1p-72f < target && sa < cap && sb < cap; ++k) {
+        if (pa < pb) { sa *= step; pa *= step; } else { sb *= step; pb *= step; }
+    }
+    const TripleFloat q = detail::tf_divide_core(detail::tf_pow2_scale(a, sa),
+                                                 detail::tf_pow2_scale(b, sb));
+    return detail::tf_pow2_scale(q, sb / sa);   // exact: both are powers of two
 }
 
 // Division by scalar. Derived from divide() by replacing b.f1, b.f2 with zeros
