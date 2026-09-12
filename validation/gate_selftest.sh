@@ -248,18 +248,22 @@ monotone)
     | gzip > "$work/fp_mismatch.csv.gz"
   run fingerprint-mismatch pass --baseline "$work/fp_mismatch.csv.gz"
 
-  # And with improvements on top of the mismatch -- the exact shape CI hits. The
-  # improvements are real and sub-noise-free, so the honest answer is 5 (the
-  # record is stale in the better direction); the mismatched fingerprint must
-  # NOT escalate that to 3, because on a runner whose libquadmath differs it is
-  # the normal state of the world.
+  # And with improvements on top of the mismatch -- the exact shape the GitHub
+  # runner reports on a CLEAN TREE, where a different libquadmath makes a few
+  # hundred rows hairline-better than the record.
+  #
+  # The answer is PASS, and I asserted 5 here first and broke CI again. Exit 5
+  # says "the record is stale, re-record it"; that is only true if the reference
+  # is unchanged. With a mismatched fingerprint the rows are better because the
+  # ORACLE moved, so there is nothing to attribute and nothing to re-record.
+  # Unattributable improvement is not a finding.
   zcat "$base" \
     | sed 's/^# oracle-fingerprint: .*/# oracle-fingerprint: deadbeefdeadbeef/' \
     | awk -F, -v OFS=, '
         /^#/{print;next} /^backend,/{print;next}
         !done && $8=="S" && $6+0>0 { $6=1e6; $5="14.00"; done=1; print; next }
         {print}' | gzip > "$work/fp_mismatch_improved.csv.gz"
-  run fingerprint-mismatch-improved 5 --baseline "$work/fp_mismatch_improved.csv.gz"
+  run fingerprint-mismatch-improved pass --baseline "$work/fp_mismatch_improved.csv.gz"
   ;;
 
 absolute)

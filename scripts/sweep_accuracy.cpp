@@ -3875,27 +3875,43 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
   // the absolute gate's register.
   bool stale_improved = (increased || drift_digits_up);
 
-  // THE INTERLOCK. A different oracle improves thousands of rows at once and is
-  // NOT a library improvement -- measured: --oracle=mpfr against the committed
-  // baseline yields 1631 ungated improvements. Without this, exit 5 plus a CI
-  // lane that accepts 5 would wave an oracle swap straight through.
+  // ATTRIBUTION. Exit 5 claims the record is stale in the better direction and
+  // a re-baseline is owed. That claim is only meaningful if the REFERENCE is the
+  // same one the record was made against -- otherwise the rows are better
+  // because a different oracle computed them, and there is nothing to attribute
+  // to the library and nothing to re-record.
   //
-  // KEYED ON THE SELECTED ORACLE, NOT ON THE FINGERPRINT. The first version of
-  // this tested `fp_seen && !fp_ok` and it broke CI on the first push. The
-  // GitHub runner's libquadmath differs from the toolchain of record, so the
-  // fingerprint mismatches there on EVERY run -- the repo documents that as the
-  // expected state and deliberately does not gate on it. Keying the interlock
-  // there turned a handful of hairline improvements (measured: increased: 436)
-  // into a hard failure of both sweep_monotone_gate and its self-test.
+  // Two ways the reference can differ, and they are NOT the same case:
   //
-  // Every check that "verified" the first version ran on the toolchain of
-  // record, where the fingerprint matches by construction, so the whole test
-  // matrix was blind to the condition it depended on.
+  //   1. The toolchain drifted. The fingerprint mismatches. This is the NORMAL
+  //      state on any runner whose libquadmath is not the one of record, and
+  //      the repo has deliberately decided not to gate on it -- there is
+  //      already a warning above saying the reference moved. An improvement
+  //      here is unattributable, so it is reported and DROPPED.
   //
-  // The hazard is a run that DELIBERATELY SELECTED a different reference. That
-  // is a property of this process and is known exactly. A drifting toolchain is
-  // a different thing: it has its own warning above, and not gating on it is a
-  // decision this repo has already made and must keep.
+  //   2. This process deliberately selected another oracle (--oracle=mpfr).
+  //      Measured: 1,631 ungated improvements against the committed baseline.
+  //      That is record drift proper -- the operator changed the standard --
+  //      and it escalates to 3.
+  //
+  // I GOT THIS BACKWARDS TWICE AND BROKE CI BOTH TIMES. v1 escalated a
+  // fingerprint mismatch to 3, which made every hairline improvement on the
+  // GitHub runner a hard failure. v2 stopped escalating but still let the rows
+  // gate as 5, so the `clean` case failed there with "390 row(s) are BETTER".
+  // Both versions asked whether a mismatch should make the verdict HARSHER. The
+  // question is whether the improvement is attributable at all, and when the
+  // reference moved it is not.
+  //
+  // Reproduced on the toolchain of record before this edit: a baseline with a
+  // mismatched fingerprint and 390 injected improvements -- the runner's exact
+  // state on a clean tree -- exited 5, and must exit 0.
+  if (stale_improved && fp_seen && !fp_ok) {
+    std::printf("  note          : %ld row(s) are better than the record, but the "
+                "oracle\n                  fingerprint does not match — the "
+                "REFERENCE moved, so this is\n                  not attributable "
+                "to the library and is not gated\n", increased);
+    stale_improved = false;
+  }
   if (stale_improved && g_oracle_mpfr) {
     std::printf("  note          : improvement drift under a NON-DEFAULT oracle "
                 "(--oracle=mpfr) —\n                  the reference was changed, "
