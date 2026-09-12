@@ -169,6 +169,18 @@ static double qf_digits(float128 computed, float128 ref) {
 // and the plan specifies an absolute ulp tolerance, not a statistical one.)
 // 96*log10(2) = 28.8988; hence 10 ulp -> 27.90, 30 ulp -> 27.42.
 static const double kTolDefault = 27.90;   // 10 ulp  = -log10(10 * 2^-96), the default gate
+
+// B1_sqrt_sq only. 27.90 (10 ulp) was attainable ONLY because the pre-lift
+// divide inside Heron's sqrt erred in a direction that flattered sqrt(a)^2.
+// With an exactly rounded 400-bit divide substituted at every call site the
+// mean is 27.8887 -- 27.90 is UNATTAINABLE by any correct implementation, not
+// merely by this one:
+//     plain 28.0229 PASS   lifted 27.8785 FAIL   exactly-rounded 27.8887 FAIL
+// The whole loss is below 1e-15 in FP32's subnormal tail; from 1e-15 up, plain
+// and lifted are identical at 28.98 by decade. 27.80 clears the exactly-rounded
+// floor with margin and still fails if sqrt or divide regresses for any other
+// reason. Evidence: scripts/probe_b1_sqrt_sq.cpp.
+static const double kTolB1SqrtSq = 27.80;   // exactly-rounded floor is 27.8887
 static const double kTolSection10 = 27.42; // 30 ulp: exp-denormal-tail-limited round-trips (§10)
 #endif  // KOKKOS_EP_HAVE_QUADMATH
 
@@ -601,7 +613,7 @@ int main(int argc, char** argv) {
         qf::QuadFloat s = qf::sqrt(qf::QuadFloat(x));
         c = qf_to_q(qf::multiply(s, s));
         r = (float128)x;
-      }, kTolDefault));
+      }, kTolB1SqrtSq));
     // B2: exp(log(a)) ~= a, a>0 in [1e-13,1e13]. exp guards a.f0>=88, and for a
     // mapping exp near FP32's smallest normal the low QF words fall into the
     // denormal tail (PORT_NOTES_QF §10). [1e-13,1e13] keeps ln(a) in +-30 (well
@@ -813,10 +825,10 @@ int main(int argc, char** argv) {
       for (int i = 0; i < kDeviceN; ++i)
         digs[i] = qf_digits(qf_to_q(qf::QuadFloat(f0[i], f1[i], f2[i], f3[i])), (float128)x[i]);
       AccStats s = compute_stats(digs.data(), kDeviceN);
-      bool pass = s.mean >= kTolDefault;
+      bool pass = s.mean >= kTolB1SqrtSq;
       if (!pass) ++device_failures;
       std::printf("  [device] %-14s n=%d min=%.2f mean=%.2f tol=%.2f status=%s\n",
-                  "B1_sqrt_sq", kDeviceN, s.min, s.mean, kTolDefault, pass ? "PASS" : "FAIL");
+                  "B1_sqrt_sq", kDeviceN, s.min, s.mean, kTolB1SqrtSq, pass ? "PASS" : "FAIL");
     }
     // Device B4: sin^2+cos^2 ~= 1.
     {
