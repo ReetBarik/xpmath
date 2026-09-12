@@ -111,6 +111,31 @@ monotone)
   run truncated fail --baseline "$work/short.csv.gz"
 
   # ---------------------------------------------------------------------
+  # ZERO ROWS. The case `truncated` above CANNOT reach.
+  #
+  # `head -1000` keeps the '#' header, so declared_real/declared_cplx are set
+  # and the truncation check fires. Strip the header too and every guard in
+  # compare_baseline no-ops at once: declared_* stay 0 so the truncation check
+  # is skipped, removed_points is 0 because there were no baseline rows to go
+  # missing, and nothing counted `parsed`. The gate printed
+  # "compared: 0 points ... RESULT: PASS" and exited 0 -- certifying a
+  # comparison it had not made. Measured on the real binary before the fix.
+  #
+  # Three inputs, because they fail through different doors: an empty file, a
+  # file with a header and no body, and a stream the decompressor rejects.
+  # ---------------------------------------------------------------------
+  : | gzip > "$work/empty.csv.gz"
+  run empty-baseline fail --baseline "$work/empty.csv.gz"
+
+  gzip -dc "$base" | grep '^#' | gzip > "$work/header_only.csv.gz"
+  run header-only fail --baseline "$work/header_only.csv.gz"
+
+  # Not valid gzip at all: exercises the pclose status path specifically,
+  # which used to be discarded outright.
+  printf 'this is not gzip data' > "$work/corrupt.csv.gz"
+  run corrupt-gz fail --baseline "$work/corrupt.csv.gz"
+
+  # ---------------------------------------------------------------------
   # DIRECTIONAL DIGIT DRIFT.
   #
   # Digit drift no longer gates when a measured improvement explains it, so

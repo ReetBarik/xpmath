@@ -3178,10 +3178,44 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
     if (!row_moved) ++unchanged;
     ++idx;
   }
-  if (gz) pclose(f); else std::fclose(f);
+  // pclose returns the DECOMPRESSOR's exit status, and discarding it was one of
+  // three independent ways this function could certify a comparison it never
+  // made: a gzip that dies on a corrupt or truncated file writes nothing to the
+  // pipe, which reads as a clean EOF and leaves every counter at zero.
+  int reader_status = 0;
+  if (gz) reader_status = pclose(f); else std::fclose(f);
+  if (gz && reader_status != 0) {
+    std::fprintf(stderr,
+                 "\n  the decompressor failed on %s (status %d). Whatever rows it\n"
+                 "  did not deliver would be silently counted as new points, so this\n"
+                 "  comparison cannot certify anything. Refusing.\n",
+                 path.c_str(), reader_status);
+    structural = true;
+  }
 
   for (size_t i = 0; i < fresh.size(); ++i)
     if (!fresh_seen[i]) ++new_points;
+
+  // ZERO ROWS IS NOT A PASS. The truncation check below cannot see this case:
+  // it is guarded by `declared_real > 0 || declared_cplx > 0`, and a file with
+  // no '#' header -- an empty file, a failed decompression, a path that
+  // resolved to something that is not a baseline -- never sets them. With
+  // parsed == 0 every counter stays zero, `removed_points` is zero because
+  // there were no baseline rows to go missing, and the function fell through
+  // to "RESULT: PASS -- no point got worse". Verified against an empty .gz:
+  // `compared: 0 points ... RESULT: PASS`, exit 0.
+  //
+  // gate_selftest.sh's truncation poison cuts with `head -1000`, which KEEPS
+  // the header, so declared_* are set and that path is exercised. The zero-row
+  // case is precisely the one the existing poison cannot reach -- see the
+  // `empty-baseline` case added alongside this change.
+  if (parsed == 0) {
+    std::fprintf(stderr,
+                 "\n  baseline %s yielded NO rows. A comparison against nothing is not\n"
+                 "  a pass: there is no evidence here either way. Refusing.\n",
+                 path.c_str());
+    structural = true;
+  }
 
   // TRUNCATION CHECK. Count how many rows this baseline's OWN header implies,
   // and require the body to deliver them. Older baselines with a smaller grid
