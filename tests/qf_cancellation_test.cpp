@@ -51,7 +51,8 @@
 // carries BackendTraits<DD> and <FF> but NOT <QF> (its backend-tag block has a
 // TODO(Phase 3) placeholder for QF; the primary template is undefined). Rather than touch
 // the shared harness other tasks own (rule 1/4), this file carries the QF-local
-// kMaxDig / qf_to_q / qf_digits helpers directly — IDENTICAL to qf_accuracy_test
+// kMaxDig / qf_to_q / qf_digits helpers directly — these were shared with the
+// retired qf_accuracy_test
 // (T3.4) and qf_property_test (T3.3), which established this pattern. kMaxDig = 29.0
 // matches those files and src/demo_qf_real.cpp.
 //
@@ -61,7 +62,7 @@
 //
 // NAMESPACE PATH.  Uses the `namespace qf = Kokkos::Experimental` alias
 // (qf::add / qf::sqrt / qf::atan / …), matching every other QF test in this suite
-// (qf_eft_test, qf_nonoverlap_test, qf_property_test, qf_accuracy_test,
+// (qf_eft_test, qf_nonoverlap_test, qf_property_test,
 // qf_fma_guard_test).
 //
 // SCOPE (per plan): real QF kernels only — no complex (qf_complex.hpp is NOT
@@ -98,7 +99,8 @@ namespace qf = Kokkos::Experimental;
 #ifdef KOKKOS_EP_HAVE_QUADMATH
 
 // ----------------------------------------------------------------------------
-// QF <-> oracle, precision constants, digit metric. Identical to qf_accuracy_test
+// QF <-> oracle, precision constants, digit metric. Formerly shared with
+// qf_accuracy_test (retired)
 // (T3.4) and qf_property_test (T3.3): test_utils.hpp has BackendTraits<DD>/<FF>
 // but NOT <QF>, so — rather than touch the shared harness other tasks own — this
 // file carries the QF-local helpers directly. qf_to_q mirrors src/demo_qf_real.cpp.
@@ -115,7 +117,7 @@ static inline float128 Q(const qf::QuadFloat& x) {
 
 // Digits of accuracy of a QF result (already widened) against the oracle, capped
 // at QF's 29-digit ceiling. NaN/inf/zero handling included (mirrors
-// digits_of_accuracy in test_utils.hpp and qf_digits in qf_accuracy_test).
+// digits_of_accuracy in test_utils.hpp).
 static double qf_digits(float128 computed, float128 ref) {
   if (Kokkos::isnan(computed) || Kokkos::isnan(ref)) return 0.0;
   if (Kokkos::isinf(ref))

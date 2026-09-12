@@ -796,7 +796,7 @@ XPMATH_INLINE_FUNCTION QuadFloat divide(QuadFloat a, QuadFloat b) {
 //
 // Accuracy: identical algorithm to divide(), and the residual correction here
 // is exact rather than merely faithful, so this is not a precision/speed
-// trade. Validated against qf_accuracy_test / qf_property_test.
+// trade. Validated against qf_property_test and the sweep.
 XPMATH_INLINE_FUNCTION QuadFloat divide_scalar(QuadFloat a, float b) {
     float q0, q1, q2, q3, p, e;
     QuadFloat r;
@@ -892,7 +892,7 @@ XPMATH_INLINE_FUNCTION QuadFloat sqrt(QuadFloat a) {
 // The `d - r == 0.5f` line restores QD's TIE DIRECTION. rint is ties-to-EVEN;
 // QD's floor(d + 0.5) is ties-toward-+INFINITY (note: toward +inf, not away from
 // zero — floor(-2.5 + 0.5) = -2). The tie rule is deliberately left alone: it is
-// user-visible through `qf::round`, whose oracle in qf_accuracy_test.cpp is
+// user-visible through `qf::round`, whose oracle in the sweep is
 // `roundq` with exact ties excluded from the corpus, and the multi-word tie
 // correction below (`x0 - a.f0 == 0.5f && a.f1 < 0`) assumes the leading word
 // rounded UP. KI-2 is the near-tie wrong answer; the tie direction is a

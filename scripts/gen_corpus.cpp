@@ -5,7 +5,8 @@
 // WHAT THIS PRODUCES
 //   One binary file holding, for every operation in the union of the DD / FF /
 //   QF op inventories, N input elements plus the __float128 reference value for
-//   each element. Layout and loader: tests/corpus_binary.hpp.
+//   each element. Layout and loader were in tests/corpus_binary.hpp, deleted
+//   with the retired accuracy tests -- see the note on the include below.
 //
 // WHY IT EXISTS — COMPARABILITY, NOT SPEED
 //   Today each demo (src/demo_*.cpp) generates its own inputs from its own seed
@@ -221,11 +222,21 @@
 //   guaranteed for a given libquadmath. A libquadmath upgrade that changes a
 //   transcendental by an ulp would change the file — which is exactly what the
 //   generator_version staleness guard is for: bump kGeneratorVersion in
-//   tests/corpus_binary.hpp and every consumer will refuse the old file.
+//   the (now deleted) loader and every consumer will refuse the old file.
 //
 // ============================================================================
 
-#include "../tests/corpus_binary.hpp"
+// NOTE: this tool no longer builds. It included ../tests/corpus_binary.hpp,
+// which was deleted with the eight retired mean-gated accuracy tests -- they
+// were its only consumers.
+//
+// IT IS KEPT ANYWAY, and deliberately: scripts/sweep_accuracy.cpp cites it
+// thirteen times as the PROVENANCE of its own sampling primitives, op inventory
+// and order, domain-repair table, default seed and one-in-seven cancelling-draw
+// ratio ("copied from", "identical order and naming to", "transcribed from").
+// Deleting it would strand every one of those references. See issue #20 on the
+// probe/tool lifecycle question.
+// #include "../tests/corpus_binary.hpp"   // deleted; see above
 #include "../tests/corpus.hpp"
 
 #include <quadmath.h>

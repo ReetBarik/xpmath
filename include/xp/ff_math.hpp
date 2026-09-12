@@ -592,7 +592,8 @@ XPMATH_INLINE_FUNCTION FloatFloat abs(FloatFloat a) {
 // half-integer and near-half-integer class; see docs/KNOWN_ISSUES.md, KI-2 resolution.
 //
 // Ties-to-even is the SHIPPED semantics of ff::round and is what
-// ff_accuracy_test.cpp's `nearbyintq` oracle expects. It is deliberately
+// the `nearbyintq` oracle expects (now scored by the sweep's R_Round row,
+// which uses mpfr_rint / ties-to-even -- see KI-37). It is deliberately
 // unchanged. (QF and TF are ties-toward-+infinity and are likewise unchanged;
 // the two backend families disagree on ties and always have.)
 XPMATH_INLINE_FUNCTION FloatFloat round_to_nearest_int(FloatFloat a) {
@@ -2032,7 +2033,8 @@ XPMATH_INLINE_FUNCTION FloatFloat erf(FloatFloat z) {
 // its own 3.5 switchover, so FF's shipped erfc does not get a shelf — it falls
 // off a CLIFF: measured 7.60 digits at z = 6.00 and exactly 0.00 (erfc returns
 // +0, relative error 1) at every z >= 6.02. That cliff, not a slow ramp, is what
-// pinned the ff_accuracy_test erfc row's min at -0.00.
+// pinned the erfc row's min at -0.00 (measured under the retired
+// ff_accuracy_test; the sweep now scores erfc per point).
 //
 // Fix: for z >= kDirectMin, evaluate erfc directly from the SAME asymptotic
 // series erf() uses (erfc_asymptotic_sum, A&S 7.1.23) and never form 1 - erf.
@@ -2065,7 +2067,7 @@ XPMATH_INLINE_FUNCTION FloatFloat erf(FloatFloat z) {
 //
 // The pointwise rule is NOT free here, unlike at DD. B2 could apply it at no
 // cost because DD's row mean was flat to +/-0.03 digit across its whole
-// candidate window. FF's is not: the predicted ff_accuracy_test random-domain
+// candidate window. FF's is not: the predicted random-domain
 // mean rises monotonically with a lower cut — 11.84 with no direct path, 11.96
 // at 5.75, 12.26 at 5.0, 12.36 at 4.5-4.0 (the plateau), 12.21 at 3.0. So 5.75
 // leaves ~0.40 digit of mean on the table versus the mean-optimal ~4.0. That is
@@ -2085,7 +2087,7 @@ XPMATH_INLINE_FUNCTION FloatFloat erf(FloatFloat z) {
 // trough, 5.459 digits at z = 3.5, is not cancellation at all — it is erf()'s own
 // Taylor->asymptotic seam, where the two paths return the identical value.)
 // Closing that band needs a different algorithm (a Lentz continued fraction,
-// A&S 7.1.14, or a triple-float erf). The ff_accuracy_test row gates on the MEAN
+// A&S 7.1.14, or a triple-float erf). That row used to gate on the MEAN
 // and passes at 11.97 vs 8.45; the pointwise band is a separate, open concern.
 XPMATH_INLINE_FUNCTION FloatFloat erfc(FloatFloat z) {
     // See derivation above. Sits below erf()'s own |z| > 6.0 saturation, so the

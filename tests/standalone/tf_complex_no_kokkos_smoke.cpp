@@ -9,7 +9,7 @@
 // + 3 basic + 5 trig + 3 inv-trig + 3 hyperbolic + 3 inv-hyperbolic + 3 exp/log
 // + 3 utility), with a handful of real arithmetic primitives dispatched through
 // tf_math.hpp. Checks for sensible results — not byte-exact validation (that's
-// what tf_accuracy_test does), just "sqrt of a small positive returns something
+// what the sweep does), just "sqrt of a small positive returns something
 // reasonable, not NaN/inf".
 //
 // IMPORTANT COVERAGE NOTE: xp::TripleFloatComplex is a bespoke struct (re, im

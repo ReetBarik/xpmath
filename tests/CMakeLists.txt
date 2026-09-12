@@ -138,44 +138,6 @@ function(kokkos_ep_add_eft_test_contract_on name)
     KOKKOS_EP_BASELINE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/${_base}_baseline.txt")
 endfunction()
 
-# --- Helper: standalone test, no Kokkos and no libquadmath ----------------
-# For tests that must keep running on toolchains where the GCC-flavoured
-# __float128 oracle does not exist. hipcc and icpx are clang-based; there,
-# KOKKOS_EP_QUADMATH_DEFINE is unset and every oracle-scored test above
-# runtime-SKIPs with exit 77, so an AMD or Intel run reports no accuracy signal
-# at all. The *_complex_accuracy_test targets close that hole by reading
-# precomputed binary128 references from a file instead of computing them:
-#
-#   tests/data/xp_corpus_complex.bin   generated ONCE on an x86_64 GCC host by
-#                                      scripts/gen_corpus.cpp (which does link
-#                                      libquadmath), committed, consumed anywhere.
-#
-# So this helper deliberately does NOT do three things kokkos_ep_add_test does:
-#   * no Kokkos::kokkos link      — the sources include only include/xp/, and a
-#                                   Kokkos link would re-import -arch=sm_XX and
-#                                   the rest of the interface flags into a TU
-#                                   that has no device code;
-#   * no KOKKOS_EP_QUADMATH_DEFINE — the consumer side must not compile a
-#                                   quadmath path even when one is available,
-#                                   or the decoupling would be untested here;
-#   * no SKIP_RETURN_CODE 77       — there is nothing to skip. A missing or stale
-#                                   corpus is a hard FAIL with instructions,
-#                                   not a silent pass.
-#
-# Include path is include/ (the standalone core) plus this directory (for
-# corpus_binary.hpp); third_party/include is intentionally absent, mirroring
-# scripts/check_standalone_no_kokkos.sh, so a Kokkos compat wrapper cannot
-# accidentally satisfy an include.
-function(kokkos_ep_add_standalone_test name)
-  add_executable(${name} ${name}.cpp)
-  target_include_directories(${name} PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR})
-  target_compile_definitions(${name} PRIVATE
-    KOKKOS_EP_COMPLEX_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/data/xp_corpus_complex.bin")
-  add_test(NAME ${name} COMMAND ${name})
-endfunction()
-
 # --- Registered tests -----------------------------------------------------
 kokkos_ep_add_test(hello_test)
 kokkos_ep_add_test(corpus_test)
@@ -191,7 +153,6 @@ kokkos_ep_add_test(dd_property_test)
 # T1.4 differential accuracy vs quadmath: per-op digits-of-accuracy against the
 # __float128 oracle. Quadmath-gated (runtime-SKIPs without LIBQUADMATH). Plain
 # helper — NOT an EFT test, so no contraction flags.
-# RETIRED (mean-gated, see the note at the end of this file): kokkos_ep_add_test(dd_accuracy_test)
 # T1.6 end-to-end cancellation kernels: quadmath-oracle-gated, host-side. Plain
 # helper — NOT an EFT test, so no contraction flags (kernels are not EFT atoms).
 kokkos_ep_add_test(dd_e2e_test)
@@ -208,9 +169,7 @@ kokkos_ep_add_eft_test(ff_eft_test)
 kokkos_ep_add_test(ff_property_test)
 # T2.4 differential accuracy vs quadmath for FF: per-op digits-of-accuracy against
 # the __float128 oracle (runtime-SKIPs without LIBQUADMATH). FF analogue of
-# dd_accuracy_test. Plain helper — NOT an EFT test, so no contraction flags
-# (mirrors dd_accuracy_test's registration).
-# RETIRED (mean-gated, see the note at the end of this file): kokkos_ep_add_test(ff_accuracy_test)
+# Plain helper — NOT an EFT test, so no contraction flags.
 # T2.5 end-to-end cancellation kernels for FF: quadmath-oracle-gated, host-side.
 # FF analogue of dd_e2e_test (T1.6). Plain helper — NOT an EFT test, so no
 # contraction flags. NOTE ON CONTRACTION: unlike T1.6's dd_e2e_test (which also
@@ -272,14 +231,13 @@ kokkos_ep_add_test(qf_property_test)
 
 # T3.4 differential accuracy vs quadmath for QF: per-op digits-of-accuracy against
 # the __float128 oracle (runtime-SKIPs without LIBQUADMATH). QF analogue of
-# ff_accuracy_test (T2.4) / dd_accuracy_test (T1.4). Scores every QF op returning a
+# the retired per-backend accuracy tests (T1.4 / T2.4). Scores every QF op returning a
 # QuadFloat with a quadmath counterpart across narrow(Route-A) + broad(~96-bit) +
 # corpus passes; gates on the MEAN against the QF quad-word absolute ulp-of-U floor
 # (10 ulp = 27.90 digits default; 30 ulp = 27.42 for the exp-family output-denormal
 # tail, PORT_NOTES_QF §10), with low mins for §5-registry ops reported as
 # EXPECTED-MIN-DROP. Plain helper — NOT an EFT test, so no contraction flags
-# (mirrors dd_accuracy_test / ff_accuracy_test registration).
-# RETIRED (mean-gated, see the note at the end of this file): kokkos_ep_add_test(qf_accuracy_test)
+# (plain helper; no contraction flags).
 
 # T3.5 FMA-contraction guard for QF: QF analogue of T2.5's ff_fma_guard_test, same
 # source/two-postures dual-registration pattern (see qf_fma_guard_test.cpp). Reuses
@@ -313,7 +271,6 @@ kokkos_ep_add_test(qf_cancellation_test)
 kokkos_ep_add_eft_test(tf_eft_test)                    # -> tf_eft_test              (OFF, gates)
 kokkos_ep_add_eft_test_contract_on(tf_eft_test)        # -> tf_eft_test_contract_on  (ON, reports)
 kokkos_ep_add_test(tf_property_test)                   # algebraic identities (Group A/B/C)
-# RETIRED (mean-gated, see the note at the end of this file): kokkos_ep_add_test(tf_accuracy_test)
 kokkos_ep_add_test(tf_cancellation_test)               # e2e cancellation kernels (K1-K4)
 kokkos_ep_add_eft_test(tf_fma_guard_test)              # -> tf_fma_guard_test              (OFF, gates)
 kokkos_ep_add_eft_test_contract_on(tf_fma_guard_test)  # -> tf_fma_guard_test_contract_on  (ON, reports)
@@ -326,43 +283,38 @@ kokkos_ep_add_eft_test_contract_on(tf_fma_guard_test)  # -> tf_fma_guard_test_co
 # original DD port through FF, QF and TF. See docs/history/KNOWN_ISSUES.md.
 #
 # Standalone helper, NOT kokkos_ep_add_test: these read precomputed binary128
-# references from tests/data/xp_corpus_complex.bin and therefore run on
+# references from a precomputed binary corpus and therefore ran on
 # toolchains with no libquadmath, where the oracle-scored tests above only skip.
 # 24 ops each (add sub mul div abs conj sqrt exp log log10 sin cos tan asin acos
 # atan sinh cosh tanh asinh acosh atanh pow polar), per-op tolerance table set
 # from measurement. NOT EFT tests, so no contraction flags — verified
 # insensitive to -O0/-O2/-O3 and -ffp-contract=off/fast.
-# RETIRED (mean-gated, see the note at the end of this file): kokkos_ep_add_standalone_test(dd_complex_accuracy_test)
-# RETIRED (mean-gated, see the note at the end of this file): kokkos_ep_add_standalone_test(ff_complex_accuracy_test)
-# RETIRED (mean-gated, see the note at the end of this file): kokkos_ep_add_standalone_test(qf_complex_accuracy_test)
-# RETIRED (mean-gated, see the note at the end of this file): kokkos_ep_add_standalone_test(tf_complex_accuracy_test)
 
 # ---------------------------------------------------------------------------
-# RETIRED: the eight mean-gated accuracy tests
+# WHY THERE IS NO PER-BACKEND ACCURACY TEST
 # ---------------------------------------------------------------------------
-# dd_accuracy_test, ff_accuracy_test, qf_accuracy_test, tf_accuracy_test and
-# dd/ff/qf/tf_complex_accuracy_test are no longer registered. Their sources are
-# kept on disk; only the ctest registration is gone.
+# There used to be eight: dd/ff/qf/tf_accuracy_test and their complex
+# counterparts. They were retired in 334cc9b and deleted outright once nothing
+# referenced them.
 #
-# Every one of them scored a MEAN digit count per op against a per-op tolerance
-# table, and every entry in those tables was set by measuring the implementation
-# and rounding down. That makes the current behaviour the specification: a defect
-# that was present when the table was written is, by construction, a pass. It is
-# also why not one of the forty entries in the known-issues history was caught
-# here -- the tests could not fail for a reason they had not already been told
-# about. Averaging compounds it: one point at 0 digits inside a thousand at 31
-# moves the mean by 0.03.
+# Each scored a MEAN digit count per op against a per-op tolerance table, and
+# every entry in those tables was set by measuring the implementation and
+# rounding down. That makes the current behaviour the specification: a defect
+# present when the table was written is, by construction, a pass. Not one of the
+# forty entries in the known-issues history was ever caught by them. Averaging
+# compounds it -- one point at 0 digits inside a thousand at 31 moves the mean
+# by 0.03.
 #
-# They are replaced by two gates over ONE measurement (ulps against the
-# binary128 oracle, per point, versus a bound derived from the format and the
-# condition number). The verdict is per point rather than per mean, and the
+# They are replaced by the two gates below, over ONE measurement: ulps against
+# the binary128 oracle, per point, versus a bound derived from the format and
+# the condition number. The verdict is per point rather than per mean, and the
 # bound comes from the format rather than from the implementation. See
 # docs/CORRECTNESS.md.
 #
-# Nothing STRUCTURAL was retired. The bit-exact EFT tests (two_sum / two_prod /
-# two_sqr), the FMA-contraction guards in both postures, the representation
-# invariants, the QF/TF non-overlap tests, the property/identity tests and the
-# cancellation kernels all remain registered above.
+# Nothing STRUCTURAL was retired: the bit-exact EFT tests, the FMA-contraction
+# guards in both postures, the representation invariants, the QF/TF non-overlap
+# tests, the property/identity tests and the cancellation kernels all remain
+# registered above.
 
 # ---------------------------------------------------------------------------
 # THE TWO GATES
@@ -489,7 +441,7 @@ add_test(NAME sweep_absolute_gate_selftest
 # It issues NO accuracy verdict on exp -- docs/CORRECTNESS.md:5-6 reserves that
 # for the sweep. Bit-equalities only, no oracle, no tolerance.
 #
-# Registered by hand rather than through kokkos_ep_add_standalone_test: it needs
+# Registered by hand rather than through a helper: it needs
 # no corpus define, and no Kokkos link (no device code). libquadmath is required
 # for the __float128 tail arithmetic.
 # pow()'s non-positive-base contract, all four backends. Registered separately

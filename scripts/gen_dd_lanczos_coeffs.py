@@ -37,7 +37,8 @@ CHOICE OF (g, N) -- see the B1 block in docs/TEST_SUITE_PLAN.md
   under simulated DD arithmetic (106-bit) over the accuracy test's
   uniform(0.1, 50) input range gives an interior optimum near g=14, N=17.
   Run with --scan to reproduce that sweep.  The shipped configuration is
-  g=14, N=17 (dd_accuracy_test tgamma mean 28.30 digits, gate 25.91).
+  g=14, N=17 (measured under the retired dd_accuracy_test: tgamma mean 28.30
+  digits against a gate of 25.91; tgamma is now scored per point by the sweep).
 
 DEFAULTS
   --g 14 --n 17  reproduces exactly the constants currently in dd_math.hpp.

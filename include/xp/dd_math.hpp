@@ -509,7 +509,8 @@ XPMATH_INLINE_FUNCTION DoubleDouble abs(DoubleDouble a) {
 // rounded once, in the low word, ties to even — so there is nothing for `rint`
 // to improve, and no scalar `rint` formulation reaches 106 bits anyway.
 // Ties-to-even is also the shipped semantics of dd::round and what
-// dd_accuracy_test.cpp's `nearbyintq` oracle expects.
+// the `nearbyintq` oracle expects (now the sweep's R_Round row, mpfr_rint
+// with ties-to-even -- see KI-37).
 // See docs/KNOWN_ISSUES.md, KI-2 resolution.
 XPMATH_INLINE_FUNCTION DoubleDouble round_to_nearest_int(DoubleDouble a) {
     if (a.hi == 0.0) return DoubleDouble(0.0);
@@ -2417,7 +2418,7 @@ XPMATH_INLINE_FUNCTION DoubleDouble erf(DoubleDouble z) {
 // asymptotic path cannot help there: its optimal-truncation floor is worth only
 // ~11 digits at z = 5, i.e. worse than the subtract it would replace. Closing
 // that band needs a different algorithm (a Lentz continued fraction, A&S
-// 7.1.14, or a triple-double erf). The dd_accuracy_test row gates on the MEAN
+// 7.1.14, or a triple-double erf). That row used to gate on the MEAN
 // and passes at 27.97 vs 25.91; the pointwise band is a separate, open concern.
 XPMATH_INLINE_FUNCTION DoubleDouble erfc(DoubleDouble z) {
     // See derivation above. Sits above erf()'s own kTaylorMax = 6.0 seam, so

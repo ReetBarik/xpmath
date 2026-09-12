@@ -17,7 +17,8 @@
 //
 // WHY IT EXISTS — THE TOLERANCE TABLE CANNOT SEE A PARTIAL LOSS
 //   The per-op tolerance tables in tests/*_accuracy_test.cpp and
-//   tests/*_complex_accuracy_test.cpp gate on the MEAN over a corpus, against a
+//   the retired tests/*_complex_accuracy_test.cpp gated on the MEAN over a
+//   corpus, against a
 //   threshold. That protects against a score falling BELOW a threshold. It does
 //   not protect against a score falling AT ALL. A fix that repairs complex acosh
 //   by 30 digits while quietly costing complex exp two digits leaves exp's mean
@@ -189,7 +190,7 @@
 //
 // For COMPLEX ops the two components are scored separately and the point takes
 // min(d_re, d_im) — the weaker component decides, matching
-// tests/*_complex_accuracy_test.cpp. That file's zero-reference rule is carried
+// the retired tests/*_complex_accuracy_test.cpp. Their zero-reference rule is carried
 // over too: a component whose reference is exactly zero is scored ABSOLUTELY
 // against the magnitude of the OTHER component. Without it every purely-real
 // result reads a spurious 0.00, which is a scoring artifact and not a defect.
@@ -1822,7 +1823,7 @@ double score_scalar(__float128 got, __float128 ref, double cap) {
   return d > cap ? cap : d;
 }
 
-// Complex component score, carrying tests/*_complex_accuracy_test.cpp's rule for
+// Complex component score, carrying the retired complex accuracy tests' rule for
 // a component whose reference is exactly zero: measure it ABSOLUTELY against the
 // magnitude of the other component rather than relatively against zero.
 double score_component(__float128 got, __float128 ref, __float128 other, double cap) {

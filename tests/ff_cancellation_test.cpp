@@ -51,7 +51,7 @@
 // NAMESPACE PATH.  Uses the explicit Kokkos::Experimental path via the
 // `namespace ff = Kokkos::Experimental` alias (ff::add / ff::sqrt / ff::atan / …),
 // matching every other FF test in this suite (ff_property_test, ff_invariant_test,
-// ff_eft_test, ff_accuracy_test).
+// ff_eft_test; and formerly ff_accuracy_test, now the sweep).
 //
 // SCOPE (per plan): real FF kernels only — no complex (ff_complex.hpp), no DD/QF
 // (T1.6 / T3.6), no per-op differential accuracy (T2.4, the sibling task).

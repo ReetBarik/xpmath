@@ -178,8 +178,8 @@ inline InputDist uniform(double lo, double hi) {
 // explicit PORT_NOTES §3/§4 regression accessors. It returns MATERIALIZED
 // vectors (std::vector<T> / std::vector<std::pair<T,T>>), not InputDist
 // generators, because corpus entries are fixed constants rather than random
-// draws. The random-pass runners above stay generator-driven; the corpus-pass
-// runners below (run_unary_op_on_corpus / run_binary_op_on_corpus) consume the
+// draws. The random-pass runners above stay generator-driven. The corpus-pass
+// runners that used to sit below consumed the
 // corpus vectors. A full accuracy test runs BOTH passes: random for breadth,
 // corpus for the pathological inputs uniform random misses.
 // (corpus.hpp is #included at the top of this file, at file scope.)
@@ -509,94 +509,7 @@ AccStats run_binary_op(int n, uint64_t seed,
 // instead of (seed, n) + generator. Tests call these for the corpus pass; the
 // generator-based runners above are unchanged for the random pass.
 
-template <typename Backend, typename DeviceOp>
-AccStats run_unary_op_on_corpus(
-    const std::vector<double>& inputs,
-    const std::function<float128(float128)>& host_oracle,
-    DeviceOp device_op) {
-  using T = typename BackendTraits<Backend>::type;
-  using exec_space = Kokkos::DefaultExecutionSpace;
-  using view_t     = Kokkos::View<T*, Kokkos::LayoutRight, exec_space>;
 
-  const int n = (int)inputs.size();
-  if (n <= 0) return AccStats{};
-
-  // 1. host oracle reference from the corpus inputs.
-  std::vector<float128> href(n);
-  for (int i = 0; i < n; ++i) href[i] = host_oracle((float128)inputs[i]);
-
-  // 2. inputs -> device
-  view_t din("din", n), dout("dout", n);
-  auto hmir = Kokkos::create_mirror_view(din);
-  for (int i = 0; i < n; ++i) hmir(i) = T(inputs[i]);
-  Kokkos::deep_copy(din, hmir);
-
-  // 3. run op on device
-  Kokkos::parallel_for("run_unary_op_on_corpus", Kokkos::RangePolicy<exec_space>(0, n),
-                       KOKKOS_LAMBDA(int i) { dout(i) = device_op(din(i)); });
-  Kokkos::fence();
-
-  // 4. results -> host
-  auto rmir = Kokkos::create_mirror_view(dout);
-  Kokkos::deep_copy(rmir, dout);
-
-  // 5. per-element accuracy — BOTH metrics, from the same widened result.
-  std::vector<double> digs(n), ulps(n);
-  for (int i = 0; i < n; ++i) {
-    float128 got = BackendTraits<Backend>::to_quad(rmir(i));
-    digs[i] = digits_of_accuracy<Backend>(got, href[i]);
-    ulps[i] = ulp_error<Backend>(got, href[i]);
-  }
-
-  // 6. stats
-  return compute_stats(digs.data(), ulps.data(), n);
-}
-
-template <typename Backend, typename DeviceOp>
-AccStats run_binary_op_on_corpus(
-    const std::vector<std::pair<double, double>>& inputs,
-    const std::function<float128(float128, float128)>& host_oracle,
-    DeviceOp device_op) {
-  using T = typename BackendTraits<Backend>::type;
-  using exec_space = Kokkos::DefaultExecutionSpace;
-  using view_t     = Kokkos::View<T*, Kokkos::LayoutRight, exec_space>;
-
-  const int n = (int)inputs.size();
-  if (n <= 0) return AccStats{};
-
-  // 1. host oracle reference from the corpus pairs.
-  std::vector<float128> href(n);
-  for (int i = 0; i < n; ++i)
-    href[i] = host_oracle((float128)inputs[i].first, (float128)inputs[i].second);
-
-  // 2. inputs -> device
-  view_t da("da", n), db("db", n), dout("dout", n);
-  auto hma = Kokkos::create_mirror_view(da);
-  auto hmb = Kokkos::create_mirror_view(db);
-  for (int i = 0; i < n; ++i) { hma(i) = T(inputs[i].first); hmb(i) = T(inputs[i].second); }
-  Kokkos::deep_copy(da, hma);
-  Kokkos::deep_copy(db, hmb);
-
-  // 3. run op on device
-  Kokkos::parallel_for("run_binary_op_on_corpus", Kokkos::RangePolicy<exec_space>(0, n),
-                       KOKKOS_LAMBDA(int i) { dout(i) = device_op(da(i), db(i)); });
-  Kokkos::fence();
-
-  // 4. results -> host
-  auto rmir = Kokkos::create_mirror_view(dout);
-  Kokkos::deep_copy(rmir, dout);
-
-  // 5. per-element accuracy — BOTH metrics, from the same widened result.
-  std::vector<double> digs(n), ulps(n);
-  for (int i = 0; i < n; ++i) {
-    float128 got = BackendTraits<Backend>::to_quad(rmir(i));
-    digs[i] = digits_of_accuracy<Backend>(got, href[i]);
-    ulps[i] = ulp_error<Backend>(got, href[i]);
-  }
-
-  // 6. stats
-  return compute_stats(digs.data(), ulps.data(), n);
-}
 
 #endif  // KOKKOS_EP_HAVE_QUADMATH
 
