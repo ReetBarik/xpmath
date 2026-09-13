@@ -8,7 +8,7 @@
 #   standalone      Does include/xp/ compile with ZERO Kokkos, on Linux AND
 #                   macOS/ARM?  (The macOS leg is the evidence for the upstream
 #                   claim that the core is not x86_64-dependent.)
-#   monotone-gate   Did any of the 428,592 scored sweep points get LESS accurate?
+#   monotone-gate   Did any of the 436,080 scored sweep points get LESS accurate?
 #   build-and-test  Does the full Kokkos build + the WHOLE ctest suite pass?
 #                   "Whole" is asserted, not assumed: the lane installs
 #                   libmpfr-dev/libgmp-dev and then checks the registered
@@ -131,7 +131,7 @@ jobs:
   # ==========================================================================
   # 3. THE MONOTONE GATE.  The single most valuable regression check here.
   #
-  # Rebuilds every one of the 428,592 scored sweep points against a libquadmath
+  # Rebuilds every one of the 436,080 scored sweep points against a libquadmath
   # oracle and fails if ANY point's digit count DECREASED.  The per-op tolerance
   # tables in ctest gate on a mean against a threshold, so they cannot see a fix
   # that buys 30 digits in one op by quietly spending 2 in another.  This can.
@@ -173,7 +173,7 @@ jobs:
       # So compare the PARENT COMMIT against HEAD, both scored on THIS runner
       # with THIS libquadmath. The oracle is identical on both sides and cancels
       # exactly, and the question CI actually needs answered -- "did this commit
-      # make any of the 428,592 points worse?" -- is answered without depending
+      # make any of the 436,080 points worse?" -- is answered without depending
       # on a reference recorded somewhere else.
       #
       # The committed baseline remains the reference for work done on the
@@ -224,6 +224,18 @@ jobs:
           if [ "$rc" -eq 5 ]; then
             echo "::notice::exit 5 — rows improved against the parent. Expected"
             echo "::notice::on an accuracy fix; nothing to re-record in this lane."
+          elif [ "$rc" -eq 6 ]; then
+            # Exit 6 is COVERAGE GROWTH (#21): this commit scores points the
+            # parent did not have. Same reasoning as 5, and for the same
+            # structural reason -- the parent baseline is regenerated from the
+            # parent's own source above, so new points have nothing durable to
+            # invalidate. Widening the grid is the one change the keyed
+            # matching was introduced to permit; failing it here would leave no
+            # way to land it. ctest's sweep_monotone_gate still fails on 6,
+            # where the baseline is a committed artifact and a re-baseline
+            # commit is owed.
+            echo "::notice::exit 6 — this commit scores grid points the parent"
+            echo "::notice::did not. Coverage grew; nothing to re-record here."
           elif [ "$rc" -ne 0 ]; then
             exit "$rc"
           fi

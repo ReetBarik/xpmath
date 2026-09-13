@@ -21,8 +21,11 @@ compare.
 
 The measurement engine is `scripts/sweep_accuracy.cpp`, built by CMake as the
 `sweep_accuracy` target. It evaluates 39 real and 24 complex operations on four
-backends over a fixed grid of 1,652 real and 1,780 complex points (seed 12345),
-which is 428,592 scored points, in about eight seconds.
+backends over a fixed grid of 1,700 real and 1,780 complex points (seed 12345),
+which is 436,080 points (1700*39*4 + 1780*24*4), in about eight seconds. Of those,
+397,409 are scored `S`; 33,879 are `U` (an intermediate left the exponent range)
+and 4,792 are `N` (unscorable). The real grid was 1,652 points until `5f2fc90`
+added the hard argument-reduction anchors.
 
 The oracle is libquadmath, and *which* libquadmath matters: the baseline carries
 an `oracle-fingerprint` header and the gates warn when it does not match. The
@@ -109,7 +112,7 @@ sweep_accuracy --baseline validation/sweep/sweep_baseline.csv.gz
 Compares every point's ulp count against the committed baseline. Larger is worse.
 
 **The noise floor.** The oracle's own last place moves under a compiler or glibc
-change, and re-running the identical binary moves roughly twenty of the 428,592
+change, and re-running the identical binary moves roughly twenty of the 436,080
 rows. The gate therefore reports a regression only when a point's error grows by
 more than a factor of **1.2589254 = 10^0.1**, i.e. one tenth of a digit, and only
 when the fresh value exceeds one ulp — below one ulp the score is a rounding
@@ -168,6 +171,8 @@ This mattered: `digits` and `bound` used to be parsed and discarded, and only
 the *losing* direction of a state move was counted. Rewriting the last numeric
 column — `bound`, not `ulps` — of all 428,592 rows to zero printed
 `unchanged: 428592 / RESULT: PASS`, and so did rewriting every state to `U`.
+(428,592 was the row count when that was measured, on the 1,652-point real grid;
+the sweep is 436,080 rows today. The measurement is left as it was taken.)
 
 ### `sweep_monotone_gate_selftest`, `sweep_absolute_gate_selftest`
 
@@ -193,11 +198,13 @@ specific, named code:
 | monotone | `ulps` column inflated x1000 | 5 (stale in the better direction) |
 | monotone | ONE row rewritten to 1e6 ulps | 5 (the smallest unit that must fire) |
 | monotone | `ulps` improved by 1.05x (sub-noise) | 0 — must stay silent |
+| monotone | one grid point deleted from the baseline | 6 (coverage grew) |
+| monotone | the same file with nothing deleted | 0 — the control for it |
 | absolute | a registered defect deleted | 4 (unlisted point above bound) |
 | absolute | a bogus entry added | 4 (stale register entry) |
 | absolute | register emptied | 4 (every above-bound point unlisted) |
 
-The self-test asserts the exact **exit code**, not merely nonzero. Four distinct
+The self-test asserts the exact **exit code**, not merely nonzero. Five distinct
 failure doors exist, and a case that starts failing through the wrong one has
 stopped testing what it was written for — when exit 5 was added, `digits-inflated`
 would otherwise have stayed green while silently changing which door it
@@ -244,8 +251,13 @@ gzip -9 -c /tmp/base.csv > validation/sweep/sweep_baseline.csv.gz
 python3 scripts/gen_domains.py > docs/DOMAINS.md
 ```
 
-**Trap:** `sweep_accuracy` with no `--out` writes the committed baseline in place,
-and `--grid-out` does the same to the grid. Always pass an explicit path.
+**Always pass an explicit `--out`.** With no `--out` the run computes the whole
+sweep and then exits 1 with `cannot open  for writing` — the output path defaults
+to the empty string, not to the committed baseline. (This line used to warn that
+the default overwrote `validation/sweep/sweep_baseline.csv` in place. It did
+once; `334cc9b` removed the use of `kDefaultOut` and left the constant behind at
+`scripts/sweep_accuracy.cpp:273`, unreferenced. Verified by running it against a
+sentinel file: exit 1, sentinel intact.)
 
 ## 6. What this replaced, and what it did not
 

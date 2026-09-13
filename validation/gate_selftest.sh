@@ -15,7 +15,9 @@
 # The monotone gate was in fact blind when this was written. `bound` and
 # `digits`, two of the four value columns of every baseline row, were parsed
 # and discarded (`(void)dig; (void)base_bound;`), so rewriting the last numeric
-# column of all 428,592 rows to zero still printed
+# column of all 428,592 rows to zero still printed (428,592 was the row count
+# when this was measured, on the 1,652-point real grid; it is 436,080 today --
+# the observation is left at the number it was taken at)
 # "unchanged: 428592 / RESULT: PASS". Case `bound` below is exactly that edit.
 #
 # Everything is written under the build directory. validation/ is READ ONLY
@@ -62,6 +64,7 @@ fails=0
 #   1  a point got worse            2  coverage removed / unreadable baseline
 #   3  record drift (bound/digits/state, or a moved oracle fingerprint)
 #   5  improvement drift -- the record is stale in the BETTER direction
+#   6  coverage growth -- this build scores points the baseline does not have
 #
 # This is the same discipline as oracle_conv_selftest.sh's why[] table, and it
 # is here for the same reason: when exit 5 was added, `digits-inflated` would
@@ -312,6 +315,41 @@ monotone)
         !done && $8=="S" && $6+0>0 { $6=1e6; $5="14.00"; done=1; print; next }
         {print}' | gzip > "$work/fp_mismatch_improved.csv.gz"
   run fingerprint-mismatch-improved pass --baseline "$work/fp_mismatch_improved.csv.gz"
+
+  # ---------------------------------------------------------------------
+  # COVERAGE GROWTH (#21). The record does not contain rows this build scores.
+  #
+  # `new_points` was counted, printed "not gated", and dropped before the exit
+  # code -- the same shape as #9. MEASURED on the pre-fix binary: this exact
+  # input reported "new points: 156" and "RESULT: PASS", exit 0.
+  #
+  # The poison is built from THIS BUILD'S OWN SWEEP, for the same reason
+  # improvement-subnoise is: the committed baseline was recorded under the
+  # toolchain of record, and on any other libquadmath it already differs by
+  # more than the noise floor on a few hundred rows. Deleting a grid point from
+  # a foreign-reference file would fire exit 6 for the right reason while ALSO
+  # carrying drift, and the case could then keep passing for the wrong one.
+  #
+  # The header's `# grid: real=` must be rewritten alongside the deleted rows.
+  # It is what the truncation check multiplies out, so leaving it at 1700 while
+  # the body carries 1699 points makes the file SHORT OF ITS OWN HEADER and the
+  # run exits 2 -- through a door that has nothing to do with this case.
+  #
+  # Point 1699 is the last real grid index, so deleting it removes 39 real ops
+  # x 4 backends = 156 rows and touches no complex row.
+  awk -F, -v OFS=, '
+      /^# grid:/ {print "# grid: real=1699 complex=1780  seed=12345"; next}
+      /^#/{print;next} /^backend,/{print;next}
+      ($2=="r" && $4==1699){next}
+      {print}' "$work/self.csv" | gzip > "$work/coverage_grew.csv.gz"
+  run coverage-grew 6 --baseline "$work/coverage_grew.csv.gz"
+
+  # The negative control for it. Same file, the point NOT deleted: coverage
+  # that did not grow must not fire 6. Without this, a gate hard-wired to
+  # return 6 would satisfy the case above.
+  awk -F, -v OFS=, '/^#/{print;next} {print}' "$work/self.csv" \
+    | gzip > "$work/coverage_same.csv.gz"
+  run coverage-unchanged pass --baseline "$work/coverage_same.csv.gz"
   ;;
 
 absolute)
