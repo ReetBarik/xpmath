@@ -154,7 +154,7 @@
 //   every regeneration — and the whole workflow here is "regenerate and diff
 //   after each fix", so history growth is a recurring cost, not a one-off.
 //
-//   1652 real / 1780 complex points gives ~429k rows and a ~8.7 MB CSV (~1.3 MB
+//   1700 real / 1780 complex points gives 436,080 rows and a ~8.7 MB CSV (~1.3 MB
 //   once git packs it) while still containing EVERY family the brief named, at
 //   full resolution in the families that matter: all 100 multiples of pi, all 31
 //   decades of cut approach, both signed zeros. What was traded away is density
@@ -3799,10 +3799,11 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
   // NO row-count equality check here. With keyed matching `idx` counts the
   // baseline rows consumed, which is legitimately smaller than fresh.size()
   // whenever the grid grew. Both asymmetries are already handled: a baseline
-  // row with no counterpart is `removed_points` (structural, above), and a
-  // fresh row with no counterpart is `new_points` (reported, not gated). A
-  // count comparison here would re-impose the very constraint that made the
-  // gate refuse added coverage.
+  // row with no counterpart is `removed_points` (structural, exit 2), and a
+  // fresh row with no counterpart is `new_points` (exit 6, below). A count
+  // comparison here would re-impose the very constraint that made the gate
+  // refuse added coverage -- exit 6 records that coverage grew WITHOUT
+  // refusing the rows, which is the distinction that matters.
 
   std::printf("\n  compared      : %zu points against %s\n", idx, path.c_str());
   std::printf("  decreased     : %ld%s\n", decreased,
@@ -3814,8 +3815,9 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
   // precisely the sentence a blind gate prints.
   std::printf("  unchanged     : %ld\n", unchanged);
   if (new_points)
-    std::printf("  new points    : %ld   (not in the baseline; nothing to compare "
-                "against, not gated)\n", new_points);
+    std::printf("  new points    : %ld   (not in the baseline; coverage GREW, so "
+                "the record\n                  does not describe this build)\n",
+                new_points);
   std::printf("  state moved   : %ld%s\n", state_moved,
               state_moved ? "   <-- the recorded verdicts are not this build's" : "");
   std::printf("  record drift  : %ld bound, %ld digits%s\n",
@@ -3938,11 +3940,52 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
                 "out what improved before accepting it.\n",
                 increased ? increased : drift_digits_up,
                 drift_digits_up ? " and its digit counts moved with them" : "");
+  else if (new_points)
+    std::printf("\nRESULT: STALE — no point got worse, but this build scores %ld "
+                "point(s) the\n        baseline does not contain. Coverage GREW, so "
+                "the file is no longer a\n        record of what is measured. That is "
+                "the change this apparatus exists\n        to encourage — re-record it "
+                "in its own commit so the new points get\n        a baseline to be "
+                "compared against next time.\n", new_points);
   else
     std::printf("\nRESULT: PASS — no point above the 0.1-digit noise floor got worse\n");
   if (decreased) return 1;
   if (drifted || return_as_drift) return 3;
-  return stale_improved ? 5 : 0;
+  if (stale_improved) return 5;
+
+  // COVERAGE GROWTH (#21). `new_points` was counted, printed "not gated", and
+  // then dropped before the exit code -- the identical shape of #9, which had
+  // just given improvement drift its own door. MEASURED on the pre-fix binary
+  // before this change: a baseline with one grid point removed (real 1700 ->
+  // 1699, 156 rows across 39 real ops x 4 backends) reported
+  // "new points: 156" and exited 0. A poison nobody has seen fire is not a
+  // poison, so that case is now `coverage-grew` in gate_selftest.sh.
+  //
+  // WHY THIS IS NOT EXIT 2. Exit 2 is coverage REMOVED, which is a change of
+  // standard the comparison cannot certify and must refuse. Growth is the
+  // opposite: it is the one change the keyed matching was introduced to
+  // permit, and refusing it would restore the positional walk's behaviour of
+  // "the apparatus refusing the one change it exists to encourage". Exit 6
+  // accepts the rows and records that the baseline no longer covers them.
+  //
+  // WHY THIS IS NOT EXIT 3 OR 5. Both say the record disagrees with the build
+  // about rows BOTH contain. This says the record is silent about rows it does
+  // not contain at all, and the remedy differs in kind: not "find out what
+  // changed", but "re-record so these points have a reference at all".
+  //
+  // WHY IT IS NOT SUPPRESSED BY A FINGERPRINT MISMATCH, unlike exit 5. An
+  // improvement under a moved oracle is unattributable, so there is nothing to
+  // record. A point that is absent from the baseline is absent under every
+  // oracle -- the claim is structural, not comparative, so attribution never
+  // enters into it.
+  //
+  // Call sites differ exactly as they do for 5: ctest's sweep_monotone_gate
+  // compares against the committed .gz and must fail, because a re-baseline
+  // commit is owed. CI's parent-vs-HEAD lane regenerates the parent baseline
+  // from the parent's own source, so a commit that ADDS grid points is the
+  // lane working as intended and it accepts 6.
+  if (new_points) return 6;
+  return 0;
 }
 
 

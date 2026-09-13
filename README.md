@@ -23,8 +23,8 @@ install.
 [![CI](https://github.com/ReetBarik/xpmath/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ReetBarik/xpmath/actions/workflows/ci.yml)
 
 The badge covers six lanes: generated-doc freshness, the standalone no-Kokkos
-core on Linux **and** macOS/ARM, the 428,592-point monotone accuracy gate, the
-full Kokkos build + 34-test ctest suite, and per-header `nvcc` device compiles.
+core on Linux **and** macOS/ARM, the 436,080-point monotone accuracy gate, the
+full Kokkos build + 39-test ctest suite, and per-header `nvcc` device compiles.
 See `.github/workflows/ci.yml` and the S7 STATUS block in
 `docs/UPSTREAM_PLAN_STATUS.md`.
 
@@ -114,7 +114,7 @@ each time, so a single-operation run reproduces the corresponding row exactly.
 The tables below report accuracy on a random corpus drawn from each operation's
 comfortable range. They do not tell you where an operation *fails*, and every
 backend has such ranges. `docs/DOMAINS.md` covers all 4 backends x 63 operations,
-generated from a 428,592-point sweep: for each cell it gives the input band where
+generated from a 436,080-point sweep: for each cell it gives the input band where
 the operation holds 90% of its cap, the measured digit count at the boundary
 where it degrades, and a classification of the cause. The headline limits are now
 mostly format limits: the three FP32-word backends (FF, QF, TF) bottom out near
@@ -324,14 +324,22 @@ LICENSE, NOTICE.md, LICENSES/   licensing — see Section 6
 
 ## Section 4 — Tests
 
-The suite is 31 ctest tests spanning all four backends:
+The suite is 39 ctest targets spanning all four backends. The eight
+`*_accuracy_test` targets that used to head this list are **retired** — they
+gated on a per-op MEAN, which cannot see a single point getting worse. The
+sweep and its two gates replaced them; see §"What this replaced" in
+`docs/CORRECTNESS.md`.
 
-- **Accuracy, real** — per-backend differential accuracy against the `__float128`
-  oracle: `dd_accuracy_test`, `ff_accuracy_test`, `qf_accuracy_test`,
-  `tf_accuracy_test`.
-- **Accuracy, complex** — the same against the `__complex128` oracle:
-  `dd_complex_accuracy_test`, `ff_complex_accuracy_test`,
-  `qf_complex_accuracy_test`, `tf_complex_accuracy_test`.
+- **The accuracy record** — `sweep_absolute_gate` (no point above its derived
+  bound that is not in the open-defect register) and `sweep_monotone_gate` (no
+  point worse than the committed baseline), plus `sweep_absolute_gate_selftest`
+  and `sweep_monotone_gate_selftest`, which poison each gate's input and
+  require it to fail through a named exit code.
+- **Reduction and oracle** — `pow_domain_test`, `exp_reduction_test`,
+  `trig_reduction_test`, `oracle_conv_test`, and the three compile-time poison
+  self-tests `exp_reduction_selftest`, `trig_reduction_selftest`,
+  `oracle_conv_selftest`. The trig/oracle four are registered only when MPFR is
+  present.
 - **Property / identity** — algebraic identities that must hold for the type:
   `dd_property_test`, `ff_property_test`, `qf_property_test`,
   `tf_property_test`.
@@ -351,8 +359,8 @@ The suite is 31 ctest tests spanning all four backends:
 All 39 targets pass on `main`. Four of them (the trig-reduction and
 oracle-conversion tests and their poison self-tests) are registered only
 when MPFR is present; CI installs libmpfr-dev and asserts the full count
-so a missing optional dependency cannot quietly shrink the suite. A 39th,
-`consumer_package`, is the odd one out: it tests the installed CMake package
+so a missing optional dependency cannot quietly shrink the suite.
+`consumer_package` is the odd one out: it tests the installed CMake package
 rather than the library, by building a separate project against it.
 
 Tests are exercised on the Serial Kokkos execution space; the type headers are
