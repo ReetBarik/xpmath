@@ -1715,8 +1715,13 @@ XPMATH_NOINLINE_FUNCTION QuadFloat tanh(QuadFloat a) {
 // bit-for-bit.  Full argument at ff_math.hpp's asinh.
 //
 // The reflection is a sign FOLD, not `negate(asinh(negate(a)))` -- see the block
-// above dd_math.hpp's asinh.  QF is the backend whose reflected arm returned
-// silently wrong values (122 of 849 negative grid points) rather than faulting.
+// above dd_math.hpp's asinh.  QF is one of the two backends whose reflected arm
+// returned silently wrong values rather than faulting: 122 of the 849 negative
+// points on the device sweep grid, against the 3 that a provisioned stack still
+// leaves (those 3 are genuine numerics, not this defect).  That was measured
+// under blanket noinline; at the inlining main actually ships, QF's frame chain
+// happened to fit and the same build scored 3.  The margin, not the code, was
+// the difference -- which is exactly why this is fixed at the source.
 XPMATH_INLINE_FUNCTION QuadFloat asinh(QuadFloat a) {
     const bool neg = (a.f0 < 0.0f);
     if (neg) a = negate(a);
