@@ -1685,10 +1685,16 @@ XPMATH_INLINE_FUNCTION QuadFloat cosh(QuadFloat a) {
 // nearly-equal large exponentials.  ff_math.hpp:580 (QD qd_real.cpp:2547 divides
 // the exponentials directly; the expm1 form is better-conditioned near 0).
 XPMATH_NOINLINE_FUNCTION QuadFloat tanh(QuadFloat a) {
-    if (a.f0 < 0.0f) return negate(tanh(negate(a)));
-    if (a.f0 > kQFHyperbolicSaturate) return QuadFloat(1.0f);  // KI-7, see dd_math.hpp
-    QuadFloat e = expm1(mul_pwr2(a, 2.0f));
-    return divide(e, add(e, QuadFloat(2.0f)));
+    const bool neg = (a.f0 < 0.0f);     // sign FOLD, never a self-call: see the
+    if (neg) a = negate(a);             // block above dd_math.hpp's asinh
+    QuadFloat r;
+    if (a.f0 > kQFHyperbolicSaturate) {
+        r = QuadFloat(1.0f);                                    // KI-7, see dd_math.hpp
+    } else {
+        QuadFloat e = expm1(mul_pwr2(a, 2.0f));
+        r = divide(e, add(e, QuadFloat(2.0f)));
+    }
+    return neg ? negate(r) : r;
 }
 
 // asinh(a) = log(a + sqrt(a^2 + 1)).  QD qd_real.cpp:2576.  Odd reflection
@@ -1707,24 +1713,33 @@ XPMATH_NOINLINE_FUNCTION QuadFloat tanh(QuadFloat a) {
 // second term's log(2) ~ 0.69 by orders of magnitude, and both are computed to
 // full relative precision.  Below the band the original expression is kept
 // bit-for-bit.  Full argument at ff_math.hpp's asinh.
+//
+// The reflection is a sign FOLD, not `negate(asinh(negate(a)))` -- see the block
+// above dd_math.hpp's asinh.  QF is the backend whose reflected arm returned
+// silently wrong values (122 of 849 negative grid points) rather than faulting.
 XPMATH_INLINE_FUNCTION QuadFloat asinh(QuadFloat a) {
-    if (a.f0 < 0.0f) return negate(asinh(negate(a)));
+    const bool neg = (a.f0 < 0.0f);
+    if (neg) a = negate(a);
+    QuadFloat r;
     if (a.f0 > detail::kQFSqHi) {
         QuadFloat u = divide(QuadFloat(1.0f), a);
         u = multiply(u, u);
-        return add(log(a), log(add(QuadFloat(1.0f), sqrt(add(QuadFloat(1.0f), u)))));
+        r = add(log(a), log(add(QuadFloat(1.0f), sqrt(add(QuadFloat(1.0f), u)))));
+    } else {
+        // KI-22: log1p(a + a^2/(1+sqrt(a^2+1))).  Derivation at dd_math.hpp's asinh.
+        const QuadFloat a2 = sqr(a);
+        const QuadFloat s  = sqrt(add(a2, QuadFloat(1.0f)));
+        if (a.f0 < 0.5f) {
+            r = log1p(add(a, divide(a2, add(QuadFloat(1.0f), s))));
+        } else {
+            // KI-29: 1/2 log1p(2a(a+s)) rather than log(a+s).  Halves the share of
+            // log's constant absolute error that asinh inherits.  Derived at
+            // dd_math.hpp's asinh.
+            const QuadFloat t = add(a, s);
+            r = mul_pwr2(log1p(mul_pwr2(multiply(a, t), 2.0f)), 0.5f);
+        }
     }
-    // KI-22: log1p(a + a^2/(1+sqrt(a^2+1))).  Derivation at dd_math.hpp's asinh.
-    const QuadFloat a2 = sqr(a);
-    const QuadFloat s  = sqrt(add(a2, QuadFloat(1.0f)));
-    if (a.f0 < 0.5f) {
-        return log1p(add(a, divide(a2, add(QuadFloat(1.0f), s))));
-    }
-    // KI-29: 1/2 log1p(2a(a+s)) rather than log(a+s).  Halves the share of
-    // log's constant absolute error that asinh inherits.  Derived at
-    // dd_math.hpp's asinh.
-    const QuadFloat t = add(a, s);
-    return mul_pwr2(log1p(mul_pwr2(multiply(a, t), 2.0f)), 0.5f);
+    return neg ? negate(r) : r;
 }
 // acosh(a) = log(a + sqrt(a^2 - 1)).  QD qd_real.cpp:2580.
 XPMATH_INLINE_FUNCTION QuadFloat acosh(QuadFloat a) {

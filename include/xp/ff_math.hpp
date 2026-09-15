@@ -1360,10 +1360,16 @@ XPMATH_INLINE_FUNCTION FloatFloat cosh(FloatFloat a) {
     FloatFloat c, s; sinhcosh(a, c, s); return c;
 }
 XPMATH_INLINE_FUNCTION FloatFloat tanh(FloatFloat a) {
-    if (a.hi < 0.0f) return negate(tanh(negate(a)));
-    if (a.hi > kFFHyperbolicSaturate) return FloatFloat(1.0f);  // KI-7, see dd_math.hpp
-    FloatFloat e = expm1(multiply_scalar(a, 2.0f));
-    return divide(e, add(e, FloatFloat(2.0f)));
+    const bool neg = (a.hi < 0.0f);     // sign FOLD, never a self-call: see the
+    if (neg) a = negate(a);             // block above dd_math.hpp's asinh
+    FloatFloat r;
+    if (a.hi > kFFHyperbolicSaturate) {
+        r = FloatFloat(1.0f);                                   // KI-7, see dd_math.hpp
+    } else {
+        FloatFloat e = expm1(multiply_scalar(a, 2.0f));
+        r = divide(e, add(e, FloatFloat(2.0f)));
+    }
+    return neg ? negate(r) : r;
 }
 
 // KI-13.  asinh and acosh both form a^2 +- 1, which leaves the FP32 word at
@@ -1379,27 +1385,37 @@ XPMATH_INLINE_FUNCTION FloatFloat tanh(FloatFloat a) {
 // limit (asinh(a) -> log(2a)).  No cancellation: log(|a|) >= 41 dominates the
 // second term's log(2) ~ 0.69, and both are computed to full relative
 // precision.  Below the band the original expression is kept bit-for-bit.
+// The reflection is a sign FOLD, not `negate(asinh(negate(a)))` -- see the
+// block above dd_math.hpp's asinh for the gfx90a dynamic-stack reason.  FF is
+// one of the two backends whose kernel took hipErrorIllegalAddress under the
+// recursive form.
 XPMATH_NOINLINE_FUNCTION FloatFloat asinh(FloatFloat a) {
-    if (a.hi < 0.0f) return negate(asinh(negate(a)));
+    const bool neg = (a.hi < 0.0f);
+    if (neg) a = negate(a);
+    FloatFloat r;
     if (a.hi > detail::kFFSqHi) {
         FloatFloat u = divide(FloatFloat(1.0f), a);
         u = multiply(u, u);
-        return add(log(a), log(add(FloatFloat(1.0f), sqrt(add(FloatFloat(1.0f), u)))));
+        r = add(log(a), log(add(FloatFloat(1.0f), sqrt(add(FloatFloat(1.0f), u)))));
+    } else {
+        // KI-22: log1p(a + a^2/(1+sqrt(a^2+1))).  Derivation at dd_math.hpp's asinh.
+        // KI-22 named only DD, but the old `1 + x` inside the log lost the same
+        // u/|x| here -- one FP32 word of two at x = 1e-7.
+        const FloatFloat a2 = multiply(a, a);
+        const FloatFloat s  = sqrt(add(a2, FloatFloat(1.0f)));
+        if (a.hi < 0.5f) {
+            r = log1p(add(a, divide(a2, add(FloatFloat(1.0f), s))));
+        } else {
+            // KI-29: 1/2 log1p(2a(a+s)) rather than log(a+s).  Halves the share of
+            // log's constant absolute error that asinh inherits; the mid-band
+            // residual KI-29 recorded is that constant, not Sterbenz.  Derived at
+            // dd_math.hpp.
+            const FloatFloat t = add(a, s);
+            const FloatFloat z = multiply(a, t);
+            r = multiply_scalar(log1p(add(z, z)), 0.5f);
+        }
     }
-    // KI-22: log1p(a + a^2/(1+sqrt(a^2+1))).  Derivation at dd_math.hpp's asinh.
-    // KI-22 named only DD, but the old `1 + x` inside the log lost the same
-    // u/|x| here -- one FP32 word of two at x = 1e-7.
-    const FloatFloat a2 = multiply(a, a);
-    const FloatFloat s  = sqrt(add(a2, FloatFloat(1.0f)));
-    if (a.hi < 0.5f) {
-        return log1p(add(a, divide(a2, add(FloatFloat(1.0f), s))));
-    }
-    // KI-29: 1/2 log1p(2a(a+s)) rather than log(a+s).  Halves the share of
-    // log's constant absolute error that asinh inherits; the mid-band residual
-    // KI-29 recorded is that constant, not Sterbenz.  Derived at dd_math.hpp.
-    const FloatFloat t = add(a, s);
-    const FloatFloat z = multiply(a, t);
-    return multiply_scalar(log1p(add(z, z)), 0.5f);
+    return neg ? negate(r) : r;
 }
 XPMATH_INLINE_FUNCTION FloatFloat acosh(FloatFloat a) {
     if (ff_cmp_one(a) < 0) {                                            // KI-16
@@ -2139,12 +2155,12 @@ XPMATH_INLINE_FUNCTION FloatFloat erfc(FloatFloat z) {
 }
 
 // gamma — Lanczos approximation
-XPMATH_INLINE_FUNCTION FloatFloat tgamma(FloatFloat a) {
-    if (a.hi < 0.5f) {
-        FloatFloat pi = FloatFloat_pi();
-        FloatFloat sin_pi_a = sin(multiply(pi, a));
-        return divide(pi, multiply(sin_pi_a, tgamma(subtract(FloatFloat(1.0f), a))));
-    }
+//
+// Core and reflection are separate functions so the reflected arm never makes a
+// device self-call; the split is value-preserving because 1-a has a leading word
+// >= 0.5 whenever a.hi < 0.5.  Full argument at dd_math.hpp's tgamma, mechanism
+// at dd_math.hpp's asinh.
+XPMATH_INLINE_FUNCTION FloatFloat ff_tgamma_lanczos(FloatFloat a) {
     // B7: Lanczos g=7 coefficients promoted from `float` to `double`. Stored as
     // `float` literals, each coefficient was truncated to FP32's ~7-digit ceiling,
     // capping tgamma at ~6 digits regardless of the enclosing FF arithmetic (a
@@ -2180,6 +2196,16 @@ XPMATH_INLINE_FUNCTION FloatFloat tgamma(FloatFloat a) {
     FloatFloat two_pi_sqrt = FloatFloat(2.5066282746310002);
     return multiply(multiply(two_pi_sqrt, s),
                  multiply(pow(t, add(x, FloatFloat(0.5f))), exp(negate(t))));
+}
+
+XPMATH_INLINE_FUNCTION FloatFloat tgamma(FloatFloat a) {
+    if (a.hi < 0.5f) {
+        FloatFloat pi = FloatFloat_pi();
+        FloatFloat sin_pi_a = sin(multiply(pi, a));
+        return divide(pi, multiply(sin_pi_a,
+                                   ff_tgamma_lanczos(subtract(FloatFloat(1.0f), a))));
+    }
+    return ff_tgamma_lanczos(a);
 }
 
 // Bessel J0 via series

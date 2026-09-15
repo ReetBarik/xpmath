@@ -1513,32 +1513,42 @@ XPMATH_INLINE_FUNCTION TripleFloat acos(TripleFloat a) {
 // sees a non-positive argument and bails to 0.  TF asinh(-1e12) returned 0
 // while asinh(+1e12) was correct; the asymmetry was the whole diagnosis.
 // Reflecting first is exact (a sign flip on every word) and free, and it is
-// what DD, FF and QF have always done.  Verified while fixing this: the REAL
-// asinh in DD (dd_math.hpp), FF (ff_math.hpp) and QF (qf_math.hpp) each already
-// open with the same `if (leading word < 0) return negate(asinh(negate(a)));`,
-// so TF was the sole omission.  (KI-5(a) fixed the COMPLEX case separately.)
-// The kTFSqHi branch below used to re-apply the sign itself; with the reflection
-// in front of it, it only ever sees a >= 0, so that bookkeeping is gone.
+// what DD, FF and QF have always done.  (KI-5(a) fixed the COMPLEX case
+// separately.)  The kTFSqHi branch below used to re-apply the sign itself; with
+// the reflection in front of it, it only ever sees a >= 0, so that bookkeeping
+// is gone.
+//
+// KI-17 originally wrote the reflection as `return negate(asinh(negate(a)))`,
+// matching what the other three backends did.  That is a device SELF-CALL and it
+// is why all four asinh kernels ran on an unprovisioned dynamic stack on
+// gfx90a -- TF is one of the two backends that took hipErrorIllegalAddress for
+// it.  The reflection is now a sign FOLD, same value, no recursion: see the
+// block above dd_math.hpp's asinh for the mechanism and the measurements.
 XPMATH_INLINE_FUNCTION TripleFloat asinh(TripleFloat a) {
-    if (a.f0 < 0.0f) return negate(asinh(negate(a)));                   // KI-17
+    const bool neg = (a.f0 < 0.0f);                                     // KI-17
+    if (neg) a = negate(a);
+    TripleFloat r;
     if (a.f0 > detail::kTFSqHi) {
         TripleFloat u  = divide(TripleFloat(1.0f), a);
         u = multiply(u, u);
-        return add(log(a), log(add(TripleFloat(1.0f), sqrt(add(TripleFloat(1.0f), u)))));
+        r = add(log(a), log(add(TripleFloat(1.0f), sqrt(add(TripleFloat(1.0f), u)))));
+    } else {
+        // KI-22: log1p(a + a^2/(1+sqrt(a^2+1))).  Derivation at dd_math.hpp's asinh.
+        // TF is the backend that MEASURED the series alternative as a regression --
+        // 36 terms of rounding at the crossover to save 1 bit of cancellation.
+        const TripleFloat a2 = sqr(a);
+        const TripleFloat s  = sqrt(add(a2, TripleFloat(1.0f)));
+        if (a.f0 < 0.5f) {
+            r = log1p(add(a, divide(a2, add(TripleFloat(1.0f), s))));
+        } else {
+            // KI-29: 1/2 log1p(2a(a+s)) rather than log(a+s).  TF is the backend that
+            // FILED KI-29 (92 of its 140 decreases); the residual is log's constant
+            // absolute error, not Sterbenz.  Derived at dd_math.hpp's asinh.
+            const TripleFloat t = add(a, s);
+            r = mul_pwr2(log1p(mul_pwr2(multiply(a, t), 2.0f)), 0.5f);
+        }
     }
-    // KI-22: log1p(a + a^2/(1+sqrt(a^2+1))).  Derivation at dd_math.hpp's asinh.
-    // TF is the backend that MEASURED the series alternative as a regression --
-    // 36 terms of rounding at the crossover to save 1 bit of cancellation.
-    const TripleFloat a2 = sqr(a);
-    const TripleFloat s  = sqrt(add(a2, TripleFloat(1.0f)));
-    if (a.f0 < 0.5f) {
-        return log1p(add(a, divide(a2, add(TripleFloat(1.0f), s))));
-    }
-    // KI-29: 1/2 log1p(2a(a+s)) rather than log(a+s).  TF is the backend that
-    // FILED KI-29 (92 of its 140 decreases); the residual is log's constant
-    // absolute error, not Sterbenz.  Derived at dd_math.hpp's asinh.
-    const TripleFloat t = add(a, s);
-    return mul_pwr2(log1p(mul_pwr2(multiply(a, t), 2.0f)), 0.5f);
+    return neg ? negate(r) : r;
 }
 
 XPMATH_INLINE_FUNCTION TripleFloat acosh(TripleFloat a) {

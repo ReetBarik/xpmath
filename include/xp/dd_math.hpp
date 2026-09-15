@@ -1468,7 +1468,15 @@ XPMATH_INLINE_FUNCTION DoubleDouble cosh(DoubleDouble a) {
 XPMATH_INLINE_FUNCTION DoubleDouble tanh(DoubleDouble a) {
     // tanh(x) = expm1(2x) / (expm1(2x) + 2), reflected for negative x
     // Avoids dividing two nearly-equal large numbers from sinhcosh
-    if (a.hi < 0.0) return negate(tanh(negate(a)));
+    //
+    // Sign FOLD, not `negate(tanh(negate(a)))`: see the block above asinh() for
+    // why a device self-call is not available to this library.  tanh's own
+    // chain never overran the 1024 B allowance the way asinh's did, but it
+    // carried the same unbounded-stack marker into the kernel descriptor, so it
+    // is folded on the same terms.  negate() is exact; the value is unchanged.
+    const bool neg = (a.hi < 0.0);
+    if (neg) a = negate(a);
+    DoubleDouble r;
     // KI-7: saturate before evaluating anything. 1 - tanh(x) = 2e^{-2x} is below
     // DD's half-ulp at 1 (2^-107) for x > 37.4, so ±1 is the correctly rounded
     // answer here; and it is the only correct answer, because 2x overflows the
@@ -1476,9 +1484,13 @@ XPMATH_INLINE_FUNCTION DoubleDouble tanh(DoubleDouble a) {
     // inf/(inf+2) is NaN. Before this short-circuit the ±300 exp guard made
     // expm1(2x) = 0-1 = -1 and the expression collapsed to (-1)/(1) = -1 for
     // every large POSITIVE x — the wrong sign, KI-7's reported symptom.
-    if (a.hi > kDDHyperbolicSaturate) return DoubleDouble(1.0);
-    DoubleDouble e = expm1(multiply_scalar(a, 2.0));
-    return divide(e, add(e, DoubleDouble(2.0)));
+    if (a.hi > kDDHyperbolicSaturate) {
+        r = DoubleDouble(1.0);
+    } else {
+        DoubleDouble e = expm1(multiply_scalar(a, 2.0));
+        r = divide(e, add(e, DoubleDouble(2.0)));
+    }
+    return neg ? negate(r) : r;
 }
 
 // KI-13.  asinh and acosh both form a^2 +- 1, which leaves the word range at
@@ -1634,27 +1646,56 @@ XPMATH_INLINE_FUNCTION DoubleDouble tanh(DoubleDouble a) {
 // This does not close the underlying defect, which is log's constant absolute
 // error and behind it exp's relative error; that is filed separately as KI-34.
 // asinh's exposure to it is what KI-29 was about, and that is what halves.
+//
+// WHY THE REFLECTION IS A FOLD AND NOT A RECURSIVE CALL.  This block is the
+// canonical statement; tanh here and asinh/tanh in the other three backends
+// point at it.  The odd reflection used to read
+//
+//     if (a.hi < 0.0) return negate(asinh(negate(a)));
+//
+// which is a device SELF-CALL.  On AMDGPU a recursive call makes the backend
+// give up on bounding the kernel's stack: it sets `uses_dynamic_stack` in the
+// kernel descriptor and provisions NOTHING for the recursion, so the entire
+// non-inlined chain below the recursive entry -- asinh -> asinh -> log1p ->
+// log -> exp -> multiply, every one of them a real frame because
+// XPMATH_NOINLINE_FUNCTION deliberately made them so -- is charged to the HIP
+// runtime's per-thread stack allowance, which defaults to 1024 bytes.  It does
+// not fit.  Measured on MI250X/gfx90a: FF and TF asinh take
+// hipErrorIllegalAddress, DD and QF silently return wrong values on the
+// reflected arm, and raising hipLimitStackSize to 4096 makes both symptoms
+// disappear without touching the source.  Full evidence in
+// docs/ROCM_RECURSIVE_DEVICE_STACK.md.
+//
+// The fold is value-preserving by construction: negate() is exact word
+// negation, so evaluating on |a| and negating the result returns the identical
+// bits the recursive form returned.  It is not a numerical change and must
+// never be scored as one.
 XPMATH_INLINE_FUNCTION DoubleDouble asinh(DoubleDouble a) {
     const double kXpAsinhSmall = 0.5;
     // Reflect: asinh(-a) = -asinh(a). For positive a, a + sqrt(a²+1) >= 1 always,
     // so log argument never causes cancellation.
-    if (a.hi < 0.0) return negate(asinh(negate(a)));
+    const bool neg = (a.hi < 0.0);
+    if (neg) a = negate(a);
+    DoubleDouble r;
     if (a.hi > detail::kDDSqHi) {
         DoubleDouble u = divide(DoubleDouble(1.0), a);
         u = multiply(u, u);
-        return add(log(a), log(add(DoubleDouble(1.0), sqrt(add(DoubleDouble(1.0), u)))));
+        r = add(log(a), log(add(DoubleDouble(1.0), sqrt(add(DoubleDouble(1.0), u)))));
+    } else {
+        const DoubleDouble a2 = multiply(a, a);
+        const DoubleDouble s  = sqrt(add(a2, DoubleDouble(1.0)));
+        if (a.hi < kXpAsinhSmall) {                                     // KI-22
+            // log1p(a + a^2/(1+sqrt(a^2+1))) -- see the derivation above.
+            r = log1p(add(a, divide(a2, add(DoubleDouble(1.0), s))));
+        } else {
+            // KI-29: 1/2 log1p(2a(a+s)) rather than log(a+s) -- same value, half
+            // of log's constant absolute error.  Derivation immediately above.
+            const DoubleDouble t = add(a, s);
+            const DoubleDouble z = multiply(a, t);
+            r = multiply_scalar(log1p(add(z, z)), 0.5);
+        }
     }
-    const DoubleDouble a2 = multiply(a, a);
-    const DoubleDouble s  = sqrt(add(a2, DoubleDouble(1.0)));
-    if (a.hi < kXpAsinhSmall) {                                         // KI-22
-        // log1p(a + a^2/(1+sqrt(a^2+1))) -- see the derivation above.
-        return log1p(add(a, divide(a2, add(DoubleDouble(1.0), s))));
-    }
-    // KI-29: 1/2 log1p(2a(a+s)) rather than log(a+s) -- same value, half of
-    // log's constant absolute error.  Derivation immediately above.
-    const DoubleDouble t = add(a, s);
-    const DoubleDouble z = multiply(a, t);
-    return multiply_scalar(log1p(add(z, z)), 0.5);
+    return neg ? negate(r) : r;
 }
 XPMATH_INLINE_FUNCTION DoubleDouble acosh(DoubleDouble a) {
     if (dd_cmp_one(a) < 0) {                                            // KI-16
@@ -2482,13 +2523,14 @@ XPMATH_INLINE_FUNCTION DoubleDouble erfc(DoubleDouble z) {
 // Reference for the method: C. Lanczos, "A Precision Approximation of the Gamma
 // Function", J. SIAM Numer. Anal. B 1 (1964) 86-96; P. Godfrey (2001), "A note
 // on the computation of the convergent Lanczos complex Gamma approximation".
-XPMATH_INLINE_FUNCTION DoubleDouble tgamma(DoubleDouble a) {
-    if (a.hi < 0.5) {
-        // Reflection. DoubleDouble_pi() is already a full two-word DD constant.
-        DoubleDouble pi = DoubleDouble_pi();
-        DoubleDouble sin_pi_a = sin(multiply(pi, a));
-        return divide(pi, multiply(sin_pi_a, tgamma(subtract(DoubleDouble(1.0), a))));
-    }
+//
+// The Lanczos core is a SEPARATE function from the reflection, and tgamma's
+// reflected arm calls the core, never itself.  A device self-call costs the
+// whole kernel its bounded stack -- see the block above asinh in this file.  The
+// split is value-preserving by inspection: the reflection only fires for
+// a.hi < 0.5, and it passes 1-a, whose leading word is then >= 0.5, so the
+// recursive form could only ever have reached the Lanczos branch anyway.
+XPMATH_INLINE_FUNCTION DoubleDouble dd_tgamma_lanczos(DoubleDouble a) {
     // Lanczos g=14, N=17 partial-fraction terms; g+1/2 = 14.5 is exact in binary.
     // Stored as from_bits pairs (no static — not device-safe).
     const DoubleDouble c0  = DoubleDouble::from_bits(0x3ff0000000000000ULL, 0xbae5ccd249ecc19bULL); // 0.99999999999999999999999943648104
@@ -2532,6 +2574,17 @@ XPMATH_INLINE_FUNCTION DoubleDouble tgamma(DoubleDouble a) {
 
     return multiply(multiply(sqrt_2pi, s),
                  multiply(pow(t, add(x, DoubleDouble(0.5))), exp(negate(t))));
+}
+
+XPMATH_INLINE_FUNCTION DoubleDouble tgamma(DoubleDouble a) {
+    if (a.hi < 0.5) {
+        // Reflection. DoubleDouble_pi() is already a full two-word DD constant.
+        DoubleDouble pi = DoubleDouble_pi();
+        DoubleDouble sin_pi_a = sin(multiply(pi, a));
+        return divide(pi, multiply(sin_pi_a,
+                                   dd_tgamma_lanczos(subtract(DoubleDouble(1.0), a))));
+    }
+    return dd_tgamma_lanczos(a);
 }
 
 // Bessel J0 via series
