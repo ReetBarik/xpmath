@@ -6,9 +6,22 @@ what we did about it locally.
 
 - **Local mitigation:** commit `48df439` — `XPMATH_NOINLINE_FUNCTION` in
   `include/xp/config.hpp` keeps every device callee under the branch reach.
-- **Local regression guard:** `scripts/xpm_lint_device_asm.sh`, wired into the
-  `device-hip` lane of `.github/workflows/ci.yml`.
+- **Local regression guard:** `scripts/xpm_lint_device_asm.sh` tiers 1–3, wired
+  into the `device-hip` lane of `.github/workflows/ci.yml`.
 - **Status:** not yet filed upstream.
+
+> **This is not the only gfx90a defect in these headers, and the mitigation
+> below is not free.** A second, unrelated one —
+> [ROCM_RECURSIVE_DEVICE_STACK.md](ROCM_RECURSIVE_DEVICE_STACK.md) — was found
+> afterwards on MI250X: a recursive device call sets `uses_dynamic_stack` and
+> provisions nothing, so `xp::asinh`'s one-level sign reflection overran the
+> 1024 B default HIP per-thread stack in all four backends. The two interact.
+> The `noinline` prescribed here is precisely what turns each link of that
+> function's call chain into a real frame, and it measurably deepened the
+> overrun. See [Cost of the mitigation](#cost-of-the-mitigation-measured-after-the-fact)
+> below, which corrects the "Numerics are untouched" line in this file's
+> original text. Any future change to either mitigation must be re-measured
+> against both.
 
 Everything in the "Report" section below was re-measured on the round-0 (pre-fix)
 device assembly on 2026-09-15, except the two items explicitly marked as carried
@@ -230,16 +243,50 @@ regrows: a new op, a higher inline threshold in a future LLVM, a different
 Numerics are untouched — `noinline` cannot change FP results, and the build uses
 `-ffp-contract=off`, so no contraction decision crosses a call boundary.
 
+### Cost of the mitigation (measured after the fact)
+
+The sentence above is true as written and was the wrong thing to conclude from.
+`noinline` cannot change *an* FP result. It can change whether the computation
+runs at all, and on MI250X it did.
+
+Forcing a function not to inline turns it into a real stack frame. Where a
+device function is recursive, the AMDGPU backend sets `uses_dynamic_stack` and
+provisions nothing, and the whole non-inlined chain below the recursive entry is
+charged to the HIP runtime's 1024 B default per-thread allowance —
+so `noinline` makes that chain *deeper* and the overrun *worse*. `xp::asinh`
+reflected by calling itself, and measured on MI250X:
+
+| posture | QF `asinh` grossly wrong, of 849 reflected points |
+|---|---|
+| everything inlinable | 73 |
+| with `XPMATH_NOINLINE_FUNCTION` as shipped in `6ddcb2d` | 135 |
+| blanket `noinline` on every `xp` function | 135, plus FF and TF abort |
+
+`6ddcb2d` did not create that defect: the recursion predates it and the 1024 B
+default is the same either way. It exposed and deepened it. The fix was to remove
+every device self-call rather than to weaken this mitigation — see
+[ROCM_RECURSIVE_DEVICE_STACK.md](ROCM_RECURSIVE_DEVICE_STACK.md) — so the two
+mitigations now coexist, and `scripts/xpm_lint_device_asm.sh` gates both.
+
+The general lesson, recorded because it will recur: **"this transformation
+cannot change the arithmetic" is not the same claim as "this transformation
+cannot change the answer."** A codegen mitigation adopted on the first ground
+needs to be measured on the second.
+
 ### The guard
 
 `scripts/xpm_lint_device_asm.sh` (+ `scripts/xpm_device_guard.awk`) reads the
-device `.s` and reports three tiers:
+device `.s` and reports four tiers. Tiers 1–3 are this defect; tier 4 is the
+recursive-stack defect and is documented in
+[ROCM_RECURSIVE_DEVICE_STACK.md](ROCM_RECURSIVE_DEVICE_STACK.md). They share a
+script because they share an input and because they constrain each other.
 
 | tier | severity | what |
 |---|---|---|
 | 1 | FATAL | relaxation scavenged `s[30:31]` in a callee — the live bug |
 | 2 | WARN | any relaxation site in a callee — one allocation decision from tier 1 |
 | 3 | FATAL / WARN | a callee over 131,068 B / over 98,304 B |
+| 4 | FATAL / WARN | a function that calls itself / a kernel with `uses_dynamic_stack=1` |
 
 Three rules it encodes, all learned the hard way:
 
