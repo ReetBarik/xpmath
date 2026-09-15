@@ -95,6 +95,42 @@
 #endif
 
 // ============================================================
+// 2b. XPMATH_NOINLINE_FUNCTION — AMDGPU branch-reach guard
+// ============================================================
+// gfx9/gfx90a S_BRANCH carries a signed 16-bit dword displacement: +/-131,068
+// bytes.  A device *callee* larger than that forces LLVM's BranchRelaxation
+// pass to expand an out-of-range branch into s_getpc_b64/s_setpc_b64, and
+// SIInstrInfo::insertIndirectBranch scavenges the scratch SGPR pair without
+// modelling the liveness of s[30:31], the ABI return-address register.  When it
+// picks s[30:31] the function's own `s_setpc_b64 s[30:31]` return branches back
+// into the body: an infinite loop on the GPU.  Observed on ROCm 7.0.2 /
+// LLVM 20 (AMD clang 20.0.0git, roc-7.0.2 25385) in xp::sinhcosh(QuadFloat) and
+// xp::QuadFloatComplex::operator/.  Kernels are immune -- s_endpgm, no s[30:31].
+//
+// Marking the expansion-multiplier primitives noinline keeps every generated
+// callee under the reach.  `inline` is retained for COMDAT linkage -- dropping
+// it gives the device TU external linkage and duplicate-symbol errors; only the
+// inlining decision changes.  Scoped to hipcc, so plain-C++, CUDA and SYCL
+// codegen and performance are untouched.  Define XPMATH_DISABLE_AMDGPU_SIZE_GUARD
+// to opt out, or pre-define XPMATH_NOINLINE_FUNCTION to override the spelling.
+//
+// MEASURED, ROCm 7.0.2: __AMDGCN__ is defined in BOTH hipcc passes, not just
+// the device one (only __HIP_DEVICE_COMPILE__ distinguishes them), so the
+// disjunction below is satisfied in the host pass too and this reduces to
+// "hipcc".  That is deliberate and is the safe direction: both passes then emit
+// the same attribute.  noinline does not affect mangling, so a disagreement
+// would be harmless too -- but the x86 half of a hipcc build does pay the call
+// overhead.  Host-only builds (g++/clang++, the demos and the sweep) do not.
+#if !defined(XPMATH_NOINLINE_FUNCTION)
+#if defined(__HIPCC__) && (defined(__AMDGCN__) || defined(__HIP_DEVICE_COMPILE__)) \
+    && !defined(XPMATH_DISABLE_AMDGPU_SIZE_GUARD)
+#define XPMATH_NOINLINE_FUNCTION __host__ __device__ inline __attribute__((noinline))
+#else
+#define XPMATH_NOINLINE_FUNCTION XPMATH_INLINE_FUNCTION
+#endif
+#endif
+
+// ============================================================
 // 3. XPMATH_PRINTF — diagnostic policy
 // ============================================================
 // The numeric headers print a one-line diagnostic on a domain violation

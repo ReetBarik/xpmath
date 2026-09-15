@@ -253,6 +253,64 @@ struct QuadFloatComplex {
             return mul_recover(*this, b, rr, ri);
         return QuadFloatComplex(rr, ri);
     }
+    // ---- operator/ legs, split out -----------------------------------------
+    // gfx90a branch-reach guard; see config.hpp's XPMATH_NOINLINE_FUNCTION.
+    // The three heavy legs below are disjoint -- exactly one runs per call --
+    // but fused into a single operator/ body they emit a ~174 KB device callee,
+    // past the 131,068-byte S_BRANCH reach.  That is the condition under which
+    // LLVM's BranchRelaxation scavenges the live return-address pair s[30:31];
+    // in this very function the relaxed edge off the `b == 0` guard targets the
+    // function's own return block, so the return jumps to itself.  Annotating
+    // primitives does not reach this one: the bulk is inlined add/multiply
+    // renormalisation, not divide, so the lever is the split.  Each leg is
+    // ~43 KB standing alone.  Numerics are untouched -- same expressions, same
+    // order, and -ffp-contract=off means no contraction decision crosses the
+    // new call boundary either.
+    static XPMATH_NOINLINE_FUNCTION QuadFloatComplex
+    div_smith_re(QuadFloatComplex a, QuadFloatComplex b) {
+        QuadFloat rr = divide(b.im, b.re);
+        QuadFloat dd = add(b.re, multiply(b.im, rr));
+        return QuadFloatComplex(divide(add(a.re, multiply(a.im, rr)), dd),
+                   divide(subtract(a.im, multiply(a.re, rr)), dd));
+    }
+    static XPMATH_NOINLINE_FUNCTION QuadFloatComplex
+    div_smith_im(QuadFloatComplex a, QuadFloatComplex b) {
+        QuadFloat rr = divide(b.re, b.im);
+        QuadFloat dd = add(multiply(b.re, rr), b.im);
+        return QuadFloatComplex(divide(add(multiply(a.re, rr), a.im), dd),
+                   divide(subtract(multiply(a.im, rr), a.re), dd));
+    }
+    // KI-41 scaled leg; `ma`/`mbb` are the operand magnitudes the caller has
+    // already formed to decide that this leg is the one to take.
+    static XPMATH_NOINLINE_FUNCTION QuadFloatComplex
+    div_scaled(QuadFloatComplex a, QuadFloatComplex b, float ma, float mbb) {
+        float sa = 1.0f, sb = 1.0f, pa = ma, pb = mbb;
+        // Lift whichever operand is smaller, so neither overflows.
+        for (int k = 0; k < 8; ++k) {
+            if ((pa * pb) * 0x1p-72f >= 1.17549435e-38f * 4.0f) break;
+            if (pa < pb) { sa *= 0x1p24f; pa *= 0x1p24f; }
+            else         { sb *= 0x1p24f; pb *= 0x1p24f; }
+        }
+        const QuadFloat ar2 = detail::qf_pow2_scale(a.re, sa), ai2 = detail::qf_pow2_scale(a.im, sa);
+        const QuadFloat br2 = detail::qf_pow2_scale(b.re, sb), bi2 = detail::qf_pow2_scale(b.im, sb);
+        const QuadFloat den2 = add(multiply(br2, br2), multiply(bi2, bi2));
+        const QuadFloat inv2 = divide(QuadFloat(1.0f), den2);
+        const QuadFloat q_re = multiply(detail::qf_cross(ar2, br2, negate(ai2), bi2), inv2);
+        const QuadFloat q_im = multiply(detail::qf_cross(ai2, br2, ar2, bi2), inv2);
+        // result carries the factor sa/sb; undo it exactly.
+        const float un = sb / sa;
+        return QuadFloatComplex(detail::qf_pow2_scale(q_re, un), detail::qf_pow2_scale(q_im, un));
+    }
+    static XPMATH_NOINLINE_FUNCTION QuadFloatComplex
+    div_direct(QuadFloatComplex a, QuadFloatComplex b) {
+        QuadFloat denom = add(multiply(b.re, b.re), multiply(b.im, b.im));
+        QuadFloat inv   = divide(QuadFloat(1.0f), denom);
+        // KI-36: both numerators are 2x2 determinants and both can cancel.
+        return QuadFloatComplex(
+            multiply(detail::qf_cross(a.re, b.re, negate(a.im), b.im), inv),
+            multiply(detail::qf_cross(a.im, b.re, a.re, b.im), inv));
+    }
+
     XPMATH_INLINE_FUNCTION QuadFloatComplex operator/(QuadFloatComplex b) const {
         // (a+bi)/(c+di) = [(ac+bd) + (bc-ad)i] / (c²+d²)  (ff_complex.hpp:71-80)
         if (b.re.f0 == 0.0f && b.im.f0 == 0.0f) {
@@ -276,17 +334,8 @@ struct QuadFloatComplex {
             // words well above it, not just below 1.0e-18f.  Smith's algorithm forms
             // no square at all, so it is correct across the whole widened band.
             if (!(mb <= detail::kQFSqHi && mb >= detail::kQFSqLo)) {
-                if (mre >= mim) {
-                    QuadFloat rr = divide(b.im, b.re);
-                    QuadFloat dd = add(b.re, multiply(b.im, rr));
-                    return QuadFloatComplex(divide(add(re, multiply(im, rr)), dd),
-                               divide(subtract(im, multiply(re, rr)), dd));
-                } else {
-                    QuadFloat rr = divide(b.re, b.im);
-                    QuadFloat dd = add(multiply(b.re, rr), b.im);
-                    return QuadFloatComplex(divide(add(multiply(re, rr), im), dd),
-                               divide(subtract(multiply(im, rr), re), dd));
-                }
+                if (mre >= mim) return div_smith_re(*this, b);
+                else            return div_smith_im(*this, b);
             }
         }
         // KI-41.  THE NUMERATOR PRODUCT CAN GO SUBNORMAL, INDEPENDENTLY OF
@@ -332,30 +381,10 @@ struct QuadFloatComplex {
             // The 4x margin keeps the lifted word clear of the boundary itself.
             if (ma != 0.0f && mbb != 0.0f &&
                 (ma * mbb) * 0x1p-72f < 1.17549435e-38f * 4.0f) {
-                float sa = 1.0f, sb = 1.0f, pa = ma, pb = mbb;
-                // Lift whichever operand is smaller, so neither overflows.
-                for (int k = 0; k < 8; ++k) {
-                    if ((pa * pb) * 0x1p-72f >= 1.17549435e-38f * 4.0f) break;
-                    if (pa < pb) { sa *= 0x1p24f; pa *= 0x1p24f; }
-                    else         { sb *= 0x1p24f; pb *= 0x1p24f; }
-                }
-                const QuadFloat ar2 = detail::qf_pow2_scale(re, sa), ai2 = detail::qf_pow2_scale(im, sa);
-                const QuadFloat br2 = detail::qf_pow2_scale(b.re, sb), bi2 = detail::qf_pow2_scale(b.im, sb);
-                const QuadFloat den2 = add(multiply(br2, br2), multiply(bi2, bi2));
-                const QuadFloat inv2 = divide(QuadFloat(1.0f), den2);
-                const QuadFloat q_re = multiply(detail::qf_cross(ar2, br2, negate(ai2), bi2), inv2);
-                const QuadFloat q_im = multiply(detail::qf_cross(ai2, br2, ar2, bi2), inv2);
-                // result carries the factor sa/sb; undo it exactly.
-                const float un = sb / sa;
-                return QuadFloatComplex(detail::qf_pow2_scale(q_re, un), detail::qf_pow2_scale(q_im, un));
+                return div_scaled(*this, b, ma, mbb);
             }
         }
-        QuadFloat denom = add(multiply(b.re, b.re), multiply(b.im, b.im));
-        QuadFloat inv   = divide(QuadFloat(1.0f), denom);
-        // KI-36: both numerators are 2x2 determinants and both can cancel.
-        return QuadFloatComplex(
-            multiply(detail::qf_cross(re, b.re, negate(im), b.im), inv),
-            multiply(detail::qf_cross(im, b.re, re, b.im), inv));
+        return div_direct(*this, b);
     }
     XPMATH_INLINE_FUNCTION QuadFloatComplex operator-() const {
         return QuadFloatComplex(negate(re), negate(im));
@@ -468,7 +497,7 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex conj(QuadFloatComplex z) {
 // B = sqrt((R+|re|)/2) + i·sign(im)·sqrt((R-|re|)/2), R = |z|, arranged to avoid
 // cancellation. The ½ and 2 are FP32-exact literals used via multiply_scalar
 // (PORT_NOTES §3-lift), matching ff_complex.hpp:146-148.
-XPMATH_INLINE_FUNCTION QuadFloatComplex sqrt(QuadFloatComplex z) {
+XPMATH_NOINLINE_FUNCTION QuadFloatComplex sqrt(QuadFloatComplex z) {
     if (z.re.f0 == 0.0f && z.im.f0 == 0.0f) return QuadFloatComplex();
     QuadFloat r  = abs(z);   // KI-8: scaled magnitude, was sqrt(re^2+im^2) inline
     QuadFloat a1 = abs(z.re);
@@ -700,7 +729,7 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex tan(QuadFloatComplex z) {
 // at a >= 2 into log(a) + log1p(sqrt(1 - (1/a)^2)); it measured WORSE (FF asin
 // 14.00 -> 13.81, QF asinh 28.83 -> 27.75 at z = 2, pure rounding churn from
 // the extra log), so the split does not ship.
-XPMATH_INLINE_FUNCTION QuadFloat xp_asin_imag_mag(QuadFloat x, QuadFloat y) {
+XPMATH_NOINLINE_FUNCTION QuadFloat xp_asin_imag_mag(QuadFloat x, QuadFloat y) {
     const QuadFloat one(1.0f);
     const QuadFloat xp1  = add(x, one);
     const QuadFloat xm1s = subtract(x, one);            // signed, for the max(x,1) term
@@ -827,7 +856,7 @@ XPMATH_INLINE_FUNCTION QuadFloat xp_asin_imag_mag(QuadFloat x, QuadFloat y) {
 // because a is EVEN in x -- x -> -x swaps r and s -- so the leg is even too and
 // the quadrant comes from the SIGNED Re z in acos's atan2 alone, with no case
 // split. xp_asin_real_mag() is left as the atan2 wrapper so asin is unchanged.
-XPMATH_INLINE_FUNCTION QuadFloat xp_asin_real_leg(QuadFloat x, QuadFloat y) {
+XPMATH_NOINLINE_FUNCTION QuadFloat xp_asin_real_leg(QuadFloat x, QuadFloat y) {
     const QuadFloat one(1.0f);
     const QuadFloat xp1  = add(x, one);
     const QuadFloat xm1s = subtract(x, one);            // signed, for the max(1,x) term
@@ -1060,7 +1089,7 @@ XPMATH_INLINE_FUNCTION bool xp_acosh_chain_short(QuadFloat x, QuadFloat y) {
 // underflows; and both terms carry the sign of x, so the sum never cancels.
 // Used ONLY where the primary form has provably lost its x^2 -- see the call
 // sites in atan() and atanh(), which explain when that is.
-XPMATH_INLINE_FUNCTION QuadFloat xp_atan_re_split(QuadFloat x, QuadFloat y) {
+XPMATH_NOINLINE_FUNCTION QuadFloat xp_atan_re_split(QuadFloat x, QuadFloat y) {
     const QuadFloat one_(1.0f);
     return multiply_scalar(add(xp_atan2_safe(x, subtract(one_, y)),
                                xp_atan2_safe(x, add(one_, y))),

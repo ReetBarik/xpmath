@@ -16,7 +16,8 @@
 #                   targets sit behind if(XPMATH_MPFR_FOUND) and this lane used
 #                   to run 34 of 38 while reporting "31 tests" and green.
 #   device-nvcc     Does each of the eight headers compile for a CUDA device?
-#   device-hip      Same for HIP/ROCm.  UNVERIFIED — see `continue-on-error`.
+#   device-hip      Same for HIP/ROCm, plus the gfx90a branch-reach guard over
+#                   the emitted device asm.  UNVERIFIED — see `continue-on-error`.
 #
 # TOOLCHAIN NOTES THAT MATTER (do not "simplify" these away):
 #
@@ -499,6 +500,17 @@ jobs:
   #    committed.  It is therefore `continue-on-error: true`: it reports, it
   #    does not gate.  Once a run confirms the image and the flags, delete that
   #    line and the lane becomes real.
+  #
+  #    UPDATE.  The two steps below HAVE since been run by hand against ROCm
+  #    7.0.2 / gfx90a on a machine with hipcc (14 s for the compile; the guard
+  #    exits 0 on the current tree and 1 on the pre-fix one).  What remains
+  #    unverified is the GitHub side: the `rocm/dev-ubuntu-24.04:latest`
+  #    container, its hipcc version, and whether a hosted runner has the disk
+  #    and time for it.  `continue-on-error: true` therefore STAYS -- the
+  #    branch-reach guard cannot gate merges from inside a lane whose
+  #    environment has never once executed, because the first red would be
+  #    indistinguishable from a broken image.  Delete the line after the first
+  #    green run and the guard becomes gating along with the rest of the lane.
   # ==========================================================================
   device-hip:
     name: hipcc device compile (UNVERIFIED, non-gating)
@@ -553,4 +565,40 @@ jobs:
                      + (double)xp::abs(xp::log(zt)).f0;
           }
           EOF
-          time hipcc -std=c++17 --offload-arch=gfx90a -c -Iinclude /tmp/hip_tu.hip -o /tmp/hip_tu.o
+          # --save-temps=obj keeps the device .s next to the object so the
+          # branch-reach guard below has something to read.  It is the reason
+          # this step writes into a directory rather than straight to /tmp.
+          mkdir -p /tmp/hipsave
+          time hipcc -std=c++17 --offload-arch=gfx90a --save-temps=obj \
+               -c -Iinclude /tmp/hip_tu.hip -o /tmp/hipsave/hip_tu.o
+          ls -la /tmp/hipsave/*-amdgcn-amd-amdhsa-*.s
+
+      # ----------------------------------------------------------------------
+      # gfx90a branch-reach guard.  See docs/ROCM_BRANCH_RELAXATION_BUG.md.
+      #
+      # LLVM's BranchRelaxation scavenges s[30:31] -- the live return-address
+      # pair -- when it expands an out-of-range branch inside a device CALLEE,
+      # so the callee's own `s_setpc_b64 s[30:31]` return jumps back into its
+      # body.  Confirmed on ROCm 7.0.2 / gfx90a.  The library's defence is
+      # XPMATH_NOINLINE_FUNCTION keeping every callee under the +/-131,068 B
+      # S_BRANCH reach; this step is what stops that regressing.
+      #
+      # SCOPE, HONESTLY.  This TU has one kernel, so with everything inlined
+      # the bulk would land in a kernel, which is exempt (kernels end in
+      # s_endpgm and never hold a return address).  What the step really
+      # watches is the ~25 library callees that XPMATH_NOINLINE_FUNCTION
+      # creates -- measured locally on this exact TU, the largest is
+      # xp::atan2(TripleFloat) at 75,553 B, i.e. 77% of the 98,304 B drift
+      # gate.  It is a real tripwire on those, not a whole-program audit.  The
+      # authoritative run is the lint over a full device build of the sweep,
+      # which is not something a GitHub runner can produce.
+      #
+      # This step was executed locally against ROCm 7.0.2 before it was
+      # committed (unlike the rest of this lane), both ways: exit 0 on the
+      # fixed build, exit 1 on the pre-fix one.
+      # ----------------------------------------------------------------------
+      - name: gfx90a branch-reach guard on the emitted device asm
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/xpm_lint_device_asm.sh /tmp/hipsave

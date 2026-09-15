@@ -91,21 +91,21 @@ namespace xp {
 struct QuadFloat;
 XPMATH_INLINE_FUNCTION QuadFloat add(QuadFloat a, QuadFloat b);
 XPMATH_INLINE_FUNCTION QuadFloat subtract(QuadFloat a, QuadFloat b);
-XPMATH_INLINE_FUNCTION QuadFloat multiply(QuadFloat a, QuadFloat b);
-XPMATH_INLINE_FUNCTION QuadFloat divide(QuadFloat a, QuadFloat b);
+XPMATH_NOINLINE_FUNCTION QuadFloat multiply(QuadFloat a, QuadFloat b);
+XPMATH_NOINLINE_FUNCTION QuadFloat divide(QuadFloat a, QuadFloat b);
 XPMATH_INLINE_FUNCTION QuadFloat multiply_scalar(QuadFloat a, float b);
 XPMATH_INLINE_FUNCTION QuadFloat divide_scalar(QuadFloat a, float b);
 XPMATH_INLINE_FUNCTION QuadFloat mul_pwr2(QuadFloat a, float b);
 XPMATH_INLINE_FUNCTION QuadFloat negate(QuadFloat a);
 XPMATH_INLINE_FUNCTION QuadFloat abs(QuadFloat a);
 XPMATH_INLINE_FUNCTION QuadFloat sqr(QuadFloat a);
-XPMATH_INLINE_FUNCTION QuadFloat sqrt(QuadFloat a);
+XPMATH_NOINLINE_FUNCTION QuadFloat sqrt(QuadFloat a);
 XPMATH_INLINE_FUNCTION QuadFloat round_to_nearest_int(QuadFloat a);
 XPMATH_INLINE_FUNCTION QuadFloat pow_int(QuadFloat a, int n);
 // T3.0b transcendentals (forward decls — struct-independent, but several call
 // each other, so declare the whole family up front).
-XPMATH_INLINE_FUNCTION QuadFloat exp(QuadFloat a);
-XPMATH_INLINE_FUNCTION QuadFloat log(QuadFloat a);
+XPMATH_NOINLINE_FUNCTION QuadFloat exp(QuadFloat a);
+XPMATH_NOINLINE_FUNCTION QuadFloat log(QuadFloat a);
 XPMATH_INLINE_FUNCTION QuadFloat pow(QuadFloat a, QuadFloat b);
 XPMATH_INLINE_FUNCTION void      sincos(QuadFloat a, QuadFloat& sin_a, QuadFloat& cos_a);
 XPMATH_INLINE_FUNCTION void      sinhcosh(QuadFloat a, QuadFloat& sinh_a, QuadFloat& cosh_a);
@@ -576,7 +576,7 @@ XPMATH_INLINE_FUNCTION QuadFloat mul_pwr2(QuadFloat a, float b) {
 // folded in scalar, and terms of weight u^4 and higher are dropped before
 // renorm_4 collapses the length-5 accumulator to length-4.  Port of
 // qd_real::sloppy_mul, QD 2.3.24 qd_inline.h:567-599.
-XPMATH_INLINE_FUNCTION QuadFloat multiply(QuadFloat a, QuadFloat b) {
+XPMATH_NOINLINE_FUNCTION QuadFloat multiply(QuadFloat a, QuadFloat b) {
     float p0, p1, p2, p3, p4, p5;
     float q0, q1, q2, q3, q4, q5;
     float t0, t1;
@@ -765,7 +765,7 @@ XPMATH_INLINE_FUNCTION QuadFloat qf_divide_core(QuadFloat a, QuadFloat b) {
 }
 }  // namespace detail
 
-XPMATH_INLINE_FUNCTION QuadFloat divide(QuadFloat a, QuadFloat b) {
+XPMATH_NOINLINE_FUNCTION QuadFloat divide(QuadFloat a, QuadFloat b) {
     if (!detail::qf_div_lift_wanted(a, b)) return detail::qf_divide_core(a, b);
     const float step = 0x1p24f, target = 1.17549435e-38f * 4.0f, cap = 0x1p120f;
     float sa = 1.0f, sb = 1.0f;
@@ -850,7 +850,7 @@ XPMATH_INLINE_FUNCTION QuadFloat divide_accurate(QuadFloat a, QuadFloat b) {
 // (24 -> 48 -> 96, saturating at the ~96-bit QuadFloat width), so 3 iterations
 // suffice. QD's loop runs up to 10 with an early-out convergence test; the port
 // keeps that structure with eps = 2^-96 so it stops after ~3 on real inputs.
-XPMATH_INLINE_FUNCTION QuadFloat sqrt(QuadFloat a) {
+XPMATH_NOINLINE_FUNCTION QuadFloat sqrt(QuadFloat a) {
     if (a.f0 == 0.0f && a.f1 == 0.0f && a.f2 == 0.0f && a.f3 == 0.0f)
         return QuadFloat(0.0f);
     if (a.f0 < 0.0f) {
@@ -1022,7 +1022,7 @@ XPMATH_INLINE_FUNCTION QuadFloat pow_int(QuadFloat a, int n) {
 // dd_math.hpp) balances squaring cost against Taylor length; the loop caps at 60
 // and, unlike ff_math.hpp:376, does NOT return 0 on the cap (that FF behavior
 // is a latent stall bug — see PORT_NOTES_QF; here we proceed with the best sum).
-XPMATH_INLINE_FUNCTION QuadFloat exp(QuadFloat a) {
+XPMATH_NOINLINE_FUNCTION QuadFloat exp(QuadFloat a) {
     const int   nq  = 6;
     // eps is deliberately COARSER than QF's resolution u = 2^-96 ~= 1.3e-29.
     // ff_math.hpp used eps = 1e-15f finer than FloatFloat resolution 3.55e-15,
@@ -1080,6 +1080,13 @@ XPMATH_INLINE_FUNCTION QuadFloat exp(QuadFloat a) {
     // `log` an absolute floor of ~9.3 units of 2^-96, flat in |ln v|.
     s1 = mul_pwr2(s0, ldexpf(1.0f, -nq));           // r = s0 / 2^nq
     QuadFloat s2 = s1, s3 = s1;                     // term = r, sum = e^r - 1
+    // gfx90a size hygiene: this loop has a data-dependent early exit, so a
+    // full unroll buys little and costs I-cache -- and the bytes it adds are
+    // what pushes the enclosing callee past the 131,068-byte S_BRANCH reach.
+    // (exp Taylor series)
+#if defined(__clang__)
+#pragma clang loop unroll_count(4)
+#endif
     for (int l1 = 2; l1 <= 60; ++l1) {
         s0 = multiply(s2, s1);
         s2 = divide_scalar(s0, (float)l1);      // term = r^l1 / l1!
@@ -1087,6 +1094,13 @@ XPMATH_INLINE_FUNCTION QuadFloat exp(QuadFloat a) {
         if (detail::fabs(s2.f0) <= eps * detail::fabs(s3.f0)) break;
         // NOTE: no return-0 on l1 == 60 (see header comment); fall through with s3.
     }
+    // gfx90a size hygiene: this loop has a data-dependent early exit, so a
+    // full unroll buys little and costs I-cache -- and the bytes it adds are
+    // what pushes the enclosing callee past the 131,068-byte S_BRANCH reach.
+    // (exp squaring ladder)
+#if defined(__clang__)
+#pragma clang loop unroll_count(4)
+#endif
     for (int i = 0; i < nq; ++i) s3 = multiply(s3, add(s3, QuadFloat(2.0f)));
     s3 = add(QuadFloat(1.0f), s3);
 
@@ -1111,7 +1125,7 @@ XPMATH_INLINE_FUNCTION QuadFloat exp(QuadFloat a) {
 // x <- x + a*exp(-x) - 1 three times (Newton ~doubles correct digits per step;
 // FP32 seed ~24 bits -> 48 -> 96, saturating at QF width on the 3rd).  Same
 // three-step structure as dd_math.hpp:380.
-XPMATH_INLINE_FUNCTION QuadFloat log(QuadFloat a) {
+XPMATH_NOINLINE_FUNCTION QuadFloat log(QuadFloat a) {
     if (detail::isinf(a.f0)) return a;   // KI-6, see dd_math.hpp
     if (a.f0 <= 0.0f) {
         XPMATH_PRINTF("QFLOG: non-positive argument\n");
@@ -1565,7 +1579,7 @@ XPMATH_INLINE_FUNCTION QuadFloat atan(QuadFloat a) {
     return r;
 }
 // atan2(y, x) = angle(x, y).  QD qd_real.cpp:2393 (STL argument order).
-XPMATH_INLINE_FUNCTION QuadFloat atan2(QuadFloat y, QuadFloat x) {
+XPMATH_NOINLINE_FUNCTION QuadFloat atan2(QuadFloat y, QuadFloat x) {
     return angle(x, y);
 }
 
@@ -1594,6 +1608,13 @@ XPMATH_INLINE_FUNCTION void sinhcosh(QuadFloat a, QuadFloat& sinh_a, QuadFloat& 
         QuadFloat a2 = multiply(a, a);
         QuadFloat sinh_sum = a,             sinh_term = a;
         QuadFloat cosh_sum = QuadFloat(1.0f), cosh_term = QuadFloat(1.0f);
+        // gfx90a size hygiene: this loop has a data-dependent early exit, so a
+        // full unroll buys little and costs I-cache -- and the bytes it adds are
+        // what pushes the enclosing callee past the 131,068-byte S_BRANCH reach.
+        // (sinhcosh sinh/cosh Taylor series)
+#if defined(__clang__)
+#pragma clang loop unroll_count(4)
+#endif
         for (int k = 1; k <= 60; ++k) {
             sinh_term = divide_scalar(multiply(sinh_term, a2), (float)((2*k) * (2*k + 1)));
             sinh_sum  = add(sinh_sum, sinh_term);
@@ -1663,7 +1684,7 @@ XPMATH_INLINE_FUNCTION QuadFloat cosh(QuadFloat a) {
 // tanh(a) via expm1(2a)/(expm1(2a)+2) with odd reflection — avoids dividing two
 // nearly-equal large exponentials.  ff_math.hpp:580 (QD qd_real.cpp:2547 divides
 // the exponentials directly; the expm1 form is better-conditioned near 0).
-XPMATH_INLINE_FUNCTION QuadFloat tanh(QuadFloat a) {
+XPMATH_NOINLINE_FUNCTION QuadFloat tanh(QuadFloat a) {
     if (a.f0 < 0.0f) return negate(tanh(negate(a)));
     if (a.f0 > kQFHyperbolicSaturate) return QuadFloat(1.0f);  // KI-7, see dd_math.hpp
     QuadFloat e = expm1(mul_pwr2(a, 2.0f));
@@ -1786,7 +1807,7 @@ XPMATH_INLINE_FUNCTION QuadFloat pow(QuadFloat a, QuadFloat b) {
 // included, so the inf test comes first.  Otherwise a NaN operand propagates to
 // NaN through the arithmetic.  Both operands are taken through abs() first, so
 // the returned infinity is always +inf.
-XPMATH_INLINE_FUNCTION QuadFloat hypot(QuadFloat a, QuadFloat b) {
+XPMATH_NOINLINE_FUNCTION QuadFloat hypot(QuadFloat a, QuadFloat b) {
     QuadFloat x = abs(a);
     QuadFloat y = abs(b);
     if (detail::isinf(x.f0)) return x;

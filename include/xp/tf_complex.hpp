@@ -228,6 +228,59 @@ struct TripleFloatComplex {
             return mul_recover(*this, b, rr, ri);
         return TripleFloatComplex(rr, ri);
     }
+    // ---- operator/ legs, split out -----------------------------------------
+    // Same split, same reason, as QuadFloatComplex::operator/ -- see the note
+    // there and config.hpp's XPMATH_NOINLINE_FUNCTION.  TF's fused operator/ is
+    // ~106 KB, under the 131,068-byte gfx90a S_BRANCH reach today, but it is
+    // the identical code shape and it carries the identical confirmed defect on
+    // ROCm 7.0.2 (`.LBB53_5488`): the `b == 0` guard's relaxed edge targets the
+    // function's own return block.  Under the reach by 19% is a margin, not an
+    // invariant, so it gets the structural fix rather than the measurement.
+    static XPMATH_NOINLINE_FUNCTION TripleFloatComplex
+    div_smith_re(TripleFloatComplex a, TripleFloatComplex b) {
+        TripleFloat rr = divide(b.im, b.re);
+        TripleFloat dd = add(b.re, multiply(b.im, rr));
+        return TripleFloatComplex(divide(add(a.re, multiply(a.im, rr)), dd),
+                   divide(subtract(a.im, multiply(a.re, rr)), dd));
+    }
+    static XPMATH_NOINLINE_FUNCTION TripleFloatComplex
+    div_smith_im(TripleFloatComplex a, TripleFloatComplex b) {
+        TripleFloat rr = divide(b.re, b.im);
+        TripleFloat dd = add(multiply(b.re, rr), b.im);
+        return TripleFloatComplex(divide(add(multiply(a.re, rr), a.im), dd),
+                   divide(subtract(multiply(a.im, rr), a.re), dd));
+    }
+    // KI-41 scaled leg; `ma`/`mbb` are the operand magnitudes the caller has
+    // already formed to decide that this leg is the one to take.
+    static XPMATH_NOINLINE_FUNCTION TripleFloatComplex
+    div_scaled(TripleFloatComplex a, TripleFloatComplex b, float ma, float mbb) {
+        float sa = 1.0f, sb = 1.0f, pa = ma, pb = mbb;
+        // Lift whichever operand is smaller, so neither overflows.
+        for (int k = 0; k < 8; ++k) {
+            if ((pa * pb) * 0x1p-48f >= 1.17549435e-38f * 4.0f) break;
+            if (pa < pb) { sa *= 0x1p24f; pa *= 0x1p24f; }
+            else         { sb *= 0x1p24f; pb *= 0x1p24f; }
+        }
+        const TripleFloat ar2 = detail::tf_pow2_scale(a.re, sa), ai2 = detail::tf_pow2_scale(a.im, sa);
+        const TripleFloat br2 = detail::tf_pow2_scale(b.re, sb), bi2 = detail::tf_pow2_scale(b.im, sb);
+        const TripleFloat den2 = add(multiply(br2, br2), multiply(bi2, bi2));
+        const TripleFloat inv2 = divide(TripleFloat(1.0f), den2);
+        const TripleFloat q_re = multiply(detail::tf_cross(ar2, br2, negate(ai2), bi2), inv2);
+        const TripleFloat q_im = multiply(detail::tf_cross(ai2, br2, ar2, bi2), inv2);
+        // result carries the factor sa/sb; undo it exactly.
+        const float un = sb / sa;
+        return TripleFloatComplex(detail::tf_pow2_scale(q_re, un), detail::tf_pow2_scale(q_im, un));
+    }
+    static XPMATH_NOINLINE_FUNCTION TripleFloatComplex
+    div_direct(TripleFloatComplex a, TripleFloatComplex b) {
+        TripleFloat denom = add(multiply(b.re, b.re), multiply(b.im, b.im));
+        TripleFloat inv   = divide(TripleFloat(1.0f), denom);
+        // KI-36: both numerators are 2x2 determinants and both can cancel.
+        return TripleFloatComplex(
+            multiply(detail::tf_cross(a.re, b.re, negate(a.im), b.im), inv),
+            multiply(detail::tf_cross(a.im, b.re, a.re, b.im), inv));
+    }
+
     XPMATH_INLINE_FUNCTION TripleFloatComplex operator/(TripleFloatComplex b) const {
         // (a+bi)/(c+di) = [(ac+bd) + (bc-ad)i] / (c²+d²)  (qf_complex.hpp:133-142)
         if (b.re.f0 == 0.0f && b.im.f0 == 0.0f) {
@@ -251,17 +304,8 @@ struct TripleFloatComplex {
             // words well above it, not just below 1.0e-18f.  Smith's algorithm forms
             // no square at all, so it is correct across the whole widened band.
             if (!(mb <= detail::kTFSqHi && mb >= detail::kTFSqLo)) {
-                if (mre >= mim) {
-                    TripleFloat rr = divide(b.im, b.re);
-                    TripleFloat dd = add(b.re, multiply(b.im, rr));
-                    return TripleFloatComplex(divide(add(re, multiply(im, rr)), dd),
-                               divide(subtract(im, multiply(re, rr)), dd));
-                } else {
-                    TripleFloat rr = divide(b.re, b.im);
-                    TripleFloat dd = add(multiply(b.re, rr), b.im);
-                    return TripleFloatComplex(divide(add(multiply(re, rr), im), dd),
-                               divide(subtract(multiply(im, rr), re), dd));
-                }
+                if (mre >= mim) return div_smith_re(*this, b);
+                else            return div_smith_im(*this, b);
             }
         }
         // KI-41.  THE NUMERATOR PRODUCT CAN GO SUBNORMAL, INDEPENDENTLY OF
@@ -307,30 +351,10 @@ struct TripleFloatComplex {
             // The 4x margin keeps the lifted word clear of the boundary itself.
             if (ma != 0.0f && mbb != 0.0f &&
                 (ma * mbb) * 0x1p-48f < 1.17549435e-38f * 4.0f) {
-                float sa = 1.0f, sb = 1.0f, pa = ma, pb = mbb;
-                // Lift whichever operand is smaller, so neither overflows.
-                for (int k = 0; k < 8; ++k) {
-                    if ((pa * pb) * 0x1p-48f >= 1.17549435e-38f * 4.0f) break;
-                    if (pa < pb) { sa *= 0x1p24f; pa *= 0x1p24f; }
-                    else         { sb *= 0x1p24f; pb *= 0x1p24f; }
-                }
-                const TripleFloat ar2 = detail::tf_pow2_scale(re, sa), ai2 = detail::tf_pow2_scale(im, sa);
-                const TripleFloat br2 = detail::tf_pow2_scale(b.re, sb), bi2 = detail::tf_pow2_scale(b.im, sb);
-                const TripleFloat den2 = add(multiply(br2, br2), multiply(bi2, bi2));
-                const TripleFloat inv2 = divide(TripleFloat(1.0f), den2);
-                const TripleFloat q_re = multiply(detail::tf_cross(ar2, br2, negate(ai2), bi2), inv2);
-                const TripleFloat q_im = multiply(detail::tf_cross(ai2, br2, ar2, bi2), inv2);
-                // result carries the factor sa/sb; undo it exactly.
-                const float un = sb / sa;
-                return TripleFloatComplex(detail::tf_pow2_scale(q_re, un), detail::tf_pow2_scale(q_im, un));
+                return div_scaled(*this, b, ma, mbb);
             }
         }
-        TripleFloat denom = add(multiply(b.re, b.re), multiply(b.im, b.im));
-        TripleFloat inv   = divide(TripleFloat(1.0f), denom);
-        // KI-36: both numerators are 2x2 determinants and both can cancel.
-        return TripleFloatComplex(
-            multiply(detail::tf_cross(re, b.re, negate(im), b.im), inv),
-            multiply(detail::tf_cross(im, b.re, re, b.im), inv));
+        return div_direct(*this, b);
     }
     XPMATH_INLINE_FUNCTION TripleFloatComplex operator-() const {
         return TripleFloatComplex(negate(re), negate(im));
@@ -441,7 +465,7 @@ XPMATH_INLINE_FUNCTION TripleFloatComplex conj(TripleFloatComplex z) {
 // B = sqrt((R+|re|)/2) + i·sign(im)·sqrt((R-|re|)/2), R = |z|, arranged to avoid
 // cancellation. The ½ and 2 are FP32-exact literals used via multiply_scalar
 // (PORT_NOTES_TF §3), matching qf_complex.hpp:226-228.
-XPMATH_INLINE_FUNCTION TripleFloatComplex sqrt(TripleFloatComplex z) {
+XPMATH_NOINLINE_FUNCTION TripleFloatComplex sqrt(TripleFloatComplex z) {
     if (z.re.f0 == 0.0f && z.im.f0 == 0.0f) return TripleFloatComplex();
     TripleFloat r  = abs(z);   // KI-8: scaled magnitude, was sqrt(re^2+im^2) inline
     TripleFloat a1 = abs(z.re);
@@ -675,7 +699,7 @@ XPMATH_INLINE_FUNCTION TripleFloatComplex tan(TripleFloatComplex z) {
 // at a >= 2 into log(a) + log1p(sqrt(1 - (1/a)^2)); it measured WORSE (FF asin
 // 14.00 -> 13.81, QF asinh 28.83 -> 27.75 at z = 2, pure rounding churn from
 // the extra log), so the split does not ship.
-XPMATH_INLINE_FUNCTION TripleFloat xp_asin_imag_mag(TripleFloat x, TripleFloat y) {
+XPMATH_NOINLINE_FUNCTION TripleFloat xp_asin_imag_mag(TripleFloat x, TripleFloat y) {
     const TripleFloat one(1.0f);
     const TripleFloat xp1  = add(x, one);
     const TripleFloat xm1s = subtract(x, one);            // signed, for the max(x,1) term
@@ -764,7 +788,7 @@ XPMATH_INLINE_FUNCTION TripleFloat xp_asin_imag_mag(TripleFloat x, TripleFloat y
 // because a is EVEN in x -- x -> -x swaps r and s -- so the leg is even too and
 // the quadrant comes from the SIGNED Re z in acos's atan2 alone, with no case
 // split. xp_asin_real_mag() is left as the atan2 wrapper so asin is unchanged.
-XPMATH_INLINE_FUNCTION TripleFloat xp_asin_real_leg(TripleFloat x, TripleFloat y) {
+XPMATH_NOINLINE_FUNCTION TripleFloat xp_asin_real_leg(TripleFloat x, TripleFloat y) {
     const TripleFloat one(1.0f);
     const TripleFloat xp1  = add(x, one);
     const TripleFloat xm1s = subtract(x, one);            // signed, for the max(1,x) term
@@ -977,7 +1001,7 @@ XPMATH_INLINE_FUNCTION bool xp_acosh_chain_short(TripleFloat x, TripleFloat y) {
 // underflows; and both terms carry the sign of x, so the sum never cancels.
 // Used ONLY where the primary form has provably lost its x^2 -- see the call
 // sites in atan() and atanh(), which explain when that is.
-XPMATH_INLINE_FUNCTION TripleFloat xp_atan_re_split(TripleFloat x, TripleFloat y) {
+XPMATH_NOINLINE_FUNCTION TripleFloat xp_atan_re_split(TripleFloat x, TripleFloat y) {
     const TripleFloat one_(1.0f);
     return multiply_scalar(add(xp_atan2_safe(x, subtract(one_, y)),
                                xp_atan2_safe(x, add(one_, y))),

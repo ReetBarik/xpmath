@@ -80,17 +80,17 @@ namespace xp {
 struct DoubleDouble;
 XPMATH_INLINE_FUNCTION DoubleDouble add(DoubleDouble a, DoubleDouble b);
 XPMATH_INLINE_FUNCTION DoubleDouble subtract(DoubleDouble a, DoubleDouble b);
-XPMATH_INLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b);
-XPMATH_INLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b);
+XPMATH_NOINLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b);
+XPMATH_NOINLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b);
 XPMATH_INLINE_FUNCTION DoubleDouble multiply_scalar(DoubleDouble a, double b);
 XPMATH_INLINE_FUNCTION DoubleDouble divide_scalar(DoubleDouble a, double b);
 XPMATH_INLINE_FUNCTION DoubleDouble negate(DoubleDouble a);
 XPMATH_INLINE_FUNCTION DoubleDouble abs(DoubleDouble a);
-XPMATH_INLINE_FUNCTION DoubleDouble sqrt(DoubleDouble a);
+XPMATH_NOINLINE_FUNCTION DoubleDouble sqrt(DoubleDouble a);
 XPMATH_INLINE_FUNCTION DoubleDouble round_to_nearest_int(DoubleDouble a);
 XPMATH_INLINE_FUNCTION DoubleDouble pow_int(DoubleDouble a, int n);
-XPMATH_INLINE_FUNCTION DoubleDouble exp(DoubleDouble a);
-XPMATH_INLINE_FUNCTION DoubleDouble log(DoubleDouble a);
+XPMATH_NOINLINE_FUNCTION DoubleDouble exp(DoubleDouble a);
+XPMATH_NOINLINE_FUNCTION DoubleDouble log(DoubleDouble a);
 XPMATH_INLINE_FUNCTION DoubleDouble pow(DoubleDouble a, DoubleDouble b);
 // KI-44: the unevaluated-pair trio behind pow. Defined after the Shewchuk
 // expansion helpers they use (dd_expansion_push / _compress, ~line 1715), which
@@ -292,7 +292,7 @@ XPMATH_INLINE_FUNCTION void dd_split(double a, double& hi, double& lo) {
 // hardware product, not a rescaled stand-in.
 //
 // TwoProduct (Dekker splitting)
-XPMATH_INLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b) {
+XPMATH_NOINLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b) {
     const double p = a.hi * b.hi;                                   // KI-27
     if (!detail::isfinite(p) || p == 0.0) return DoubleDouble(p, 0.0);
     double a1, a2, b1, b2;                                          // KI-30
@@ -401,7 +401,7 @@ XPMATH_INLINE_FUNCTION DoubleDouble dd_divide_core(DoubleDouble a, DoubleDouble 
 }
 }  // namespace detail
 
-XPMATH_INLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b) {
+XPMATH_NOINLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b) {
     if (!detail::dd_div_lift_wanted(a, b)) return detail::dd_divide_core(a, b);
     const double step = 0x1p53, target = 2.2250738585072014e-308 * 4.0, cap = 0x1p159;
     double sa = 1.0, sb = 1.0;
@@ -535,7 +535,7 @@ XPMATH_INLINE_FUNCTION DoubleDouble round_to_nearest_int(DoubleDouble a) {
     else            return add(subtract(a, CON), CON);
 }
 
-XPMATH_INLINE_FUNCTION DoubleDouble sqrt(DoubleDouble a) {
+XPMATH_NOINLINE_FUNCTION DoubleDouble sqrt(DoubleDouble a) {
     if (a.hi == 0.0) return DoubleDouble(0.0);
     if (a.hi < 0.0) {
         XPMATH_PRINTF("DDSQRT: negative argument\n");
@@ -601,7 +601,7 @@ XPMATH_INLINE_FUNCTION DoubleDouble pow_int(DoubleDouble a, int n) {
 // Exp / Log family
 // ============================================================
 
-XPMATH_INLINE_FUNCTION DoubleDouble exp(DoubleDouble a) {
+XPMATH_NOINLINE_FUNCTION DoubleDouble exp(DoubleDouble a) {
     const int nq = 6;
     const double eps = 1.0e-32;
     DoubleDouble al2 = DoubleDouble_log2();
@@ -728,7 +728,7 @@ XPMATH_INLINE_FUNCTION DoubleDouble exp(DoubleDouble a) {
     return DoubleDouble(detail::ldexp(s3.hi, nz), detail::ldexp(s3.lo, nz));
 }
 
-XPMATH_INLINE_FUNCTION DoubleDouble log(DoubleDouble a) {
+XPMATH_NOINLINE_FUNCTION DoubleDouble log(DoubleDouble a) {
     // KI-6: log(+inf) = +inf, returned directly. Since exp() now returns +inf
     // on genuine overflow instead of 0, the Newton step below would evaluate
     // (a - e^x)/e^x = (inf - inf)/inf = NaN on an infinite argument. atanh(±1)
@@ -1358,7 +1358,7 @@ XPMATH_INLINE_FUNCTION DoubleDouble atan(DoubleDouble a) {
         return (r.hi < 0.0) ? DoubleDouble(-h.hi, -h.lo) : h;
     return r;
 }
-XPMATH_INLINE_FUNCTION DoubleDouble atan2(DoubleDouble y, DoubleDouble x) {
+XPMATH_NOINLINE_FUNCTION DoubleDouble atan2(DoubleDouble y, DoubleDouble x) {
     return angle(x, y);
 }
 

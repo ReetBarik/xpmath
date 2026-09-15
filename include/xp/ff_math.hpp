@@ -92,17 +92,17 @@ namespace xp {
 struct FloatFloat;
 XPMATH_INLINE_FUNCTION FloatFloat add(FloatFloat a, FloatFloat b);
 XPMATH_INLINE_FUNCTION FloatFloat subtract(FloatFloat a, FloatFloat b);
-XPMATH_INLINE_FUNCTION FloatFloat multiply(FloatFloat a, FloatFloat b);
-XPMATH_INLINE_FUNCTION FloatFloat divide(FloatFloat a, FloatFloat b);
+XPMATH_NOINLINE_FUNCTION FloatFloat multiply(FloatFloat a, FloatFloat b);
+XPMATH_NOINLINE_FUNCTION FloatFloat divide(FloatFloat a, FloatFloat b);
 XPMATH_INLINE_FUNCTION FloatFloat multiply_scalar(FloatFloat a, float b);
 XPMATH_INLINE_FUNCTION FloatFloat divide_scalar(FloatFloat a, float b);
 XPMATH_INLINE_FUNCTION FloatFloat negate(FloatFloat a);
 XPMATH_INLINE_FUNCTION FloatFloat abs(FloatFloat a);
-XPMATH_INLINE_FUNCTION FloatFloat sqrt(FloatFloat a);
+XPMATH_NOINLINE_FUNCTION FloatFloat sqrt(FloatFloat a);
 XPMATH_INLINE_FUNCTION FloatFloat round_to_nearest_int(FloatFloat a);
 XPMATH_INLINE_FUNCTION FloatFloat pow_int(FloatFloat a, int n);
-XPMATH_INLINE_FUNCTION FloatFloat exp(FloatFloat a);
-XPMATH_INLINE_FUNCTION FloatFloat log(FloatFloat a);
+XPMATH_NOINLINE_FUNCTION FloatFloat exp(FloatFloat a);
+XPMATH_NOINLINE_FUNCTION FloatFloat log(FloatFloat a);
 XPMATH_INLINE_FUNCTION FloatFloat pow(FloatFloat a, FloatFloat b);
 XPMATH_INLINE_FUNCTION FloatFloat ff_mul_ext(FloatFloat x, FloatFloat y, float& err);
 XPMATH_INLINE_FUNCTION FloatFloat ff_log_ext(FloatFloat a, float& err);
@@ -225,7 +225,7 @@ XPMATH_INLINE_FUNCTION FloatFloat subtract(FloatFloat a, FloatFloat b) {
 }
 
 // TwoProduct (Dekker splitting). Splitter = 2^13 + 1 for FP32 (24-bit mantissa).
-XPMATH_INLINE_FUNCTION FloatFloat multiply(FloatFloat a, FloatFloat b) {
+XPMATH_NOINLINE_FUNCTION FloatFloat multiply(FloatFloat a, FloatFloat b) {
     // KI-27.  Non-finite / degenerate signalling on the PRODUCT — the
     // multiply-side counterpart of the guard KI-19 put on divide(), and the
     // exact rule qf_two_prod/tf_two_prod already carry.  Full derivation at
@@ -427,7 +427,7 @@ XPMATH_INLINE_FUNCTION FloatFloat ff_divide_core(FloatFloat a, FloatFloat b) {
 }
 }  // namespace detail
 
-XPMATH_INLINE_FUNCTION FloatFloat divide(FloatFloat a, FloatFloat b) {
+XPMATH_NOINLINE_FUNCTION FloatFloat divide(FloatFloat a, FloatFloat b) {
     if (!detail::ff_div_lift_wanted(a, b)) return detail::ff_divide_core(a, b);
     const float step = 0x1p24f, target = 1.17549435e-38f * 4.0f, cap = 0x1p72f;
     float sa = 1.0f, sb = 1.0f;
@@ -634,7 +634,7 @@ XPMATH_INLINE_FUNCTION FloatFloat round_to_nearest_int(FloatFloat a) {
     return FloatFloat(hi, lo);
 }
 
-XPMATH_INLINE_FUNCTION FloatFloat sqrt(FloatFloat a) {
+XPMATH_NOINLINE_FUNCTION FloatFloat sqrt(FloatFloat a) {
     if (a.hi == 0.0f) return FloatFloat(0.0f);
     if (a.hi < 0.0f) {
         XPMATH_PRINTF("FFSQRT: negative argument\n");
@@ -686,7 +686,7 @@ XPMATH_INLINE_FUNCTION FloatFloat pow_int(FloatFloat a, int n) {
 // Exp / Log family
 // ============================================================
 
-XPMATH_INLINE_FUNCTION FloatFloat exp(FloatFloat a) {
+XPMATH_NOINLINE_FUNCTION FloatFloat exp(FloatFloat a) {
     const int nq = 4;
     const float eps = 1.0e-15f;
     FloatFloat al2 = FloatFloat_log2();
@@ -770,7 +770,7 @@ XPMATH_INLINE_FUNCTION FloatFloat exp(FloatFloat a) {
     return FloatFloat(ldexpf(s3.hi, nz), ldexpf(s3.lo, nz));
 }
 
-XPMATH_INLINE_FUNCTION FloatFloat log(FloatFloat a) {
+XPMATH_NOINLINE_FUNCTION FloatFloat log(FloatFloat a) {
     if (detail::isinf(a.hi)) return a;   // KI-6, see dd_math.hpp
     if (a.hi <= 0.0f) {
         XPMATH_PRINTF("FFLOG: non-positive argument\n");
@@ -1260,7 +1260,7 @@ XPMATH_INLINE_FUNCTION FloatFloat atan(FloatFloat a) {
         return (r.hi < 0.0f) ? FloatFloat(-h.hi, -h.lo) : h;
     return r;
 }
-XPMATH_INLINE_FUNCTION FloatFloat atan2(FloatFloat y, FloatFloat x) {
+XPMATH_NOINLINE_FUNCTION FloatFloat atan2(FloatFloat y, FloatFloat x) {
     return angle(x, y);
 }
 
@@ -1379,7 +1379,7 @@ XPMATH_INLINE_FUNCTION FloatFloat tanh(FloatFloat a) {
 // limit (asinh(a) -> log(2a)).  No cancellation: log(|a|) >= 41 dominates the
 // second term's log(2) ~ 0.69, and both are computed to full relative
 // precision.  Below the band the original expression is kept bit-for-bit.
-XPMATH_INLINE_FUNCTION FloatFloat asinh(FloatFloat a) {
+XPMATH_NOINLINE_FUNCTION FloatFloat asinh(FloatFloat a) {
     if (a.hi < 0.0f) return negate(asinh(negate(a)));
     if (a.hi > detail::kFFSqHi) {
         FloatFloat u = divide(FloatFloat(1.0f), a);

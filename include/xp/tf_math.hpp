@@ -80,20 +80,20 @@ namespace xp {
 struct TripleFloat;
 XPMATH_INLINE_FUNCTION TripleFloat add(TripleFloat a, TripleFloat b);
 XPMATH_INLINE_FUNCTION TripleFloat subtract(TripleFloat a, TripleFloat b);
-XPMATH_INLINE_FUNCTION TripleFloat multiply(TripleFloat a, TripleFloat b);
-XPMATH_INLINE_FUNCTION TripleFloat divide(TripleFloat a, TripleFloat b);
+XPMATH_NOINLINE_FUNCTION TripleFloat multiply(TripleFloat a, TripleFloat b);
+XPMATH_NOINLINE_FUNCTION TripleFloat divide(TripleFloat a, TripleFloat b);
 XPMATH_INLINE_FUNCTION TripleFloat multiply_scalar(TripleFloat a, float b);
 XPMATH_INLINE_FUNCTION TripleFloat divide_scalar(TripleFloat a, float b);
 XPMATH_INLINE_FUNCTION TripleFloat mul_pwr2(TripleFloat a, float b);
 XPMATH_INLINE_FUNCTION TripleFloat negate(TripleFloat a);
 XPMATH_INLINE_FUNCTION TripleFloat abs(TripleFloat a);
 XPMATH_INLINE_FUNCTION TripleFloat sqr(TripleFloat a);
-XPMATH_INLINE_FUNCTION TripleFloat sqrt(TripleFloat a);
+XPMATH_NOINLINE_FUNCTION TripleFloat sqrt(TripleFloat a);
 XPMATH_INLINE_FUNCTION TripleFloat round_to_nearest_int(TripleFloat a);
 XPMATH_INLINE_FUNCTION TripleFloat pow_int(TripleFloat a, int n);
-XPMATH_INLINE_FUNCTION TripleFloat exp(TripleFloat a);
-XPMATH_INLINE_FUNCTION TripleFloat log(TripleFloat a);
-XPMATH_INLINE_FUNCTION TripleFloat log1p(TripleFloat a);   // asinh() is defined above it
+XPMATH_NOINLINE_FUNCTION TripleFloat exp(TripleFloat a);
+XPMATH_NOINLINE_FUNCTION TripleFloat log(TripleFloat a);
+XPMATH_NOINLINE_FUNCTION TripleFloat log1p(TripleFloat a);   // asinh() is defined above it
 XPMATH_INLINE_FUNCTION TripleFloat pow(TripleFloat a, TripleFloat b);
 // KI-44: the unevaluated-pair trio behind pow, defined after the expansion
 // helpers they use (tf_expansion_push / _compress, ~line 1732).
@@ -535,7 +535,7 @@ XPMATH_INLINE_FUNCTION TripleFloat abs(TripleFloat a) {
 // (those words do not exist at k=3), and the closing renormalization is
 // renorm_3 over four words (p0,p1,s0,s1) instead of renorm over five —
 // so s2, QD's u^4 word, is folded into s1 rather than passed separately.
-XPMATH_INLINE_FUNCTION TripleFloat multiply(TripleFloat a, TripleFloat b) {
+XPMATH_NOINLINE_FUNCTION TripleFloat multiply(TripleFloat a, TripleFloat b) {
     float p0, p1, p2, p3, p4, p5;
     float q0, q1, q2, q3, q4, q5;
     float t0, t1;
@@ -702,7 +702,7 @@ XPMATH_INLINE_FUNCTION TripleFloat tf_divide_core(TripleFloat a, TripleFloat b) 
 }
 }  // namespace detail
 
-XPMATH_INLINE_FUNCTION TripleFloat divide(TripleFloat a, TripleFloat b) {
+XPMATH_NOINLINE_FUNCTION TripleFloat divide(TripleFloat a, TripleFloat b) {
     if (!detail::tf_div_lift_wanted(a, b)) return detail::tf_divide_core(a, b);
     const float step = 0x1p24f, target = 1.17549435e-38f * 4.0f, cap = 0x1p96f;
     float sa = 1.0f, sb = 1.0f;
@@ -743,7 +743,7 @@ XPMATH_INLINE_FUNCTION TripleFloat divide_scalar(TripleFloat a, float b) {
 // 48b → 72b, saturating at TF width, so 2 iterations reach full precision
 // (confirmed by early-out on iteration 2). QD uses eps = 2^-212; TF uses
 // eps = 2^-72, the unit roundoff.
-XPMATH_INLINE_FUNCTION TripleFloat sqrt(TripleFloat a) {
+XPMATH_NOINLINE_FUNCTION TripleFloat sqrt(TripleFloat a) {
     if (a.f0 == 0.0f)
         return TripleFloat(0.0f);
 
@@ -868,7 +868,7 @@ XPMATH_INLINE_FUNCTION TripleFloat pow_int(TripleFloat a, int n) {
 //   |r|^9 / 9! ≈ 4.9e-23   (< u, converged)
 // So N = 9 terms suffice. Convergence eps set to 1e-21f (coarser than u, per
 // PORT_NOTES_QF.md §7 to avoid FF's exp-eps stall bug).
-XPMATH_INLINE_FUNCTION TripleFloat exp(TripleFloat a) {
+XPMATH_NOINLINE_FUNCTION TripleFloat exp(TripleFloat a) {
     const float k_inv_log2 = 1.44269504088896341f;  // 1/ln(2)
     const TripleFloat k_log2 = TripleFloat_log2();
 
@@ -957,7 +957,7 @@ XPMATH_INLINE_FUNCTION TripleFloat exp(TripleFloat a) {
 // log: Newton iteration x ← x + (a - e^x)/e^x. Port of qd_real::log
 // (qd_real.cpp:998-1041), specialized to k=3. Initial estimate from
 // FP32 log(a.f0). Three iterations double precision 24→48→72 bits.
-XPMATH_INLINE_FUNCTION TripleFloat log(TripleFloat a) {
+XPMATH_NOINLINE_FUNCTION TripleFloat log(TripleFloat a) {
     if (detail::isinf(a.f0)) return a;   // KI-6, see dd_math.hpp
     if (a.f0 <= 0.0f) {
         XPMATH_PRINTF("TFLOG: non-positive argument\n");
@@ -1427,7 +1427,7 @@ XPMATH_INLINE_FUNCTION TripleFloat angle(TripleFloat x, TripleFloat y) {
 }
 
 // atan2(y, x) = angle(x, y).  QD qd_real.cpp:2393 (STL argument order).
-XPMATH_INLINE_FUNCTION TripleFloat atan2(TripleFloat y, TripleFloat x) {
+XPMATH_NOINLINE_FUNCTION TripleFloat atan2(TripleFloat y, TripleFloat x) {
     return angle(x, y);
 }
 
@@ -1645,7 +1645,7 @@ XPMATH_INLINE_FUNCTION TripleFloat expm1(TripleFloat a) {
 // dd_math.hpp's log1p for the derivation (KI-5(b)), including why Goldberg's
 // correction was measured and rejected. The old body log(a+1) lost
 // log10(1/|a|) digits for small a.
-XPMATH_INLINE_FUNCTION TripleFloat log1p(TripleFloat a) {
+XPMATH_NOINLINE_FUNCTION TripleFloat log1p(TripleFloat a) {
     if (detail::fabs(a.f0) < 0.25f) {
         TripleFloat t   = divide(a, add(TripleFloat(2.0f), a));
         TripleFloat t2  = multiply(t, t);
