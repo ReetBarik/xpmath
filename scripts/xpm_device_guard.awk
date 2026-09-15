@@ -1,9 +1,31 @@
 # Classify every function in a gfx90a device .s.
-# Columns: KIND  bytes  relax_sites  poisoned_sites  symbol
+# Columns: KIND  bytes  relax_sites  poisoned_sites  self_calls  symbol
 #   KIND    KERNEL (ends s_endpgm, immune) or callee (returns via s[30:31])
 #   bytes   instruction count x BPI (default 4.71, override with -v BPI=)
 #   relax   BranchRelaxation long-jump expansions (any scratch register)
-#   poison  ... of those, ones that scavenged s[30:31]  <-- the defect
+#   poison  ... of those, ones that scavenged s[30:31]  <-- defect 1
+#   self    call relocations naming the emitting function itself <-- defect 2
+#
+# SELF-CALLS ARE A SEPARATE DEFECT FROM BRANCH RELAXATION and the second half of
+# this file's job.  A recursive device call makes the AMDGPU backend stop
+# bounding the kernel's stack: it sets `.amdhsa_uses_dynamic_stack 1`, provisions
+# nothing for the recursive frame, and charges the whole non-inlined chain below
+# the recursive entry to the HIP runtime's per-thread allowance, which defaults
+# to 1024 B.  Measured on MI250X/gfx90a: xp::asinh overran it in all four
+# backends -- FF and TF took hipErrorIllegalAddress, DD and QF silently returned
+# wrong values on the reflected arm.  See docs/ROCM_RECURSIVE_DEVICE_STACK.md.
+#
+# The recursion here is always ONE level (a sign reflection or an argument
+# reflection), so it is not the depth that hurts; it is that ANY self-call at all
+# disables the static bound for the entire chain.  Hence the gate is zero
+# tolerance rather than a threshold.
+#
+# Detection is on the relocation OPERAND, not on a name grep: the backend spells
+# a direct call as `s_add_u32 sN, sN, <callee>@rel32@lo+4`, so a self-call is
+# exactly a `<sym>@rel32@lo` inside the body of <sym>.  Anchoring on the operand
+# is what keeps `s_mov_b32`/label comments and same-named OVERLOADS (the mangled
+# name carries the signature) out of the count -- a source-level grep for
+# `name(` inside `name` reports ~76 false positives on these headers.
 #
 # THE ESTIMATE IS DELIBERATELY LOW AND YOU MUST NOT GATE ON THE HARD REACH
 # ALONE.  Function bodies here are `.p2align 2` and `.size` is
@@ -57,16 +79,28 @@ BEGIN { if (BPI + 0 <= 0) BPI = 4.71 }
 
 # Function label: `name:` followed by the `; @name` comment the asm printer emits.
 /^[A-Za-z_][A-Za-z0-9_$.]*:[ \t]*;[ \t]*@/ {
-    fn = $1; sub(/:$/, "", fn); n = 0; ke = 0; relax = 0; poison = 0; pend = 0; next
+    fn = $1; sub(/:$/, "", fn)
+    n = 0; ke = 0; relax = 0; poison = 0; self = 0; pend = 0; next
 }
 /^\.Lfunc_end[0-9]+:/ {
     if (fn != "")
-        printf "%-6s %9d %4d %4d %s\n", (ke ? "KERNEL" : "callee"),
-               int(n * BPI), relax, poison, fn
+        printf "%-6s %9d %4d %4d %4d %s\n", (ke ? "KERNEL" : "callee"),
+               int(n * BPI), relax, poison, self, fn
     fn = ""; next
 }
 fn == "" { next }
 /^\t[a-z]/ { n++; if ($1 == "s_endpgm") ke = 1 }
+# Self-call: a call relocation whose target symbol is this very function.  The
+# trailing `; @sym` comment on the label line is stripped first, or every
+# function would count itself once.
+/@rel32@lo/ {
+    r = $0; sub(/[ \t]*;.*$/, "", r)
+    while (match(r, /[A-Za-z_$][A-Za-z0-9_$.]*@rel32@lo/)) {
+        s = substr(r, RSTART, RLENGTH); sub(/@rel32@lo$/, "", s)
+        if (s == fn) self++
+        r = substr(r, RSTART + RLENGTH)
+    }
+}
 /s_getpc_b64 s\[30:31\]/ { pend = 1; next }
 /^\.Lpost_getpc/ { relax++; if (pend) poison++ }
 { pend = 0 }

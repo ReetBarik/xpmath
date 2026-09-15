@@ -16,8 +16,12 @@
 #                   targets sit behind if(XPMATH_MPFR_FOUND) and this lane used
 #                   to run 34 of 38 while reporting "31 tests" and green.
 #   device-nvcc     Does each of the eight headers compile for a CUDA device?
-#   device-hip      Same for HIP/ROCm, plus the gfx90a branch-reach guard over
-#                   the emitted device asm.  UNVERIFIED — see `continue-on-error`.
+#   device-hip      Same for HIP/ROCm, plus the gfx90a codegen guard over the
+#                   emitted device asm: branch reach (tiers 1-3) and recursive
+#                   device stack (tier 4).  UNVERIFIED — see `continue-on-error`.
+#                   The UNVERIFIED applies to the ROCm container, not to the
+#                   guard: both guards were run locally against ROCm 7.0.2, each
+#                   confirmed to fail on the pre-fix source and pass on the fixed.
 #
 # TOOLCHAIN NOTES THAT MATTER (do not "simplify" these away):
 #
@@ -562,7 +566,23 @@ jobs:
                      + xp::abs(xp::log(z)).hi
                      + (double)xp::abs(xp::log(zf)).hi
                      + (double)xp::abs(xp::log(zq)).f0
-                     + (double)xp::abs(xp::log(zt)).f0;
+                     + (double)xp::abs(xp::log(zt)).f0
+                     // The reflecting functions, so the tier-4 self-call guard
+                     // below has something to judge.  asinh/tanh/tgamma each
+                     // used to reflect by calling THEMSELVES; on gfx90a that
+                     // cost the kernel its static stack bound.  Without these
+                     // calls the TU emits no recursive callee and tier 4 is
+                     // vacuously clean.  See docs/ROCM_RECURSIVE_DEVICE_STACK.md.
+                     + xp::asinh(a).hi
+                     + (double)xp::asinh(c).hi
+                     + (double)xp::asinh(d).f0
+                     + (double)xp::asinh(e).f0
+                     + xp::tanh(a).hi
+                     + (double)xp::tanh(c).hi
+                     + (double)xp::tanh(d).f0
+                     + (double)xp::tanh(e).f0
+                     + xp::tgamma(a).hi
+                     + (double)xp::tgamma(c).hi;
           }
           EOF
           # --save-temps=obj keeps the device .s next to the object so the
@@ -574,14 +594,29 @@ jobs:
           ls -la /tmp/hipsave/*-amdgcn-amd-amdhsa-*.s
 
       # ----------------------------------------------------------------------
-      # gfx90a branch-reach guard.  See docs/ROCM_BRANCH_RELAXATION_BUG.md.
+      # gfx90a device-codegen guard.  TWO defects, one pass.
       #
+      # (1) BRANCH REACH, tiers 1-3.  See docs/ROCM_BRANCH_RELAXATION_BUG.md.
       # LLVM's BranchRelaxation scavenges s[30:31] -- the live return-address
       # pair -- when it expands an out-of-range branch inside a device CALLEE,
       # so the callee's own `s_setpc_b64 s[30:31]` return jumps back into its
       # body.  Confirmed on ROCm 7.0.2 / gfx90a.  The library's defence is
       # XPMATH_NOINLINE_FUNCTION keeping every callee under the +/-131,068 B
       # S_BRANCH reach; this step is what stops that regressing.
+      #
+      # (2) RECURSIVE DEVICE STACK, tier 4.  See
+      # docs/ROCM_RECURSIVE_DEVICE_STACK.md.  A device self-call sets
+      # uses_dynamic_stack and provisions nothing, charging the whole
+      # non-inlined chain to the HIP runtime's 1024 B default per-thread
+      # allowance.  Measured on MI250X: xp::asinh overran it in all four
+      # backends.  Tier 4 is zero-tolerance and was executed both ways locally
+      # before it was committed -- exit 1 on 6ddcb2d's headers (9 self-calls:
+      # asinh x4, tanh x3, tgamma x2), exit 0 on the de-recursed ones.
+      #
+      # These two mitigations PULL AGAINST EACH OTHER, which is why they share a
+      # guard: the noinline that fixes (1) deepens the frame chain that (2)
+      # cannot afford.  Any future change to either must be re-measured against
+      # both tiers, not just its own.
       #
       # SCOPE, HONESTLY.  This TU has one kernel, so with everything inlined
       # the bulk would land in a kernel, which is exempt (kernels end in
@@ -597,7 +632,7 @@ jobs:
       # committed (unlike the rest of this lane), both ways: exit 0 on the
       # fixed build, exit 1 on the pre-fix one.
       # ----------------------------------------------------------------------
-      - name: gfx90a branch-reach guard on the emitted device asm
+      - name: gfx90a device-codegen guard on the emitted device asm
         shell: bash
         run: |
           set -euo pipefail
