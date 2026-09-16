@@ -1,10 +1,11 @@
 # `tests/` — the ctest suite
 
 49 registered targets with Kokkos, **21 without it**. The count is asserted in
-CI (`.github/workflows/ci.yml`, `expected=49`), not assumed: four targets sit
-behind `if(XPMATH_MPFR_FOUND)`, and a missing optional dependency removes
-coverage while leaving the lane green. That is how this lane once ran 34 targets
-while reporting 31.
+CI (`.github/workflows/ci.yml`, `expected=49`), not assumed. That is how this
+lane once ran 34 targets while reporting 31. Four targets used to sit behind
+`if(XPMATH_MPFR_FOUND)`, so a runner missing a `-dev` package lost coverage and
+stayed green; that guard is gone — MPFR/MPC are the sweep oracle now, and a
+missing package is a configure `FATAL_ERROR`.
 
 `-DXPMATH_WITH_KOKKOS=OFF` drops the 28 targets that link Kokkos and keeps the
 other 21 — both gates, both gate self-tests, the oracle-conversion and reduction

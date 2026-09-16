@@ -4,7 +4,8 @@
 //
 // WHAT THIS PRODUCES
 //   One CSV row per (backend, kind, op, grid point) giving the measured decimal
-//   digits of agreement with a __float128 / __complex128 oracle:
+//   digits of agreement with an MPFR/MPC oracle at 400 bits, carried in
+//   __float128:
 //
 //       backend,kind,op,point,digits
 //       DD,r,add,0,31.00
@@ -35,8 +36,9 @@
 //   accurate"; this says "this op is no less accurate than it was".
 //
 // RELATIONSHIP TO scripts/gen_corpus.cpp
-//   Same posture (standalone host tool, not wired into CMake, libquadmath
-//   allowed) and the same determinism discipline. The deterministic sampling
+//   Same posture (standalone host tool) and the same determinism discipline.
+//   gen_corpus still scores against libquadmath; this tool no longer does, and
+//   the two are not comparable point for point. The deterministic sampling
 //   primitives — splitmix64, fnv1a, struct Rng, stream_seed — and the per-op
 //   domain repair table are taken from gen_corpus.cpp rather than reinvented;
 //   see the DETERMINISM and PER-OP DOMAIN POLICY sections of that file for the
@@ -50,15 +52,33 @@
 //   corpus finds defects by volume; this grid finds them by aim.
 //
 // BUILD (from the repository root)
-//   g++ -std=c++17 -fext-numeric-literals -O2 -Iinclude
-//       scripts/sweep_accuracy.cpp -lquadmath -o scripts/sweep_accuracy
+//   g++ -std=c++17 -fext-numeric-literals -O2 -Iinclude -DXPMATH_HAVE_MPFR=1
+//       scripts/sweep_accuracy.cpp -lmpc -lmpfr -lgmp -o scripts/sweep_accuracy
 //
 //   (-fext-numeric-literals is required for __float128 under -std=c++17.
 //    Toolchain of record is gcc/13.3.0 per scripts/prepare.sh.)
 //
+//   NO -lquadmath, AND THAT IS CHECKED, NOT HOPED FOR. __float128 is a COMPILER
+//   type: its arithmetic comes from libgcc (__addtf3 and friends) and its
+//   elementary functions, where this file still needs any, come from glibc's
+//   *f128 entry points in libm. libquadmath supplied only the `*q` spellings,
+//   and the oracle that used to call them is gone. Two acceptance checks say so:
+//
+//       ldd  <build>/tests/sweep_accuracy | grep -i quadmath      # no output
+//       nm -D --undefined-only <build>/tests/sweep_accuracy \
+//           | grep -E 'q$'                                        # empty
+//
+//   The second is the real one -- a stale RPATH or a transitive dependency can
+//   make the first lie, but an undefined `sinq` cannot hide.
+//
 // RUN
-//   ./scripts/sweep_accuracy                                  # write the default baseline
-//   ./scripts/sweep_accuracy --out /tmp/fresh.csv             # write elsewhere
+//   ./scripts/sweep_accuracy --out /tmp/fresh.csv             # write a sweep
+//   (There is NO default output path. With no --out this computes the whole
+//    sweep and then exits 1 with `cannot open  for writing`. That is deliberate
+//    -- it used to default to the committed baseline and overwrote it in place
+//    -- but the line here used to say "write the default baseline", which is
+//    where the belief came from. Always pass an explicit --out. Same for
+//    --grid-out.)
 //   ./scripts/sweep_accuracy --baseline validation/sweep/sweep_baseline.csv
 //                                                             # MONOTONE GATE: exit 1 on any decrease
 //   ./scripts/sweep_accuracy --grid-out validation/sweep/sweep_grid.csv
@@ -247,11 +267,44 @@
 #include "../include/xp/qf_complex.hpp"
 #include "../include/xp/tf_complex.hpp"
 
-#include <quadmath.h>
-#if defined(XPMATH_HAVE_MPFR)
-#include <mpfr.h>
-#include <mpc.h>   // complex MPFR: the complex half of the --oracle=mpfr arm
+// MPFR/MPC is the ORACLE, and it is the only one. Not optional, not selectable:
+// see THE ORACLE above. Without it there is no reference and nothing to build.
+#if !defined(XPMATH_HAVE_MPFR)
+#error "sweep_accuracy requires MPFR and MPC. Install libmpfr-dev, libgmp-dev and libmpc-dev, reconfigure, and build again."
 #endif
+#include <mpfr.h>
+#include <mpc.h>   // complex MPFR: the complex half of the oracle
+
+// Selects a deliberately broken conversion; see validation/oracle_conv_selftest.sh
+// and the q_to_mpfr / mpfr_to_q comments. Defined here rather than next to those
+// because the include below is conditional on it.
+#ifndef XPMATH_POISON_ORACLE_CONV
+#define XPMATH_POISON_ORACLE_CONV 0
+#endif
+
+// <quadmath.h> IS DELIBERATELY NOT INCLUDED, and its absence is load-bearing.
+// The header is what makes fabsq/sinq/csqrtq/... spellable, so leaving it out is
+// what stops the evaluator arm growing back one call at a time. __float128 is a
+// COMPILER type whose arithmetic (__addtf3 and friends) comes from libgcc, not
+// from libquadmath, so keeping it as the sweep's carrier costs nothing; see the
+// q_* helpers below for the handful of bit-level operations that used to come
+// from the header. The two poisoned builds that deliberately restore the old
+// decimal conversions are the sole exception, and they say so.
+#if XPMATH_POISON_ORACLE_CONV == 1 || XPMATH_POISON_ORACLE_CONV == 3
+#include <quadmath.h>   // POISON ONLY: quadmath_snprintf / strtoflt128
+#endif
+
+// glibc's binary128 complex functions, used by ONE thing: the branch-cut arm of
+// --oracle-selftest, which has to compare MPC against an implementation that
+// shares no code with it. Declared rather than pulled in via <complex.h>, whose
+// `I` and `complex` macros do not belong in a 4k-line C++ translation unit.
+// These live in libm, not libquadmath.
+typedef _Complex _Float128 QCplx;
+extern "C" {
+QCplx csqrtf128(QCplx);
+QCplx clogf128 (QCplx);
+QCplx casinf128(QCplx);
+}
 
 
 #include <cmath>
@@ -268,6 +321,57 @@
 #include <vector>
 
 namespace {
+
+// ---------------------------------------------------------------------------
+// WHAT <quadmath.h> USED TO SUPPLY, AND WHERE IT COMES FROM NOW
+// ---------------------------------------------------------------------------
+// Everything below is a BIT-LEVEL or EXACT operation on binary128 — sign,
+// exponent, magnitude, the integral-part family, the select family. None of
+// them is an approximation, so none of them is a second opinion about what the
+// right answer is: there is exactly one, and the compiler knows it. That is why
+// these can move to __builtin_ without a measurement, and why the transcendental
+// functions in kappa_real CANNOT (they went to MPFR instead).
+//
+// q_abs / q_copysign / q_signbit / q_isnan / q_isinf / q_finite compile to
+// inline bit arithmetic with no call at all. The rest resolve to glibc's
+// binary128 entry points (floorf128, ldexpf128, ...) in libm.
+//
+// NAMED q_* AND NOT q_abs. Defining `q_abs` ourselves would have kept the diff
+// to zero call sites, and would have made every one of them lie: a reader who
+// sees q_abs reasonably concludes libquadmath is in the link line. The rename is
+// the point.
+inline __float128 q_abs      (__float128 v)                { return __builtin_fabsq(v); }
+inline __float128 q_copysign (__float128 v, __float128 s)  { return __builtin_copysignq(v, s); }
+inline bool       q_signbit  (__float128 v)                { return __builtin_signbit(v) != 0; }
+inline bool       q_isnan    (__float128 v)                { return __builtin_isnan(v) != 0; }
+inline bool       q_isinf    (__float128 v)                { return __builtin_isinf(v) != 0; }
+inline bool       q_finite   (__float128 v)                { return __builtin_isfinite(v) != 0; }
+inline __float128 q_ldexp    (__float128 v, int e)         { return __builtin_ldexpf128(v, e); }
+inline __float128 q_frexp    (__float128 v, int* e)        { return __builtin_frexpf128(v, e); }
+inline __float128 q_floor    (__float128 v)                { return __builtin_floorf128(v); }
+inline __float128 q_ceil     (__float128 v)                { return __builtin_ceilf128(v); }
+inline __float128 q_trunc    (__float128 v)                { return __builtin_truncf128(v); }
+inline __float128 q_nearbyint(__float128 v)                { return __builtin_nearbyintf128(v); }
+inline __float128 q_fmax     (__float128 a, __float128 b)  { return __builtin_fmaxf128(a, b); }
+inline __float128 q_fmin     (__float128 a, __float128 b)  { return __builtin_fminf128(a, b); }
+inline __float128 q_fdim     (__float128 a, __float128 b)  { return __builtin_fdimf128(a, b); }
+inline __float128 q_nan      ()                            { return __builtin_nanf128(""); }
+const  __float128 kQInf = __builtin_inff128();
+
+// sqrt and hypot are not bit operations, but they are not opinions either:
+// IEEE 754 REQUIRES sqrt to be correctly rounded, so glibc's sqrtf128 and a
+// 400-bit MPFR sqrt rounded to binary128 are the same number by definition, and
+// the builtin is the cheap way to say it. hypot rides along because its only
+// callers here are magnitude denominators in the ulp scorer and in
+// kappa_complex_numeric — carrier arithmetic, never a reference.
+inline __float128 q_sqrt (__float128 v)                    { return __builtin_sqrtf128(v); }
+inline __float128 q_hypot(__float128 a, __float128 b)      { return __builtin_hypotf128(a, b); }
+
+// log2/log10 of a magnitude. Both callers cast the result straight to double —
+// one counts decimal digits of agreement, the other reads an exponent — so the
+// binary128 tail was never observable, and neither is a reference.
+inline __float128 q_log2 (__float128 v)                    { return __builtin_log2f128(v); }
+inline __float128 q_log10(__float128 v)                    { return __builtin_log10f128(v); }
 
 const char* const kFormatVersion = "xp-sweep-2";
 const char* const kDefaultOut    = "validation/sweep/sweep_baseline.csv";
@@ -309,54 +413,35 @@ uint64_t stream_seed(uint64_t base, const char* name, unsigned kind) {
 }
 
 // ---------------------------------------------------------------------------
-// Oracle fingerprint — hashes the raw bits of a fixed set of libquadmath results
-// so that "the reference moved" is distinguishable from "the library
-// regressed". See the DETERMINISM section above. Deliberately covers the
-// complex inverse functions, which is where the two libquadmath builds on this
-// machine actually differ.
+// Oracle fingerprint — hashes the raw bits of a fixed set of ORACLE results so
+// that "the reference moved" is distinguishable from "the library regressed".
+// See the DETERMINISM section above.
+//
+// WHAT IT USED TO HASH, AND WHY THAT IS GONE. Until the oracle became MPFR-only
+// this was a block of sqrtq/logq/casinq/... calls: the fingerprint's whole job
+// was to notice that the machine's libquadmath had changed under it, which it
+// silently did between two installs on this host and again between gcc 13 and
+// 14. There is no libquadmath left to notice. MPFR and MPC are correctly rounded
+// to a stated precision, so a version change does not move a value the way a
+// libm rewrite does, and the thing genuinely worth detecting is now a change in
+// the CONVERSIONS that carry binary128 in and out of them. That is exactly what
+// the two contributions below hash: values that have travelled
+// q_to_mpfr -> mpfr -> mpfr_to_q and q_to_mpc -> mpc -> mpc_to_q.
+//
+// The seed constant is kept from the MPFR arm, so a baseline written by the
+// selectable-oracle build under --oracle=mpfr and one written by this build
+// share a lineage rather than looking unrelated. They still differ, because the
+// quadmath block above is no longer mixed in — that is the change being made,
+// and the fingerprint saying so is the mechanism working.
 // ---------------------------------------------------------------------------
-extern bool g_oracle_mpfr;
-#if defined(XPMATH_HAVE_MPFR)
 uint64_t mpfr_oracle_fingerprint(uint64_t h);   // defined with the MPFR oracle
 uint64_t mpc_oracle_fingerprint(uint64_t h);    // defined with the MPC oracle
-#endif
 uint64_t oracle_fingerprint() {
-  // Seeded by WHICH oracle is in use: an MPFR-scored baseline and a
-  // libquadmath-scored one are not comparable, and the fingerprint is the
-  // mechanism that says so.
-  // Seeded by WHICH PAIR of oracles is in use. A single bool was enough when
-  // only the real arm could change; with a complex arm too there are four
-  // pairings and a baseline has to say which one produced it.
-  uint64_t h = g_oracle_mpfr ? 0xc3a5c85c97cb3127ull : 1469598103934665603ull;
-  auto mix = [&h](__float128 v) {
-    unsigned char b[sizeof(__float128)];
-    std::memcpy(b, &v, sizeof(b));
-    for (size_t i = 0; i < sizeof(b); ++i) { h ^= b[i]; h *= 1099511628211ull; }
-  };
-  auto mixc = [&mix](__complex128 z) { mix(crealq(z)); mix(cimagq(z)); };
-  for (int k = 1; k <= 8; ++k) {
-    const __float128 x = (__float128)k / (__float128)7.0;
-    mix(sqrtq(x)); mix(logq(x)); mix(expq(x)); mix(log10q(x)); mix(log1pq(x));
-    mix(sinq(x)); mix(cosq(x)); mix(atanq(x)); mix(tanhq(x));
-    mix(acoshq((__float128)1 + x)); mix(powq(x, (__float128)3.5));
-    __complex128 z; __real__ z = x; __imag__ z = (__float128)0.25 * (__float128)k;
-    mixc(csqrtq(z)); mixc(clogq(z)); mixc(clog10q(z)); mixc(cexpq(z));
-    mixc(casinq(z)); mixc(cacosq(z)); mixc(cacoshq(z));
-    mixc(casinhq(z)); mixc(catanhq(z)); mixc(cpowq(z, z));
-  }
-  // Seeding by WHICH oracle is in use stops being enough once the oracle itself
-  // can change. When MPFR is selected, hash values that have actually travelled
-  // the q_to_mpfr -> mpfr -> mpfr_to_q chain, so a change in the conversions
-  // moves the fingerprint instead of silently rescoring the sweep.
-#if defined(XPMATH_HAVE_MPFR)
-  if (g_oracle_mpfr) {
-    h = mpfr_oracle_fingerprint(h);
-    // The complex arm travels its own conversions, so it contributes its own
-    // hash. Without this an MPC-scored baseline and a quadmath-complex one
-    // carry the SAME fingerprint and the file cannot say which produced it.
-    h = mpc_oracle_fingerprint(h);
-  }
-#endif
+  uint64_t h = 0xc3a5c85c97cb3127ull;
+  h = mpfr_oracle_fingerprint(h);
+  // The complex arm travels its own conversions, so it contributes its own
+  // hash: a change confined to q_to_mpc / mpc_to_q has to move the file too.
+  h = mpc_oracle_fingerprint(h);
   return h;
 }
 
@@ -695,52 +780,27 @@ void fill_complex_operands(int id, size_t i, const std::vector<GridPoint>& grid,
 }
 
 // ---------------------------------------------------------------------------
-// __float128 oracle. Same op semantics as gen_corpus.cpp's reference_real /
-// reference_complex, including its use of powq for exp2/exp10 (exp10q does not
-// exist and exp2q is absent from older libquadmath).
-// ---------------------------------------------------------------------------
-// KI-37.  `round` is the one op where the oracle and the library follow
-// DIFFERENT conventions, and the oracle was the wrong one.  C's `round` — and
-// therefore libquadmath's `roundq` — breaks ties AWAY from zero, so it scores
-// round(-6.5) as -7 and round(-0.5) as -1.  KI-20 deliberately gave the library
-// IEEE 754 `roundToIntegralTiesToEven`, under which those are -6 and -0, and
-// the library implements that correctly.  The two conventions differ at the
-// exact half-integers and nowhere else, which is why the disagreement was
-// exactly 8 points per backend.  Round the tie to even here so the oracle
-// scores the convention the library actually implements.
+// THE ORACLE: MPFR for the real ops, MPC for the complex ones. There is no
+// other, and --oracle=quadmath is refused rather than honoured.
 //
-// Written out rather than delegating to rintq/nearbyintq: those honour the
-// DYNAMIC rounding mode, and the sweep must not depend on the mode a caller
-// happens to leave set.
-__float128 round_ties_even_q(__float128 a) {
-  if (isnanq(a) || !finiteq(a) || a == 0) return a;
-  const __float128 t = truncq(a);                    // toward zero, exact
-  const __float128 f = a - t;                        // |f| < 1, exact (Sterbenz)
-  const __float128 af = fabsq(f);
-  if (af < (__float128)0.5) return t;
-  if (af > (__float128)0.5) return t + copysignq((__float128)1.0, a);
-  // Exact tie: keep the even neighbour.
-  const __float128 h = t * (__float128)0.5;          // exact
-  if (h == truncq(h)) return t;                      // t already even
-  return t + copysignq((__float128)1.0, a);
-}
-
-#if defined(XPMATH_HAVE_MPFR)
-// ---------------------------------------------------------------------------
-// MPFR ORACLE (real path only), enabled with --oracle=mpfr.
+// WHY THE ALTERNATIVE WENT AWAY. libquadmath's argument reduction fails above
+// ~1e40: measured against MPFR at 400 bits, sinq/cosq/tanq are clean at 1e40 and
+// wrong by ~1e34 ulps at 1e60 and beyond. ulps_scalar treats the oracle as
+// exact, so every trig row at family (5) magnitudes (to 5.32e255) was scored
+// against a broken reference, and a correct implementation read as a regression.
+// KI-36 is the complex analogue: libquadmath's complex divide is itself
+// round-then-cancel, so the "error" the sweep attributed to the library was the
+// reference moving. Keeping a selectable oracle kept both of those reachable by
+// a command-line flag, and kept two baselines that are not comparable.
 //
-// libquadmath's argument reduction fails above ~1e40: measured against MPFR at
-// 400 bits, sinq/cosq/tanq are clean at 1e40 and wrong by ~1e34 ulps at 1e60
-// and beyond. Since ulps_scalar treats the oracle as exact, every trig row at
-// family (5) magnitudes (to 5.32e255) is currently scored against a broken
-// reference, and a correct implementation would read as a regression.
+// MEASURED BEFORE THE ARM WAS REMOVED, on the toolchain of record with
+// gcc/13.3.0's libquadmath correctly resolved: 29,970 of 436,080 rows move in
+// ulps between the two oracles (6.9%) and NOT ONE row changes state. The
+// difference is a better reference, not a different verdict — which is what made
+// deleting the arm safe rather than merely tidy. Cost: 7.93 s to 11.02 s.
 //
 // 400 bits is >3x the 113-bit format under test and matches the precision used
 // by every probe in this arc.
-//
-// REAL ONLY. MPFR has no complex type; complex stays on libquadmath rather
-// than pulling in MPC or hand-rolling branch cuts.
-__float128 reference_real_q_quad(int id, __float128 a, __float128 b, __float128 c);
 static const mpfr_prec_t kOraclePrec = 400;
 // The complex arm's working precision, separate from kOraclePrec ONLY so that
 // POISON 8 can drop it without touching the conversions.
@@ -764,7 +824,64 @@ static const mpfr_prec_t kMpcPrec = 64;
 #else
 static const mpfr_prec_t kMpcPrec = kOraclePrec;
 #endif
-bool g_oracle_mpfr = false;
+
+// ---------------------------------------------------------------------------
+// MPFR SCRATCH for the kappa formulae.
+//
+// kappa_real needs exp/log/sin/cos/asin/... of a binary128 argument. Those used
+// to be libquadmath's, chosen so that selecting an alternate oracle moved only
+// the REFERENCES and never the BOUNDS -- one variable at a time. With one oracle
+// left that argument has nothing to protect, and keeping libquadmath alive for
+// it would have preserved the exact defect this file exists to route around: the
+// bound for sin at 1e60 would still be derived from a mis-reduced sin while the
+// reference is correct.
+//
+// One static pair, initialised once. The sweep is single-threaded (say so here
+// rather than paying mpfr_init2/mpfr_clear on every one of ~265k calls); if that
+// ever stops being true this has to become thread_local.
+struct MpfrScratch {
+  mpfr_t x, y;
+  MpfrScratch()  { mpfr_inits2(kOraclePrec, x, y, (mpfr_ptr)0); }
+  ~MpfrScratch() { mpfr_clears(x, y, (mpfr_ptr)0); }
+};
+__float128 mpfr_to_q(mpfr_srcptr v);
+void       q_to_mpfr(mpfr_t out, __float128 v);
+
+// Evaluate one MPFR unary function at a binary128 argument and round back.
+typedef int (*MpfrUnary)(mpfr_ptr, mpfr_srcptr, mpfr_rnd_t);
+__float128 q_elem(MpfrUnary f, __float128 a) {
+  static MpfrScratch s;
+  q_to_mpfr(s.x, a);
+  f(s.y, s.x, MPFR_RNDN);
+  return mpfr_to_q(s.y);
+}
+inline __float128 q_exp  (__float128 a) { return q_elem(mpfr_exp,   a); }
+inline __float128 q_expm1(__float128 a) { return q_elem(mpfr_expm1, a); }
+inline __float128 q_log  (__float128 a) { return q_elem(mpfr_log,   a); }
+inline __float128 q_log1p(__float128 a) { return q_elem(mpfr_log1p, a); }
+inline __float128 q_sin  (__float128 a) { return q_elem(mpfr_sin,   a); }
+inline __float128 q_cos  (__float128 a) { return q_elem(mpfr_cos,   a); }
+inline __float128 q_asin (__float128 a) { return q_elem(mpfr_asin,  a); }
+inline __float128 q_acos (__float128 a) { return q_elem(mpfr_acos,  a); }
+inline __float128 q_atan (__float128 a) { return q_elem(mpfr_atan,  a); }
+inline __float128 q_sinh (__float128 a) { return q_elem(mpfr_sinh,  a); }
+inline __float128 q_cosh (__float128 a) { return q_elem(mpfr_cosh,  a); }
+inline __float128 q_asinh(__float128 a) { return q_elem(mpfr_asinh, a); }
+inline __float128 q_acosh(__float128 a) { return q_elem(mpfr_acosh, a); }
+inline __float128 q_atanh(__float128 a) { return q_elem(mpfr_atanh, a); }
+
+// %.36g of a binary128, the one thing quadmath_snprintf was still doing outside
+// the evaluator arm. Diagnostic output only (--dump-operands and the selftest's
+// failure detail); nothing in the baseline CSV goes through here.
+const char* q_fmt(__float128 v) {
+  static char buf[4][80];
+  static int  k = 0;
+  k = (k + 1) & 3;
+  static MpfrScratch s;
+  q_to_mpfr(s.x, v);
+  mpfr_snprintf(buf[k], sizeof buf[k], "%.36Rg", s.x);
+  return buf[k];
+}
 
 // ---------------------------------------------------------------------------
 // __float128 <-> mpfr, EXACTLY. No decimal string anywhere on this path.
@@ -795,11 +912,9 @@ bool g_oracle_mpfr = false;
 // that was very nearly but not quite correctly rounded.
 //
 // XPMATH_POISON_ORACLE_CONV selects a deliberately broken conversion; see
-// validation/oracle_conv_selftest.sh.
+// validation/oracle_conv_selftest.sh. Its default is set at the top of the
+// file, next to the conditional <quadmath.h> include that reads it.
 // ---------------------------------------------------------------------------
-#ifndef XPMATH_POISON_ORACLE_CONV
-#define XPMATH_POISON_ORACLE_CONV 0
-#endif
 
 static_assert(sizeof(unsigned long) == 8,
               "the 113-bit split below hands mpfr two 64-bit halves");
@@ -813,13 +928,13 @@ void q_to_mpfr(mpfr_t out, __float128 v) {
   mpfr_set_str(out, buf, 10, MPFR_RNDN);
   return;
 #else
-  if (isnanq(v))          { mpfr_set_nan(out); return; }
-  if (isinfq(v))          { mpfr_set_inf(out, v > 0 ? 1 : -1); return; }
-  if (v == (__float128)0) { mpfr_set_zero(out, signbitq(v) ? -1 : 1); return; }
+  if (q_isnan(v))          { mpfr_set_nan(out); return; }
+  if (q_isinf(v))          { mpfr_set_inf(out, v > 0 ? 1 : -1); return; }
+  if (v == (__float128)0) { mpfr_set_zero(out, q_signbit(v) ? -1 : 1); return; }
 
   int        e = 0;
-  __float128 m = frexpq(v, &e);        // |m| in [0.5,1); normalises subnormals
-  m = ldexpq(m, kQMantBits);           // integral, |m| < 2^113. Both exact.
+  __float128 m = q_frexp(v, &e);        // |m| in [0.5,1); normalises subnormals
+  m = q_ldexp(m, kQMantBits);           // integral, |m| < 2^113. Both exact.
   e -= kQMantBits;
   const bool        neg = m < (__float128)0;
   unsigned __int128 um  = (unsigned __int128)(neg ? -m : m);
@@ -841,8 +956,8 @@ void q_to_mpfr(mpfr_t out, __float128 v) {
 }
 
 __float128 mpfr_to_q(mpfr_srcptr v) {
-  if (mpfr_nan_p(v))  return nanq("");
-  if (mpfr_inf_p(v))  return mpfr_sgn(v) > 0 ?  HUGE_VALQ : -HUGE_VALQ;
+  if (mpfr_nan_p(v))  return q_nan();
+  if (mpfr_inf_p(v))  return mpfr_sgn(v) > 0 ?  kQInf : -kQInf;
   if (mpfr_zero_p(v)) return mpfr_signbit(v) ? -(__float128)0 : (__float128)0;
 #if XPMATH_POISON_ORACLE_CONV == 3
   {
@@ -871,9 +986,19 @@ __float128 mpfr_to_q(mpfr_srcptr v) {
   mpfr_set(t, v, MPFR_RNDN);
   // Scale into double's exponent range so the three-double read is always
   // available: exp() references in this sweep reach 1e434, far past DBL_MAX.
-  long shift = (long)mpfr_get_exp(t);
-  if (shift >  1000000) shift =  1000000;
-  if (shift < -1000000) shift = -1000000;
+  //
+  // THE SCALE IS NOT CLAMPED, AND THAT IS A FIX. It used to be pinned to
+  // +-1000000 "so it fits an int", which silently broke the one invariant the
+  // read below depends on: t in [0.5, 1). sinh(1e6) has exponent 1442695, so
+  // the clamped scale left it at 2^442695, mpfr_get_d returned inf, the
+  // residual was -inf, and the third term made the sum a NaN. Every MPFR
+  // reference past 2^1000001 -- exp/sinh/cosh over the log and hard-reduction
+  // families -- was therefore a NaN rather than the +-inf binary128 rounds to.
+  // MEASURED: 80 rows (tanh, all four backends, |x| from 1e6 to 5.3e8) lost
+  // their condition number to it the moment kappa_real started using this
+  // conversion. The saturation now happens AFTER the read, where it is a
+  // statement about binary128's range instead of an accident of an int.
+  const long shift = (long)mpfr_get_exp(t);
   mpfr_mul_2si(t, t, -shift, MPFR_RNDN);      // exact; t is now in [0.5,1)
   // 113 bits fit in three doubles (3 x 53 = 159), each residual is exactly
   // representable, and the three-term sum equals t — which has 113 bits — so
@@ -886,8 +1011,13 @@ __float128 mpfr_to_q(mpfr_srcptr v) {
   }
   mpfr_clear(t);
   // The only remaining rounding, and only for binary128 overflow/subnormals.
-  // The sweep's references never reach 1e-4900, so it never fires in practice.
-  return ldexpq(acc, (int)shift);
+  // binary128 spans 2^-16494 (smallest subnormal) to just under 2^16384, so
+  // past +-20000 the answer is a saturating +-inf or +-0 and there is nothing
+  // for ldexp to round; inside that window ldexp does the saturating and the
+  // subnormal rounding itself, correctly, and its int argument is in range.
+  if (shift >  20000) return acc > 0 ?  kQInf : -kQInf;
+  if (shift < -20000) return acc > 0 ?  (__float128)0 : -(__float128)0;
+  return q_ldexp(acc, (int)shift);
 #endif
 }
 
@@ -930,7 +1060,7 @@ uint64_t mpfr_oracle_fingerprint(uint64_t h) {
 // ---------------------------------------------------------------------------
 
 // Split v into three doubles and hand mpfr one at a time. Shares nothing with
-// q_to_mpfr: no frexpq, no 128-bit integer, no decimal. Three doubles cover
+// q_to_mpfr: no q_frexp, no 128-bit integer, no decimal. Three doubles cover
 // 113 bits (3 x 53 = 159) and each residual of a binary128 after its leading
 // double is exactly representable, so this is exact — but ONLY while the whole
 // 113-bit span stays inside double, i.e. 2^-961 <= |v| <= 2^1023. Outside that
@@ -948,17 +1078,16 @@ void q_to_mpfr_by_doubles(mpfr_t out, __float128 v) {
   mpfr_add_d(out, out, d2, MPFR_RNDN);
 }
 
-#if defined(XPMATH_HAVE_MPFR)
 // Forward declarations for the complex half of the selftest below. The
-// conversions and the libquadmath complex reference are defined further down,
-// next to the oracle they serve; the selftest is up here with the rest of the
-// conversion checking. Declaring rather than reordering keeps each group with
-// the thing it belongs to.
+// conversions and the complex reference are defined further down, next to the
+// oracle they serve; the selftest is up here with the rest of the conversion
+// checking. Declaring rather than reordering keeps each group with the thing
+// it belongs to.
 void q_to_mpc(mpc_t out, __float128 re, __float128 im);
 void mpc_to_q(mpc_srcptr v, __float128& out_re, __float128& out_im);
-void reference_complex_q(int id, __float128 are, __float128 aim,
-                         __float128 bre, __float128 bim,
-                         __float128& out_re, __float128& out_im);
+void reference_complex_mpc(int id, __float128 are, __float128 aim,
+                           __float128 bre, __float128 bim,
+                           __float128& out_re, __float128& out_im);
 
 int oracle_conv_selftest() {
   int fails = 0;
@@ -966,11 +1095,10 @@ int oracle_conv_selftest() {
     std::printf("  FAIL  %-28s %s\n", what, detail);
     ++fails;
   };
-  auto qstr = [](__float128 v) {
-    static char b[4][64]; static int k = 0; k = (k + 1) & 3;
-    quadmath_snprintf(b[k], 64, "%.36Qe", v);
-    return b[k];
-  };
+  // Diagnostics only. q_fmt goes through q_to_mpfr, so under a poisoned build
+  // the printed value is itself poisoned -- that is fine here and nowhere else:
+  // no check below compares strings, and the harness greps for the check letter.
+  auto qstr = [](__float128 v) { return q_fmt(v); };
   auto same_bits = [](__float128 a, __float128 b) {
     return std::memcmp(&a, &b, sizeof a) == 0;
   };
@@ -988,23 +1116,23 @@ int oracle_conv_selftest() {
       (__float128)344.00439556808237,
       (__float128)1.5707963267948966,
       one, -one, (__float128)0.5,
-      one + ldexpq(one, -112),                     // last significand bit set
-      one - ldexpq(one, -113),                     // just below 1
+      one + q_ldexp(one, -112),                     // last significand bit set
+      one - q_ldexp(one, -113),                     // just below 1
       (__float128)2 / (__float128)3,               // 113 bits, none of them nice
       -((__float128)7 / (__float128)11),
-      ldexpq(one, -960) * ((__float128)3 / (__float128)7),
-      ldexpq(one, 1000) * ((__float128)3 / (__float128)7),
+      q_ldexp(one, -960) * ((__float128)3 / (__float128)7),
+      q_ldexp(one, 1000) * ((__float128)3 / (__float128)7),
   };
   // Round trip only: either outside double's range entirely (exp() references
   // in this sweep reach 1e434) or with a 113-bit span that reaches below
   // 2^-1074. An exponent error of even one bit still breaks the round trip, so
   // B is what covers the extremes A cannot reach.
   std::vector<__float128> wide = {
-      expq((__float128)1000), expq((__float128)-1000),
-      ldexpq(one, 16000) + ldexpq(one, 16000 - 112),
-      ldexpq(one, -16000),
-      ldexpq(one, -16440),                         // binary128 subnormal
-      ldexpq(one, -1000) * ((__float128)3 / (__float128)7),
+      q_exp((__float128)1000), q_exp((__float128)-1000),
+      q_ldexp(one, 16000) + q_ldexp(one, 16000 - 112),
+      q_ldexp(one, -16000),
+      q_ldexp(one, -16440),                         // binary128 subnormal
+      q_ldexp(one, -1000) * ((__float128)3 / (__float128)7),
       (__float128)5e-324,                          // smallest double subnormal
   };
 
@@ -1062,8 +1190,8 @@ int oracle_conv_selftest() {
     for (const double* p : hard) {
       args.push_back((__float128)p[0] + (__float128)p[1]);
       int ex = 0;
-      frexpq((__float128)p[0], &ex);
-      args.push_back((__float128)p[0] + ldexpq(one, ex - kQMantBits));
+      q_frexp((__float128)p[0], &ex);
+      args.push_back((__float128)p[0] + q_ldexp(one, ex - kQMantBits));
     }
     for (const __float128 x : args) {
       q_to_mpfr(m, x);
@@ -1094,7 +1222,7 @@ int oracle_conv_selftest() {
     for (int k = 0; k < 64; ++k) {
       const __float128 base = (__float128)(1.0 + (double)k * 0.0137);  // [1,2)
       const __float128 q =
-          ldexpq(base + ldexpq(one, -112), k - 32);    // last bit set, spread
+          q_ldexp(base + q_ldexp(one, -112), k - 32);    // last bit set, spread
       q_to_mpfr_by_doubles(m, q);
       mpfr_set_ui(u, 1, MPFR_RNDN);
       mpfr_mul_2si(u, u, (long)mpfr_get_exp(m) - kQMantBits, MPFR_RNDN);
@@ -1120,15 +1248,15 @@ int oracle_conv_selftest() {
     q_to_mpfr(m, nz);
     if (!mpfr_zero_p(m) || !mpfr_signbit(m)) bad("E -0 -> mpfr", "");
     if (!same_bits(mpfr_to_q(m), nz))        bad("E -0 round trip", "");
-    q_to_mpfr(m, HUGE_VALQ);
+    q_to_mpfr(m, kQInf);
     if (!mpfr_inf_p(m) || mpfr_sgn(m) < 0)   bad("E +inf -> mpfr", "");
-    if (mpfr_to_q(m) != HUGE_VALQ)           bad("E +inf round trip", "");
-    q_to_mpfr(m, -HUGE_VALQ);
+    if (mpfr_to_q(m) != kQInf)               bad("E +inf round trip", "");
+    q_to_mpfr(m, -kQInf);
     if (!mpfr_inf_p(m) || mpfr_sgn(m) > 0)   bad("E -inf -> mpfr", "");
-    if (mpfr_to_q(m) != -HUGE_VALQ)          bad("E -inf round trip", "");
-    q_to_mpfr(m, nanq(""));
+    if (mpfr_to_q(m) != -kQInf)              bad("E -inf round trip", "");
+    q_to_mpfr(m, q_nan());
     if (!mpfr_nan_p(m))                      bad("E nan -> mpfr", "");
-    if (!isnanq(mpfr_to_q(m)))               bad("E nan round trip", "");
+    if (!q_isnan(mpfr_to_q(m)))              bad("E nan round trip", "");
   }
 
   // -------------------------------------------------------------------------
@@ -1162,7 +1290,7 @@ int oracle_conv_selftest() {
     const __float128 vals[] = {
         one, -one, pz, nz, (__float128)0.5, -(__float128)100,
         (__float128)2 / (__float128)3, (__float128)182.21237390820801,
-        one + ldexpq(one, -112),
+        one + q_ldexp(one, -112),
     };
     for (__float128 a : vals) {
       for (__float128 b : vals) {
@@ -1177,8 +1305,8 @@ int oracle_conv_selftest() {
           bad("F q_to_mpc not exact", d);
         }
         // The signbit assertion. A value comparison above cannot see this.
-        if (mpfr_signbit(mpc_realref(z)) != (int)(signbitq(a) != 0) ||
-            mpfr_signbit(mpc_imagref(z)) != (int)(signbitq(b) != 0)) {
+        if (mpfr_signbit(mpc_realref(z)) != (int)(q_signbit(a) != 0) ||
+            mpfr_signbit(mpc_imagref(z)) != (int)(q_signbit(b) != 0)) {
           char d[200];
           std::snprintf(d, sizeof d, "re=%s im=%s (zero sign lost)",
                         qstr(a), qstr(b));
@@ -1195,9 +1323,17 @@ int oracle_conv_selftest() {
   //
   // At a cut the ANSWER depends on which side of a signed zero the argument
   // sits, so this is where a lost or flipped zero sign stops being invisible
-  // and starts being a wrong number. Require MPC and libquadmath to agree to
-  // well inside the binary128 floor at inputs drawn from the cuts the grid
-  // actually contains.
+  // and starts being a wrong number. Require MPC and an INDEPENDENT binary128
+  // implementation to agree to well inside the binary128 floor at inputs drawn
+  // from the cuts the grid actually contains.
+  //
+  // THE INDEPENDENT IMPLEMENTATION IS GLIBC'S, NOT LIBQUADMATH'S. csqrtf128 /
+  // clogf128 / casinf128 live in libm and share no code with libquadmath, which
+  // this file no longer links. They serve the same purpose the quadmath
+  // comparator did -- a second opinion about which SHEET the cut lands on, from
+  // a codebase that is not MPC -- and are equally fit for it: sheet selection is
+  // a sign test, not a precision test, which is the whole reason G needs the G2
+  // arm below to see a precision defect at all.
   //
   // This is also the only check that can see POISON 8 (a working precision
   // dropped to 113 bits with the conversions untouched): a round trip is
@@ -1218,21 +1354,23 @@ int oracle_conv_selftest() {
         {-(__float128)2,   pz}, {-(__float128)2,   nz},
     };
     for (const auto& c : cuts) {
-      __complex128 zq;
-      __real__ zq = c.re;
-      __imag__ zq = c.im;
+      QCplx zq;
+      __real__ zq = (_Float128)c.re;
+      __imag__ zq = (_Float128)c.im;
       for (int op = 0; op < 3; ++op) {
         q_to_mpc(z, c.re, c.im);
-        __complex128 refq;
-        if (op == 0) { mpc_sqrt(r, z, MPC_RNDNN); refq = csqrtq(zq); }
-        if (op == 1) { mpc_log (r, z, MPC_RNDNN); refq = clogq(zq);  }
-        if (op == 2) { mpc_asin(r, z, MPC_RNDNN); refq = casinq(zq); }
+        QCplx refq = zq;
+        if (op == 0) { mpc_sqrt(r, z, MPC_RNDNN); refq = csqrtf128(zq); }
+        if (op == 1) { mpc_log (r, z, MPC_RNDNN); refq = clogf128(zq);  }
+        if (op == 2) { mpc_asin(r, z, MPC_RNDNN); refq = casinf128(zq); }
+        const __float128 rre = (__float128)__real__ refq;
+        const __float128 rim = (__float128)__imag__ refq;
         __float128 gre = 0, gim = 0;
         mpc_to_q(r, gre, gim);
-        const __float128 dre = fabsq(gre - crealq(refq));
-        const __float128 dim = fabsq(gim - cimagq(refq));
-        const __float128 mag = hypotq(crealq(refq), cimagq(refq));
-        const __float128 tol = (mag > 0 ? mag : one) * ldexpq(one, -100);
+        const __float128 dre = q_abs(gre - rre);
+        const __float128 dim = q_abs(gim - rim);
+        const __float128 mag = q_hypot(rre, rim);
+        const __float128 tol = (mag > 0 ? mag : one) * q_ldexp(one, -100);
         if (!(dre <= tol) || !(dim <= tol)) {
           char d[240];
           std::snprintf(d, sizeof d, "op=%d z=(%s,%s)", op, qstr(c.re), qstr(c.im));
@@ -1242,8 +1380,11 @@ int oracle_conv_selftest() {
     }
     // G2 -- HEADROOM, not sheet agreement.
     //
-    // The arm above compares MPC against libquadmath, which pins the branch-cut
-    // SHEET but cannot measure precision: at a well-conditioned cut point both
+    // The arm above compares MPC against glibc's binary128 complex functions
+    // (libquadmath's, before this file stopped linking it -- the substitution
+    // changed nothing about this argument, because the point was never WHICH
+    // second opinion). That pins the branch-cut SHEET but cannot measure
+    // precision: at a well-conditioned cut point both
     // are correctly rounded and they agree at any working precision >= 113. It
     // was therefore blind to POISON 8 (working precision dropped to 113 with the
     // conversions untouched) -- measured, not assumed: the poison ran and G
@@ -1266,7 +1407,7 @@ int oracle_conv_selftest() {
       // sits on moduli 0.99 / 1.0 / 1.01 / 1.1, so this is the population the
       // sweep actually scores, not a contrived corner.
       for (int k = 40; k <= 80; k += 20) {
-        const __float128 eps = ldexpq(one, -k);
+        const __float128 eps = q_ldexp(one, -k);
         const __float128 zre = one + eps;
         const __float128 zim = eps;
         q_to_mpc(zl, zre, zim);
@@ -1327,9 +1468,9 @@ int oracle_conv_selftest() {
 
     // The C_Abs shape: an exact, positively-signed zero imaginary part.
     __float128 are_ = 0, aim_ = 0;
-    reference_complex_q(C_Abs, (__float128)3, (__float128)4,
-                        (__float128)0, (__float128)0, are_, aim_);
-    if (!(aim_ == (__float128)0) || signbitq(aim_))
+    reference_complex_mpc(C_Abs, (__float128)3, (__float128)4,
+                          (__float128)0, (__float128)0, are_, aim_);
+    if (!(aim_ == (__float128)0) || q_signbit(aim_))
       bad("H C_Abs imag not exact +0", qstr(aim_));
 
     mpfr_clears(u, off, (mpfr_ptr)0);
@@ -1342,14 +1483,14 @@ int oracle_conv_selftest() {
               XPMATH_POISON_ORACLE_CONV);
   return fails ? 1 : 0;
 }
-#endif
 
 
 __float128 reference_real_mpfr(int id, __float128 a, __float128 b, __float128 c) {
   mpfr_t ma, mb, mc, r;
   mpfr_inits2(kOraclePrec, ma, mb, mc, r, (mpfr_ptr)0);
   q_to_mpfr(ma, a); q_to_mpfr(mb, b); q_to_mpfr(mc, c);
-  bool handled = true;
+  bool       handled   = true;      // false => the answer is already in out_exact
+  __float128 out_exact = (__float128)0;
 
   switch (id) {
     case R_Add:       mpfr_add(r, ma, mb, MPFR_RNDN); break;
@@ -1386,80 +1527,38 @@ __float128 reference_real_mpfr(int id, __float128 a, __float128 b, __float128 c)
     case R_Ceil:      mpfr_ceil(r, ma); break;
     case R_Floor:     mpfr_floor(r, ma); break;
     case R_Trunc:     mpfr_trunc(r, ma); break;
-    case R_Round:     mpfr_rint(r, ma, MPFR_RNDN); break;   // ties-to-even, KI-37
-    default:          handled = false; break;               // sign/select ops
+    // KI-37. `round` is the one op where the oracle and the library follow
+    // DIFFERENT conventions, and the oracle used to be the wrong one. C's
+    // `round` -- and therefore libquadmath's `roundq` -- breaks ties AWAY from
+    // zero, so it scored round(-6.5) as -7 and round(-0.5) as -1. KI-20
+    // deliberately gave the library IEEE 754 `roundToIntegralTiesToEven`, under
+    // which those are -6 and -0, and the library implements that correctly. The
+    // two conventions differ at the exact half-integers and nowhere else, which
+    // is why the disagreement was exactly 8 points per backend.
+    //
+    // mpfr_rint under an EXPLICIT MPFR_RNDN is ties-to-even and does not consult
+    // the hardware rounding mode, so unlike rintq/q_nearbyint the answer cannot
+    // depend on a mode some caller left set. The hand-written ties-to-even this
+    // replaced existed only because libquadmath offered no such guarantee.
+    case R_Round:     mpfr_rint(r, ma, MPFR_RNDN); break;
+
+    // copysign/fmax/fmin/fdim are EXACT bit operations on the carrier: there is
+    // no rounding for a 400-bit intermediate to improve on, and routing them
+    // through mpfr would only add two conversions and lose the signed-zero and
+    // NaN-propagation corner cases that IEEE specifies and the compiler
+    // builtins already implement. Answered in the carrier, in this one switch;
+    // there is no second evaluator left to defer to.
+    case R_Copysign:  out_exact = q_copysign(a, b); handled = false; break;
+    case R_Fmax:      out_exact = q_fmax(a, b);     handled = false; break;
+    case R_Fmin:      out_exact = q_fmin(a, b);     handled = false; break;
+    case R_Fdim:      out_exact = q_fdim(a, b);     handled = false; break;
+
+    default:          out_exact = (__float128)0;    handled = false; break;
   }
 
-  __float128 out;
-  if (handled) {
-    out = mpfr_to_q(r);
-  } else {
-    // copysign/fmax/fmin/fdim are exact bit operations with no rounding to
-    // improve on; defer to libquadmath rather than reimplement their corner
-    // cases (signed zero, NaN propagation) in a second place.
-    out = reference_real_q_quad(id, a, b, c);
-  }
+  const __float128 out = handled ? mpfr_to_q(r) : out_exact;
   mpfr_clears(ma, mb, mc, r, (mpfr_ptr)0);
   return out;
-}
-
-#else
-// Built without MPFR. --oracle=mpfr is refused at startup rather than
-// silently falling back to libquadmath: a run that LOOKS like it used the
-// better oracle but did not is worse than one that will not start.
-bool g_oracle_mpfr = false;
-__float128 reference_real_q_quad(int id, __float128 a, __float128 b, __float128 c);
-__float128 reference_real_mpfr(int id, __float128 a, __float128 b, __float128 c) {
-  return reference_real_q_quad(id, a, b, c);
-}
-#endif  // XPMATH_HAVE_MPFR
-
-// The quad-argument form. --classify needs to evaluate the oracle at PERTURBED
-// inputs, which are quad and not exactly representable as double, so the body
-// lives here and the double entry point below just widens and forwards.
-__float128 reference_real_q_quad(int id, __float128 a, __float128 b, __float128 c) {
-  switch (id) {
-    case R_Add:       return a + b;
-    case R_Sub:       return a - b;
-    case R_Mul:       return a * b;
-    case R_Div:       return a / b;
-    case R_Sqrt:      return sqrtq(a);
-    case R_Abs:       return fabsq(a);
-    case R_Exp:       return expq(a);
-    case R_Log:       return logq(a);
-    case R_Exp2:      return powq((__float128)2.0, a);
-    case R_Exp10:     return powq((__float128)10.0, a);
-    case R_Expm1:     return expm1q(a);
-    case R_Log2:      return log2q(a);
-    case R_Log10:     return log10q(a);
-    case R_Log1p:     return log1pq(a);
-    case R_Sin:       return sinq(a);
-    case R_Cos:       return cosq(a);
-    case R_Tan:       return tanq(a);
-    case R_Asin:      return asinq(a);
-    case R_Acos:      return acosq(a);
-    case R_Atan:      return atanq(a);
-    case R_Sinh:      return sinhq(a);
-    case R_Cosh:      return coshq(a);
-    case R_Tanh:      return tanhq(a);
-    case R_Acosh:     return acoshq(a);
-    case R_Asinh:     return asinhq(a);
-    case R_Atanh:     return atanhq(a);
-    case R_Pow:       return powq(a, b);
-    case R_Hypot:     return hypotq(a, b);
-    case R_Fmod:      return fmodq(a, b);
-    case R_Remainder: return remainderq(a, b);
-    case R_Copysign:  return copysignq(a, b);
-    case R_Fmax:      return fmaxq(a, b);
-    case R_Fmin:      return fminq(a, b);
-    case R_Fdim:      return fdimq(a, b);
-    case R_Fma:       return fmaq(a, b, c);
-    case R_Ceil:      return ceilq(a);
-    case R_Floor:     return floorq(a);
-    case R_Round:     return round_ties_even_q(a);           // KI-37
-    case R_Trunc:     return truncq(a);
-  }
-  return (__float128)0.0;
 }
 
 // ---------------------------------------------------------------------------
@@ -1481,7 +1580,6 @@ __float128 reference_real_q_quad(int id, __float128 a, __float128 b, __float128 
 // check F must catch that by comparing SIGNBITS, not values. `-0.0 == +0.0` is
 // true and mpc_cmp compares values, so a round-trip or mpc_cmp-based check is
 // blind to it by construction.
-#if defined(XPMATH_HAVE_MPFR)
 void q_to_mpc(mpc_t out, __float128 re, __float128 im) {
   mpfr_t r, i;
   mpfr_inits2(kOraclePrec, r, i, (mpfr_ptr)0);   // input side is always full
@@ -1510,7 +1608,6 @@ void mpc_to_q(mpc_srcptr v, __float128& out_re, __float128& out_im) {
   out_im = mpfr_to_q(mpc_imagref(v));
 #endif
 }
-#endif
 
 // The complex oracle's contribution to the fingerprint.
 //
@@ -1522,7 +1619,6 @@ void mpc_to_q(mpc_srcptr v, __float128& out_re, __float128& out_im) {
 // coverage: the signed-zero branch cuts, |z| = 1 where log cancels to nothing,
 // and a badly conditioned divide. A fixture set of well-conditioned points
 // would hash fine and detect nothing.
-#if defined(XPMATH_HAVE_MPFR)
 uint64_t mpc_oracle_fingerprint(uint64_t h) {
   auto mix = [&h](__float128 v) {
     unsigned char b[sizeof(__float128)];
@@ -1536,7 +1632,7 @@ uint64_t mpc_oracle_fingerprint(uint64_t h) {
       {-(__float128)100, pz}, {-(__float128)100, nz},   // sqrt/log cut, both sheets
       {-one_, pz},            {-one_, nz},
       {pz, -one_},            {nz, -one_},
-      {one_ + ldexpq(one_, -60), ldexpq(one_, -60)},    // |z| ~ 1: log cancels
+      {one_ + q_ldexp(one_, -60), q_ldexp(one_, -60)},    // |z| ~ 1: log cancels
       {(__float128)4.84e8, one_},                       // the KI-36 divide point
   };
   mpc_t z, r;
@@ -1558,24 +1654,22 @@ uint64_t mpc_oracle_fingerprint(uint64_t h) {
   mpc_clear(r);
   return h;
 }
-#endif
 
-// C_Polar under the MPFR arm. NOT an MPC op: polar(r, theta) takes two REAL
+// C_Polar. NOT an MPC op: polar(r, theta) takes two REAL
 // arguments -- the grid packs r into the operand's real slot and theta into its
 // imaginary slot (see the C_Polar case in the backend dispatch, which calls
 // xp::polar(a.re, a.im)) -- so there is no complex number here to convert and
 // nothing for mpc_* to do.
 //
-// The quadmath reference it replaces is `rad * cosq(th)`, `rad * sinq(th)`:
+// The quadmath reference it replaced is `rad * cosq(th)`, `rad * sinq(th)`:
 // two real transcendentals composed by hand, which is exactly the population
-// the real MPFR arm was added for. At large |theta| the reduction inside
-// cosq/sinq is the limiting term, not the multiply.
+// the real MPFR path exists for. At large |theta| the reduction inside
+// cosq/sinq was the limiting term, not the multiply.
 //
 // ARGUMENT ORDER. mpfr_sin_cos(sop, cop, op, rnd) writes SIN first. The
 // library's own sincos(theta, c, s) writes COS first. That swap has cost this
 // project once already; the naming below is deliberately explicit rather than
 // positional.
-#if defined(XPMATH_HAVE_MPFR)
 void reference_polar_mpfr(__float128 rad, __float128 th,
                           __float128& out_re, __float128& out_im) {
   mpfr_t mr, mt, ms, mc, prod;
@@ -1589,75 +1683,13 @@ void reference_polar_mpfr(__float128 rad, __float128 th,
   out_im = mpfr_to_q(prod);
   mpfr_clears(mr, mt, ms, mc, prod, (mpfr_ptr)0);
 }
-#endif
 
-// Oracle dispatch. Default is libquadmath so this change records no different
-// number until --oracle=mpfr is asked for explicitly.
 __float128 reference_real_q(int id, __float128 a, __float128 b, __float128 c) {
-  return g_oracle_mpfr ? reference_real_mpfr(id, a, b, c)
-                       : reference_real_q_quad(id, a, b, c);
+  return reference_real_mpfr(id, a, b, c);
 }
 
 __float128 reference_real(int id, double da, double db, double dc) {
   return reference_real_q(id, (__float128)da, (__float128)db, (__float128)dc);
-}
-
-void reference_complex_q(int id, __float128 are, __float128 aim,
-                         __float128 bre, __float128 bim,
-                         __float128& out_re, __float128& out_im) {
-  __complex128 za; __real__ za = are; __imag__ za = aim;
-  __complex128 zb; __real__ zb = bre; __imag__ zb = bim;
-  __complex128 r;
-  switch (id) {
-    case C_Add:   r = za + zb;       break;
-    case C_Sub:   r = za - zb;       break;
-    case C_Mul:   r = za * zb;       break;
-    case C_Div:   r = za / zb;       break;
-    case C_Abs:
-#if XPMATH_POISON_ORACLE_CONV == 7
-      // POISON 7: route a complex-to-REAL op through the complex output path
-      // instead of writing an exact +0.0 imaginary. The scorer computes
-      // hypot(e_re, e_im) / hypot(ref_re, ref_im) and never consults an
-      // is_real flag, so it degenerates to a real measurement only because
-      // both imaginary parts are exactly zero. A tiny nonzero imaginary part
-      // silently rewrites the metric for every C_Abs row.
-      {
-        const __float128 a_ = cabsq(za);
-        out_re = a_;
-        out_im = a_ * ldexpq((__float128)1, -120);   // not zero, not visible
-        return;
-      }
-#else
-      out_re = cabsq(za); out_im = (__float128)0.0; return;
-#endif
-    case C_Conj:  r = conjq(za);     break;
-    case C_Sqrt:  r = csqrtq(za);    break;
-    case C_Exp:   r = cexpq(za);     break;
-    case C_Log:   r = clogq(za);     break;
-    case C_Log10: r = clog10q(za);   break;
-    case C_Sin:   r = csinq(za);     break;
-    case C_Cos:   r = ccosq(za);     break;
-    case C_Tan:   r = ctanq(za);     break;
-    case C_Asin:  r = casinq(za);    break;
-    case C_Acos:  r = cacosq(za);    break;
-    case C_Atan:  r = catanq(za);    break;
-    case C_Sinh:  r = csinhq(za);    break;
-    case C_Cosh:  r = ccoshq(za);    break;
-    case C_Tanh:  r = ctanhq(za);    break;
-    case C_Asinh: r = casinhq(za);   break;
-    case C_Acosh: r = cacoshq(za);   break;
-    case C_Atanh: r = catanhq(za);   break;
-    case C_Pow:   r = cpowq(za, zb); break;
-    case C_Polar: {
-      const __float128 rad = are, th = aim;
-      out_re = rad * cosq(th);
-      out_im = rad * sinq(th);
-      return;
-    }
-    default: r = (__complex128)0; break;
-  }
-  out_re = crealq(r);
-  out_im = cimagq(r);
 }
 
 // The complex oracle under MPC.
@@ -1666,11 +1698,11 @@ void reference_complex_q(int id, __float128 are, __float128 aim,
 //
 //   C_Polar  takes two REAL arguments and is handled by reference_polar_mpfr
 //            above. There is no complex number to convert.
-//   C_Conj   is exact negation of the imaginary part. It joins copysign / fmax
-//            / fmin / fdim in the deferral list for the reason stated there:
-//            an exact bit operation has no rounding to improve on, and
-//            reimplementing its signed-zero and NaN corner cases in a second
-//            place is how you get two behaviours instead of one.
+//   C_Conj   is exact negation of the imaginary part, answered in the carrier
+//            for the same reason copysign / fmax / fmin / fdim are on the real
+//            side: an exact bit operation has no rounding for a 400-bit
+//            intermediate to improve on, and `-aim` already carries the
+//            signed-zero and NaN behaviour IEEE asks for.
 //
 // Everything else routes to mpc_*. C_Abs is the one that needs care: its result
 // is REAL, so it takes the real rail out (an mpfr_t through mpfr_to_q) and
@@ -1683,19 +1715,39 @@ void reference_complex_q(int id, __float128 are, __float128 aim,
 //
 // MPC GRINDS on some arguments: tan with a large imaginary part and tanh with a
 // large real part both drive an internal exp() past the point where the binary128
-// result carries any information, and MPC will sit there computing it. The
-// ceiling below is ported from scripts/probe_complex_oracle.cpp, which measured
-// it. A skipped point falls back to libquadmath AND IS COUNTED -- a silent
-// per-point fallback would be a hybrid oracle that nothing declares.
-#if defined(XPMATH_HAVE_MPFR)
+// result carries any information, and MPC's Ziv loop will sit there computing
+// it -- probe_complex_oracle.cpp measured the requirement at ~5.6e7 bits. The
+// ceiling below is ported from that probe. Past 2|y| = 11400 the small component
+// is below binary128's smallest subnormal (~6.5e-4966), so the answer IS the
+// analytic limit and nothing is being approximated away; the limit is evaluated
+// below, at 400 bits, AND THE POINT IS COUNTED -- a silent per-point fallback
+// would be a hybrid oracle that nothing declares.
 static const double kMpcGrindCeiling = 5700.0;   // probe_complex_oracle.cpp
 long g_mpc_fallbacks = 0;
 
 bool mpc_would_grind(int id, __float128 are, __float128 aim) {
-  const double re = (double)fabsq(are), im = (double)fabsq(aim);
+  const double re = (double)q_abs(are), im = (double)q_abs(aim);
   if (id == C_Tan  && im > kMpcGrindCeiling) return true;
   if (id == C_Tanh && re > kMpcGrindCeiling) return true;
   return false;
+}
+
+// sign(sin(2t)) as a SIGNED ZERO, at 400 bits.
+//
+// The limits below need the sign of sin(2t) at |t| that can reach 5.3e255, which
+// is precisely the argument reduction libquadmath gets wrong above ~1e40 and the
+// reason this file has one oracle instead of two. mpfr_sin reduces exactly, and
+// returns a correctly signed zero for a zero argument, so mpfr_signbit is the
+// right reader here and mpfr_sgn (which cannot distinguish +0 from -0) is not.
+__float128 limit_zero_signed_like_sin2(__float128 t) {
+  mpfr_t m;
+  mpfr_init2(m, kOraclePrec);
+  q_to_mpfr(m, t);
+  mpfr_mul_2ui(m, m, 1, MPFR_RNDN);          // 2t, exact
+  mpfr_sin(m, m, MPFR_RNDN);
+  const bool neg = mpfr_signbit(m) != 0;
+  mpfr_clear(m);
+  return neg ? -(__float128)0.0 : (__float128)0.0;
 }
 
 void reference_complex_mpc(int id, __float128 are, __float128 aim,
@@ -1703,9 +1755,25 @@ void reference_complex_mpc(int id, __float128 are, __float128 aim,
                            __float128& out_re, __float128& out_im) {
   if (mpc_would_grind(id, are, aim)) {
     ++g_mpc_fallbacks;
-    reference_complex_q(id, are, aim, bre, bim, out_re, out_im);
+    // The analytic limit, which past the ceiling is also the correctly rounded
+    // answer. tan(x+iy) = (sin 2x + i sinh 2y) / (cos 2x + cosh 2y): at large
+    // |y| the real part underflows to a zero signed like sin 2x and the
+    // imaginary part saturates at sign(y). tanh is the same identity with the
+    // roles of x and y exchanged. VERIFIED against the arm this replaces:
+    // libquadmath returned exactly these bits at all 144 points the ceiling
+    // catches (48 C_Tan, 96 C_Tanh).
+    if (id == C_Tan) {
+      out_re = limit_zero_signed_like_sin2(are);
+      out_im = q_copysign((__float128)1.0, aim);
+    } else {
+      out_re = q_copysign((__float128)1.0, are);
+      out_im = limit_zero_signed_like_sin2(aim);
+    }
     return;
   }
+
+  if (id == C_Conj)  { out_re = are;  out_im = -aim; return; }
+  if (id == C_Polar) { reference_polar_mpfr(are, aim, out_re, out_im); return; }
 
   mpc_t za, zb, r;
   mpc_init2(za, kMpcPrec);
@@ -1743,51 +1811,36 @@ void reference_complex_mpc(int id, __float128 are, __float128 aim,
       mpfr_init2(a, kMpcPrec);
       mpc_abs(a, za, MPFR_RNDN);
       out_re = mpfr_to_q(a);
+#if XPMATH_POISON_ORACLE_CONV == 7
+      // POISON 7: emit a tiny nonzero imaginary part instead of the exact +0.0.
+      // The scorer computes hypot(e_re, e_im) / hypot(ref_re, ref_im) and never
+      // consults an is_real flag, so it degenerates to a real measurement only
+      // because both imaginary parts are exactly zero. This silently rewrites
+      // the metric for every C_Abs row; check H is the only thing that sees it.
+      out_im = out_re * q_ldexp((__float128)1, -120);
+#else
       out_im = (__float128)0.0;
+#endif
       mpfr_clear(a);
       mpc_clear(za); mpc_clear(zb); mpc_clear(r);
       return;
     }
-    default: handled = false; break;   // C_Conj, C_Polar
+    default: handled = false; break;   // not an op this oracle knows
   }
 
   if (handled) {
     mpc_to_q(r, out_re, out_im);
   } else {
-    reference_complex_q(id, are, aim, bre, bim, out_re, out_im);
+    out_re = (__float128)0.0;
+    out_im = (__float128)0.0;
   }
   mpc_clear(za); mpc_clear(zb); mpc_clear(r);
-}
-#endif
-
-// Complex oracle dispatch.
-//
-// Deliberately a separate function from reference_complex_q, which stays a pure
-// libquadmath switch. kappa_complex_numeric calls reference_complex_q BY NAME
-// rather than coming through here, so the condition numbers -- and therefore
-// every complex BOUND -- stay on libquadmath while only the REFERENCES move.
-// That is one-variable-at-a-time for free, and it is why this dispatch is here
-// and not inside reference_complex_q.
-void reference_complex_dispatch(int id, __float128 are, __float128 aim,
-                                __float128 bre, __float128 bim,
-                                __float128& out_re, __float128& out_im) {
-#if defined(XPMATH_HAVE_MPFR)
-  if (g_oracle_mpfr) {
-    if (id == C_Polar) {
-      reference_polar_mpfr(are, aim, out_re, out_im);
-      return;
-    }
-    reference_complex_mpc(id, are, aim, bre, bim, out_re, out_im);
-    return;
-  }
-#endif
-  reference_complex_q(id, are, aim, bre, bim, out_re, out_im);
 }
 
 void reference_complex(int id, double are, double aim, double bre, double bim,
                        __float128& out_re, __float128& out_im) {
-  reference_complex_dispatch(id, (__float128)are, (__float128)aim,
-                             (__float128)bre, (__float128)bim, out_re, out_im);
+  reference_complex_mpc(id, (__float128)are, (__float128)aim,
+                        (__float128)bre, (__float128)bim, out_re, out_im);
 }
 
 // ---------------------------------------------------------------------------
@@ -1811,14 +1864,14 @@ __float128 to_q(const xp::QuadFloat& x) {
 }
 
 double score_scalar(__float128 got, __float128 ref, double cap) {
-  if (isnanq(ref)) return isnanq(got) ? cap : 0.0;
-  if (!finiteq(ref))                                     // ref is +-inf
-    return (!finiteq(got) && !isnanq(got) && signbitq(got) == signbitq(ref)) ? cap : 0.0;
-  if (isnanq(got) || !finiteq(got)) return 0.0;
+  if (q_isnan(ref)) return q_isnan(got) ? cap : 0.0;
+  if (!q_finite(ref))                                     // ref is +-inf
+    return (!q_finite(got) && !q_isnan(got) && q_signbit(got) == q_signbit(ref)) ? cap : 0.0;
+  if (q_isnan(got) || !q_finite(got)) return 0.0;
   if (ref == 0) return got == 0 ? cap : 0.0;
   if (got == ref) return cap;
-  const __float128 rel = fabsq(got - ref) / fabsq(ref);
-  const double     d   = -(double)log10q(rel);
+  const __float128 rel = q_abs(got - ref) / q_abs(ref);
+  const double     d   = -(double)q_log10(rel);
   if (!(d > 0.0)) return 0.0;
   return d > cap ? cap : d;
 }
@@ -1827,10 +1880,10 @@ double score_scalar(__float128 got, __float128 ref, double cap) {
 // a component whose reference is exactly zero: measure it ABSOLUTELY against the
 // magnitude of the other component rather than relatively against zero.
 double score_component(__float128 got, __float128 ref, __float128 other, double cap) {
-  if (finiteq(ref) && ref == 0 && finiteq(other) && other != 0) {
+  if (q_finite(ref) && ref == 0 && q_finite(other) && other != 0) {
     if (got == 0) return cap;
-    if (isnanq(got) || !finiteq(got)) return 0.0;
-    const double d = -(double)log10q(fabsq(got) / fabsq(other));
+    if (q_isnan(got) || !q_finite(got)) return 0.0;
+    const double d = -(double)q_log10(q_abs(got) / q_abs(other));
     if (!(d > 0.0)) return 0.0;
     return d > cap ? cap : d;
   }
@@ -1867,14 +1920,14 @@ double score_component(__float128 got, __float128 ref, __float128 other, double 
 double kUnscorableUlps() { return -1.0; }   // sentinel: not measurable here
 
 double ulps_scalar(__float128 got, __float128 ref, int sig_bits) {
-  if (isnanq(ref) || !finiteq(ref)) return kUnscorableUlps();
+  if (q_isnan(ref) || !q_finite(ref)) return kUnscorableUlps();
   if (ref == 0) return (got == 0) ? 0.0 : kUnscorableUlps();
-  if (isnanq(got) || !finiteq(got)) return HUGE_VAL;
+  if (q_isnan(got) || !q_finite(got)) return HUGE_VAL;
   if (got == ref) return 0.0;
   // |got - ref| / (|ref| * 2^-p), formed as (|got-ref|/|ref|) * 2^p so that the
   // scaling cannot overflow or underflow binary128 for any in-range ref.
-  const __float128 rel = fabsq(got - ref) / fabsq(ref);
-  return (double)ldexpq(rel, sig_bits);
+  const __float128 rel = q_abs(got - ref) / q_abs(ref);
+  return (double)q_ldexp(rel, sig_bits);
 }
 
 // ===========================================================================
@@ -1943,82 +1996,82 @@ const __float128 kQLn10 = 2.30258509299404568401799145468436421Q;
 // available for this op — no such op exists today; the hook stays so that
 // adding an op cannot silently acquire a fabricated bound.
 bool kappa_real(int id, __float128 a, __float128 b, __float128 c, double& kappa) {
-  const __float128 aa = fabsq(a), ab = fabsq(b);
+  const __float128 aa = q_abs(a), ab = q_abs(b);
   __float128 k;
   switch (id) {
     // --- algebraic ---------------------------------------------------------
-    case R_Add:   k = (a + b == 0) ? HUGE_VALQ : (aa + ab) / fabsq(a + b);      break;
-    case R_Sub:   k = (a - b == 0) ? HUGE_VALQ : (aa + ab) / fabsq(a - b);      break;
+    case R_Add:   k = (a + b == 0) ? kQInf : (aa + ab) / q_abs(a + b);      break;
+    case R_Sub:   k = (a - b == 0) ? kQInf : (aa + ab) / q_abs(a - b);      break;
     case R_Mul:   k = 2;                                                        break;  // |a f_a/f| + |b f_b/f|
     case R_Div:   k = 2;                                                        break;
     case R_Sqrt:  k = 0.5Q;                                                     break;  // x*(1/2 x^-1/2)/x^1/2
     case R_Abs:   k = 1;                                                        break;
     case R_Hypot: k = 1;                                                        break;  // (a^2+b^2)/h^2
     case R_Fma: { const __float128 p = a * b, f = p + c;
-                  k = (f == 0) ? HUGE_VALQ : (2 * fabsq(p) + fabsq(c)) / fabsq(f); } break;
+                  k = (f == 0) ? kQInf : (2 * q_abs(p) + q_abs(c)) / q_abs(f); } break;
     case R_Fdim: { if (!(a > b)) { k = 0; break; }
-                   k = (a - b == 0) ? HUGE_VALQ : (aa + ab) / fabsq(a - b); }    break;
+                   k = (a - b == 0) ? kQInf : (aa + ab) / q_abs(a - b); }    break;
     case R_Copysign: case R_Fmax: case R_Fmin: k = 1;                            break;
     case R_Ceil: case R_Floor: case R_Round: case R_Trunc: k = 0;                break;
     case R_Fmod: case R_Remainder: {
-      if (b == 0) { k = HUGE_VALQ; break; }
-      const __float128 n = (id == R_Fmod) ? truncq(a / b) : nearbyintq(a / b);
+      if (b == 0) { k = kQInf; break; }
+      const __float128 n = (id == R_Fmod) ? q_trunc(a / b) : q_nearbyint(a / b);
       const __float128 f = a - b * n;
-      k = (f == 0) ? HUGE_VALQ : (aa + fabsq(b * n)) / fabsq(f);
+      k = (f == 0) ? kQInf : (aa + q_abs(b * n)) / q_abs(f);
     } break;
 
     // --- exponentials: f = base^x, x f'/f = x ln(base) ----------------------
     case R_Exp:   k = aa;                                                        break;
     case R_Exp2:  k = aa * kQLn2;                                                break;
     case R_Exp10: k = aa * kQLn10;                                               break;
-    case R_Expm1: { const __float128 f = expm1q(a);
-                    k = (f == 0) ? HUGE_VALQ : fabsq(a * expq(a) / f); }         break;
+    case R_Expm1: { const __float128 f = q_expm1(a);
+                    k = (f == 0) ? kQInf : q_abs(a * q_exp(a) / f); }         break;
 
     // --- logarithms: f = log_base(x), x f'/f = 1/ln(x) ----------------------
     case R_Log: case R_Log2: case R_Log10: {
-      const __float128 l = logq(a);
-      k = (l == 0) ? HUGE_VALQ : 1 / fabsq(l);
+      const __float128 l = q_log(a);
+      k = (l == 0) ? kQInf : 1 / q_abs(l);
     } break;
-    case R_Log1p: { const __float128 f = log1pq(a);
-                    k = (f == 0 || a == -1) ? HUGE_VALQ
-                                            : fabsq(a / ((1 + a) * f)); }        break;
+    case R_Log1p: { const __float128 f = q_log1p(a);
+                    k = (f == 0 || a == -1) ? kQInf
+                                            : q_abs(a / ((1 + a) * f)); }        break;
 
     // --- circular -----------------------------------------------------------
-    case R_Sin:  { const __float128 s = sinq(a);
-                   k = (s == 0) ? HUGE_VALQ : fabsq(a * cosq(a) / s); }          break;
-    case R_Cos:  { const __float128 co = cosq(a);
-                   k = (co == 0) ? HUGE_VALQ : fabsq(a * sinq(a) / co); }        break;
-    case R_Tan:  { const __float128 d = sinq(a) * cosq(a);
-                   k = (d == 0) ? HUGE_VALQ : fabsq(a / d); }                    break;
-    case R_Asin: { const __float128 f = asinq(a), r = 1 - a * a;
-                   k = (f == 0 || r <= 0) ? HUGE_VALQ : fabsq(a / (sqrtq(r) * f)); } break;
-    case R_Acos: { const __float128 f = acosq(a), r = 1 - a * a;
-                   k = (f == 0 || r <= 0) ? HUGE_VALQ : fabsq(a / (sqrtq(r) * f)); } break;
-    case R_Atan: { const __float128 f = atanq(a);
-                   k = (f == 0) ? HUGE_VALQ : fabsq(a / ((1 + a * a) * f)); }    break;
+    case R_Sin:  { const __float128 s = q_sin(a);
+                   k = (s == 0) ? kQInf : q_abs(a * q_cos(a) / s); }          break;
+    case R_Cos:  { const __float128 co = q_cos(a);
+                   k = (co == 0) ? kQInf : q_abs(a * q_sin(a) / co); }        break;
+    case R_Tan:  { const __float128 d = q_sin(a) * q_cos(a);
+                   k = (d == 0) ? kQInf : q_abs(a / d); }                    break;
+    case R_Asin: { const __float128 f = q_asin(a), r = 1 - a * a;
+                   k = (f == 0 || r <= 0) ? kQInf : q_abs(a / (q_sqrt(r) * f)); } break;
+    case R_Acos: { const __float128 f = q_acos(a), r = 1 - a * a;
+                   k = (f == 0 || r <= 0) ? kQInf : q_abs(a / (q_sqrt(r) * f)); } break;
+    case R_Atan: { const __float128 f = q_atan(a);
+                   k = (f == 0) ? kQInf : q_abs(a / ((1 + a * a) * f)); }    break;
 
     // --- hyperbolic ---------------------------------------------------------
-    case R_Sinh: { const __float128 s = sinhq(a);
-                   k = (s == 0) ? HUGE_VALQ : fabsq(a * coshq(a) / s); }         break;
-    case R_Cosh: { const __float128 co = coshq(a);
-                   k = (co == 0) ? HUGE_VALQ : fabsq(a * sinhq(a) / co); }       break;
-    case R_Tanh: { const __float128 d = sinhq(a) * coshq(a);
-                   k = (d == 0) ? HUGE_VALQ : fabsq(a / d); }                    break;
-    case R_Asinh:{ const __float128 f = asinhq(a);
-                   k = (f == 0) ? HUGE_VALQ : fabsq(a / (sqrtq(1 + a * a) * f)); } break;
-    case R_Acosh:{ const __float128 f = acoshq(a), r = a * a - 1;
-                   k = (f == 0 || r <= 0) ? HUGE_VALQ : fabsq(a / (sqrtq(r) * f)); } break;
-    case R_Atanh:{ const __float128 f = atanhq(a), r = 1 - a * a;
-                   k = (f == 0 || r == 0) ? HUGE_VALQ : fabsq(a / (r * f)); }    break;
+    case R_Sinh: { const __float128 s = q_sinh(a);
+                   k = (s == 0) ? kQInf : q_abs(a * q_cosh(a) / s); }         break;
+    case R_Cosh: { const __float128 co = q_cosh(a);
+                   k = (co == 0) ? kQInf : q_abs(a * q_sinh(a) / co); }       break;
+    case R_Tanh: { const __float128 d = q_sinh(a) * q_cosh(a);
+                   k = (d == 0) ? kQInf : q_abs(a / d); }                    break;
+    case R_Asinh:{ const __float128 f = q_asinh(a);
+                   k = (f == 0) ? kQInf : q_abs(a / (q_sqrt(1 + a * a) * f)); } break;
+    case R_Acosh:{ const __float128 f = q_acosh(a), r = a * a - 1;
+                   k = (f == 0 || r <= 0) ? kQInf : q_abs(a / (q_sqrt(r) * f)); } break;
+    case R_Atanh:{ const __float128 f = q_atanh(a), r = 1 - a * a;
+                   k = (f == 0 || r == 0) ? kQInf : q_abs(a / (r * f)); }    break;
 
     // --- pow: a df/da / f = b;  b df/db / f = b ln a ------------------------
-    case R_Pow:  { if (a <= 0) { k = fabsq(b); break; }      // ln a undefined; a-partial only
-                   k = fabsq(b) + fabsq(b * logq(a)); }                          break;
+    case R_Pow:  { if (a <= 0) { k = q_abs(b); break; }      // ln a undefined; a-partial only
+                   k = q_abs(b) + q_abs(b * q_log(a)); }                          break;
 
     default: return false;
   }
   (void)c;
-  if (isnanq(k)) return false;
+  if (q_isnan(k)) return false;
   kappa = (double)k;
   return true;
 }
@@ -2191,12 +2244,12 @@ double algo_floor_ulps(int id, int exp_squarings, __float128 a) {
     // absolute error and |f| scale together, so the ulp floor is unchanged.
     case R_Log: case R_Log2: case R_Log10: {
       if (a <= 0) return g;
-      const double l = std::fabs((double)logq(a));
+      const double l = std::fabs((double)q_log(a));
       return (l > 0.0) ? g / l : g * std::exp2((double)exp_squarings);
     }
     case R_Log1p: {
       if (a <= -1) return g;
-      const double l = std::fabs((double)log1pq(a));
+      const double l = std::fabs((double)q_log1p(a));
       return (l > 0.0) ? g / l : g * std::exp2((double)exp_squarings);
     }
     default:
@@ -2289,9 +2342,9 @@ double complex_algo_gain(int id, int exp_nq) {
 double kappa_complex_numeric(int id, __float128 are, __float128 aim,
                              __float128 bre, __float128 bim,
                              __float128 fre, __float128 fim) {
-  const __float128 h = ldexpq((__float128)1.0, -40);
-  const __float128 fm = hypotq(fre, fim);
-  if (fm == 0 || !finiteq(fm)) return -1.0;            // no bound issuable
+  const __float128 h = q_ldexp((__float128)1.0, -40);
+  const __float128 fm = q_hypot(fre, fim);
+  if (fm == 0 || !q_finite(fm)) return -1.0;            // no bound issuable
   // Four independent REAL directions, not two complex ones. Perturbing
   // a -> a(1+h) scales re and im together, which is a purely RADIAL move and
   // cannot see a tangential sensitivity. log(z) near |z| = 1 is the canonical
@@ -2307,17 +2360,21 @@ double kappa_complex_numeric(int id, __float128 are, __float128 aim,
       default: pb_im = bim * (1 + h); break;
     }
     __float128 gre = 0, gim = 0;
-    // DELIBERATELY reference_complex_q, not reference_complex_dispatch. The
-    // condition number is differentiated from the reference, so routing this
-    // through the dispatch would move every complex BOUND the moment an
-    // alternate oracle is selected -- which moves `state` S<->U and fires the
-    // monotone gate's state_moved flag across thousands of rows with no library
-    // change. Bounds are a property of the format and kappa, not of which
-    // oracle is in use. Do not "tidy" this into the dispatch.
-    reference_complex_q(id, pa_re, pa_im, pb_re, pb_im, gre, gim);
-    if (!finiteq(gre) || !finiteq(gim)) return -1.0;
-    const __float128 d = hypotq(gre - fre, gim - fim) / (fm * h);
-    if (!finiteq(d)) return -1.0;
+    // This used to call the libquadmath switch BY NAME while the references
+    // went through a dispatch, so that selecting an alternate oracle moved the
+    // references and never the BOUNDS -- a bound that moves flips `state` S<->U
+    // and fires the monotone gate's state_moved flag across thousands of rows
+    // with no library change. That reasoning protected a comparison between two
+    // oracles; with one oracle there is nothing left to hold still, and a bound
+    // differentiated from a DIFFERENT function than the one being scored is an
+    // inconsistency, not a control. MEASURED at the switch, against the
+    // libquadmath sweep this commit replaces: of 436,080 rows, the bound column
+    // moved on ZERO and no row changed state. Only `ulps` moved, on 29,970
+    // rows (6.9%), which is the oracle doing its job.
+    reference_complex_mpc(id, pa_re, pa_im, pb_re, pb_im, gre, gim);
+    if (!q_finite(gre) || !q_finite(gim)) return -1.0;
+    const __float128 d = q_hypot(gre - fre, gim - fim) / (fm * h);
+    if (!q_finite(d)) return -1.0;
     kappa += (double)d;
   }
   return kappa;
@@ -2354,10 +2411,10 @@ int complex_intermediates(int id, __float128 are, __float128 aim,
     case C_Asin: case C_Acos: case C_Asinh: case C_Acosh: {
       const __float128 zr = are * are - aim * aim;
       const __float128 zi = 2 * are * aim;
-      out[0] = hypotq(zr, zi); out[1] = 1;       return 2;
+      out[0] = q_hypot(zr, zi); out[1] = 1;       return 2;
     }
     case C_Atan: case C_Atanh:
-      out[0] = hypotq(are, aim); out[1] = 1;     return 2;
+      out[0] = q_hypot(are, aim); out[1] = 1;     return 2;
     default:
       return 0;
   }
@@ -2388,12 +2445,12 @@ int real_intermediates(int id, __float128 a, __float128 b, __float128 c,
 // it is invisible to any probe that perturbs only the INPUTS -- which is
 // exactly the blind spot KI-40 records.
 double kappa_intermediate(const __float128* inter, int ninter, __float128 ref) {
-  if (ninter == 0 || ref == 0 || !finiteq(ref)) return 0.0;
-  const __float128 f = fabsq(ref);
+  if (ninter == 0 || ref == 0 || !q_finite(ref)) return 0.0;
+  const __float128 f = q_abs(ref);
   __float128 worst = 0;
   for (int k = 0; k < ninter; ++k) {
-    if (!finiteq(inter[k])) continue;
-    const __float128 r = fabsq(inter[k]) / f;
+    if (!q_finite(inter[k])) continue;
+    const __float128 r = q_abs(inter[k]) / f;
     if (r > worst) worst = r;
   }
   // An intermediate no larger than the answer cancels nothing; charge 0 there
@@ -2476,10 +2533,10 @@ void fill_log_bounds(Range& r) {
 // This is an INHERENT FORMAT LIMIT, not an implementation defect, and it is the
 // same kind of statement UNDERFLOW and OVERFLOW already make.
 double subnormal_floor_ulps(__float128 v, const Range& rg, int sig_bits) {
-  if (v == 0 || !finiteq(v)) return 1.0;
+  if (v == 0 || !q_finite(v)) return 1.0;
   // log2 in quad: a binary128 magnitude like exp(-1000) is fine to the oracle
   // but collapses to 0.0 the instant it is cast to double.
-  const double l2   = (double)log2q(fabsq(v));
+  const double l2   = (double)q_log2(q_abs(v));
   double       lfl  = std::log2(rg.min_sub) + (double)sig_bits - l2;
   // Clamp at 2^p. Once |v| drops below the word type's smallest subnormal the
   // format holds nothing at all there, and "holds nothing" is exactly 2^p
@@ -2549,15 +2606,15 @@ Range range_float(int limbs) {
 
 bool out_of_format(__float128 v, const Range& rg) {
   if (v == 0) return false;                      // exact zero is representable
-  if (!finiteq(v)) return true;
-  const __float128 m = fabsq(v);
+  if (!q_finite(v)) return true;
+  const __float128 m = q_abs(v);
   return m > (__float128)rg.max_val || m < (__float128)rg.min_sub;
 }
 
 bool point_unresolved(double bound, __float128 ref, const __float128* exact,
                       int nops, const __float128* inter, int ninter,
                       const Range& rg, int sig_bits) {
-  if (ref == 0 || !finiteq(ref) || out_of_format(ref, rg)) return true;   // (1)
+  if (ref == 0 || !q_finite(ref) || out_of_format(ref, rg)) return true;   // (1)
   for (int k = 0; k < nops; ++k)
     if (out_of_format(exact[k], rg)) return true;                         // (2)
   for (int k = 0; k < ninter; ++k)
@@ -2787,9 +2844,9 @@ bool jump_unresolved(int id, const __float128* stored, const __float128* exact) 
   if (id != R_Fmod && id != R_Remainder) return false;
   if (stored[1] == 0 || exact[1] == 0) return false;
   const __float128 qe = exact[0] / exact[1], qs = stored[0] / stored[1];
-  if (!finiteq(qe) || !finiteq(qs)) return false;
-  const __float128 ne = (id == R_Fmod) ? truncq(qe) : nearbyintq(qe);
-  const __float128 ns = (id == R_Fmod) ? truncq(qs) : nearbyintq(qs);
+  if (!q_finite(qe) || !q_finite(qs)) return false;
+  const __float128 ne = (id == R_Fmod) ? q_trunc(qe) : q_nearbyint(qe);
+  const __float128 ns = (id == R_Fmod) ? q_trunc(qs) : q_nearbyint(qs);
   return ne != ns;
 }
 
@@ -2848,8 +2905,8 @@ UlpCell make_ulp_cell(const char* be, char kind, const char* op) {
 // given.
 double storage_rel_err(__float128 stored, __float128 exact) {
   if (exact == 0) return (stored == 0) ? 0.0 : 1.0;
-  if (!finiteq(exact) || !finiteq(stored)) return 0.0;
-  const __float128 e = fabsq(stored - exact) / fabsq(exact);
+  if (!q_finite(exact) || !q_finite(stored)) return 0.0;
+  const __float128 e = q_abs(stored - exact) / q_abs(exact);
   return (double)e;
 }
 
@@ -2948,7 +3005,7 @@ void sweep_real(int id, const std::vector<GridPoint>& grid,
         // so clause (4) fires and the point is unresolved, by arithmetic
         // rather than by an exemption list.
         if (jump_unresolved(id, stored, exact) && ref[i] != 0) {
-          const double jump = std::ldexp((double)(fabsq(exact[1]) / fabsq(ref[i])),
+          const double jump = std::ldexp((double)(q_abs(exact[1]) / q_abs(ref[i])),
                                          sb_bits);
           if (jump > k_int) k_int = jump;
         }
@@ -3001,11 +3058,11 @@ void sweep_real(int id, const std::vector<GridPoint>& grid,
         // added this.
         if (ux->dump_op && ux->dump_point == int(i) &&
             std::strcmp(ux->dump_op, kReal[id].name) == 0) {
-          char qa[64], qb[64], qc[64], qr[64];
-          quadmath_snprintf(qa, sizeof qa, "%.36Qg", exact[0]);
-          quadmath_snprintf(qb, sizeof qb, "%.36Qg", exact[1]);
-          quadmath_snprintf(qc, sizeof qc, "%.36Qg", exact[2]);
-          quadmath_snprintf(qr, sizeof qr, "%.36Qg", ref[i]);
+          char qa[80], qb[80], qc[80], qr[80];
+          std::snprintf(qa, sizeof qa, "%s", q_fmt(exact[0]));
+          std::snprintf(qb, sizeof qb, "%s", q_fmt(exact[1]));
+          std::snprintf(qc, sizeof qc, "%s", q_fmt(exact[2]));
+          std::snprintf(qr, sizeof qr, "%s", q_fmt(ref[i]));
           std::printf("DUMP %s r %s point %d\n", B::name(), kReal[id].name, int(i));
           std::printf("  a      = %s\n", qa);
           if (nops >= 2) std::printf("  b      = %s\n", qb);
@@ -3099,10 +3156,10 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
       // be poisoned against the signed-zero grid family before it is trusted.
       const __float128 sref_re = ref_re[i], sref_im = ref_im[i];
       const __float128 e_re = to_q(r.re) - sref_re, e_im = to_q(r.im) - sref_im;
-      const __float128 mref = hypotq(sref_re, sref_im);
-      const bool bad = isnanq(e_re) || isnanq(e_im) ||
-                       isnanq(sref_re) || isnanq(sref_im) ||
-                       !finiteq(sref_re) || !finiteq(sref_im);
+      const __float128 mref = q_hypot(sref_re, sref_im);
+      const bool bad = q_isnan(e_re) || q_isnan(e_im) ||
+                       q_isnan(sref_re) || q_isnan(sref_im) ||
+                       !q_finite(sref_re) || !q_finite(sref_im);
       if (bad || mref == 0) {
         ++ucell.n_unscorable;
       } else {
@@ -3138,7 +3195,7 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
         // a cancelled component against the resolution the modulus affords --
         // and that needs deriving and poisoning before it gates anything.
         // Filed rather than guessed.
-        const double m = (double)ldexpq(hypotq(e_re, e_im) / mref, B::sig_bits());
+        const double m = (double)q_ldexp(q_hypot(e_re, e_im) / mref, B::sig_bits());
         row_.ulps = m;
         if (m > ucell.max_ulps) { ucell.max_ulps = m; ucell.max_ulps_point = int(i); }
         const int sb_bits = B::sig_bits();
@@ -3181,13 +3238,13 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
           row_.bound = bd.value;
           if (ux->dump_op && ux->dump_point == int(i) &&
               std::strcmp(ux->dump_op, kComplex[id].name) == 0) {
-            char qa[64], qb[64], qc[64], qd[64], qr[64], qi[64];
-            quadmath_snprintf(qa, sizeof qa, "%.36Qg", exact[0]);
-            quadmath_snprintf(qb, sizeof qb, "%.36Qg", exact[1]);
-            quadmath_snprintf(qc, sizeof qc, "%.36Qg", exact[2]);
-            quadmath_snprintf(qd, sizeof qd, "%.36Qg", exact[3]);
-            quadmath_snprintf(qr, sizeof qr, "%.36Qg", sref_re);
-            quadmath_snprintf(qi, sizeof qi, "%.36Qg", sref_im);
+            char qa[80], qb[80], qc[80], qd[80], qr[80], qi[80];
+            std::snprintf(qa, sizeof qa, "%s", q_fmt(exact[0]));
+            std::snprintf(qb, sizeof qb, "%s", q_fmt(exact[1]));
+            std::snprintf(qc, sizeof qc, "%s", q_fmt(exact[2]));
+            std::snprintf(qd, sizeof qd, "%s", q_fmt(exact[3]));
+            std::snprintf(qr, sizeof qr, "%s", q_fmt(sref_re));
+            std::snprintf(qi, sizeof qi, "%s", q_fmt(sref_im));
             std::printf("DUMP %s c %s point %d\n", B::name(), kComplex[id].name, int(i));
             std::printf("  a      = (%s, %s)\n", qa, qb);
             std::printf("  b      = (%s, %s)\n", qc, qd);
@@ -3536,10 +3593,15 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
         if (!fp_ok)
           std::fprintf(stderr,
             "WARNING: oracle fingerprint mismatch — baseline %016llx, this run %016llx.\n"
-            "  libquadmath is not the one the baseline was recorded against, so the\n"
-            "  REFERENCE moved, not necessarily the library. Expect a scatter of 0.01\n"
-            "  differences that are not regressions. Load the toolchain of record\n"
-            "  (module use /soft/modulefiles && module load gcc/13.3.0) and re-run.\n",
+            "  The REFERENCE moved, not necessarily the library, so nothing below is\n"
+            "  attributable and this run does not gate. Two things can do it:\n"
+            "    - the baseline predates the MPFR/MPC oracle (578322f998a329c8 and\n"
+            "      54901e8104607a77 are libquadmath; 2c641431948dc5ba is the old\n"
+            "      selectable --oracle=mpfr arm). Re-record it.\n"
+            "    - the conversions between __float128 and mpfr/mpc changed. Run\n"
+            "      --oracle-selftest before trusting anything.\n"
+            "  It is NO LONGER the shell: MPFR and MPC are correctly rounded, and the\n"
+            "  fingerprint is reproducible with no module loaded at all (measured).\n",
             fp, (unsigned long long)fp_now);
       }
       continue;
@@ -3886,11 +3948,15 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
   //
   // Two ways the reference can differ, and they are NOT the same case:
   //
-  //   1. The toolchain drifted. The fingerprint mismatches. This is the NORMAL
-  //      state on any runner whose libquadmath is not the one of record, and
-  //      the repo has deliberately decided not to gate on it -- there is
-  //      already a warning above saying the reference moved. An improvement
-  //      here is unattributable, so it is reported and DROPPED.
+  //   1. The reference drifted. The fingerprint mismatches. This used to be the
+  //      NORMAL state on any runner whose libquadmath was not the one of
+  //      record; with a correctly-rounded MPFR/MPC oracle it should now mean a
+  //      baseline older than the oracle switch, or a change in the conversions.
+  //      Either way the repo has deliberately decided not to gate on it --
+  //      there is already a warning above saying the reference moved. An
+  //      improvement here is unattributable, so it is reported and DROPPED.
+  //      The arm is KEPT, not deleted: it is what stops a pre-switch baseline
+  //      from reading as 29,970 library improvements.
   //
   //   2. This process deliberately selected another oracle (--oracle=mpfr).
   //      Measured: 1,631 ungated improvements against the committed baseline.
@@ -3915,13 +3981,13 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
                 "to the library and is not gated\n", increased);
     stale_improved = false;
   }
-  if (stale_improved && g_oracle_mpfr) {
-    std::printf("  note          : improvement drift under a NON-DEFAULT oracle "
-                "(--oracle=mpfr) —\n                  the reference was changed, "
-                "so this is record drift, not a fix\n");
-    stale_improved = false;
-    return_as_drift = true;
-  }
+  // There used to be a second arm here for "improvement drift under a
+  // NON-DEFAULT oracle", which caught the case where --oracle=mpfr was selected
+  // against a libquadmath baseline. There is no non-default oracle any more,
+  // and the fingerprint arm above already covers the situation it was aimed at:
+  // a baseline recorded against a different reference does not match this
+  // build's fingerprint, so its improvements are reported as the reference
+  // moving rather than gated as a fix.
 
   if (decreased)
     std::printf("\nRESULT: FAIL — a point got worse by more than a tenth of a digit\n");
@@ -4157,12 +4223,14 @@ void usage(const char* argv0) {
     "  --out PATH        write the baseline CSV here. No default: without this\n"
     "                    flag nothing is written.\n"
     "  --grid-out PATH   also write the grid manifest here\n"
-    "  --oracle WHICH    quadmath (default) or mpfr. libquadmath's own argument\n"
+    "  --oracle WHICH    mpfr only, and it is already the default -- MPFR at 400\n"
+    "                    bits for the real ops, MPC for the complex ones. The\n"
+    "                    flag is kept so existing callers keep working;\n"
+    "                    --oracle=quadmath is REFUSED. libquadmath's argument\n"
     "                    reduction fails above ~1e40 (measured: clean at 1e40,\n"
-    "                    ~1e34 ulps wrong at 1e60+), so trig rows at family (5)\n"
-    "                    magnitudes are scored against a broken reference.\n"
-    "                    --oracle=mpfr uses MPFR at 400 bits for the REAL path;\n"
-    "                    complex stays on libquadmath.\n"
+    "                    ~1e34 ulps wrong at 1e60+) and its complex divide is\n"
+    "                    round-then-cancel, so it scored correct results as\n"
+    "                    regressions. Nothing here links it any more.\n"
     "  --oracle-selftest check that the __float128 <-> mpfr conversions are\n"
     "                    EXACT, against routes sharing no mechanism with them,\n"
     "                    and exit. Runs nothing else. A conversion that merely\n"
@@ -4261,29 +4329,29 @@ int main(int argc, char** argv) {
     else if (s == "--out")       { out = need_v("--out"); out_set = true; }
     else if (s == "--grid-out")  { grid_out = need_v("--grid-out"); }
     else if (s == "--oracle") {
+      // The flag survives its own obsolescence on purpose. `--oracle=mpfr` is
+      // now what the binary does with no flag at all, and it is accepted as a
+      // no-op so that every script, CI lane and shell-history line that passes
+      // it keeps working. `--oracle=quadmath` is REFUSED, not quietly ignored:
+      // a run that names an oracle it did not use is the one failure mode this
+      // whole change exists to remove.
       const std::string v = need_v("--oracle");
-#if defined(XPMATH_HAVE_MPFR)
-      if (v == "mpfr")           g_oracle_mpfr = true;
-#else
-      if (v == "mpfr") {
+      if (v == "mpfr") { /* the default, and the only one */ }
+      else if (v == "quadmath") {
         std::fprintf(stderr,
-            "--oracle=mpfr: this binary was built without MPFR.\n"
-            "  Install libmpfr-dev and reconfigure; refusing to run rather\n"
-            "  than score against libquadmath while claiming otherwise.\n");
+            "--oracle=quadmath: the libquadmath evaluator has been removed.\n"
+            "  Its argument reduction fails above ~1e40 and its complex divide\n"
+            "  is round-then-cancel, so it was scoring correct results as\n"
+            "  regressions. MPFR/MPC at %ld bits is now the only oracle.\n"
+            "  Drop the flag, or pass --oracle=mpfr, which is the same thing.\n"
+            "  Baselines recorded against the old oracle carry a different\n"
+            "  fingerprint and will be reported as such, not silently compared.\n",
+            (long)kOraclePrec);
         return 2;
       }
-#endif
-      else if (v == "quadmath")  g_oracle_mpfr = false;
-      else { std::fprintf(stderr, "--oracle must be quadmath or mpfr\n"); return 2; }
+      else { std::fprintf(stderr, "--oracle must be mpfr (the default)\n"); return 2; }
     }
-#if defined(XPMATH_HAVE_MPFR)
     else if (s == "--oracle-selftest") { return oracle_conv_selftest(); }
-#else
-    else if (s == "--oracle-selftest") {
-      std::fprintf(stderr, "--oracle-selftest: built without MPFR; nothing to check.\n");
-      return 77;   // ctest SKIP, not a pass
-    }
-#endif
     else if (s == "--baseline")  { baseline = need_v("--baseline"); }
     else if (s == "--ulp")       { ulp_gate = true; }
     else if (s == "--ulp-allowance") { ulp_allowance = std::atof(need_v("--ulp-allowance").c_str()); }

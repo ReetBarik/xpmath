@@ -247,20 +247,26 @@ Diagnosis and threshold work only. No KI was fixed, `sweep_baseline.csv` and
 
 ```
 module use /soft/modulefiles && module load gcc/13.3.0 cmake/3.28.3
-g++ -std=c++17 -fext-numeric-literals -O2 -Iinclude \
-    scripts/sweep_accuracy.cpp -lquadmath -o /tmp/sweep
-export LD_LIBRARY_PATH=/soft/compilers/gcc/13.3.0/x86_64-suse-linux/lib64:$LD_LIBRARY_PATH
+g++ -std=c++17 -fext-numeric-literals -O2 -DXPMATH_HAVE_MPFR=1 -Iinclude \
+    scripts/sweep_accuracy.cpp -lmpc -lmpfr -lgmp -o /tmp/sweep
 /tmp/sweep --ulp --ulp-dump /tmp/dump.csv
 /tmp/sweep --ulp --ulp-explain exp2:110
 ```
 
-**The `LD_LIBRARY_PATH` line is not optional.** Loading the gcc module fixes the
-*compiler* but not the *runtime* `libquadmath`: the binary still resolves
-`/usr/lib64/libquadmath.so.0`, whose `sinq`/`cosq` differ in the last bits. That
-alone produces the oracle-fingerprint mismatch and the phantom "7 decreased" the
-previous session saw. With the path set, the fingerprint matches
-`578322f998a329c8` and the gate is clean. This is the same trap recorded for the
-build; it bites the *run* too.
+**That compile line is not the one this section was measured with.** Step 1c
+scored against a libquadmath oracle, built with `-lquadmath` and run with
+`LD_LIBRARY_PATH` pointed at the gcc module's `lib64` — because the binary
+carried no RPATH, resolved `/usr/lib64/libquadmath.so.0` otherwise, and
+`sinq`/`cosq` differ there in the last bits. That trap produced the
+oracle-fingerprint mismatch and the phantom "7 decreased" a session chased, and
+with the path set the fingerprint read `578322f998a329c8`.
+
+**It is retired.** The oracle is MPFR/MPC at 400 bits, correctly rounded, and
+`sweep_accuracy` no longer links libquadmath at all — the compile line above is
+the current one and needs no `LD_LIBRARY_PATH`. Expect fingerprint
+`44f18a4a959f6c29`. The *numbers* in this section are still the step-1c
+libquadmath ones and are left as recorded; re-measure before quoting one as
+current.
 
 ## What the 172 actually were
 

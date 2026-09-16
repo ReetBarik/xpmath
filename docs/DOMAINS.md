@@ -16,10 +16,11 @@ the end of this file for whoever sets up CI in S7.
 
 ## How to read this
 
-Every number below is measured, on a fixed grid of 1652 real and 1780 complex
-inputs per op, scored against a `__float128` (binary128) oracle. A backend's
-**cap** is the most digits its format can carry; a cell reports where the op
-actually reaches that cap and where it does not.
+Every number below is measured, on a fixed grid of 1700 real and 1780 complex
+inputs per op, scored against an MPFR/MPC oracle at 400 bits, quantised into
+`__float128` (binary128). A backend's **cap** is the most digits its format
+can carry; a cell reports where the op actually reaches that cap and where
+it does not.
 
 | backend | words | cap (digits) | full-precision floor | word max | word min (subnormal) |
 |---|---|---|---|---|---|
@@ -67,7 +68,7 @@ Verdicts, from `scripts/sweep_accuracy --ulp`:
 - **OPEN DEFECT** — at least one point exceeds its derived bound and is carried in validation/sweep/open_defects.txt
 
 There is one measurement behind all three: the error in ulps against the
-`__float128` / `__complex128` oracle, compared against a bound derived from the
+MPFR/MPC oracle, compared against a bound derived from the
 format (word count, exponent range, intermediate width) and the condition
 number — never from what the implementation currently scores. The derivation is
 in `docs/CORRECTNESS.md`. `UNRESOLVED` and `at or below bound` are both healthy
@@ -336,10 +337,10 @@ for each cell that has any:
 | `mul` | QF | 29.00 | 27.02 | 100 .. 1e+08 | 84% | below 10: 13.55 | 76 | UNRESOLVED |
 | `mul` | TF | 21.70 | 20.83 | 100 .. 1e+08 | 92% | below 10: 10.62; above 1e+08: 7.52 | 63 | UNRESOLVED |
 | `mul` | FF | 14.00 | 13.63 | 10 .. 1e+08 | 96% | below 10: 0.36; above 1e+08: 0.00 | 45 | UNRESOLVED |
-| `div` | DD | 31.00 | 29.59 | 0 .. 1e-09 | 89% | above 0.99: 13.14 | 7 | UNRESOLVED |
-| `div` | QF | 29.00 | 26.10 | 1e-14 .. 1e-10 | 78% | below 1e-19: 11.38; above 1e-08: 3.44 | 113 | UNRESOLVED |
-| `div` | TF | 21.70 | 20.27 | 1e-14 .. 1e-09 | 84% | below 1e-15: 10.44; above 1e-08: 0.00 | 80 | UNRESOLVED |
-| `div` | FF | 14.00 | 12.50 | 0.99 .. 1 | 89% | below 0.99: 0.00; above 1: 0.00 | 189 | UNRESOLVED |
+| `div` | DD | 31.00 | 30.97 | 1 .. 1e+08 | 100% | below 1: 0.00; above 1e+09: 0.00 | 2 | UNRESOLVED |
+| `div` | QF | 29.00 | 26.49 | 100 .. 1e+08 | 80% | below 100: 12.64; above 1e+09: 0.00 | 108 | UNRESOLVED |
+| `div` | TF | 21.70 | 20.38 | 2 .. 2.236 | 87% | below 2: 2.89; above 10: 10.73 | 78 | UNRESOLVED |
+| `div` | FF | 14.00 | 12.51 | 0.99 .. 1 | 89% | below 0.99: 0.00; above 1: 0.00 | 188 | UNRESOLVED |
 | `abs` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
 | `abs` | QF | 29.00 | 29.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
 | `abs` | TF | 21.70 | 21.70 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
@@ -359,7 +360,7 @@ for each cell that has any:
 - `add` — QF 6 pts (perpendicular approach to the real axis); TF 4 pts (perpendicular approach to the real axis); FF 84 pts (perpendicular approach to the real axis)
 - `sub` — QF 6 pts (perpendicular approach to the real axis); TF 6 pts (perpendicular approach to the real axis); FF 96 pts (perpendicular approach to the real axis)
 - `mul` — QF 76 pts (perpendicular approach to the real axis); TF 63 pts (perpendicular approach to the real axis); FF 45 pts (perpendicular approach to the real axis)
-- `div` — DD 7 pts (polar shells); QF 113 pts (perpendicular approach to the real axis); TF 80 pts (perpendicular approach to the real axis); FF 189 pts (perpendicular approach to the real axis)
+- `div` — DD 2 pts (perpendicular approach to the real axis); QF 108 pts (perpendicular approach to the real axis); TF 78 pts (perpendicular approach to the real axis); FF 188 pts (perpendicular approach to the real axis)
 - `polar` — QF 1 pts (polar shells); FF 4 pts (polar shells)
 
 ---
