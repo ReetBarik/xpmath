@@ -294,6 +294,99 @@ install(FILES
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
         DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/xpmath")
 
+# ---------------------------------------------------------------------------
+# BUILD PROVENANCE -- build-info.txt
+# ---------------------------------------------------------------------------
+# Three campaign artifacts produced this month could not be traced back to the
+# tree that produced them. This is the fix: every configure stamps the build
+# directory with what it was, and the ctest target `build_provenance` fails if
+# the stamp is missing or short a field.
+#
+# WRITTEN HERE, NOT BY scripts/xpm_build.sh. A stamp only the wrapper wrote
+# would be absent from exactly the builds nobody can trace -- the ones made by
+# calling cmake directly, which is what CI does and what anybody debugging
+# does. CMake is the one thing every build goes through, and it is also the
+# only place that knows the RESOLVED compiler version and the FINAL flags
+# (this file mutates CMAKE_CXX_FLAGS above, and Kokkos adds to the picture
+# through its interface).
+#
+# XPMATH_ARCH and XPMATH_OPT are supplied by the wrapper. A direct cmake call
+# leaves them at their defaults below, which says so rather than guessing.
+set(XPMATH_ARCH "unspecified" CACHE STRING
+    "Name of the target-hardware configuration this build was made for")
+set(XPMATH_OPT "from-CMAKE_CXX_FLAGS_RELEASE" CACHE STRING
+    "Optimization level requested by scripts/xpm_build.sh --opt")
+
+# git HEAD, with -dirty when the tree carries uncommitted changes to tracked
+# files. `git describe --dirty` is not used: this repo has tags, so it would
+# report a tag name where a SHA is wanted.
+set(_xp_git_head "unknown")
+find_package(Git QUIET)
+if(GIT_FOUND)
+  execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+                  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                  OUTPUT_VARIABLE _xp_sha OUTPUT_STRIP_TRAILING_WHITESPACE
+                  ERROR_QUIET RESULT_VARIABLE _xp_rc)
+  if(_xp_rc EQUAL 0 AND _xp_sha)
+    set(_xp_git_head "${_xp_sha}")
+    # --quiet exits 1 when there is a difference. Tracked files only, which is
+    # the conventional meaning of "dirty"; an untracked scratch file is not a
+    # change to the tree that produced the binary.
+    execute_process(COMMAND "${GIT_EXECUTABLE}" diff --quiet HEAD --
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                    RESULT_VARIABLE _xp_dirty ERROR_QUIET)
+    if(NOT _xp_dirty EQUAL 0)
+      set(_xp_git_head "${_xp_sha}-dirty")
+    endif()
+  endif()
+endif()
+
+# The flags the compiler ACTUALLY gets: the global set plus the per-config set
+# for the configuration being built. Single-config generators only; a
+# multi-config generator has no one answer at configure time and says so.
+if(CMAKE_BUILD_TYPE)
+  string(TOUPPER "${CMAKE_BUILD_TYPE}" _xp_cfg)
+  set(_xp_all_flags "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${_xp_cfg}}")
+else()
+  set(_xp_all_flags "${CMAKE_CXX_FLAGS} (multi-config generator: per-config flags vary)")
+endif()
+string(STRIP "${_xp_all_flags}" _xp_all_flags)
+
+if(XPMATH_WITH_KOKKOS)
+  set(_xp_kokkos_prefix "${Kokkos_DIR}")
+  if(NOT _xp_kokkos_prefix)
+    set(_xp_kokkos_prefix "${CMAKE_PREFIX_PATH}")
+  endif()
+else()
+  set(_xp_kokkos_prefix "(none: XPMATH_WITH_KOKKOS=OFF)")
+endif()
+
+string(TIMESTAMP _xp_stamp_utc "%Y-%m-%dT%H:%M:%SZ" UTC)
+
+# check_build_provenance.cmake parses `key: value`, so every field is one line
+# and no value may be empty.
+file(WRITE "${CMAKE_BINARY_DIR}/build-info.txt"
+"# xpmath build provenance -- written by CMakeLists.txt at configure time.
+# Regenerated on every configure. Do not edit; do not commit.
+arch: ${XPMATH_ARCH}
+git-head: ${_xp_git_head}
+compiler: ${CMAKE_CXX_COMPILER}
+compiler-id: ${CMAKE_CXX_COMPILER_ID}
+compiler-version: ${CMAKE_CXX_COMPILER_VERSION}
+kokkos: ${XPMATH_WITH_KOKKOS}
+kokkos-prefix: ${_xp_kokkos_prefix}
+cxx-standard: ${CMAKE_CXX_STANDARD}
+build-type: ${CMAKE_BUILD_TYPE}
+opt-level: ${XPMATH_OPT}
+cxx-flags: ${_xp_all_flags}
+timestamp-utc: ${_xp_stamp_utc}
+")
+
+if(_xp_git_head MATCHES "-dirty$")
+  message(STATUS "build provenance: tree is DIRTY -- build-info.txt records ${_xp_git_head}")
+endif()
+message(STATUS "build provenance: ${CMAKE_BINARY_DIR}/build-info.txt (arch=${XPMATH_ARCH})")
+
 # ---- Tests (T0.1: backend-parameterized harness) ----------------------------
 # THIRD_PARTY_INCLUDE (set above) is consumed by tests/CMakeLists.txt.
 option(KOKKOS_EP_BUILD_TESTS "Build the extended-precision test suite" ON)

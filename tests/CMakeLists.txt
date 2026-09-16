@@ -333,7 +333,7 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/contraction_manifest.txt" "${_xp_manifes
 # check circular: delete a kokkos_ep_add_eft_test call and both the manifest
 # and the expectation shrink together, so the guard passes while a target has
 # silently lost its contraction flag by ceasing to exist. Same contract as
-# ci.yml's `expected=48` -- adding or removing a guarded target is a deliberate
+# ci.yml's `expected=49` -- adding or removing a guarded target is a deliberate
 # act that updates a number here.
 set(XPMATH_EFT_OFF_EXPECTED 8)   # dd/ff/qf/tf _eft_test + dd/ff/qf/tf _fma_guard_test
 set(XPMATH_EFT_ON_EXPECTED  5)   # the four *_fma_guard_test_contract_on + tf_eft_test_contract_on
@@ -653,6 +653,25 @@ set_tests_properties(consumer_package PROPERTIES
 
 add_test(NAME domains_fresh
          COMMAND ${CMAKE_SOURCE_DIR}/validation/check_domains_fresh.sh)
+
+# ---------------------------------------------------------------------------
+# BUILD PROVENANCE
+# ---------------------------------------------------------------------------
+# Every other target here judges the LIBRARY. This one judges the BUILD
+# DIRECTORY: it fails when ${CMAKE_BINARY_DIR}/build-info.txt is absent or
+# short a field, so a build whose artifacts could not be traced back to a tree
+# is caught by ctest rather than by the next person who needs the baseline.
+#
+# Registered OUTSIDE the XPMATH_WITH_KOKKOS guard -- provenance is a property
+# of the build, not of whether Kokkos is in it -- so it counts in both
+# configurations: 48 -> 49 with Kokkos, 20 -> 21 without.
+#
+# It takes NO contraction flags and adds no target, so
+# XPMATH_EFT_OFF_EXPECTED / XPMATH_EFT_ON_EXPECTED above stay at 8 / 5.
+add_test(NAME build_provenance
+         COMMAND ${CMAKE_COMMAND}
+                 -DINFO=${CMAKE_BINARY_DIR}/build-info.txt
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/check_build_provenance.cmake)
 
 set_tests_properties(sweep_absolute_gate sweep_monotone_gate
                      PROPERTIES TIMEOUT 600)

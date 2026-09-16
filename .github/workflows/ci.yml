@@ -145,7 +145,8 @@ jobs:
   #
   # Without a lane, that decoupling regresses the first time someone moves a
   # target outside the guard and only ever configures with Kokkos on. Measured
-  # locally before this lane was written: 20/20 in 164 s.
+  # locally before this lane was written: 20/20 in 164 s; 21/21 in 169 s since
+  # build_provenance joined the Kokkos-free set.
   # ---------------------------------------------------------------------------
   no-kokkos-build:
     name: build + ctest with XPMATH_WITH_KOKKOS=OFF
@@ -175,7 +176,7 @@ jobs:
       - name: Assert the Kokkos-free suite is the expected size
         run: |
           set -euo pipefail
-          expected=20
+          expected=21
           actual=$(ctest --test-dir build-nokokkos -N | awk '/^Total Tests: /{print $3}')
           echo "registered without Kokkos: ${actual} (expected ${expected})"
           if [ "${actual}" != "${expected}" ]; then
@@ -417,7 +418,7 @@ jobs:
       - name: Assert the full suite is registered
         run: |
           set -euo pipefail
-          expected=48
+          expected=49
           actual=$(ctest --test-dir build -N | awk '/^Total Tests: /{print $3}')
           echo "registered targets: ${actual} (expected ${expected})"
           if [ "${actual}" != "${expected}" ]; then
