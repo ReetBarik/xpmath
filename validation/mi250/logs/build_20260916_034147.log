@@ -1,0 +1,1594 @@
+===========================================================
+ S8c — xpm_build.sh --arch mi250, first execution
+ date      : 2026-09-16T03:41:47+00:00
+ host      : amdgpu05
+ repo      : /home/rbarik/xpm-mi250-validate
+ commit    : 0230239
+ branch    : step2/mi250-validate
+ build dir : /home/rbarik/xpm-mi250-validate/build-mi250
+ log       : /home/rbarik/xpm-mi250-validate/validation/mi250/logs/build_20260916_034147.log
+===========================================================
+  module system: present; gcc/13.3.0 + cmake/3.28.3 loaded in THIS shell
+  hipcc not on PATH -- fell back to ROCM_ROOT=/soft/compilers/rocm/rocm-7.0.2
+
+--- [0/6] provenance ---
+  -- hostname / kernel --
+    amdgpu05
+    Linux 6.4.0-150600.23.103-default x86_64
+  -- rocm-smi --showproductname --
+    
+    
+    ============================ ROCm System Management Interface ============================
+    ====================================== Product Info ======================================
+    GPU[0]		: Card Series: 		AMD Instinct MI250X / MI250
+    GPU[0]		: Card Model: 		0x740c
+    GPU[0]		: Card Vendor: 		Advanced Micro Devices, Inc. [AMD/ATI]
+    GPU[0]		: Card SKU: 		D65210
+    GPU[0]		: Subsystem ID: 	0x0b0c
+    GPU[0]		: Device Rev: 		0x01
+    GPU[0]		: Node ID: 		4
+    GPU[0]		: GUID: 		57586
+    GPU[0]		: GFX Version: 		gfx90a
+    GPU[1]		: Card Series: 		AMD Instinct MI250X / MI250
+    GPU[1]		: Card Model: 		0x740c
+    GPU[1]		: Card Vendor: 		Advanced Micro Devices, Inc. [AMD/ATI]
+    GPU[1]		: Card SKU: 		D65210
+    GPU[1]		: Subsystem ID: 	0x0b0c
+    GPU[1]		: Device Rev: 		0x01
+    GPU[1]		: Node ID: 		5
+    GPU[1]		: GUID: 		45873
+    GPU[1]		: GFX Version: 		gfx90a
+    GPU[2]		: Card Series: 		AMD Instinct MI250X / MI250
+    GPU[2]		: Card Model: 		0x740c
+    GPU[2]		: Card Vendor: 		Advanced Micro Devices, Inc. [AMD/ATI]
+    GPU[2]		: Card SKU: 		D65210
+    GPU[2]		: Subsystem ID: 	0x0b0c
+    GPU[2]		: Device Rev: 		0x01
+    GPU[2]		: Node ID: 		2
+    GPU[2]		: GUID: 		14571
+    GPU[2]		: GFX Version: 		gfx90a
+    GPU[3]		: Card Series: 		AMD Instinct MI250X / MI250
+    GPU[3]		: Card Model: 		0x740c
+    GPU[3]		: Card Vendor: 		Advanced Micro Devices, Inc. [AMD/ATI]
+    GPU[3]		: Card SKU: 		D65210
+    GPU[3]		: Subsystem ID: 	0x0b0c
+    GPU[3]		: Device Rev: 		0x01
+    GPU[3]		: Node ID: 		3
+    GPU[3]		: GUID: 		27432
+    GPU[3]		: GFX Version: 		gfx90a
+    GPU[4]		: Card Series: 		AMD Instinct MI250X / MI250
+    GPU[4]		: Card Model: 		0x740c
+    GPU[4]		: Card Vendor: 		Advanced Micro Devices, Inc. [AMD/ATI]
+    GPU[4]		: Card SKU: 		D65210
+    GPU[4]		: Subsystem ID: 	0x0b0c
+    GPU[4]		: Device Rev: 		0x01
+    GPU[4]		: Node ID: 		8
+    GPU[4]		: GUID: 		30939
+    GPU[4]		: GFX Version: 		gfx90a
+    GPU[5]		: Card Series: 		AMD Instinct MI250X / MI250
+    GPU[5]		: Card Model: 		0x740c
+    GPU[5]		: Card Vendor: 		Advanced Micro Devices, Inc. [AMD/ATI]
+    GPU[5]		: Card SKU: 		D65210
+    GPU[5]		: Subsystem ID: 	0x0b0c
+    GPU[5]		: Device Rev: 		0x01
+    GPU[5]		: Node ID: 		9
+    GPU[5]		: GUID: 		8466
+    GPU[5]		: GFX Version: 		gfx90a
+    GPU[6]		: Card Series: 		AMD Instinct MI250X / MI250
+    GPU[6]		: Card Model: 		0x740c
+    GPU[6]		: Card Vendor: 		Advanced Micro Devices, Inc. [AMD/ATI]
+    GPU[6]		: Card SKU: 		D65210
+    GPU[6]		: Subsystem ID: 	0x0b0c
+    GPU[6]		: Device Rev: 		0x01
+    GPU[6]		: Node ID: 		6
+    GPU[6]		: GUID: 		41154
+    GPU[6]		: GFX Version: 		gfx90a
+    GPU[7]		: Card Series: 		AMD Instinct MI250X / MI250
+    GPU[7]		: Card Model: 		0x740c
+    GPU[7]		: Card Vendor: 		Advanced Micro Devices, Inc. [AMD/ATI]
+    GPU[7]		: Card SKU: 		D65210
+    GPU[7]		: Subsystem ID: 	0x0b0c
+    GPU[7]		: Device Rev: 		0x01
+    GPU[7]		: Node ID: 		7
+    GPU[7]		: GUID: 		63755
+    GPU[7]		: GFX Version: 		gfx90a
+    ==========================================================================================
+    ================================== End of ROCm SMI Log ===================================
+  -- hipcc --version --
+    HIP version: 7.0.51831-7c9236b16
+    AMD clang version 20.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.0.2 25385 0dda3adf56766e0aac0d03173ced3759e1ffecbc)
+    Target: x86_64-unknown-linux-gnu
+    Thread model: posix
+    InstalledDir: /soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin
+    Configuration file: /soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++.cfg
+  -- run-time toolchain of this shell (ctest inherits it) --
+    g++    : /soft/compilers/gcc/13.3.0/x86_64-suse-linux/bin/g++  13.3.0
+    cmake  : /soft/buildtools/cmake/3.28.3/bin/cmake  cmake version 3.28.3
+    libquadmath on LD_LIBRARY_PATH:
+      /soft/compilers/gcc/13.3.0/x86_64-suse-linux/lib64/libquadmath.so.0
+  -- Kokkos install: /home/rbarik/xpm_device/kokkos-hip-gfx90a --
+    #define KOKKOS_VERSION 50100
+    #define KOKKOS_ENABLE_SERIAL
+    /* #undef KOKKOS_ENABLE_OPENMP */
+    /* #undef KOKKOS_ENABLE_CUDA */
+    #define KOKKOS_ENABLE_HIP
+    /* #undef KOKKOS_ENABLE_CUDA_RELOCATABLE_DEVICE_CODE */
+    /* #undef KOKKOS_ENABLE_CUDA_UVM */
+    /* #undef KOKKOS_ENABLE_CUDA_LAMBDA */
+    /* #undef KOKKOS_ENABLE_CUDA_CONSTEXPR */
+    /* #undef KOKKOS_ENABLE_LIBQUADMATH */
+    #define KOKKOS_ARCH_AMD_GFX90A
+    #define KOKKOS_ARCH_AMD_GPU "gfx90a"
+    => LIBQUADMATH OFF: per tests/CMakeLists.txt:12 the oracle-scored tests
+       are expected to BUILD and runtime-SKIP (exit 77). Counted separately
+       below. A skip is not a pass -- and a target that does not BUILD is
+       not a skip either, so read NOT BUILT beside it.
+  -- mi250 row of scripts/xpm_build.sh, as written --
+    declare -A ARCH_DESC=(
+      [mi250]="AMD MI250X / gfx90a, Kokkos HIP"
+    declare -A ARCH_MODULES=(
+      [mi250]="gcc/13.3.0 cmake/3.28.3 rocm/7.0.2"
+    declare -A ARCH_CC=(
+      [mi250]="gcc"
+    declare -A ARCH_CXX=(
+      [mi250]="/soft/compilers/rocm/rocm-7.0.2/bin/hipcc"
+    declare -A ARCH_KOKKOS_PREFIX=(
+      [mi250]="$HOME/xpm_device/kokkos-hip-gfx90a"
+    declare -A ARCH_KOKKOS_ARCH=(
+      [mi250]="Kokkos_ARCH_AMD_GFX90A"
+    declare -A ARCH_KOKKOS_BACKEND=(
+      [mi250]="hip"
+    declare -A ARCH_CUDA_ARCHITECTURES=(
+      [mi250]=""
+    declare -A ARCH_CONTRACT=(
+      [mi250]="-ffp-contract=off"
+
+--- [1/6] scripts/xpm_build.sh --arch mi250   (THE RECIPE, VERBATIM) ---
+  FRESH=1: removing /home/rbarik/xpm-mi250-validate/build-mi250
++ bash /home/rbarik/xpm-mi250-validate/scripts/xpm_build.sh --arch mi250 --build-dir /home/rbarik/xpm-mi250-validate/build-mi250
+  module load gcc/13.3.0
+  module load cmake/3.28.3
+  module load rocm/7.0.2
+===========================================================
+ xpm_build
+   arch        : mi250  (AMD MI250X / gfx90a, Kokkos HIP)
+   build dir   : /home/rbarik/xpm-mi250-validate/build-mi250
+   compiler    : /soft/compilers/rocm/rocm-7.0.2/bin/hipcc
+   optimization: -O3
+   contraction : -ffp-contract=off
+   kokkos      : ON  /home/rbarik/xpm_device/kokkos-hip-gfx90a  [use-existing]
+===========================================================
+-- The CXX compiler identification is Clang 20.0.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /soft/compilers/rocm/rocm-7.0.2/bin/hipcc - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE  
+-- Performing Test HIP_CLANG_SUPPORTS_PARALLEL_JOBS
+-- Performing Test HIP_CLANG_SUPPORTS_PARALLEL_JOBS - Success
+-- Enabled Kokkos devices: SERIAL;HIP
+CMake Warning at CMakeLists.txt:64 (message):
+  Kokkos was NOT built with Kokkos_ENABLE_LIBQUADMATH=ON; the host __float128
+  oracle in the demos will not compile.  Rebuild Kokkos with
+  -DKokkos_ENABLE_LIBQUADMATH=ON.
+
+
+-- build provenance: /home/rbarik/xpm-mi250-validate/build-mi250/build-info.txt (arch=mi250)
+CMake Warning at tests/CMakeLists.txt:25 (message):
+  tests: Kokkos has no LIBQUADMATH; oracle-dependent tests will runtime-SKIP
+  (CTest reports Skipped).  Rebuild Kokkos with
+  -DKokkos_ENABLE_LIBQUADMATH=ON to enable them.
+
+
+-- contraction guard: 8 OFF targets, 5 ON targets (expected 8/5)
+-- MPFR found: /usr/lib64/libmpfr.so
+-- MPC  found: /usr/lib64/libmpc.so -- the --oracle=mpfr arm is available for BOTH real and complex ops
+-- Configuring done (6.8s)
+-- Generating done (1.0s)
+CMake Warning:
+  Manually-specified variables were not used by the project:
+
+    CMAKE_C_COMPILER
+
+
+-- Build files have been written to: /home/rbarik/xpm-mi250-validate/build-mi250
+[  3%] Building CXX object tests/CMakeFiles/corpus_test.dir/corpus_test.cpp.o
+[  3%] Building CXX object tests/CMakeFiles/dd_invariant_test.dir/dd_invariant_test.cpp.o
+[  8%] Building CXX object CMakeFiles/kokkos_ep_demo.dir/src/demo_real.cpp.o
+[  8%] Building CXX object tests/CMakeFiles/dd_eft_test.dir/dd_eft_test.cpp.o
+[  8%] Building CXX object CMakeFiles/kokkos_ep_demo_ff.dir/src/demo_ff_real.cpp.o
+[ 20%] Building CXX object CMakeFiles/kokkos_ep_bench_cost.dir/src/bench_cost.cpp.o
+[ 50%] Building CXX object CMakeFiles/kokkos_ep_demo_tf.dir/src/demo_tf_real.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/ff_fma_guard_test_contract_on.dir/ff_fma_guard_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/ff_property_test.dir/ff_property_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/dd_e2e_test.dir/dd_e2e_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_property_test.dir/qf_property_test.cpp.o
+[ 50%] Building CXX object CMakeFiles/kokkos_ep_demo_qf.dir/src/demo_qf_real.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/ff_eft_test.dir/ff_eft_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/ff_cancellation_test.dir/ff_cancellation_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/dd_property_test.dir/dd_property_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_fma_guard_test.dir/qf_fma_guard_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/dd_fma_guard_test.dir/dd_fma_guard_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_no_kokkos_smoke.dir/standalone/qf_no_kokkos_smoke.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/hello_test.dir/hello_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/tf_cancellation_test.dir/tf_cancellation_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/dd_complex_no_kokkos_smoke.dir/standalone/dd_complex_no_kokkos_smoke.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/ff_no_kokkos_smoke.dir/standalone/ff_no_kokkos_smoke.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/tf_complex_no_kokkos_smoke.dir/standalone/tf_complex_no_kokkos_smoke.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/tf_fma_guard_test.dir/tf_fma_guard_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/pow_domain_test.dir/pow_domain_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/tf_fma_guard_test_contract_on.dir/tf_fma_guard_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/exp_reduction_test.dir/exp_reduction_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/trig_reduction_test.dir/trig_reduction_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/ff_fma_guard_test.dir/ff_fma_guard_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_cancellation_test.dir/qf_cancellation_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/dd_no_kokkos_smoke.dir/standalone/dd_no_kokkos_smoke.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_nonoverlap_test.dir/qf_nonoverlap_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/sweep_accuracy.dir/__/scripts/sweep_accuracy.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/tf_property_test.dir/tf_property_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_eft_test.dir/qf_eft_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/dd_fma_guard_test_contract_on.dir/dd_fma_guard_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_fma_guard_test_contract_on.dir/qf_fma_guard_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/ff_complex_no_kokkos_smoke.dir/standalone/ff_complex_no_kokkos_smoke.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_complex_no_kokkos_smoke.dir/standalone/qf_complex_no_kokkos_smoke.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/ff_invariant_test.dir/ff_invariant_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/tf_eft_test_contract_on.dir/tf_eft_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/tf_eft_test.dir/tf_eft_test.cpp.o
+clang++: error: unknown argument: '-fext-numeric-literals'
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a  -DXPMATH_HAVE_MPFR=1 -I/home/rbarik/xpm-mi250-validate/include -ffp-contract=off -O3 -DNDEBUG -std=c++17 -fext-numeric-literals -MD -MT tests/CMakeFiles/sweep_accuracy.dir/__/scripts/sweep_accuracy.cpp.o -MF CMakeFiles/sweep_accuracy.dir/__/scripts/sweep_accuracy.cpp.o.d -o "CMakeFiles/sweep_accuracy.dir/__/scripts/sweep_accuracy.cpp.o" -c -x hip /home/rbarik/xpm-mi250-validate/scripts/sweep_accuracy.cpp
+gmake[2]: *** [tests/CMakeFiles/sweep_accuracy.dir/build.make:76: tests/CMakeFiles/sweep_accuracy.dir/__/scripts/sweep_accuracy.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:1168: tests/CMakeFiles/sweep_accuracy.dir/all] Error 2
+gmake[1]: *** Waiting for unfinished jobs....
+/home/rbarik/xpm-mi250-validate/tests/exp_reduction_test.cpp:52:10: fatal error: 'quadmath.h' file not found
+   52 | #include <quadmath.h>
+      |          ^~~~~~~~~~~~
+1 error generated when compiling for gfx90a.
+In file included from /home/rbarik/xpm-mi250-validate/tests/standalone/dd_no_kokkos_smoke.cpp:29:
+In file included from /home/rbarik/xpm-mi250-validate/include/xp/dd_math.hpp:66:
+/home/rbarik/xpm-mi250-validate/include/xp/trig_reduction.hpp:150:31: error: use of undeclared identifier '__double_as_longlong'
+In file included from /home/rbarik/xpm-mi250-validate/tests/standalone/ff_complex_no_kokkos_smoke.cpp:22:
+In file included from /home/rbarik/xpm-mi250-validate/include/xp/ff_complex.hpp:52:
+In file included from /home/rbarik/xpm-mi250-validate/include/xp/ff_math.hpp:In file included from 78:
+  /home/rbarik/xpm-mi250-validate/tests/standalone/tf_complex_no_kokkos_smoke.cpp/home/rbarik/xpm-mi250-validate/include/xp/trig_reduction.hpp150 | ::15024:31:  error: :
+ In file included from use of undeclared identifier '__double_as_longlong'/home/rbarik/xpm-mi250-validate/include/xp/tf_complex.hpp
+ In file included from :/home/rbarik/xpm-mi250-validate/tests/standalone/dd_complex_no_kokkos_smoke.cpp 72::
+22In file included from :
+/home/rbarik/xpm-mi250-validate/include/xp/tf_math.hppIn file included from :65:
+b  /home/rbarik/xpm-mi250-validate/include/xp/trig_reduction.hpp/home/rbarik/xpm-mi250-validate/include/xp/dd_complex.hpp:: 150150:52= | 31In file included from In file included from :
+In file included from /home/rbarik/xpm-mi250-validate/include/xp/dd_math.hpp  :  /home/rbarik/xpm-mi250-validate/tests/standalone/qf_no_kokkos_smoke.cpp/home/rbarik/xpm-mi250-validate/tests/trig_reduction_test.cpp:serror:   b::7766tuse of undeclared identifier '__double_as_longlong'a t23:
+:
+In file included from 
+=/home/rbarik/xpm-mi250-validate/tests/pow_domain_test.cpp :
+iIn file included from /home/rbarik/xpm-mi250-validate/include/xp/trig_reduction.hppIn file included from /home/rbarik/xpm-mi250-validate/include/xp/trig_reduction.hpp:150:s32/home/rbarik/xpm-mi250-validate/include/xp/qf_math.hpp:c:/home/rbarik/xpm-mi250-validate/tests/standalone/ff_no_kokkos_smoke.cpp:23:31  150In file included from t/home/rbarik/xpm-mi250-validate/tests/standalone/qf_complex_no_kokkos_smoke.cpp75:
+In file included from _/home/rbarik/xpm-mi250-validate/include/xp/dd_math.hpp150:
+In file included from :  | ati::
+24/home/rbarik/xpm-mi250-validate/include/xp/trig_reduction.hppc::66:/home/rbarik/xpm-mi250-validate/include/xp/ff_math.hpp:31error:  c_c:
+a150:
+:78:
+31/home/rbarik/xpm-mi250-validate/include/xp/trig_reduction.hpp: use of undeclared identifier '__double_as_longlong'error:  use of undeclared identifier '__double_as_longlong'aIn file included from s/home/rbarik/xpm-mi250-validate/include/xp/trig_reduction.hpp::150
+  b 
+st<ui/home/rbarik/xpm-mi250-validate/include/xp/qf_complex.hppt:150:31:  :=  nt:<error: error: use of undeclared identifier '__double_as_longlong'
+31:  error: 150use of undeclared identifier '__double_as_longlong'689ui  use of undeclared identifier '__double_as_longlong'
+s |  
+4_:
+n150 | t  a  t>(  In file included from /home/rbarik/xpm-mi250-validate/include/xp/qf_math.hpp  t6    t150_150:751504_ b =bi  | _  | :
+ | /home/rbarik/xpm-mi250-validate/include/xp/trig_reduction.hpp : 150:31t s>c=_doubc    :t(_ la     a_dses b bberror: tot_t=   iuse of undeclared identifier '__double_as_longlong'ubaa<=st=c_c
+le_atsiu at ass_lo_cints  itstnl_64t_150c<autgocat | _iiclnast> can_cogt<i( stasnluic_ t<6t4<_ugonntg__du bitn(6(coi n=t 64>t(6_4v4v_ausb___))t)stlat>td>o)>;t
+et(_(ub;
+(<u      _ai_d_l_e      _i| s                              ^cod_as| _n_
+_uo_ul                              ^
+doubt6locbbolnl4n_let_aegloeg>ass_nag_lon(__ts(_v)ag(_lo<l);
+sv_lo)ndngouo      | )gllubing                              ^
+;ongon(lnl
+g(v))e_tong      v;a6(v| )
+s4__))                              ^)      ;lt;
+      
+| 
+on      >|                               ^|                               ^                              ^gl
+(
+
+o_n_gd(ovu)b)l;e
+_      a| s                              ^_
+longlong(v));
+      |                               ^
+/home/rbarik/xpm-mi250-validate/include/xp/trig_reduction.hpp:166:31: error: use of undeclared identifier '__float_as_int'
+  166 |     b = static_cast<uint32_t>(__float_as_int(v));
+      |                               ^
+/home/rbarik/xpm-mi250-validate/include/xp/trig_reduction.hpp:166:31: error: use of undeclared identifier '__float_as_int'
+  166 |     b = static_cast<uint32_t>(__float_as_int(v));
+      |                               ^
+/home/rbarik/xpm-mi250-validate/include/xp/trig_reduction.hpp:166:31: error: use of undeclared identifier '__float_as_int'
+  166 |     b = static_cast<uint32_t>(__float_as_int(v));
+      |                               ^
+/home/rbarik/xpm-mi250-validate/include/xp/trig_reduction.hpp:166:31: error: use of undeclared identifier '__float_as_int'
+  166 |     b = static_cast<uint32_t>(__float_as_int(v));
+      |                               ^
+/home/rbarik/xpm-mi250-validate/include/xp/trig_reduction.hpp:166:31: error: use of undeclared identifier '__float_as_int'
+  166 |     b = static_cast<uint32_t>(__float_as_int(v));
+      |                               ^
+/home/rbarik/xpm-mi250-validate/include/xp/trig_reduction.hpp:166:31: error: use of undeclared identifier '__float_as_int'
+  166 |     b = static_cast<uint32_t>(__float_as_int(v));
+      |                               ^
+/home/rbarik/xpm-mi250-validate/include/xp/trig_reduction.hpp:166:31: error: use of undeclared identifier '__float_as_int'
+  166 |     b = static_cast<uint32_t>(__float_as_int(v));
+      |                               ^
+/home/rbarik/xpm-mi250-validate/include/xp/trig_reduction.hpp:166:31: error: use of undeclared identifier '__float_as_int'
+/home/rbarik/xpm-mi250-validate/include/xp/trig_reduction.hpp  166 |     b = static_cast<uint32_t>(__float:_as166_:int(31v: ))error: ;
+use of undeclared identifier '__float_as_int'      |                               ^
+
+  166 |     b = static_cast<uint32_t>(__float_as_int(v));
+      |                               ^
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a  -I/home/rbarik/xpm-mi250-validate/include -ffp-contract=off -O3 -DNDEBUG -std=c++17 -MD -MT tests/CMakeFiles/exp_reduction_test.dir/exp_reduction_test.cpp.o -MF CMakeFiles/exp_reduction_test.dir/exp_reduction_test.cpp.o.d -o "CMakeFiles/exp_reduction_test.dir/exp_reduction_test.cpp.o" -c -x hip /home/rbarik/xpm-mi250-validate/tests/exp_reduction_test.cpp
+gmake[2]: *** [tests/CMakeFiles/exp_reduction_test.dir/build.make:76: tests/CMakeFiles/exp_reduction_test.dir/exp_reduction_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:1220: tests/CMakeFiles/exp_reduction_test.dir/all] Error 2
+In file included from /home/rbarik/xpm-mi250-validate/tests/standalone/ff_complex_no_kokkos_smoke.cpp:22:
+In file included from /home/rbarik/xpm-mi250-validate/include/xp/ff_complex.hpp:52:
+/home/rbarik/xpm-mi250-validate/include/xp/ff_math.hpp:139:13: error: use of undeclared identifier '__int_as_float'
+  139 |         h = __int_as_float(static_cast<int>(hi_bits));
+      |             ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/standalone/dd_no_kokkos_smoke.cpp:29:
+/home/rbarik/xpm-mi250-validate/include/xp/dd_math.hpp:135:13: error: use of undeclared identifier '__longlong_as_double'
+  135 |         h = __longlong_as_double(static_cast<long long>(hi_bits));
+      |             ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/standalone/dd_complex_no_kokkos_smoke.cpp:22:
+In file included from /home/rbarik/xpm-mi250-validate/include/xp/dd_complex.hpp:52:
+/home/rbarik/xpm-mi250-validate/include/xp/dd_math.hpp:135:13: error: use of undeclared identifier '__longlong_as_double'
+  135 |         h = __longlong_as_double(static_cast<long long>(hi_bits));
+      |             ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/standalone/ff_no_kokkos_smoke.cpp:23:
+/home/rbarik/xpm-mi250-validate/include/xp/ff_math.hpp:139:13: error: use of undeclared identifier '__int_as_float'
+  139 |         h = __int_as_float(static_cast<int>(hi_bits));
+      |             ^
+/home/rbarik/xpm-mi250-validate/include/xp/ff_math.hpp:140:13: error: use of undeclared identifier '__int_as_float'
+  140 |         l = __int_as_float(static_cast<int>(lo_bits));
+      |             ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/pow_domain_test.cpp:32:
+/home/rbarik/xpm-mi250-validate/include/xp/dd_math.hpp:135:13: error: use of undeclared identifier '__longlong_as_double'
+  135 |         h = __longlong_as_double(static_cast<long long>(hi_bits));
+      |             ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/standalone/tf_complex_no_kokkos_smoke.cpp:24:
+In file included from /home/rbarik/xpm-mi250-validate/include/xp/tf_complex.hpp:72:
+/home/rbarik/xpm-mi250-validate/include/xp/tf_math.hpp:337:14: error: use of undeclared identifier '__int_as_float'
+  337 |         f0 = __int_as_float(static_cast<int>(b0));
+      |              ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/standalone/qf_no_kokkos_smoke.cpp:23:
+/home/rbarik/xpm-mi250-validate/include/xp/qf_math.hpp:357:14: error: use of undeclared identifier '__int_as_float'
+  357 |         a0 = __int_as_float(static_cast<int>(b0));
+      |              ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/standalone/qf_complex_no_kokkos_smoke.cpp:24:
+In file included from /home/rbarik/xpm-mi250-validate/include/xp/qf_complex.hpp:89:
+/home/rbarik/xpm-mi250-validate/include/xp/qf_math.hpp:357:14: error: use of undeclared identifier '__int_as_float'
+  357 |         a0 = __int_as_float(static_cast<int>(b0));
+      |              ^
+/home/rbarik/xpm-mi250-validate/include/xp/ff_math.hpp:140:13: error: use of undeclared identifier '__int_as_float'
+  140 |         l = __int_as_float(static_cast<int>(lo_bits));
+      |             ^
+/home/rbarik/xpm-mi250-validate/include/xp/dd_math.hpp:136:13: error: use of undeclared identifier '__longlong_as_double'
+  136 |         l = __longlong_as_double(static_cast<long long>(lo_bits));
+      |             ^
+/home/rbarik/xpm-mi250-validate/include/xp/tf_math.hpp:338:14: error: use of undeclared identifier '__int_as_float'
+  338 |         f1 = __int_as_float(static_cast<int>(b1));
+      |              ^
+/home/rbarik/xpm-mi250-validate/include/xp/dd_math.hpp:136:13: error: use of undeclared identifier '__longlong_as_double'
+  136 |         l = __longlong_as_double(static_cast<long long>(lo_bits));
+      |             ^
+/home/rbarik/xpm-mi250-validate/include/xp/qf_math.hpp:358:14: error: use of undeclared identifier '__int_as_float'
+  358 |         a1 = __int_as_float(static_cast<int>(b1));
+      |              ^
+/home/rbarik/xpm-mi250-validate/include/xp/qf_math.hpp:358:14: error: use of undeclared identifier '__int_as_float'
+  358 |         a1 = __int_as_float(static_cast<int>(b1));
+      |              ^
+/home/rbarik/xpm-mi250-validate/include/xp/dd_math.hpp:136:13: error: use of undeclared identifier '__longlong_as_double'
+  136 |         l = __longlong_as_double(static_cast<long long>(lo_bits));
+      |             ^
+/home/rbarik/xpm-mi250-validate/include/xp/tf_math.hpp:339:14: error: use of undeclared identifier '__int_as_float'
+  339 |         f2 = __int_as_float(static_cast<int>(b2));
+      |              ^
+/home/rbarik/xpm-mi250-validate/include/xp/qf_math.hpp:359:14: error: use of undeclared identifier '__int_as_float'
+  359 |         a2 = __int_as_float(static_cast<int>(b2));
+      |              ^
+/home/rbarik/xpm-mi250-validate/include/xp/qf_math.hpp:359:14: error: use of undeclared identifier '__int_as_float'
+  359 |         a2 = __int_as_float(static_cast<int>(b2));
+      |              ^
+/home/rbarik/xpm-mi250-validate/include/xp/qf_math.hpp:360:14: error: use of undeclared identifier '__int_as_float'
+  360 |         a3 = __int_as_float(static_cast<int>(b3));
+      |              ^
+/home/rbarik/xpm-mi250-validate/include/xp/qf_math.hpp:360:14: error: use of undeclared identifier '__int_as_float'
+  360 |         a3 = __int_as_float(static_cast<int>(b3));
+      |              ^
+/home/rbarik/xpm-mi250-validate/tests/standalone/qf_no_kokkos_smoke.cpp:89:6: error: invalid operands to binary expression ('std::ostringstream' (aka 'basic_ostringstream<char>') and 'const QuadFloat')
+   89 |   os << pi;
+      |   ~~ ^  ~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/system_error:339:5: note: candidate function template not viable: no known conversion from 'const QuadFloat' to 'const error_code' for 2nd argument
+  339 |     operator<<(basic_ostream<_CharT, _Traits>& __os, const error_code& __e)
+      |     ^                                                ~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:573:5: note: candidate function template not viable: no known conversion from 'const QuadFloat' to 'char' for 2nd argument
+  573 |     operator<<(basic_ostream<_CharT, _Traits>& __out, char __c)
+      |     ^                                                 ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:579:5: note: candidate function template not viable: no known conversion from 'const QuadFloat' to 'char' for 2nd argument
+  579 |     operator<<(basic_ostream<char, _Traits>& __out, char __c)
+      |     ^                                               ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:590:5: note: candidate function template not viable: no known conversion from 'const QuadFloat' to 'signed char' for 2nd argument
+  590 |     operator<<(basic_ostream<char, _Traits>& __out, signed char __c)
+      |     ^                                               ~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:595:5: note: candidate function template not viable: no known conversion from 'const QuadFloat' to 'unsigned char' for 2nd argument
+  595 |     operator<<(basic_ostream<char, _Traits>& __out, unsigned char __c)
+      |     ^                                               ~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:671:5: note: candidate function template not viable: no known conversion from 'const QuadFloat' to 'const char *' for 2nd argument
+  671 |     operator<<(basic_ostream<char, _Traits>& __out, const char* __s)
+      |     ^                                               ~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:684:5: note: candidate function template not viable: no known conversion from 'const QuadFloat' to 'const signed char *' for 2nd argument
+  684 |     operator<<(basic_ostream<char, _Traits>& __out, const signed char* __s)
+      |     ^                                               ~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:689:5: note: candidate function template not viable: no known conversion from 'const QuadFloat' to 'const unsigned char *' for 2nd argument
+  689 |     operator<<(basic_ostream<char, _Traits>& __out, const unsigned char* __s)
+      |     ^                                               ~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/bits/ostream.tcc:307:5: note: candidate function template not viable: no known conversion from 'const QuadFloat' to 'const char *' for 2nd argument
+  307 |     operator<<(basic_ostream<_CharT, _Traits>& __out, const char* __s)
+      |     ^                                                 ~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/cstddef:125:5: note: candidate function template not viable: no known conversion from 'std::ostringstream' (aka 'basic_ostringstream<char>') to 'byte' for 1st argument
+  125 |     operator<<(byte __b, _IntegerType __shift) noexcept
+      |     ^          ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:563:5: note: candidate template ignored: deduced conflicting types for parameter '_CharT' ('char' vs. 'QuadFloat')
+  563 |     operator<<(basic_ostream<_CharT, _Traits>& __out, _CharT __c)
+      |     ^
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/string_view:763:5: note: candidate template ignored: could not match 'basic_string_view<_CharT, _Traits>' against 'QuadFloat'
+  763 |     operator<<(basic_ostream<_CharT, _Traits>& __os,
+      |     ^
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/bits/basic_string.h:4077:5: note: candidate template ignored: could not match 'const basic_string<_CharT, _Traits, _Alloc>' against 'const QuadFloat'
+ 4077 |     operator<<(basic_ostream<_CharT, _Traits>& __os,
+      |     ^
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:654:5: note: candidate template ignored: could not match 'const _CharT *' against 'QuadFloat'
+  654 |     operator<<(basic_ostream<_CharT, _Traits>& __out, const _CharT* __s)
+      |     ^
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:810:5: note: candidate template ignored: requirement '__and_<std::is_class<std::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>> &>, std::__not_<std::is_same<std::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>> &, std::ios_base>>, std::is_convertible<std::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>> *, std::ios_base *>>::value' was not satisfied [with _Ostream = std::ostringstream &, _Tp = QuadFloat]
+  810 |     operator<<(_Ostream&& __os, const _Tp& __x)
+      |     ^
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/complex:563:5: note: candidate template ignored: could not match 'const complex<_Tp>' against 'const QuadFloat'
+  563 |     operator<<(basic_ostream<_CharT, _Traits>& __os, const complex<_Tp>& __x)
+      |     ^
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:116:7: note: candidate function not viable: no known conversion from 'const QuadFloat' to '__ostream_type &(*)(__ostream_type &)' (aka 'basic_ostream<char, std::char_traits<char>> &(*)(basic_ostream<char, std::char_traits<char>> &)') for 1st argument
+  116 |       operator<<(__ostream_type& (*__pf)(__ostream_type&))
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:125:7: note: candidate function not viable: no known conversion from 'const QuadFloat' to '__ios_type &(*)(__ios_type &)' (aka 'basic_ios<char, std::char_traits<char>> &(*)(basic_ios<char, std::char_traits<char>> &)') for 1st argument
+  125 |       operator<<(__ios_type& (*__pf)(__ios_type&))
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:135:7: note: candidate function not viable: no known conversion from 'const QuadFloat' to 'ios_base &(*)(ios_base &)' for 1st argument
+  135 |       operator<<(ios_base& (*__pf) (ios_base&))
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:174:7: note: candidate function not viable: no known conversion from 'const QuadFloat' to 'long' for 1st argument
+  174 |       operator<<(long __n)
+      |       ^          ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:178:7: note: candidate function not viable: no known conversion from 'const QuadFloat' to 'unsigned long' for 1st argument
+  178 |       operator<<(unsigned long __n)
+      |       ^          ~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:182:7: note: candidate function not viable: no known conversion from 'const QuadFloat' to 'bool' for 1st argument
+  182 |       operator<<(bool __n)
+      |       ^          ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:186:7: note: candidate function not viable: no known conversion from 'const QuadFloat' to 'short' for 1st argument
+  186 |       operator<<(short __n);
+      |       ^          ~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:189:7: note: candidate function not viable: no known conversion from 'const QuadFloat' to 'unsigned short' for 1st argument
+  189 |       operator<<(unsigned short __n)
+      |       ^          ~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:197:7: note: candidate function not viable: no known conversion from 'const QuadFloat' to 'int' for 1st argument
+  197 |       operator<<(int __n);
+      |       ^          ~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:200:7: note: candidate function not viable: no known conversion from 'const QuadFloat' to 'unsigned int' for 1st argument
+  200 |       operator<<(unsigned int __n)
+      |       ^          ~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:211:7: note: candidate function not viable: no known conversion from 'const QuadFloat' to 'long long' for 1st argument
+  211 |       operator<<(long long __n)
+      |       ^          ~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:215:7: note: candidate function not viable: no known conversion from 'const QuadFloat' to 'unsigned long long' for 1st argument
+  215 |       operator<<(unsigned long long __n)
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:231:7: note: candidate function not viable: no known conversion from 'const QuadFloat' to 'double' for 1st argument
+  231 |       operator<<(double __f)
+      |       ^          ~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:235:7: note: candidate function not viable: no known conversion from 'const QuadFloat' to 'float' for 1st argument
+  235 |       operator<<(float __f)
+      |       ^          ~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:243:7: note: candidate function not viable: no known conversion from 'const QuadFloat' to 'long double' for 1st argument
+  243 |       operator<<(long double __f)
+      |       ^          ~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:301:7: note: candidate function not viable: no known conversion from 'const QuadFloat' to 'const void *' for 1st argument; take the address of the argument with &
+  301 |       operator<<(const void* __p)
+      |       ^          ~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:306:7: note: candidate function not viable: no known conversion from 'const QuadFloat' to 'nullptr_t' (aka 'std::nullptr_t') for 1st argument
+  306 |       operator<<(nullptr_t)
+      |       ^          ~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:339:7: note: candidate function not viable: no known conversion from 'const QuadFloat' to '__streambuf_type *' (aka 'basic_streambuf<char, std::char_traits<char>> *') for 1st argument
+  339 |       operator<<(__streambuf_type* __sb);
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~
+/home/rbarik/xpm-mi250-validate/tests/standalone/dd_no_kokkos_smoke.cpp:95:6: error: invalid operands to binary expression ('std::ostringstream' (aka 'basic_ostringstream<char>') and 'const DoubleDouble')
+   95 |   os << pi;
+      |   ~~ ^  ~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/system_error:339:5: note: candidate function template not viable: no known conversion from 'const DoubleDouble' to 'const error_code' for 2nd argument
+  339 |     operator<<(basic_ostream<_CharT, _Traits>& __os, const error_code& __e)
+      |     ^                                                ~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:573:5: note: candidate function template not viable: no known conversion from 'const DoubleDouble' to 'char' for 2nd argument
+  573 |     operator<<(basic_ostream<_CharT, _Traits>& __out, char __c)
+      |     ^                                                 ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:579:5: note: candidate function template not viable: no known conversion from 'const DoubleDouble' to 'char' for 2nd argument
+  579 |     operator<<(basic_ostream<char, _Traits>& __out, char __c)
+      |     ^                                               ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:590:5: note: candidate function template not viable: no known conversion from 'const DoubleDouble' to 'signed char' for 2nd argument
+  590 |     operator<<(basic_ostream<char, _Traits>& __out, signed char __c)
+      |     ^                                               ~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:595:5: note: candidate function template not viable: no known conversion from 'const DoubleDouble' to 'unsigned char' for 2nd argument
+  595 |     operator<<(basic_ostream<char, _Traits>& __out, unsigned char __c)
+      |     ^                                               ~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:671:5: note: candidate function template not viable: no known conversion from 'const DoubleDouble' to 'const char *' for 2nd argument
+  671 |     operator<<(basic_ostream<char, _Traits>& __out, const char* __s)
+      |     ^                                               ~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:684:5: note: candidate function template not viable: no known conversion from 'const DoubleDouble' to 'const signed char *' for 2nd argument
+  684 |     operator<<(basic_ostream<char, _Traits>& __out, const signed char* __s)
+      |     ^                                               ~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:689:5: note: candidate function template not viable: no known conversion from 'const DoubleDouble' to 'const unsigned char *' for 2nd argument
+  689 |     operator<<(basic_ostream<char, _Trait/home/rbarik/xpm-mi250-validate/tests/standalone/ff_no_kokkos_smoke.cpps:>89:& 6_:_ ouerror: tinvalid operands to binary expression ('std::ostringstream' (aka 'basic_ostringstream<char>') and 'const FloatFloat'),
+ const unsigned char* __s)   
+89 |        |  o    ^                                               ~~~~~~~~~~~~~~~~~~~~~~~~s 
+<< pi;
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/bits/ostream.tcc      :| 307:  ~~ ^  ~~5
+: note: candidate function template not viable: no known conversion from 'const DoubleDouble' to 'const char *' for 2nd argument
+  307 |     operator<<(basic_ostream<_CharT, _Traits>& __out, const char* __s)
+      |     ^                                                 ~~~~~~~~~~~~~~~/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/system_error
+:339:5: note: candidate function template not viable: no known conversion from 'const FloatFloat' to 'const error_code' for 2nd argument
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/cstddef:125:5: note: candidate function template not viable: no known conversion from 'std::ostringstream' (aka 'basic_ostringstream<char>') to 'byte' for 1st argument  339
+ |     operator<<(b  as125 | ic  _  oospetrraetoamr<_<C<h(arTbyte,  ___Trba,it s_>Int&e ge__roTsy, pceo n_st_s hifet) rnroeorx_ccoedpet&
+ _      _| e)    ^          ~~~~~~~~
+
+      |     ^                                                ~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:563:5: note: candidate template ignored: deduced conflicting types for parameter '_CharT' ('char' vs. 'DoubleDouble')
+  563 |   /usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream  operator<:<(b573a:5s:i cnote: _candidate function template not viable: no known conversion from 'const FloatFloat' to 'char' for 2nd argumentost
+ream  573< | _ Ch  a roTp,er _aTratoir<ts<(>b&a si_c__ooust, tr_eCahma<r_TC h__ca)r
+T      ,|     ^ 
+_Traits>/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/string_view&: 763_:_5o:u tnote: , candidate template ignored: could not match 'basic_string_view<_CharT, _Traits>' against 'DoubleDouble'c
+ha  r763 |  _ _ c ) 
+o      p| e    ^                                                 ~~~~~~~~r
+ator<<(basic_ost/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostreamr:ea579:m5<:_ Cnote: hcandidate function template not viable: no known conversion from 'const FloatFloat' to 'char' for 2nd argumenta
+rT, _Trai  t579s | > & _ _ o so,
+perat      o|     ^r
+<<(basi/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/bits/basic_string.hc:_4077o:s5t:r enote: acandidate template ignored: could not match 'const basic_string<_CharT, _Traits, _Alloc>' against 'const DoubleDouble'm
+<cha r4077, |   _ T r aiotpse>r&a t_o_ro<u<t(,ba sicch_oasrtr e_am<_c_)
+Ch      a| r    ^                                               ~~~~~~~~T
+, _Traits>& /usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:_590:_5o: s,note: candidate function template not viable: no known conversion from 'const FloatFloat' to 'signed char' for 2nd argument
+
+      |     ^
+  590/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream | : 654 : 5 :o note: pecandidate template ignored: could not match 'const _CharT *' against 'DoubleDouble'r
+at  654o | r < < ( boapseirca_toosrt<r<e(abmas<cihacr,_os t_rTearam<_itChas>r& T, __Tra_oitus>&t ,_ _soiutg,n ecod ncshta r_ C_h_acr)T
+*       | _    ^                                               ~~~~~~~~~~~~~~~_
+s)
+      |     ^
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:595:5: /usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostreamnote: :candidate function template not viable: no known conversion from 'const FloatFloat' to 'unsigned char' for 2nd argument810
+:5: note: candidate template ignored: requirement '__and_<std::is_class<std::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>> &>, std::__not_<std::is_same<std::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>> &, std::ios_base>>, std::is_convertible<std::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>> *, std::ios_base *>>::value' was not satisfied [with _Ostream = std::ostringstream &, _Tp = DoubleDouble]  
+595 |   810  |        ooppeerraattoorr<<<<((b_Oasstireca_mo&s& tr__eoasm<,c hcaorn,s t_ T_rTapi&t s_>_&x)
+       _| _    ^o
+ut, unsigned c/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/complexh:a563r: 5_:_ cnote: )candidate template ignored: could not match 'const complex<_Tp>' against 'const DoubleDouble'
+
+      |     ^                                               ~~~~~~~~~~~~~~~~~  
+563 |     operator</usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream<(:b671a:s5i:c _onote: candidate function template not viable: no known conversion from 'const FloatFloat' to 'const char *' for 2nd arguments
+tream<_C  h671 | a r T ,  _Torpaeirtast>o& _r_<o<s(,b acsoincs_to sctormeplaemx<<c_hTapr>,&  __T_rx)
+a      |     ^i
+ts>& __out, const cha/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:r116*: 7_:_ snote: )candidate function not viable: no known conversion from 'const DoubleDouble' to '__ostream_type &(*)(__ostream_type &)' (aka 'basic_ostream<char, std::char_traits<char>> &(*)(basic_ostream<char, std::char_traits<char>> &)') for 1st argument
+
+        116 | |     ^                                               ~~~~~~~~~~~~~~~   
+   operato/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:r684<:<(5__: ostnote: rcandidate function template not viable: no known conversion from 'const FloatFloat' to 'const signed char *' for 2nd argumente
+am_typ  684e&  |  (*_  _ pofpe)r(a_t_oor<s<t(breaasmi_ctype_o&)s)
+      t| r      ^          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~eam<c
+har, _Traits>& __o/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostreamu:t125,: c7o:n note: stcandidate function not viable: no known conversion from 'const DoubleDouble' to '__ios_type &(*)(__ios_type &)' (aka 'basic_ios<char, std::char_traits<char>> &(*)(basic_ios<char, std::char_traits<char>> &)') for 1st argument 
+s  ig125n | e d c h a  r * o_p_es)rato
+r      |     ^                                               ~~~~~~~~~~~~~~~~~~~~~~
+<<(__ios_/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:typ689:e& 5(:* _note: candidate function template not viable: no known conversion from 'const FloatFloat' to 'const unsigned char *' for 2nd argument_
+pf)(__ios_  t689 | ype&) ) 
+        op| e      ^          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~r
+ator/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream<<(b:a135si:c7_:os note: candidate function not viable: no known conversion from 'const DoubleDouble' to 'ios_base &(*)(ios_base &)' for 1st argumenttr
+ea  m135< | c ha  r ,   _oTperraaittosr><<(&i os___boasuet&, (* __pcf) on(iosst_ buanse&s)i)g
+n      e| d      ^          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
+cha/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:r*174 :7:_ note: _candidate function not viable: no known conversion from 'const DoubleDouble' to 'long' for 1st arguments)
+
+        |     ^                                               ~~~~~~~~~~~~~~~~~~~~~~~~174 | 
+      operator/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/bits/ostream.tcc:<307:<(5:l onote: ng candidate function template not viable: no known conversion from 'const FloatFloat' to 'const char *' for 2nd argument_
+_n)
+      |       ^          ~~~~~~~~
+  307 |    /usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream: o178p:e7r:a tnote: ocandidate function not viable: no known conversion from 'const DoubleDouble' to 'unsigned long' for 1st argumentr
+<  178<( | b a s i   co_poersattroera<m<(u<n_sCihganreTd,  _lonTrga i__tns)>
+&       | _      ^          ~~~~~~~~~~~~~~~~~_
+ou/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostreamt:,182 c:o7n:s tnote: candidate function not viable: no known conversion from 'const DoubleDouble' to 'bool' for 1st argument 
+c  h182a | r *   _ _ s oper)a
+t      or| <<    ^                                                 ~~~~~~~~~~~~~~~
+(bool __n)
+      |       ^          ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/cstddef/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:186:7: note: candidate function not viable: no known conversion from 'const DoubleDouble' to 'short' for 1st argument
+:125:5: note: candidate function template not viable: no known conversion from 'std::ostringstream' (aka 'basic_ostringstream<char>') to 'byte' for 1st argument  
+186 |       operat  125o |  r< <  (opshoerratto __r<n)<;
+      (b|       ^          ~~~~~~~~~y
+te __b, _In/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:189:t7:e gnote: ercandidate function not viable: no known conversion from 'const DoubleDouble' to 'unsigned short' for 1st argumentT
+yp  189e  |  _   _ s hoipfter)a tonor<<(unexsicgenpted
+       | s    ^          ~~~~~~~~
+hort __n)
+      |       ^          ~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream197::563:75::  note: note: candidate function not viable: no known conversion from 'const DoubleDouble' to 'int' for 1st argument
+candidate template ignored: deduced conflicting types for parameter '_CharT' ('char' vs. 'FloatFloat')
+  197 |        563  | o p e r aopteorra<tor<<<((ibnats i_c__on)st;
+re      a|       ^          ~~~~~~~m<_
+CharT, _Tr/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostreamai:t200s:>&7:  _note: _candidate function not viable: no known conversion from 'const DoubleDouble' to 'unsigned int' for 1st argumento
+ut,   200_Ch | arT  _ _ c ) 
+       o| p    ^e
+rator<<(unsi/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/string_viewg:ne763d: 5i: note: ncandidate template ignored: could not match 'basic_string_view<_CharT, _Traits>' against 'FloatFloat't
+ _  _763n | ) 
+        |        ^          ~~~~~~~~~~~~~~~~o
+perator<<(b/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostreama:s211i:c_7o: snote: trcandidate function not viable: no known conversion from 'const DoubleDouble' to 'long long' for 1st argumente
+am<_  C211h | a rT ,   _Tra  iots>p& e_r_aotso,r
+<      | <    ^(
+long long/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/bits/basic_string.h :_4077:_5n:)
+       note: |       ^          ~~~~~~~~~~~~~candidate template ignored: could not match 'const basic_string<_CharT, _Traits, _Alloc>' against 'const FloatFloat'
+
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream 4077 |     :o215p:7:era tnote: candidate function not viable: no known conversion from 'const DoubleDouble' to 'unsigned long long' for 1st argumentor
+<<  (215b | a s i c _ o ospterreaatomr<_<Ch<a(ruTn, s_iTgrnaeidts >l&o n_g l_ongos ,
+_      _| n    ^)
+
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream::654:231:57: : note: candidate template ignored: could not match 'const _CharT *' against 'FloatFloat'note: candidate function not viable: no known conversion from 'const DoubleDouble' to 'double' for 1st argument
+
+    231 | 654 |          op eopreraattoor<<r(<b<a(sidco_uobslter e_a_mf)<_
+      C|       ^          ~~~~~~~~~~
+harT, _Tr/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:a235:it7:s>& note: candidate function not viable: no known conversion from 'const DoubleDouble' to 'float' for 1st argument __o
+ut  235, |   c o n s t  _oCphearrTa*t o_r_<s<)(
+f      l| o    ^
+at __f)
+      |       ^          ~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:810:5: note: candidate template ignored: requirement '__and_<std::is_class<std::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>> &>, std::__not_<std::is_same<std::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>> &, std::ios_base>>, std::is_convertible<std::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>> *, std::ios_base *>>::value' was not satisfied [with _Ostream = std::ostringstream &, _Tp = FloatFloat]/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream
+:243  810: | 7 :   note:  candidate function not viable: no known conversion from 'const DoubleDouble' to 'long double' for 1st argumentop
+erator  <243< | (_  O  s tr eaopme&r&a t_or_<o<s(,l ocnong sdto _ubTp& le_ __x_)f
+)      
+|           ^
+|       ^          ~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/complex:563:5: note: candidate template ignored: could not match 'const complex<_Tp>' against 'const FloatFloat'
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:  301563: | 7 :    note: candidate function not viable: no known conversion from 'const DoubleDouble' to 'const void *' for 1st argument; take the address of the argument with &
+ope  301 |  r a  t  oor<pe<(rbaatsoric<<_o(csotrnesatm <v_oCihdarT*, _ Tr_a_ipt)s>&
+       _| _      ^          ~~~~~~~~~~~~~~~o
+s, const comp/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:306l:7e:x<_ note: Tpcandidate function not viable: no known conversion from 'const DoubleDouble' to 'nullptr_t' (aka 'std::nullptr_t') for 1st argument
+>& __  x)306 | 
+         |      ^ 
+ operator<<(nullptr_t)
+      | /usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream      ^          ~~~~~~~~~:
+116:7: note: candidate function not viable: no known conversion from 'const FloatFloat' to '__ostream_type &(*)(__ostream_type &)' (aka 'basic_ostream<char, std::char_traits<char>> &(*)(basic_ostream<char, std::char_traits<char>> &)') for 1st argument
+  /usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream116: | 339 : 7 :   note: candidate function not viable: no known conversion from 'const DoubleDouble' to '__streambuf_type *' (aka 'basic_streambuf<char, std::char_traits<char>> *') for 1st argument 
+operato  r339< | < (_ _ ost r e aomp_tyeprea& t(or*__<<pf)((___ost_rsetarme_atmybpuef&_)t)y
+p      e| *      ^          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
+__sb);
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:125:7: note: candidate function not viable: no known conversion from 'const FloatFloat' to '__ios_type &(*)(__ios_type &)' (aka 'basic_ios<char, std::char_traits<char>> &(*)(basic_ios<char, std::char_traits<char>> &)') for 1st argument
+  125 |       operator<<(__ios_type& (*__pf)(__ios_type&))
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:135:7: note: candidate function not viable: no known conversion from 'const FloatFloat' to 'ios_base &(*)(ios_base &)' for 1st argument
+  135 |       operator<<(ios_base& (*__pf) (ios_base&))
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:174:7: note: candidate function not viable: no known conversion from 'const FloatFloat' to 'long' for 1st argument
+  174 |       operator<<(long __n)
+      |       ^          ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:178:7: note: candidate function not viable: no known conversion from 'const FloatFloat' to 'unsigned long' for 1st argument
+  178 |       operator<<(unsigned long __n)
+      |       ^          ~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:182:7: note: candidate function not viable: no known conversion from 'const FloatFloat' to 'bool' for 1st argument
+  182 |       operator<<(bool __n)
+      |       ^          ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:186:7: note: candidate function not viable: no known conversion from 'const FloatFloat' to 'short' for 1st argument
+  186 |       operator<<(short __n);
+      |       ^          ~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:189:7: note: candidate function not viable: no known conversion from 'const FloatFloat' to 'unsigned short' for 1st argument
+  189 |       operator<<(unsigned short __n)
+      |       ^          ~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:197:7: note: candidate function not viable: no known conversion from 'const FloatFloat' to 'int' for 1st argument
+  197 |       operator<<(int __n);
+      |       ^          ~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:200:7: note: candidate function not viable: no known conversion from 'const FloatFloat' to 'unsigned int' for 1st argument
+  200 |       operator<<(unsigned int __n)
+      |       ^          ~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:211:7: note: candidate function not viable: no known conversion from 'const FloatFloat' to 'long long' for 1st argument
+  211 |       operator<<(long long __n)
+      |       ^          ~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:215:7: note: candidate function not viable: no known conversion from 'const FloatFloat' to 'unsigned long long' for 1st argument
+  215 |       operator<<(unsigned long long __n)
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:231:7: note: candidate function not viable: no known conversion from 'const FloatFloat' to 'double' for 1st argument
+  231 |       operator<<(double __f)
+      |       ^          ~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:235:7: note: candidate function not viable: no known conversion from 'const FloatFloat' to 'float' for 1st argument
+  235 |       operator<<(float __f)
+      |       ^          ~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:243:7: note: candidate function not viable: no known conversion from 'const FloatFloat' to 'long double' for 1st argument
+  243 |       operator<<(long double __f)
+      |       ^          ~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:301:7: note: candidate function not viable: no known conversion from 'const FloatFloat' to 'const void *' for 1st argument; take the address of the argument with &
+  301 |       operator<<(const void* __p)
+      |       ^          ~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:306:7: note: candidate function not viable: no known conversion from 'const FloatFloat' to 'nullptr_t' (aka 'std::nullptr_t') for 1st argument
+  306 |       operator<<(nullptr_t)
+      |       ^          ~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:339:7: note: candidate function not viable: no known conversion from 'const FloatFloat' to '__streambuf_type *' (aka 'basic_streambuf<char, std::char_traits<char>> *') for 1st argument
+  339 |       operator<<(__streambuf_type* __sb);
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~
+In file included from /home/rbarik/xpm-mi250-validate/tests/pow_domain_test.cpp:33:
+/home/rbarik/xpm-mi250-validate/include/xp/ff_math.hpp:139:13: error: use of undeclared identifier '__int_as_float'
+  139 |         h = __int_as_float(static_cast<int>(hi_bits));
+      |             ^
+/home/rbarik/xpm-mi250-validate/include/xp/ff_math.hpp:140:13: error: use of undeclared identifier '__int_as_float'
+  140 |         l = __int_as_float(static_cast<int>(lo_bits));
+      |             ^
+/home/rbarik/xpm-mi250-validate/tests/standalone/ff_complex_no_kokkos_smoke.cpp:121:6: error: invalid operands to binary expression ('std::ostringstream' (aka 'basic_ostringstream<char>') and 'const FloatFloatComplex')
+  121 |   os << z;
+      |   ~~ ^  ~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/system_error:339:5: note: candidate function template not viable: no known conversion from 'const FloatFloatComplex' to 'const error_code' for 2nd argument
+  339 |     operator<<(basic_ostream<_CharT, _Traits>& __os, const error_code& __e)
+      |     ^                                                ~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:573:5: note: candidate function template not viable: no known conversion from 'const FloatFloatComplex' to 'char' for 2nd argument
+  573 |     operator<<(basic_ostream<_CharT, _Traits>& __out, char __c)
+      |     ^                                                 ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:579:5: note: candidate function template not viable: no known conversion from 'const FloatFloatComplex' to 'char' for 2nd argument
+  579 |     operator<<(basic_ostream<char, _Traits>& __out, char __c)
+      |     ^                                               ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:590:5: note: candidate function template not viable: no known conversion from 'const FloatFloatComplex' to 'signed char' for 2nd argument
+  590 |     operator<<(basic_ostream<char, _Traits>& __out, signed char __c)
+      |     ^                                               ~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:595:5: note: candidate function template not viable: no known conversion from 'const FloatFloatComplex' to 'unsigned char' for 2nd argument
+  595 |     operator<<(basic_ostream<char, _Traits>& __out, unsigned char __c)
+      |     ^                                               ~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:671:5: note: candidate function template not viable: no known conversion from 'const FloatFloatComplex' to 'const char *' for 2nd argument
+  671 |     operator<<(basic_ostream<char, _Traits>& __out, const char* __s)
+      |     ^                                               ~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:684:5: note: candidate function template not viable: no known conversion from 'const FloatFloatComplex' to 'const signed char *' for 2nd argument
+  684 |     operator<<(basic_ostream<char, _Traits>& __out, const signed char* __s)
+      |     ^                                               ~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:689:5: note: candidate function template not viable: no known conversion from 'const FloatFloatComplex' to 'const unsigned char *' for 2nd argument
+  689 |     operator<<(basic_ostream<char, _Traits>& __out, const unsigned char* __s)
+      |     ^                                               ~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/bits/ostream.tcc:307:5: note: candidate function template not viable: no known conversion from 'const FloatFloatComplex' to 'const char *' for 2nd argument
+  307 |     operator<<(basic_ostream<_CharT, _Traits>& __out, const char* __s)
+      |     ^                                                 ~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/cstddef:125:5: note: candidate function template not viable: no known conversion from 'std::ostringstream' (aka 'basic_ostringstream<char>') to 'byte' for 1st argument
+  125 |     operator<<(byte __b, _IntegerType __shift) noexcept
+      |     ^          ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:563:5: note: candidate template ignored: deduced conflicting types for parameter '_CharT' ('char' vs. 'FloatFloatComplex')
+  563 |     operator<<(basic_ostream<_CharT, _Traits>& __out, _CharT __c)
+      |     ^
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/string_view:763:5: note: candidate template ignored: could not match 'basic_string_view<_CharT, _Traits>' against 'FloatFloatComplex'
+  763 |     operator<<(basic_ostream<_CharT, _Traits>& __os,
+      |     ^
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/bits/basic_string.h:4077:5: note: candidate template ignored: could not match 'const basic_string<_CharT, _Traits, _Alloc>' against 'const FloatFloatComplex'
+ 4077 |     operator<<(basic_ostream<_CharT, _Traits>& __os,
+      |     ^
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:654:5: note: candidate template ignored: could not match 'const _CharT *' against 'FloatFloatComplex'
+  654 |     operator<<(basic_ostream<_CharT, _Traits>& __out, const _CharT* __s)
+      |     ^
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:810:5: note: candidate template ignored: requirement '__and_<std::is_class<std::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>> &>, std::__not_<std::is_same<std::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>> &, std::ios_base>>, std::is_convertible<std::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>> *, std::ios_base *>>::value' was not satisfied [with _Ostream = std::ostringstream &, _Tp = FloatFloatComplex]
+  810 |     operator<<(_Ostream&& __os, const _Tp& __x)
+      |     ^
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/complex:563:5: note: candidate template ignored: could not match 'const complex<_Tp>' against 'const FloatFloatComplex'
+  563 |     operator<<(basic_ostream<_CharT, _Traits>& __os, const complex<_Tp>& __x)
+      |     ^
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:116:7: note: candidate function not viable: no known conversion from 'const FloatFloatComplex' to '__ostream_type &(*)(__ostream_type &)' (aka 'basic_ostream<char, std::char_traits<char>> &(*)(basic_ostream<char, std::char_traits<char>> &)') for 1st argument
+  116 |       operator<<(__ostream_type& (*__pf)(__ostream_type&))
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:125:7: note: candidate function not viable: no known conversion from 'const FloatFloatComplex' to '__ios_type &(*)(__ios_type &)' (aka 'basic_ios<char, std::char_traits<char>> &(*)(basic_ios<char, std::char_traits<char>> &)') for 1st argument
+  125 |       operator<<(__ios_type& (*__pf)(__ios_type&))
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:135:7: note: candidate function not viable: no known conversion from 'const FloatFloatComplex' to 'ios_base &(*)(ios_base &)' for 1st argument
+  135 |       operator<<(ios_base& (*__pf) (ios_base&))
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:174:7: note: candidate function not viable: no known conversion from 'const FloatFloatComplex' to 'long' for 1st argument
+  174 |       operator<<(long __n)
+      |       ^          ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:178:7: note: candidate function not viable: no known conversion from 'const FloatFloatComplex' to 'unsigned long' for 1st argument
+  178 |       operator<<(unsigned long __n)
+      |       ^          ~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:182:7: note: candidate function not viable: no known conversion from 'const FloatFloatComplex' to 'bool' for 1st argument
+  182 |       operator<<(bool __n)
+      |       ^          ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:186:7: note: candidate function not viable: no known conversion from 'const FloatFloatComplex' to 'short' for 1st argument
+  186 |       operator<<(short __n);
+      |       ^          ~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:189:7: note: candidate function not viable: no known conversion from 'const FloatFloatComplex' to 'unsigned short' for 1st argument
+  189 |       operator<<(unsigned short __n)
+      |       ^          ~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:197:7: note: candidate function not viable: no known conversion from 'const FloatFloatComplex' to 'int' for 1st argument
+  197 |       operator<<(int __n);
+      |       ^          ~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:200:7: note: candidate function not viable: no known conversion from 'const FloatFloatComplex' to 'unsigned int' for 1st argument
+  200 |       operator<<(unsigned int __n)
+      |       ^          ~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:211:7: note: candidate function not viable: no known conversion from 'const FloatFloatComplex' to 'long long' for 1st argument
+  211 |       operator<<(long long __n)
+      |       ^          ~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:215:7: note: candidate function not viable: no known conversion from 'const FloatFloatComplex' to 'unsigned long long' for 1st argument
+  215 |       operator<<(unsigned long long __n)
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:231:7: note: candidate function not viable: no known conversion from 'const FloatFloatComplex' to 'double' for 1st argument
+  231 |       operator<<(double __f)
+      |       ^          ~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:235:7: note: candidate function not viable: no known conversion from 'const FloatFloatComplex' to 'float' for 1st argument
+  235 |       operator<<(float __f)
+      |       ^          ~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:243:7: note: candidate function not viable: no known conversion from 'const FloatFloatComplex' to 'long double' for 1st argument
+  243 |       operator<<(long double __f)
+      |       ^          ~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:301:7: note: candidate function not viable: no known conversion from 'const FloatFloatComplex' to 'const void *' for 1st argument; take the address of the argument with &
+  301 |       op/home/rbarik/xpm-mi250-validate/tests/standalone/dd_complex_no_kokkos_smoke.cpper:at121or:<<6:( coerror: nstinvalid operands to binary expression ('std::ostringstream' (aka 'basic_ostringstream<char>') and 'const DoubleDoubleComplex') 
+void* __p)
+      |       ^          ~~~~~~~~~~~~~~~
+  121 |   /usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostreamo:306s: 7:< <note:  candidate function not viable: no known conversion from 'const FloatFloatComplex' to 'nullptr_t' (aka 'std::nullptr_t') for 1st argument
+z;
+      |     ~~ ^  ~306
+ |       operator<<(nullptr_t)
+      |       ^          ~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:339:7: note: /usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/system_errorcandidate function not viable: no known conversion from 'const FloatFloatComplex' to '__streambuf_type *' (aka 'basic_streambuf<char, std::char_traits<char>> *') for 1st argument:
+339:5: note:   339candidate function template not viable: no known conversion from 'const DoubleDoubleComplex' to 'const error_code' for 2nd argument | 
+      operator  <<339(_ | _ st r ea mopbeurfa_ttoyrp<e*< (_b_assbi)c;_
+o      s| t      ^          ~~~~~~~~~~~~~~~~~~~~~~
+ream<_CharT, _Traits>& __os, const error_code& __e)
+      |     ^                                                ~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:573:5: note: candidate function template not viable: no known conversion from 'const DoubleDoubleComplex' to 'char' for 2nd argument
+  573 |     operator<<(basic_ostream<_CharT, _Traits>& __out, char __c)
+      |     ^                                                 ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:579:5: note: candidate function template not viable: no known conversion from 'const DoubleDoubleComplex' to 'char' for 2nd argument
+  579 |     operator<<(basic_ostream<char, _Traits>& __out, char __c)
+      |     ^                                               ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:590:5: note: candidate function template not viable: no known conversion from 'const DoubleDoubleComplex' to 'signed char' for 2nd argument
+  590 |     operator<<(basic_ostream<char, _Traits>& __out, signed char __c)
+      |     ^                                               ~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:595:5: note: candidate function template not viable: no known conversion from 'const DoubleDoubleComplex' to 'unsigned char' for 2nd argument
+  595 |     operator<<(basic_ostream<char, _Traits>& __out, unsigned char __c)
+      |     ^                                               ~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:671:5: note: candidate function template not viable: no known conversion from 'const DoubleDoubleComplex' to 'const char *' for 2nd argument
+  671 |     operator<<(basic_ostream<char, _Traits>& __out, const char* __s)
+      |     ^                                               ~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:684:5: note: candidate function template not viable: no known conversion from 'const DoubleDoubleComplex' to 'const signed char *' for 2nd argument
+  684 |     operator<<(basic_ostream<char, _Traits>& __out, const signed char* __s)
+      |     ^                                               ~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:689:5: note: candidate function template not viable: no known conversion from 'const DoubleDoubleComplex' to 'const unsigned char *' for 2nd argument
+  689 |     operator<<(basic_ostream<char, _Traits>& __out, const unsigned char* __s)
+      |     ^                                               ~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/bits/ostream.tcc:307:5: note: candidate function template not viable: no known conversion from 'const DoubleDoubleComplex' to 'const char *' for 2nd argument
+  307 |     operator<<(basic_ostream<_CharT, _Traits>& __out, const char* __s)
+      |     ^                                                 ~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/cstddef:125:5: note: candidate function template not viable: no known conversion from 'std::ostringstream' (aka 'basic_ostringstream<char>') to 'byte' for 1st argument
+  125 |     operator<<(byte __b, _IntegerType __shift) noexcept
+      |     ^          ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:563:5: note: candidate template ignored: deduced conflicting types for parameter '_CharT' ('char' vs. 'DoubleDoubleComplex')
+  563 |     operator<<(basic_ostream<_CharT, _Traits>& __out, _CharT __c)
+      |     ^
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/string_view:763:5: note: candidate template ignored: could not match 'basic_string_view<_CharT, _Traits>' against 'DoubleDoubleComplex'
+  763 |     operator<<(basic_ostream<_CharT, _Traits>& __os,
+      |     ^
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/bits/basic_string.h:4077:5: note: candidate template ignored: could not match 'const basic_string<_CharT, _Traits, _Alloc>' against 'const DoubleDoubleComplex'
+ 4077 |     operator<<(basic_ostream<_CharT, _Traits>& __os,
+      |     ^
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:654:5: note: candidate template ignored: could not match 'const _CharT *' against 'DoubleDoubleComplex'
+  654 |     operator<<(basic_ostream<_CharT, _Traits>& __out, const _CharT* __s)
+      |     ^
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:810:5: note: candidate template ignored: requirement '__and_<std::is_class<std::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>> &>, std::__not_<std::is_same<std::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>> &, std::ios_base>>, std::is_convertible<std::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>> *, std::ios_base *>>::value' was not satisfied [with _Ostream = std::ostringstream &, _Tp = DoubleDoubleComplex]
+  810 |     operator<<(_Ostream&& __os, const _Tp& __x)
+      |     ^
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/complex:563:5: note: candidate template ignored: could not match 'const complex<_Tp>' against 'const DoubleDoubleComplex'
+  563 |     operator<<(basic_ostream<_CharT, _Traits>& __os, const complex<_Tp>& __x)
+      |     ^
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:116:7: note: candidate function not viable: no known conversion from 'const DoubleDoubleComplex' to '__ostream_type &(*)(__ostream_type &)' (aka 'basic_ostream<char, std::char_traits<char>> &(*)(basic_ostream<char, std::char_traits<char>> &)') for 1st argument
+  116 |       operator<<(__ostream_type& (*__pf)(__ostream_type&))
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:125:7: note: candidate function not viable: no known conversion from 'const DoubleDoubleComplex' to '__ios_type &(*)(__ios_type &)' (aka 'basic_ios<char, std::char_traits<char>> &(*)(basic_ios<char, std::char_traits<char>> &)') for 1st argument
+  125 |       operator<<(__ios_type& (*__pf)(__ios_type&))
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:135:7: note: candidate function not viable: no known conversion from 'const DoubleDoubleComplex' to 'ios_base &(*)(ios_base &)' for 1st argument
+  135 |       operator<<(ios_base& (*__pf) (ios_base&))
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:174:7: note: candidate function not viable: no known conversion from 'const DoubleDoubleComplex' to 'long' for 1st argument
+  174 |       operator<<(long __n)
+      |       ^          ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:178:7: note: candidate function not viable: no known conversion from 'const DoubleDoubleComplex' to 'unsigned long' for 1st argument
+  178 |       operator<<(unsigned long __n)
+      |       ^          ~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:182:7: note: candidate function not viable: no known conversion from 'const DoubleDoubleComplex' to 'bool' for 1st argument
+  182 |       operator<<(bool __n)
+      |       ^          ~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:186:7: note: candidate function not viable: no known conversion from 'const DoubleDoubleComplex' to 'short' for 1st argument
+  186 |       operator<<(short __n);
+      |       ^          ~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:189:7: note: candidate function not viable: no known conversion from 'const DoubleDoubleComplex' to 'unsigned short' for 1st argument
+  189 |       operator<<(unsigned short __n)
+      |       ^          ~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:197:7: note: candidate function not viable: no known conversion from 'const DoubleDoubleComplex' to 'int' for 1st argument
+  197 |       operator<<(int __n);
+      |       ^          ~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:200:7: note: candidate function not viable: no known conversion from 'const DoubleDoubleComplex' to 'unsigned int' for 1st argument
+  200 |       operator<<(unsigned int __n)
+      |       ^          ~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:211:7: note: candidate function not viable: no known conversion from 'const DoubleDoubleComplex' to 'long long' for 1st argument
+  211 |       operator<<(long long __n)
+      |       ^          ~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:215:7: note: candidate function not viable: no known conversion from 'const DoubleDoubleComplex' to 'unsigned long long' for 1st argument
+  215 |       operator<<(unsigned long long __n)
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:231:7: note: candidate function not viable: no known conversion from 'const DoubleDoubleComplex' to 'double' for 1st argument
+  231 |       operator<<(double __f)
+      |       ^          ~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:235:7: note: candidate function not viable: no known conversion from 'const DoubleDoubleComplex' to 'float' for 1st argument
+  235 |       operator<<(float __f)
+      |       ^          ~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:243:7: note: candidate function not viable: no known conversion from 'const DoubleDoubleComplex' to 'long double' for 1st argument
+  243 |       operator<<(long double __f)
+      |       ^          ~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:301:7: note: candidate function not viable: no known conversion from 'const DoubleDoubleComplex' to 'const void *' for 1st argument; take the address of the argument with &
+  301 |       operator<<(const void* __p)
+      |       ^          ~~~~~~~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:306:7: note: candidate function not viable: no known conversion from 'const DoubleDoubleComplex' to 'nullptr_t' (aka 'std::nullptr_t') for 1st argument
+  306 |       operator<<(nullptr_t)
+      |       ^          ~~~~~~~~~
+/usr/lib64/gcc/x86_64-suse-linux/14/../../../../include/c++/14/ostream:339:7: note: candidate function not viable: no known conversion from 'const DoubleDoubleComplex' to '__streambuf_type *' (aka 'basic_streambuf<char, std::char_traits<char>> *') for 1st argument
+  339 |       operator<<(__streambuf_type* __sb);
+      |       ^          ~~~~~~~~~~~~~~~~~~~~~~
+7 errors generated when compiling for gfx90a.
+In file included from /home/rbarik/xpm-mi250-validate/tests/pow_domain_test.cpp:34:
+/home/rbarik/xpm-mi250-validate/include/xp/tf_math.hpp:337:14: error: use of undeclared identifier '__int_as_float'
+  337 |         f0 = __int_as_float(static_cast<int>(b0));
+      |              ^
+/home/rbarik/xpm-mi250-validate/include/xp/tf_math.hpp:338:14: error: use of undeclared identifier '__int_as_float'
+  338 |         f1 = __int_as_float(static_cast<int>(b1));
+      |              ^
+/home/rbarik/xpm-mi250-validate/include/xp/tf_math.hpp:339:14: error: use of undeclared identifier '__int_as_float'
+  339 |         f2 = __int_as_float(static_cast<int>(b2));
+      |              ^
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a  -I/home/rbarik/xpm-mi250-validate/include -ffp-contract=off -O3 -DNDEBUG -std=c++17 -MD -MT tests/CMakeFiles/qf_no_kokkos_smoke.dir/standalone/qf_no_kokkos_smoke.cpp.o -MF CMakeFiles/qf_no_kokkos_smoke.dir/standalone/qf_no_kokkos_smoke.cpp.o.d -o "CMakeFiles/qf_no_kokkos_smoke.dir/standalone/qf_no_kokkos_smoke.cpp.o" -c -x hip /home/rbarik/xpm-mi250-validate/tests/standalone/qf_no_kokkos_smoke.cpp
+5 errors generated when compiling for gfx90a.
+gmake[2]: *** [tests/CMakeFiles/qf_no_kokkos_smoke.dir/build.make:76: tests/CMakeFiles/qf_no_kokkos_smoke.dir/standalone/qf_no_kokkos_smoke.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:1090: tests/CMakeFiles/qf_no_kokkos_smoke.dir/all] Error 2
+5 errors generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a  -I/home/rbarik/xpm-mi250-validate/include -ffp-contract=off -O3 -DNDEBUG -std=c++17 -MD -MT tests/CMakeFiles/dd_no_kokkos_smoke.dir/standalone/dd_no_kokkos_smoke.cpp.o -MF CMakeFiles/dd_no_kokkos_smoke.dir/standalone/dd_no_kokkos_smoke.cpp.o.d -o "CMakeFiles/dd_no_kokkos_smoke.dir/standalone/dd_no_kokkos_smoke.cpp.o" -c -x hip /home/rbarik/xpm-mi250-validate/tests/standalone/dd_no_kokkos_smoke.cpp
+gmake[2]: *** [tests/CMakeFiles/dd_no_kokkos_smoke.dir/build.make:76: tests/CMakeFiles/dd_no_kokkos_smoke.dir/standalone/dd_no_kokkos_smoke.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:986: tests/CMakeFiles/dd_no_kokkos_smoke.dir/all] Error 2
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a  -I/home/rbarik/xpm-mi250-validate/include -ffp-contract=off -O3 -DNDEBUG -std=c++17 -MD -MT tests/CMakeFiles/ff_no_kokkos_smoke.dir/standalone/ff_no_kokkos_smoke.cpp.o -MF CMakeFiles/ff_no_kokkos_smoke.dir/standalone/ff_no_kokkos_smoke.cpp.o.d -o "CMakeFiles/ff_no_kokkos_smoke.dir/standalone/ff_no_kokkos_smoke.cpp.o" -c -x hip /home/rbarik/xpm-mi250-validate/tests/standalone/ff_no_kokkos_smoke.cpp
+gmake[2]: *** [tests/CMakeFiles/ff_no_kokkos_smoke.dir/build.make:76: tests/CMakeFiles/ff_no_kokkos_smoke.dir/standalone/ff_no_kokkos_smoke.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:1038: tests/CMakeFiles/ff_no_kokkos_smoke.dir/all] Error 2
+2 errors generated when compiling for gfx90a.
+5 errors generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a  -I/home/rbarik/xpm-mi250-validate/include -ffp-contract=off -O3 -DNDEBUG -std=c++17 -MD -MT tests/CMakeFiles/trig_reduction_test.dir/trig_reduction_test.cpp.o -MF CMakeFiles/trig_reduction_test.dir/trig_reduction_test.cpp.o.d -o "CMakeFiles/trig_reduction_test.dir/trig_reduction_test.cpp.o" -c -x hip /home/rbarik/xpm-mi250-validate/tests/trig_reduction_test.cpp
+6 errors generated when compiling for gfx90a.
+gmake[2]: *** [tests/CMakeFiles/trig_reduction_test.dir/build.make:76: tests/CMakeFiles/trig_reduction_test.dir/trig_reduction_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:1246: tests/CMakeFiles/trig_reduction_test.dir/all] Error 2
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a  -I/home/rbarik/xpm-mi250-validate/include -ffp-contract=off -O3 -DNDEBUG -std=c++17 -MD -MT tests/CMakeFiles/tf_complex_no_kokkos_smoke.dir/standalone/tf_complex_no_kokkos_smoke.cpp.o -MF CMakeFiles/tf_complex_no_kokkos_smoke.dir/standalone/tf_complex_no_kokkos_smoke.cpp.o.d -o "CMakeFiles/tf_complex_no_kokkos_smoke.dir/standalone/tf_complex_no_kokkos_smoke.cpp.o" -c -x hip /home/rbarik/xpm-mi250-validate/tests/standalone/tf_complex_no_kokkos_smoke.cpp
+gmake[2]: *** [tests/CMakeFiles/tf_complex_no_kokkos_smoke.dir/build.make:76: tests/CMakeFiles/tf_complex_no_kokkos_smoke.dir/standalone/tf_complex_no_kokkos_smoke.cpp.o] Error 1
+5 errors generated when compiling for gfx90a.
+gmake[1]: *** [CMakeFiles/Makefile2:1142: tests/CMakeFiles/tf_complex_no_kokkos_smoke.dir/all] Error 2
+5 errors generated when compiling for gfx90a.
+/home/rbarik/xpm-mi250-validate/src/bench_cost.cpp:28:10: fatal error: 'quadmath.h' file not found
+   28 | #include <quadmath.h>
+      |          ^~~~~~~~~~~~
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a  -I/home/rbarik/xpm-mi250-validate/include -ffp-contract=off -O3 -DNDEBUG -std=c++17 -MD -MT tests/CMakeFiles/qf_complex_no_kokkos_smoke.dir/standalone/qf_complex_no_kokkos_smoke.cpp.o -MF CMakeFiles/qf_complex_no_kokkos_smoke.dir/standalone/qf_complex_no_kokkos_smoke.cpp.o.d -o "CMakeFiles/qf_complex_no_kokkos_smoke.dir/standalone/qf_complex_no_kokkos_smoke.cpp.o" -c -x hip /home/rbarik/xpm-mi250-validate/tests/standalone/qf_complex_no_kokkos_smoke.cpp
+gmake[2]: *** [tests/CMakeFiles/qf_complex_no_kokkos_smoke.dir/build.make:76: tests/CMakeFiles/qf_complex_no_kokkos_smoke.dir/standalone/qf_complex_no_kokkos_smoke.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:1116: tests/CMakeFiles/qf_complex_no_kokkos_smoke.dir/all] Error 2
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a  -I/home/rbarik/xpm-mi250-validate/include -ffp-contract=off -O3 -DNDEBUG -std=c++17 -MD -MT tests/CMakeFiles/ff_complex_no_kokkos_smoke.dir/standalone/ff_complex_no_kokkos_smoke.cpp.o -MF CMakeFiles/ff_complex_no_kokkos_smoke.dir/standalone/ff_complex_no_kokkos_smoke.cpp.o.d -o "CMakeFiles/ff_complex_no_kokkos_smoke.dir/standalone/ff_complex_no_kokkos_smoke.cpp.o" -c -x hip /home/rbarik/xpm-mi250-validate/tests/standalone/ff_complex_no_kokkos_smoke.cpp
+gmake[2]: *** [tests/CMakeFiles/ff_complex_no_kokkos_smoke.dir/build.make:76: tests/CMakeFiles/ff_complex_no_kokkos_smoke.dir/standalone/ff_complex_no_kokkos_smoke.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:1064: tests/CMakeFiles/ff_complex_no_kokkos_smoke.dir/all] Error 2
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a  -I/home/rbarik/xpm-mi250-validate/include -ffp-contract=off -O3 -DNDEBUG -std=c++17 -MD -MT tests/CMakeFiles/dd_complex_no_kokkos_smoke.dir/standalone/dd_complex_no_kokkos_smoke.cpp.o -MF CMakeFiles/dd_complex_no_kokkos_smoke.dir/standalone/dd_complex_no_kokkos_smoke.cpp.o.d -o "CMakeFiles/dd_complex_no_kokkos_smoke.dir/standalone/dd_complex_no_kokkos_smoke.cpp.o" -c -x hip /home/rbarik/xpm-mi250-validate/tests/standalone/dd_complex_no_kokkos_smoke.cpp
+gmake[2]: *** [tests/CMakeFiles/dd_complex_no_kokkos_smoke.dir/build.make:76: tests/CMakeFiles/dd_complex_no_kokkos_smoke.dir/standalone/dd_complex_no_kokkos_smoke.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:1012: tests/CMakeFiles/dd_complex_no_kokkos_smoke.dir/all] Error 2
+In file included from /home/rbarik/xpm-mi250-validate/tests/pow_domain_test.cpp:35:
+/home/rbarik/xpm-mi250-validate/include/xp/qf_math.hpp:357:14: error: use of undeclared identifier '__int_as_float'
+  357 |         a0 = __int_as_float(static_cast<int>(b0));
+      |              ^
+/home/rbarik/xpm-mi250-validate/include/xp/qf_math.hpp:358:14: error: use of undeclared identifier '__int_as_float'
+  358 |         a1 = __int_as_float(static_cast<int>(b1));
+      |              ^
+/home/rbarik/xpm-mi250-validate/include/xp/qf_math.hpp:359:14: error: use of undeclared identifier '__int_as_float'
+  359 |         a2 = __int_as_float(static_cast<int>(b2));
+      |              ^
+/home/rbarik/xpm-mi250-validate/include/xp/qf_math.hpp:360:14: error: use of undeclared identifier '__int_as_float'
+  360 |         a3 = __int_as_float(static_cast<int>(b3));
+      |              ^
+13 errors generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a --offload-arch=gfx90a  -I/home/rbarik/xpm-mi250-validate/include -ffp-contract=off -O3 -DNDEBUG -std=c++17 -MD -MT tests/CMakeFiles/pow_domain_test.dir/pow_domain_test.cpp.o -MF CMakeFiles/pow_domain_test.dir/pow_domain_test.cpp.o.d -o "CMakeFiles/pow_domain_test.dir/pow_domain_test.cpp.o" -c -x hip /home/rbarik/xpm-mi250-validate/tests/pow_domain_test.cpp
+gmake[2]: *** [tests/CMakeFiles/pow_domain_test.dir/build.make:76: tests/CMakeFiles/pow_domain_test.dir/pow_domain_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:1194: tests/CMakeFiles/pow_domain_test.dir/all] Error 2
+1 error generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -fno-gpu-rdc -xhip -x hip -MD -MT CMakeFiles/kokkos_ep_bench_cost.dir/src/bench_cost.cpp.o -MF CMakeFiles/kokkos_ep_bench_cost.dir/src/bench_cost.cpp.o.d -o "CMakeFiles/kokkos_ep_bench_cost.dir/src/bench_cost.cpp.o" -c /home/rbarik/xpm-mi250-validate/src/bench_cost.cpp
+gmake[2]: *** [CMakeFiles/kokkos_ep_bench_cost.dir/build.make:76: CMakeFiles/kokkos_ep_bench_cost.dir/src/bench_cost.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:284: CMakeFiles/kokkos_ep_bench_cost.dir/all] Error 2
+In file included from /home/rbarik/xpm-mi250-validate/tests/tf_cancellation_test.cpp:41:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/corpus_test.cpp:13:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/ff_property_test.cpp:91:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+In file included from /home/rbarik/xpm-mi250-validate/tests/qf_fma_guard_test.cpp:  286 | 129:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp  :  286if (u:lp20s[:i]  == kerror: UlpUnuse of undeclared identifier 'kUlpUnscorable's
+corable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/dd_property_test.cpp:65:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/tf_fma_guard_test.cpp:75:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/dd_invariant_test.cpp:72:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/qf_nonoverlap_test.cpp:141:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/tf_property_test.cpp:59:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/ff_eft_test.cpp:86:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/ff_fma_guard_test.cpp:105:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/ff_fma_guard_test.cpp:105:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/qf_cancellation_test.cpp:85:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/qf_property_test.cpp:115:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/dd_fma_guard_test.cpp:70:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/ff_invariant_test.cpp:105:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/dd_e2e_test.cpp:70:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/dd_eft_test.cpp:59:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/ff_cancellation_test.cpp:73:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/qf_fma_guard_test.cpp:129:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/tf_eft_test.cpp:25:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/hello_test.cpp:19:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/tf_eft_test.cpp:25:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/tf_fma_guard_test.cpp:75:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/dd_fma_guard_test.cpp:70:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+In file included from /home/rbarik/xpm-mi250-validate/tests/qf_eft_test.cpp:124:
+/home/rbarik/xpm-mi250-validate/tests/test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+  286 |     if (ulps[i] == kUlpUnscorable) { ++s.n_ulp_unscored; continue; }
+      |                    ^
+/home/rbarik/xpm-mi250-validate/tests/tf_fma_guard_test.cpp:482:74: warning: format specifies type 'int' but the argument has type 'long' [-Wformat]
+  482 |     std::printf("  Device: tested=%ld, skip=%d, fail=%ld\n", dev.tested, dev.skipped, dev.failures);
+      |                                             ~~                           ^~~~~~~~~~~
+      |                                             %ld
+1 error generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/tf_cancellation_test.dir/tf_cancellation_test.cpp.o -MF CMakeFiles/tf_cancellation_test.dir/tf_cancellation_test.cpp.o.d -o "CMakeFiles/tf_cancellation_test.dir/tf_cancellation_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/tf_cancellation_test.cpp
+gmake[2]: *** [tests/CMakeFiles/tf_cancellation_test.dir/build.make:76: tests/CMakeFiles/tf_cancellation_test.dir/tf_cancellation_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:908: tests/CMakeFiles/tf_cancellation_test.dir/all] Error 2
+1 error generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/qf_cancellation_test.dir/qf_cancellation_test.cpp.o -MF CMakeFiles/qf_cancellation_test.dir/qf_cancellation_test.cpp.o.d -o "CMakeFiles/qf_cancellation_test.dir/qf_cancellation_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/qf_cancellation_test.cpp
+gmake[2]: *** [tests/CMakeFiles/qf_cancellation_test.dir/build.make:76: tests/CMakeFiles/qf_cancellation_test.dir/qf_cancellation_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:804: tests/CMakeFiles/qf_cancellation_test.dir/all] Error 2
+1 error generated when compiling for gfx90a.
+1 error generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/tf_property_test.dir/tf_property_test.cpp.o -MF CMakeFiles/tf_property_test.dir/tf_property_test.cpp.o.d -o "CMakeFiles/tf_property_test.dir/tf_property_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/tf_property_test.cpp
+gmake[2]: *** [tests/CMakeFiles/tf_property_test.dir/build.make:76: tests/CMakeFiles/tf_property_test.dir/tf_property_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:882: tests/CMakeFiles/tf_property_test.dir/all] Error 2
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DKOKKOS_EP_BASELINE_PATH=\"/home/rbarik/xpm-mi250-validate/tests/dd_fma_guard_baseline.txt\" -DKOKKOS_EP_CONTRACTION_MODE=1 -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -ffp-contract=fast -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/dd_fma_guard_test_contract_on.dir/dd_fma_guard_test.cpp.o -MF CMakeFiles/dd_fma_guard_test_contract_on.dir/dd_fma_guard_test.cpp.o.d -o "CMakeFiles/dd_fma_guard_test_contract_on.dir/dd_fma_guard_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/dd_fma_guard_test.cpp
+gmake[2]: *** [tests/CMakeFiles/dd_fma_guard_test_contract_on.dir/build.make:76: tests/CMakeFiles/dd_fma_guard_test_contract_on.dir/dd_fma_guard_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:596: tests/CMakeFiles/dd_fma_guard_test_contract_on.dir/all] Error 2
+1 error generated when compiling for gfx90a.
+1 error generated when compiling for gfx90a.
+1 error generated when compiling for gfx90a.
+1 error generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/hello_test.dir/hello_test.cpp.o -MF CMakeFiles/hello_test.dir/hello_test.cpp.o.d -o "CMakeFiles/hello_test.dir/hello_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/hello_test.cpp
+gmake[2]: *** [tests/CMakeFiles/hello_test.dir/build.make:76: tests/CMakeFiles/hello_test.dir/hello_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:310: tests/CMakeFiles/hello_test.dir/all] Error 2
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/dd_e2e_test.dir/dd_e2e_test.cpp.o -MF CMakeFiles/dd_e2e_test.dir/dd_e2e_test.cpp.o.d -o "CMakeFiles/dd_e2e_test.dir/dd_e2e_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/dd_e2e_test.cpp
+gmake[2]: *** [tests/CMakeFiles/dd_e2e_test.dir/build.make:76: tests/CMakeFiles/dd_e2e_test.dir/dd_e2e_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:440: tests/CMakeFiles/dd_e2e_test.dir/all] Error 2
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DKOKKOS_EP_CONTRACTION_MODE=0 -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -ffp-contract=off -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/dd_eft_test.dir/dd_eft_test.cpp.o -MF CMakeFiles/dd_eft_test.dir/dd_eft_test.cpp.o.d -o "CMakeFiles/dd_eft_test.dir/dd_eft_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/dd_eft_test.cpp
+gmake[2]: *** [tests/CMakeFiles/dd_eft_test.dir/build.make:76: tests/CMakeFiles/dd_eft_test.dir/dd_eft_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:466: tests/CMakeFiles/dd_eft_test.dir/all] Error 2
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/ff_cancellation_test.dir/ff_cancellation_test.cpp.o -MF CMakeFiles/ff_cancellation_test.dir/ff_cancellation_test.cpp.o.d -o "CMakeFiles/ff_cancellation_test.dir/ff_cancellation_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/ff_cancellation_test.cpp
+gmake[2]: *** [tests/CMakeFiles/ff_cancellation_test.dir/build.make:76: tests/CMakeFiles/ff_cancellation_test.dir/ff_cancellation_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:544: tests/CMakeFiles/ff_cancellation_test.dir/all] Error 2
+1 error generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/corpus_test.dir/corpus_test.cpp.o -MF CMakeFiles/corpus_test.dir/corpus_test.cpp.o.d -o "CMakeFiles/corpus_test.dir/corpus_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/corpus_test.cpp
+gmake[2]: *** [tests/CMakeFiles/corpus_test.dir/build.make:76: tests/CMakeFiles/corpus_test.dir/corpus_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:336: tests/CMakeFiles/corpus_test.dir/all] Error 2
+1 error generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DKOKKOS_EP_CONTRACTION_MODE=0 -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -ffp-contract=off -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/dd_fma_guard_test.dir/dd_fma_guard_test.cpp.o -MF CMakeFiles/dd_fma_guard_test.dir/dd_fma_guard_test.cpp.o.d -o "CMakeFiles/dd_fma_guard_test.dir/dd_fma_guard_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/dd_fma_guard_test.cpp
+gmake[2]: *** [tests/CMakeFiles/dd_fma_guard_test.dir/build.make:76: tests/CMakeFiles/dd_fma_guard_test.dir/dd_fma_guard_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:570: tests/CMakeFiles/dd_fma_guard_test.dir/all] Error 2
+1 error generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DKOKKOS_EP_CONTRACTION_MODE=0 -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -ffp-contract=off -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/ff_eft_test.dir/ff_eft_test.cpp.o -MF CMakeFiles/ff_eft_test.dir/ff_eft_test.cpp.o.d -o "CMakeFiles/ff_eft_test.dir/ff_eft_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/ff_eft_test.cpp
+gmake[2]: *** [tests/CMakeFiles/ff_eft_test.dir/build.make:76: tests/CMakeFiles/ff_eft_test.dir/ff_eft_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:492: tests/CMakeFiles/ff_eft_test.dir/all] Error 2
+1 error generated when compiling for gfx90a.
+1 error generated when compiling for gfx90a.
+1 error generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DKOKKOS_EP_BASELINE_PATH=\"/home/rbarik/xpm-mi250-validate/tests/ff_fma_guard_baseline.txt\" -DKOKKOS_EP_CONTRACTION_MODE=1 -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -ffp-contract=fast -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/ff_fma_guard_test_contract_on.dir/ff_fma_guard_test.cpp.o -MF CMakeFiles/ff_fma_guard_test_contract_on.dir/ff_fma_guard_test.cpp.o.d -o "CMakeFiles/ff_fma_guard_test_contract_on.dir/ff_fma_guard_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/ff_fma_guard_test.cpp
+gmake[2]: *** [tests/CMakeFiles/ff_fma_guard_test_contract_on.dir/build.make:76: tests/CMakeFiles/ff_fma_guard_test_contract_on.dir/ff_fma_guard_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:648: tests/CMakeFiles/ff_fma_guard_test_contract_on.dir/all] Error 2
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DKOKKOS_EP_BASELINE_PATH=\"/home/rbarik/xpm-mi250-validate/tests/tf_fma_guard_baseline.txt\" -DKOKKOS_EP_CONTRACTION_MODE=1 -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -ffp-contract=fast -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/tf_fma_guard_test_contract_on.dir/tf_fma_guard_test.cpp.o -MF CMakeFiles/tf_fma_guard_test_contract_on.dir/tf_fma_guard_test.cpp.o.d -o "CMakeFiles/tf_fma_guard_test_contract_on.dir/tf_fma_guard_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/tf_fma_guard_test.cpp
+gmake[2]: *** [tests/CMakeFiles/tf_fma_guard_test_contract_on.dir/build.make:76: tests/CMakeFiles/tf_fma_guard_test_contract_on.dir/tf_fma_guard_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:960: tests/CMakeFiles/tf_fma_guard_test_contract_on.dir/all] Error 2
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DKOKKOS_EP_CONTRACTION_MODE=0 -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -ffp-contract=off -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/ff_fma_guard_test.dir/ff_fma_guard_test.cpp.o -MF CMakeFiles/ff_fma_guard_test.dir/ff_fma_guard_test.cpp.o.d -o "CMakeFiles/ff_fma_guard_test.dir/ff_fma_guard_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/ff_fma_guard_test.cpp
+gmake[2]: *** [tests/CMakeFiles/ff_fma_guard_test.dir/build.make:76: tests/CMakeFiles/ff_fma_guard_test.dir/ff_fma_guard_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:622: tests/CMakeFiles/ff_fma_guard_test.dir/all] Error 2
+1 error generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DKOKKOS_EP_CONTRACTION_MODE=0 -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -ffp-contract=off -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/qf_fma_guard_test.dir/qf_fma_guard_test.cpp.o -MF CMakeFiles/qf_fma_guard_test.dir/qf_fma_guard_test.cpp.o.d -o "CMakeFiles/qf_fma_guard_test.dir/qf_fma_guard_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/qf_fma_guard_test.cpp
+gmake[2]: *** [tests/CMakeFiles/qf_fma_guard_test.dir/build.make:76: tests/CMakeFiles/qf_fma_guard_test.dir/qf_fma_guard_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:752: tests/CMakeFiles/qf_fma_guard_test.dir/all] Error 2
+1 error generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/dd_property_test.dir/dd_property_test.cpp.o -MF CMakeFiles/dd_property_test.dir/dd_property_test.cpp.o.d -o "CMakeFiles/dd_property_test.dir/dd_property_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/dd_property_test.cpp
+gmake[2]: *** [tests/CMakeFiles/dd_property_test.dir/build.make:76: tests/CMakeFiles/dd_property_test.dir/dd_property_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:414: tests/CMakeFiles/dd_property_test.dir/all] Error 2
+1 error generated when compiling for gfx90a.
+1 error generated when compiling for gfx90a.
+1 error generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DKOKKOS_EP_CONTRACTION_MODE=0 -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -ffp-contract=off -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/tf_eft_test.dir/tf_eft_test.cpp.o -MF CMakeFiles/tf_eft_test.dir/tf_eft_test.cpp.o.d -o "CMakeFiles/tf_eft_test.dir/tf_eft_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/tf_eft_test.cpp
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DKOKKOS_EP_BASELINE_PATH=\"/home/rbarik/xpm-mi250-validate/tests/tf_eft_baseline.txt\" -DKOKKOS_EP_CONTRACTION_MODE=1 -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -ffp-contract=fast -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/tf_eft_test_contract_on.dir/tf_eft_test.cpp.o -MF CMakeFiles/tf_eft_test_contract_on.dir/tf_eft_test.cpp.o.d -o "CMakeFiles/tf_eft_test_contract_on.dir/tf_eft_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/tf_eft_test.cpp
+gmake[2]: *** [tests/CMakeFiles/tf_eft_test.dir/build.make:76: tests/CMakeFiles/tf_eft_test.dir/tf_eft_test.cpp.o] Error 1
+gmake[2]: *** [tests/CMakeFiles/tf_eft_test_contract_on.dir/build.make:76: tests/CMakeFiles/tf_eft_test_contract_on.dir/tf_eft_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:830: tests/CMakeFiles/tf_eft_test.dir/all] Error 2
+gmake[1]: *** [CMakeFiles/Makefile2:856: tests/CMakeFiles/tf_eft_test_contract_on.dir/all] Error 2
+1 warning and 1 error generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/ff_property_test.dir/ff_property_test.cpp.o -MF CMakeFiles/ff_property_test.dir/ff_property_test.cpp.o.d -o "CMakeFiles/ff_property_test.dir/ff_property_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/ff_property_test.cpp
+gmake[2]: *** [tests/CMakeFiles/ff_property_test.dir/build.make:76: tests/CMakeFiles/ff_property_test.dir/ff_property_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:518: tests/CMakeFiles/ff_property_test.dir/all] Error 2
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DKOKKOS_EP_CONTRACTION_MODE=0 -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -ffp-contract=off -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/tf_fma_guard_test.dir/tf_fma_guard_test.cpp.o -MF CMakeFiles/tf_fma_guard_test.dir/tf_fma_guard_test.cpp.o.d -o "CMakeFiles/tf_fma_guard_test.dir/tf_fma_guard_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/tf_fma_guard_test.cpp
+gmake[2]: *** [tests/CMakeFiles/tf_fma_guard_test.dir/build.make:76: tests/CMakeFiles/tf_fma_guard_test.dir/tf_fma_guard_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:934: tests/CMakeFiles/tf_fma_guard_test.dir/all] Error 2
+1 error generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DKOKKOS_EP_BASELINE_PATH=\"/home/rbarik/xpm-mi250-validate/tests/qf_fma_guard_baseline.txt\" -DKOKKOS_EP_CONTRACTION_MODE=1 -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -ffp-contract=fast -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/qf_fma_guard_test_contract_on.dir/qf_fma_guard_test.cpp.o -MF CMakeFiles/qf_fma_guard_test_contract_on.dir/qf_fma_guard_test.cpp.o.d -o "CMakeFiles/qf_fma_guard_test_contract_on.dir/qf_fma_guard_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/qf_fma_guard_test.cpp
+gmake[2]: *** [tests/CMakeFiles/qf_fma_guard_test_contract_on.dir/build.make:76: tests/CMakeFiles/qf_fma_guard_test_contract_on.dir/qf_fma_guard_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:778: tests/CMakeFiles/qf_fma_guard_test_contract_on.dir/all] Error 2
+1 error generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/qf_property_test.dir/qf_property_test.cpp.o -MF CMakeFiles/qf_property_test.dir/qf_property_test.cpp.o.d -o "CMakeFiles/qf_property_test.dir/qf_property_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/qf_property_test.cpp
+gmake[2]: *** [tests/CMakeFiles/qf_property_test.dir/build.make:76: tests/CMakeFiles/qf_property_test.dir/qf_property_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:726: tests/CMakeFiles/qf_property_test.dir/all] Error 2
+1 error generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DKOKKOS_EP_CONTRACTION_MODE=0 -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -ffp-contract=off -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/qf_eft_test.dir/qf_eft_test.cpp.o -MF CMakeFiles/qf_eft_test.dir/qf_eft_test.cpp.o.d -o "CMakeFiles/qf_eft_test.dir/qf_eft_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/qf_eft_test.cpp
+gmake[2]: *** [tests/CMakeFiles/qf_eft_test.dir/build.make:76: tests/CMakeFiles/qf_eft_test.dir/qf_eft_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:674: tests/CMakeFiles/qf_eft_test.dir/all] Error 2
+1 error generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/dd_invariant_test.dir/dd_invariant_test.cpp.o -MF CMakeFiles/dd_invariant_test.dir/dd_invariant_test.cpp.o.d -o "CMakeFiles/dd_invariant_test.dir/dd_invariant_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/dd_invariant_test.cpp
+gmake[2]: *** [tests/CMakeFiles/dd_invariant_test.dir/build.make:76: tests/CMakeFiles/dd_invariant_test.dir/dd_invariant_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:362: tests/CMakeFiles/dd_invariant_test.dir/all] Error 2
+1 error generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/qf_nonoverlap_test.dir/qf_nonoverlap_test.cpp.o -MF CMakeFiles/qf_nonoverlap_test.dir/qf_nonoverlap_test.cpp.o.d -o "CMakeFiles/qf_nonoverlap_test.dir/qf_nonoverlap_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/qf_nonoverlap_test.cpp
+gmake[2]: *** [tests/CMakeFiles/qf_nonoverlap_test.dir/build.make:76: tests/CMakeFiles/qf_nonoverlap_test.dir/qf_nonoverlap_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:700: tests/CMakeFiles/qf_nonoverlap_test.dir/all] Error 2
+1 error generated when compiling for gfx90a.
+failed to execute:/soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin/clang++  --offload-arch=gfx90a --offload-arch=gfx90a  -DKOKKOS_DEPENDENCE -DUSE_PROF_API=1 -D__HIP_PLATFORM_AMD__=1 -I/home/rbarik/xpm-mi250-validate/third_party/include -I/home/rbarik/xpm-mi250-validate/include -isystem /home/rbarik/xpm_device/kokkos-hip-gfx90a/include -ffp-contract=off -O3 -DNDEBUG -std=c++20 -fno-gpu-rdc -xhip -x hip -MD -MT tests/CMakeFiles/ff_invariant_test.dir/ff_invariant_test.cpp.o -MF CMakeFiles/ff_invariant_test.dir/ff_invariant_test.cpp.o.d -o "CMakeFiles/ff_invariant_test.dir/ff_invariant_test.cpp.o" -c /home/rbarik/xpm-mi250-validate/tests/ff_invariant_test.cpp
+gmake[2]: *** [tests/CMakeFiles/ff_invariant_test.dir/build.make:76: tests/CMakeFiles/ff_invariant_test.dir/ff_invariant_test.cpp.o] Error 1
+gmake[1]: *** [CMakeFiles/Makefile2:388: tests/CMakeFiles/ff_invariant_test.dir/all] Error 2
+[ 51%] Linking CXX executable kokkos_ep_demo_ff
+[ 51%] Built target kokkos_ep_demo_ff
+[ 52%] Linking CXX executable kokkos_ep_demo
+[ 52%] Built target kokkos_ep_demo
+[ 53%] Linking CXX executable kokkos_ep_demo_tf
+[ 53%] Built target kokkos_ep_demo_tf
+[ 54%] Linking CXX executable kokkos_ep_demo_qf
+[ 54%] Built target kokkos_ep_demo_qf
+gmake: *** [Makefile:146: all] Error 2
+
+--- build-info.txt ---
+# xpmath build provenance -- written by CMakeLists.txt at configure time.
+# Regenerated on every configure. Do not edit; do not commit.
+arch: mi250
+git-head: 0230239b9c5501e3f505ecfe245add7fd2693af9
+compiler: /soft/compilers/rocm/rocm-7.0.2/bin/hipcc
+compiler-id: Clang
+compiler-version: 20.0.0
+kokkos: ON
+kokkos-prefix: /home/rbarik/xpm_device/kokkos-hip-gfx90a/lib64/cmake/Kokkos
+cxx-standard: 17
+build-type: Release
+opt-level: O3
+cxx-flags: -ffp-contract=off -O3 -DNDEBUG
+timestamp-utc: 2026-09-16T03:41:55Z
+
+xpm_build: CONFIGURE SUCCEEDED, BUILD FAILED (exit 2) for arch mi250.
+xpm_build: on a device arch the known cause is the host __float128 oracle
+xpm_build: sharing a translation unit with device code -- see the S1 STATUS
+xpm_build: block; the TU split is S6's work, not this script's.
++ rc_build=2
++ set +x
+  xpm_build exit: 2   (40s)
+
+--- [2/6] build-info.txt ---
+    # xpmath build provenance -- written by CMakeLists.txt at configure time.
+    # Regenerated on every configure. Do not edit; do not commit.
+    arch: mi250
+    git-head: 0230239b9c5501e3f505ecfe245add7fd2693af9
+    compiler: /soft/compilers/rocm/rocm-7.0.2/bin/hipcc
+    compiler-id: Clang
+    compiler-version: 20.0.0
+    kokkos: ON
+    kokkos-prefix: /home/rbarik/xpm_device/kokkos-hip-gfx90a/lib64/cmake/Kokkos
+    cxx-standard: 17
+    build-type: Release
+    opt-level: O3
+    cxx-flags: -ffp-contract=off -O3 -DNDEBUG
+    timestamp-utc: 2026-09-16T03:41:55Z
+
+--- [3/6] ctest on the tree AS THE RECIPE LEFT IT   (THE HEADLINE COUNTS) ---
+  registered targets: 49
+    	 35 - tf_complex_no_kokkos_smoke (Not Run)
+    	 36 - sweep_absolute_gate (Not Run)
+    	 37 - sweep_monotone_gate (Not Run)
+    	 38 - sweep_monotone_gate_selftest (Failed)
+    	 39 - sweep_absolute_gate_selftest (Failed)
+    	 40 - pow_domain_test (Not Run)
+    	 41 - exp_reduction_test (Not Run)
+    	 43 - trig_reduction_test (Not Run)
+    	 45 - oracle_conv_test (Not Run)
+    Errors while running CTest
+    Output from these tests are in: /home/rbarik/xpm-mi250-validate/build-mi250/Testing/Temporary/LastTest.log
+    Use "--rerun-failed --output-on-failure" to re-run the failed cases verbosely.
+  (full ctest output: /home/rbarik/xpm-mi250-validate/validation/mi250/logs/ctest_20260916_034147.log)
+
+  ============ FOUR COUNTS — RECIPE AS SHIPPED
+   registered : 49
+   PASSED     : 8
+   FAILED     : 2
+   SKIPPED    : 0   <- asserts nothing
+   NOT BUILT  : 39   (ctest ***Not Run: the target never linked)
+  ===========================================================
+
+  -- FAILED targets, named --
+    sweep_monotone_gate_selftest
+    sweep_absolute_gate_selftest
+
+  -- NOT BUILT targets, named --
+    hello_test
+    corpus_test
+    dd_invariant_test
+    ff_invariant_test
+    dd_property_test
+    dd_e2e_test
+    dd_eft_test
+    ff_eft_test
+    ff_property_test
+    ff_cancellation_test
+    dd_fma_guard_test
+    dd_fma_guard_test_contract_on
+    ff_fma_guard_test
+    ff_fma_guard_test_contract_on
+    qf_eft_test
+    qf_nonoverlap_test
+    qf_property_test
+    qf_fma_guard_test
+    qf_fma_guard_test_contract_on
+    qf_cancellation_test
+    tf_eft_test
+    tf_eft_test_contract_on
+    tf_property_test
+    tf_cancellation_test
+    tf_fma_guard_test
+    tf_fma_guard_test_contract_on
+    dd_no_kokkos_smoke
+    dd_complex_no_kokkos_smoke
+    ff_no_kokkos_smoke
+    ff_complex_no_kokkos_smoke
+    qf_no_kokkos_smoke
+    qf_complex_no_kokkos_smoke
+    tf_complex_no_kokkos_smoke
+    sweep_absolute_gate
+    sweep_monotone_gate
+    pow_domain_test
+    exp_reduction_test
+    trig_reduction_test
+    oracle_conv_test
+
+--- [4/6] DIAGNOSTIC keep-going rebuild (NOT THE RECIPE) ---
+  generator: Unix Makefiles
+  cmake --build /home/rbarik/xpm-mi250-validate/build-mi250 -j256 -- -k
+  keep-going build exit: 2   (5s)   log: /home/rbarik/xpm-mi250-validate/validation/mi250/logs/keepgoing_build_20260916_034147.log
+  distinct compiler diagnostics (top 15 by count):
+         26 use of undeclared identifier 'kUlpUnscorable'
+         24 use of undeclared identifier '__int_as_float'
+          9 use of undeclared identifier '__float_as_int'
+          9 use of undeclared identifier '__double_as_longlong'
+          6 use of undeclared identifier '__longlong_as_double'
+          5 invalid operands to binary expression ('std::ostringstream' (aka 'basic_ostringstream<char
+          2 'quadmath.h' file not found
+          1 unknown argument: '-fext-numeric-literals'
+
+--- [5/6] execution space actually resolved by the runtime ---
+  toolchain taken from the recipe's own CMakeCache.txt:
+    CMAKE_CXX_COMPILER      = /soft/compilers/rocm/rocm-7.0.2/bin/hipcc
+    CMAKE_PREFIX_PATH       = /home/rbarik/xpm_device/kokkos-hip-gfx90a
+    CMAKE_CXX_FLAGS         = -ffp-contract=off
+    CMAKE_CXX_FLAGS_RELEASE = -O3 -DNDEBUG
+  probe configure: 0   probe build: 0
+    resolved-default-execution-space: HIP
+    resolved-default-host-execution-space: Serial
+    probe-kernel: CORRECT (0 1 4 9 16 25 36 49)
+    probe-verdict: HIP-EXECUTED
+    --- Kokkos::print_configuration ---
+      Kokkos Version: 5.1.0
+    Compiler:
+      KOKKOS_COMPILER_CLANG: 2000
+    Architecture:
+      CPU architecture: none
+      Default Device: HIP
+      GPU architecture: AMD_GFX90A
+      platform: 64bit
+    Atomics:
+      desul atomics version: 5e8dd8b549c0de391acb77535a40aa5668c35d01
+    View:
+      mdspan: enabled
+      mdspan version: 5d4eb209c77f4744980c0b0c2af44636cc81b08b
+    Vectorization:
+      KOKKOS_ENABLE_PRAGMA_IVDEP: no
+      KOKKOS_ENABLE_PRAGMA_LOOPCOUNT: no
+      KOKKOS_ENABLE_PRAGMA_UNROLL: no
+      KOKKOS_ENABLE_PRAGMA_VECTOR: no
+    Memory:
+    Options:
+      KOKKOS_ENABLE_ASM: no
+      KOKKOS_ENABLE_CXX20: yes
+      KOKKOS_ENABLE_CXX23: no
+      KOKKOS_ENABLE_CXX26: no
+      KOKKOS_ENABLE_DEBUG_BOUNDS_CHECK: no
+      KOKKOS_ENABLE_HWLOC: no
+      KOKKOS_ENABLE_LIBDL: yes
+    Host Serial Execution Space:
+      KOKKOS_ENABLE_SERIAL: yes
+    
+    Serial Runtime Configuration:
+    Device Execution Space:
+      KOKKOS_ENABLE_HIP: yes
+    HIP Options:
+      KOKKOS_ENABLE_HIP_RELOCATABLE_DEVICE_CODE: no
+    
+    Runtime Configuration:
+      XNACK environment variable set: no
+      Kernel reports HMM module via `CONFIG_HMM_MIRROR=y` in `/boot/config`: yes
+    macro  KOKKOS_ENABLE_HIP : defined
+    macro  HIP_VERSION : 70051831 = version 7.0.51831
+    macro KOKKOS_ENABLE_ROCTHRUST : defined
+    macro KOKKOS_ENABLE_IMPL_HIP_MALLOC_ASYNC: no
+    Kokkos::HIP[ 0 ] gcnArch gfx90a:sramecc+:xnack- : Selected
+      Total Global Memory: 63.98 GiB
+      Shared Memory per Block: 64 KiB
+      APU or dGPU: dGPU
+      Is Large Bar: 1
+      Supports Managed Memory: 1
+      Architecture capable of accessing system allocated memory: 1
+      System allows accessing system allocated memory on GPU: 0
+      Wavefront Size: 64
+    Kokkos::HIP[ 1 ] gcnArch gfx90a:sramecc+:xnack- : Not Selected
+      Total Global Memory: 63.98 GiB
+      Shared Memory per Block: 64 KiB
+      APU or dGPU: dGPU
+      Is Large Bar: 1
+      Supports Managed Memory: 1
+      Architecture capable of accessing system allocated memory: 1
+      System allows accessing system allocated memory on GPU: 0
+      Wavefront Size: 64
+    Kokkos::HIP[ 2 ] gcnArch gfx90a:sramecc+:xnack- : Not Selected
+      Total Global Memory: 63.98 GiB
+      Shared Memory per Block: 64 KiB
+      APU or dGPU: dGPU
+      Is Large Bar: 1
+      Supports Managed Memory: 1
+      Architecture capable of accessing system allocated memory: 1
+      System allows accessing system allocated memory on GPU: 0
+      Wavefront Size: 64
+    Kokkos::HIP[ 3 ] gcnArch gfx90a:sramecc+:xnack- : Not Selected
+      Total Global Memory: 63.98 GiB
+      Shared Memory per Block: 64 KiB
+      APU or dGPU: dGPU
+      Is Large Bar: 1
+      Supports Managed Memory: 1
+      Architecture capable of accessing system allocated memory: 1
+      System allows accessing system allocated memory on GPU: 0
+      Wavefront Size: 64
+    Kokkos::HIP[ 4 ] gcnArch gfx90a:sramecc+:xnack- : Not Selected
+      Total Global Memory: 63.98 GiB
+      Shared Memory per Block: 64 KiB
+      APU or dGPU: dGPU
+      Is Large Bar: 1
+      Supports Managed Memory: 1
+      Architecture capable of accessing system allocated memory: 1
+      System allows accessing system allocated memory on GPU: 0
+      Wavefront Size: 64
+    Kokkos::HIP[ 5 ] gcnArch gfx90a:sramecc+:xnack- : Not Selected
+      Total Global Memory: 63.98 GiB
+      Shared Memory per Block: 64 KiB
+      APU or dGPU: dGPU
+      Is Large Bar: 1
+      Supports Managed Memory: 1
+      Architecture capable of accessing system allocated memory: 1
+      System allows accessing system allocated memory on GPU: 0
+      Wavefront Size: 64
+    Kokkos::HIP[ 6 ] gcnArch gfx90a:sramecc+:xnack- : Not Selected
+      Total Global Memory: 63.98 GiB
+      Shared Memory per Block: 64 KiB
+      APU or dGPU: dGPU
+      Is Large Bar: 1
+      Supports Managed Memory: 1
+      Architecture capable of accessing system allocated memory: 1
+      System allows accessing system allocated memory on GPU: 0
+      Wavefront Size: 64
+    Kokkos::HIP[ 7 ] gcnArch gfx90a:sramecc+:xnack- : Not Selected
+      Total Global Memory: 63.98 GiB
+      Shared Memory per Block: 64 KiB
+      APU or dGPU: dGPU
+      Is Large Bar: 1
+      Supports Managed Memory: 1
+      Architecture capable of accessing system allocated memory: 1
+      System allows accessing system allocated memory on GPU: 0
+      Wavefront Size: 64
+
+  -- the lines that decide it --
+    resolved-default-execution-space: HIP
+    resolved-default-host-execution-space: Serial
+    probe-kernel: CORRECT (0 1 4 9 16 25 36 49)
+    probe-verdict: HIP-EXECUTED
+  => DEFAULT EXECUTION SPACE IS HIP, and a kernel really ran in it.
+
+  -- libquadmath actually linked by sweep_accuracy (no RPATH; LD_LIBRARY_PATH decides) --
+    sweep_accuracy not built -- cannot check
+
+--- [6/6] DIAGNOSTIC ctest + per-target first error ---
+  ctest exit: 8   log: /home/rbarik/xpm-mi250-validate/validation/mi250/logs/ctest_keepgoing_20260916_034147.log
+
+  ============ FOUR COUNTS — AFTER DIAGNOSTIC KEEP-GOING BUILD (not the recipe)
+   registered : 49
+   PASSED     : 8
+   FAILED     : 2
+   SKIPPED    : 0   <- asserts nothing
+   NOT BUILT  : 39   (ctest ***Not Run: the target never linked)
+  ===========================================================
+
+  -- FAILED targets, named --
+    sweep_monotone_gate_selftest
+    sweep_absolute_gate_selftest
+
+  -- NOT BUILT targets, named --
+    hello_test
+    corpus_test
+    dd_invariant_test
+    ff_invariant_test
+    dd_property_test
+    dd_e2e_test
+    dd_eft_test
+    ff_eft_test
+    ff_property_test
+    ff_cancellation_test
+    dd_fma_guard_test
+    dd_fma_guard_test_contract_on
+    ff_fma_guard_test
+    ff_fma_guard_test_contract_on
+    qf_eft_test
+    qf_nonoverlap_test
+    qf_property_test
+    qf_fma_guard_test
+    qf_fma_guard_test_contract_on
+    qf_cancellation_test
+    tf_eft_test
+    tf_eft_test_contract_on
+    tf_property_test
+    tf_cancellation_test
+    tf_fma_guard_test
+    tf_fma_guard_test_contract_on
+    dd_no_kokkos_smoke
+    dd_complex_no_kokkos_smoke
+    ff_no_kokkos_smoke
+    ff_complex_no_kokkos_smoke
+    qf_no_kokkos_smoke
+    qf_complex_no_kokkos_smoke
+    tf_complex_no_kokkos_smoke
+    sweep_absolute_gate
+    sweep_monotone_gate
+    pow_domain_test
+    exp_reduction_test
+    trig_reduction_test
+    oracle_conv_test
+
+  -- first compiler error per unbuilt target (serial, budget 900s) --
+    corpus_test                        test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    dd_complex_no_kokkos_smoke         trig_reduction.hpp:150:31: error: use of undeclared identifier '__double_as_longlong'
+    dd_e2e_test                        test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    dd_eft_test                        test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    dd_fma_guard_test                  test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    dd_fma_guard_test_contract_on      test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    dd_invariant_test                  test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    dd_no_kokkos_smoke                 trig_reduction.hpp:150:31: error: use of undeclared identifier '__double_as_longlong'
+    dd_property_test                   test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    exp_reduction_test                 /home/rbarik/xpm-mi250-validate/tests/exp_reduction_test.cpp:52:10: fatal error: 'quadmath.h' file not found
+    ff_cancellation_test               test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    ff_complex_no_kokkos_smoke         trig_reduction.hpp:150:31: error: use of undeclared identifier '__double_as_longlong'
+    ff_eft_test                        test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    ff_fma_guard_test                  test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    ff_fma_guard_test_contract_on      test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    ff_invariant_test                  test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    ff_no_kokkos_smoke                 trig_reduction.hpp:150:31: error: use of undeclared identifier '__double_as_longlong'
+    ff_property_test                   test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    hello_test                         test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    oracle_conv_test                   gmake: *** No rule to make target 'oracle_conv_test'.  Stop.
+    pow_domain_test                    trig_reduction.hpp:150:31: error: use of undeclared identifier '__double_as_longlong'
+    qf_cancellation_test               test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    qf_complex_no_kokkos_smoke         trig_reduction.hpp:150:31: error: use of undeclared identifier '__double_as_longlong'
+    qf_eft_test                        test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    qf_fma_guard_test                  test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    qf_fma_guard_test_contract_on      test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    qf_no_kokkos_smoke                 trig_reduction.hpp:150:31: error: use of undeclared identifier '__double_as_longlong'
+    qf_nonoverlap_test                 test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    qf_property_test                   test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    sweep_absolute_gate                gmake: *** No rule to make target 'sweep_absolute_gate'.  Stop.
+    sweep_monotone_gate                gmake: *** No rule to make target 'sweep_monotone_gate'.  Stop.
+    tf_cancellation_test               test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    tf_complex_no_kokkos_smoke         trig_reduction.hpp:150:31: error: use of undeclared identifier '__double_as_longlong'
+    tf_eft_test                        test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    tf_eft_test_contract_on            test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    tf_fma_guard_test                  test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    tf_fma_guard_test_contract_on      test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    tf_property_test                   test_utils.hpp:286:20: error: use of undeclared identifier 'kUlpUnscorable'
+    trig_reduction_test                trig_reduction.hpp:150:31: error: use of undeclared identifier '__double_as_longlong'
+
+===========================================================
+ S8c RESULT
+   recipe build    : exit 2   (40s)
+   execution space : resolved-default-execution-space: HIP
+   FOUR COUNTS (recipe as shipped, of 49 registered):
+       passed=8  failed=2  skipped=0  not-built=39
+   FOUR COUNTS (diagnostic keep-going build, NOT the recipe):
+       passed=8  failed=2  skipped=0  not-built=39
+ VERDICT : the mi250 arch block did NOT come through clean.
+           Report what broke; do not patch it in this script (Rule 4).
+ logs    : /home/rbarik/xpm-mi250-validate/validation/mi250/logs/build_20260916_034147.log
+           /home/rbarik/xpm-mi250-validate/validation/mi250/logs/ctest_20260916_034147.log
+           /home/rbarik/xpm-mi250-validate/validation/mi250/logs/keepgoing_build_20260916_034147.log
+           /home/rbarik/xpm-mi250-validate/validation/mi250/logs/ctest_keepgoing_20260916_034147.log
+===========================================================
