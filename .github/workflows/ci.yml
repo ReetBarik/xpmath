@@ -317,7 +317,15 @@ jobs:
           # regardless of it.
           #
           # THIS IS A ONE-TIME CONDITION AND IT SELF-HEALS: once the oracle
-          # commit is on main, every later PR compares MPFR against MPFR. Do not
+          # commit is on main, every later PR compares MPFR against MPFR.
+          #
+          # IT COST ONE MORE RED RUN THAN THAT SENTENCE IMPLIES, so it is worth
+          # saying exactly: the MERGE'S OWN PUSH RUN TO main FAILED TOO. A merge
+          # commit's `HEAD^` is its FIRST PARENT, which is the pre-merge main --
+          # 8cfeae7 here, still pre-oracle-switch -- so the push run for
+          # 9960df0 reproduced the identical 20-row digit drift. Measured, not
+          # predicted. The first commit whose `HEAD^` contains the oracle switch
+          # is the first one this lane can pass. Do not
           # "fix" it by relaxing the gate under schedule pressure -- the comment
           # block in sweep_accuracy.cpp records getting this exact call wrong
           # twice. If it is ever worth fixing properly, the narrow change is to
