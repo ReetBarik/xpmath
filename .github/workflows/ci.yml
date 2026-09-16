@@ -294,13 +294,36 @@ jobs:
           g++-13 -std=c++17 -fext-numeric-literals -O2 -DXPMATH_HAVE_MPFR=1 \
                  -I/tmp/parent/include /tmp/parent/scripts/sweep_accuracy.cpp \
                  -lmpc -lmpfr -lgmp -lquadmath -o /tmp/sweep_parent
-          # --oracle=mpfr is what makes the two sides COMPARABLE across the
-          # transition. On a pre-transition parent it selects the oracle HEAD
-          # now uses; on any later parent it is an accepted no-op, which is the
-          # only reason the flag was kept alive rather than deleted with the arm
-          # it used to select. Without it this lane would score a libquadmath
-          # oracle against an MPFR one and report the 29,970 rows that moved
-          # (6.9% of the sweep) as if the library had changed.
+          # --oracle=mpfr narrows the gap across the transition but DOES NOT
+          # CLOSE IT, and the claim that it did is now measured false. On any
+          # post-transition parent it is an exact no-op -- verified: the same
+          # binary with and without the flag yields the identical fingerprint
+          # 44f18a4a959f6c29 and a 436,080-row comparison with zero drift. On a
+          # PRE-transition parent it selects that source's OWN MPFR arm, which
+          # is not the arm HEAD uses: the oracle commit also rewrote mpfr_to_q,
+          # whose clamped scale had been turning exp/sinh/cosh references above
+          # 2^1000001 into NaN. So the two sides still disagree, and the flag
+          # cannot fix it.
+          #
+          # MEASURED on PR #26, the one PR that crosses the transition. NOTE
+          # THAT ON A PR `HEAD^` IS THE BASE BRANCH, not the previous commit on
+          # the branch -- Actions checks out an ephemeral merge commit -- so
+          # the parent here was `main` (8cfeae7, pre-transition, fingerprint
+          # 735ef724fa491ebd) against HEAD's 44f18a4a959f6c29. Result: 0
+          # decreased, 0 state moved, 0 bound drift, and 20 rows of DIGIT drift
+          # (DD and FF real `exp`, 0.00 -> 31.00 / 14.00) which are the
+          # mpfr_to_q fix becoming visible. Exit 3, because the fingerprint arm
+          # below drops unattributable IMPROVEMENTS but `drifted` is evaluated
+          # regardless of it.
+          #
+          # THIS IS A ONE-TIME CONDITION AND IT SELF-HEALS: once the oracle
+          # commit is on main, every later PR compares MPFR against MPFR. Do not
+          # "fix" it by relaxing the gate under schedule pressure -- the comment
+          # block in sweep_accuracy.cpp records getting this exact call wrong
+          # twice. If it is ever worth fixing properly, the narrow change is to
+          # let a fingerprint mismatch drop drift_digits the way it already
+          # drops improvements, leaving drift_bound and state_moved gating, and
+          # to ship a poison self-test proving the relaxed gate can still fail.
           /tmp/sweep_parent --oracle=mpfr --out /tmp/parent_baseline.csv --quiet > /dev/null
           echo "parent  $(git rev-parse --short HEAD^)  fingerprint: \
             $(sed -n 's/^# oracle-fingerprint: //p' /tmp/parent_baseline.csv | head -1)"

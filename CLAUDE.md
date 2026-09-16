@@ -272,11 +272,17 @@ Read **docs/CORRECTNESS.md** first. The short version:
   libstdc++ and `/lib64` libgcc_s — produced `44f18a4a959f6c29` and a sweep
   **byte-identical** in all 436,080 rows to the module-loaded run.
   Still load `gcc/13.3.0` before cmake: this says nothing about building, only
-  about running, and the rest of the suite is not `sweep_accuracy`. And the
-  measurement is one host with one `/usr/lib64` MPFR; a different MPFR *should*
-  agree, because correct rounding leaves nothing to disagree about, but nobody
-  has run two. A fingerprint mismatch is no longer explained by the environment
-  — treat it as a real change in the reference.
+  about running, and the rest of the suite is not `sweep_accuracy`.
+  **TWO INDEPENDENT MPFRs HAVE NOW BEEN RUN, AND THEY AGREE.** That used to read
+  "a different MPFR *should* agree ... but nobody has run two". Somebody has:
+  this login node's SUSE `/usr/lib64` MPFR and the ubuntu-24.04 GitHub runner's
+  both produce fingerprint `44f18a4a959f6c29` and a comparison against
+  `validation/sweep/sweep_baseline.csv.gz` with **0 bound and 0 digit drift over
+  all 436,080 rows** (PR #26's monotone lane, 2026-09-16, gating step and
+  non-gating step respectively). Correct rounding leaves nothing to disagree
+  about, and now that is measured rather than expected. A fingerprint mismatch
+  is therefore not explained by the environment — treat it as a real change in
+  the reference, and expect to be able to name which commit moved it.
 - The sweep is not bit-reproducible: ~23 rows shift between identical runs (as
   measured, on the 1,652-point real grid = 428,592 rows; `5f2fc90` widened it and
   the sweep is 436,080 rows today). That is what the monotone gate's noise floor
