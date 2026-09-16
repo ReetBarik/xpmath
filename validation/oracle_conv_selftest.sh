@@ -45,19 +45,30 @@ fail=0
 build_and_run() {   # <tag> <extra-defines...>
   local tag="$1"; shift
   local exe="${work}/sw_${tag}"
-  # -DXPMATH_HAVE_MPFR is REQUIRED here: the MPFR oracle is compiled
-  # conditionally, and without this define every poisoned build would report
-  # "built without MPFR; nothing to check" and the poison would never fire.
+  # -DXPMATH_HAVE_MPFR is REQUIRED here: the TU #errors without it, and before
+  # MPFR became mandatory every poisoned build without it reported "built
+  # without MPFR; nothing to check" and the poison never fired.
   # -lmpc is required alongside -lmpfr: the complex arm of the oracle is MPC,
   # and this harness compiles the same TU the gate is built from.
+  #
+  # NO -lquadmath, EXCEPT for poisons 1 and 3. The shipped TU does not include
+  # <quadmath.h> and calls nothing from that library -- which is the property
+  # the two acceptance checks in the header of scripts/sweep_accuracy.cpp
+  # assert, and which this harness would quietly undermine by linking it here
+  # for all nine builds. Poisons 1 and 3 are the sole exception BY DESIGN: they
+  # restore the decimal conversions that shipped, which were built out of
+  # quadmath_snprintf and strtoflt128, and a poison that cannot be spelled is a
+  # poison that cannot be tested.
   #
   # XPMATH_EXTRA_INC / XPMATH_EXTRA_LIB let the caller pass the include and
   # library paths CMake actually found. Without them this line only works when
   # MPFR/MPC sit in the default prefix -- a non-default install passes
-  # find_library() at configure time and then fails all five compiles here.
+  # find_library() at configure time and then fails all nine compiles here.
+  local quad=""
+  case "${tag}" in poison1|poison3) quad="-lquadmath" ;; esac
   if ! "${CXX}" -O2 -std=c++17 -DNDEBUG -DXPMATH_HAVE_MPFR=1 -fext-numeric-literals \
        -I "${inc}" ${XPMATH_EXTRA_INC:-} \
-       "$@" "${src}" -o "${exe}" ${XPMATH_EXTRA_LIB:-} -lquadmath -lmpc -lmpfr -lgmp \
+       "$@" "${src}" -o "${exe}" ${XPMATH_EXTRA_LIB:-} ${quad} -lmpc -lmpfr -lgmp \
        > "${work}/${tag}.build.log" 2>&1; then
     echo "  ${tag}: COMPILE FAILED (see ${work}/${tag}.build.log)"
     return 2
@@ -118,11 +129,17 @@ fi
 # says so. If F ever drops out of row 2, someone has written a second
 # conversion.
 #
-# Row 8 was a real hole, not a bookkeeping error: G compared MPC against
-# libquadmath at cut points where both are correctly rounded, so it could not
-# see a working precision with no headroom left. G now also compares the oracle
-# against itself at 2x precision on a cancelling argument. The poison was left
-# in place and re-run until it fired.
+# Row 8 was a real hole, not a bookkeeping error: G compared MPC against a
+# second binary128 implementation at cut points where both are correctly
+# rounded, so it could not see a working precision with no headroom left. G now
+# also compares the oracle against itself at 2x precision on a cancelling
+# argument. The poison was left in place and re-run until it fired.
+#
+# (That second implementation was libquadmath's csqrtq/clogq/casinq when the
+# hole was found, and is glibc's csqrtf128/clogf128/casinf128 now that this TU
+# does not link libquadmath. The swap does not touch the argument above: both
+# are correctly rounded at those points, which is exactly why neither could see
+# poison 8. Re-measured after the swap -- row 8 is still caught by G alone.)
 declare -A why=(
   [1]="A C F"      # F: q_to_mpc is built on q_to_mpfr
   [2]="A B C F H"

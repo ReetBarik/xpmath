@@ -46,7 +46,9 @@ backends usable in plain C++, CUDA, HIP, SYCL, and Kokkos — **DD** (double-dou
 (float-float), **QF** (quad-float), and **TF** (triple-float). All four are written against Kokkos
 alone, carry no hardware dependency, and compile for any Kokkos execution space:
 CPU, GPU, and everything else Kokkos targets. Each is validated for accuracy
-against a `__float128` (libquadmath) host oracle.
+against a host oracle carried in `__float128`: the accuracy record
+(`validation/sweep/`) computes that oracle with MPFR/MPC at 400 bits, and the
+demo tables in Section 2 below are the older libquadmath measurement.
 
 ## Section 2 — Backends: types, ops, measured accuracy
 

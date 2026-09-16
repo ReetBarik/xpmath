@@ -22,14 +22,26 @@ compare.
 The measurement engine is `scripts/sweep_accuracy.cpp`, built by CMake as the
 `sweep_accuracy` target. It evaluates 39 real and 24 complex operations on four
 backends over a fixed grid of 1,700 real and 1,780 complex points (seed 12345),
-which is 436,080 points (1700*39*4 + 1780*24*4), in about eight seconds. Of those,
+which is 436,080 points (1700*39*4 + 1780*24*4), in about 35 seconds. Of those,
 397,409 are scored `S`; 33,879 are `U` (an intermediate left the exponent range)
 and 4,792 are `N` (unscorable). The real grid was 1,652 points until `5f2fc90`
 added the hard argument-reduction anchors.
 
-The oracle is libquadmath, and *which* libquadmath matters: the baseline carries
-an `oracle-fingerprint` header and the gates warn when it does not match. The
-toolchain of record is GCC 13.3.0, fingerprint `578322f998a329c8`.
+The oracle is **MPFR at 400 bits for the real ops and MPC at 400 bits for the
+complex ops**, with `__float128` as the carrier the answers are quantised into.
+It was libquadmath until the switch, and it took about eight seconds then; the
+8x is correct rounding, and it bought a reference that is right where
+libquadmath is not — argument reduction past 1e40, and a complex divide that
+rounds before it cancels (KI-36). Measured at the switch, over all 436,080
+rows: `ulps` moved on 29,970 (6.9%), `bound` moved on ZERO, and NO row changed
+state. The three state counts above are the same on both sides of it.
+
+The baseline still carries an `oracle-fingerprint` header and the gates still
+warn when it does not match; the value is now `44f18a4a959f6c29`. Unlike
+libquadmath's, that number should not be a property of the toolchain — MPFR and
+MPC are correctly rounded, so any conforming version must agree — but see the
+run-time trap in CLAUDE.md for what a mismatch used to mean and how expensive
+the assumption was.
 
 ## 2. The verdict
 
@@ -237,10 +249,14 @@ cmake --build build -j16
 ctest --test-dir build -j8 --timeout 1800
 ```
 
-The `LD_LIBRARY_PATH` export is not optional: without it the binary links the
-system libquadmath, the oracle fingerprint stops matching `578322f998a329c8`, and
-you get a scatter of hairline differences that are the reference moving rather
-than the library.
+The `LD_LIBRARY_PATH` export is still here for the rest of the suite, but it is
+**no longer load-bearing for `sweep_accuracy`**. It used to be: without it the
+binary resolved the system libquadmath, the fingerprint stopped matching
+`578322f998a329c8`, and you got a scatter of hairline differences that were the
+reference moving rather than the library. `sweep_accuracy` links no libquadmath
+now, and the MPFR/MPC oracle is correctly rounded. Measured: the same binary run
+under `env -i` with no module at all resolves the system libstdc++ and still
+produces `44f18a4a959f6c29` and a byte-identical 436,080-row sweep.
 
 ### Re-baselining after an accepted change
 

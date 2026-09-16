@@ -25,8 +25,12 @@
 #
 #   validation/gate_selftest.sh <sweep_accuracy binary> monotone|absolute [workdir]
 #
-# ctest passes the build directory as <workdir>. Each sweep run is ~7s and each
-# case is one run, so budget ~45s per mode.
+# ctest passes the build directory as <workdir>. Each sweep run is ~35s and each
+# case is one run. MEASURED under ctest: `absolute` 135 s, `monotone` 674 s. It
+# was ~7s a run when this was written, against a libquadmath oracle; MPFR/MPC at
+# 400 bits is correctly rounded and costs ~5x. Both modes still sit under the
+# TIMEOUT 1200 in tests/CMakeLists.txt, but monotone is now at 56% of it rather
+# than 4% -- add a case there and raise the timeout in the same commit.
 set -u
 
 bin="${1:?usage: gate_selftest.sh <sweep_accuracy> monotone|absolute [workdir]}"

@@ -30,19 +30,31 @@ Each includes its `include/xp/` counterpart and re-exposes it as
 forwarders, so existing Kokkos code compiles unchanged. Tests and demos include
 these paths, which keeps the wrapper layer continuously validated.
 
-Validation: **one** measurement — error in ulps against a `__float128` /
-`__complex128` host oracle — with **one** verdict per point against a bound
-derived from the format and the condition number, and **two** ctest gates over
-that number (`sweep_absolute_gate`, `sweep_monotone_gate`), each with a self-test
-target (`*_selftest`) that poisons its input and requires it to fail. Read
-**docs/CORRECTNESS.md** before adding anything that judges correctness; the whole
-point is that nothing else issues a competing verdict. 48 ctest targets with
-Kokkos and **20 without** (`-DXPMATH_WITH_KOKKOS=OFF`), all passing on `main` —
-asserted by CI, not assumed, because four sit behind `if(XPMATH_MPFR_FOUND)`
-and a missing optional dependency removes coverage while leaving the lane
-green. The Kokkos-free 20 include both gates: `sweep_accuracy` links no Kokkos
-and never needed it, but until `XPMATH_WITH_KOKKOS` existed the build required
-it anyway.
+Validation: **one** measurement — error in ulps against an **MPFR/MPC oracle at
+400 bits, carried in `__float128`** — with **one** verdict per point against a
+bound derived from the format and the condition number, and **two** ctest gates
+over that number (`sweep_absolute_gate`, `sweep_monotone_gate`), each with a
+self-test target (`*_selftest`) that poisons its input and requires it to fail.
+Read **docs/CORRECTNESS.md** before adding anything that judges correctness; the
+whole point is that nothing else issues a competing verdict. 48 ctest targets
+with Kokkos and **20 without** (`-DXPMATH_WITH_KOKKOS=OFF`), all passing on
+`main` — asserted by CI, not assumed. The Kokkos-free 20 include both gates:
+`sweep_accuracy` links no Kokkos and never needed it, but until
+`XPMATH_WITH_KOKKOS` existed the build required it anyway.
+
+**The sweep oracle was libquadmath and is not any more.** `sweep_accuracy` links
+`-lmpc -lmpfr -lgmp` and **no `-lquadmath`**, and that is asserted rather than
+hoped for — two acceptance checks in the header of `scripts/sweep_accuracy.cpp`
+(`ldd | grep -i quadmath` empty, `nm -D --undefined-only | grep -E 'q$'` empty).
+`__float128` is still the CARRIER for ulp arithmetic, widenings and CSV
+formatting; its arithmetic comes from libgcc and its elementary functions from
+glibc's `*f128`, neither of which is libquadmath. MPFR/MPC are therefore a HARD
+requirement of `tests/CMakeLists.txt` — a missing `-dev` package is a configure
+`FATAL_ERROR`, not four silently unregistered targets. `--oracle=mpfr` survives
+as an accepted no-op (CI's monotone gate passes it to the parent binary, which
+may predate the switch); `--oracle=quadmath` is REFUSED with an explanation.
+`scripts/gen_corpus.cpp` still scores against libquadmath and its numbers are
+not comparable to the sweep's point for point.
 
 ## Executables
 
@@ -176,19 +188,30 @@ Read **docs/CORRECTNESS.md** first. The short version:
   produces uncompressed bytes under a `.gz` name. Write plain, then `gzip -9 -c`.
 - `ctest --test-dir` on a MISSING directory exits 0. Confirm the dir exists and
   that a nonzero test count ran, or the run proved nothing.
-- The oracle fingerprint is a property of the libquadmath loaded at **run**
-  time, not of the compiler that built the binary — `sweep_accuracy` links
-  `-lquadmath` with no RPATH, so it resolves through `LD_LIBRARY_PATH`, which is
-  what the module sets. Every `/soft` gcc from 9.5.0 to 13.3.0 supplies the
-  libquadmath of record and yields `578322f998a329c8`; the system
-  `/usr/lib64/libquadmath.so.0` and the ubuntu-24.04 CI runner both yield
+- **The run-time-library fingerprint trap is RETIRED, and the retirement is
+  measured.** It used to be the first thing to suspect: the oracle fingerprint
+  was a property of the libquadmath loaded at **run** time, not of the compiler
+  that built the binary, because `sweep_accuracy` linked `-lquadmath` with no
+  RPATH and resolved it through `LD_LIBRARY_PATH` — which is what the module
+  sets. Every `/soft` gcc from 9.5.0 to 13.3.0 supplied the libquadmath of
+  record and yielded `578322f998a329c8`; the system
+  `/usr/lib64/libquadmath.so.0` and the ubuntu-24.04 CI runner both yielded
   `54901e8104607a77`, differing in six of the 168 fingerprint fixtures (all
-  complex: `casinh` k=1,5, `csqrt` k=5, `casin`/`cacos`/`cacosh` k=7). So a
-  correctly BUILT binary still mis-scores if it is RUN without the module: 390
-  rows read as spurious "increased", 0 decreased, and the monotone gate exits 0
-  because it declines to interpret a mismatched fingerprint. Load `gcc/13.3.0`
-  in EVERY shell, before cmake **and** before ctest. A fingerprint mismatch is
-  this, until proven otherwise — it is not evidence that the baseline is stale.
+  complex: `casinh` k=1,5, `csqrt` k=5, `casin`/`cacos`/`cacosh` k=7), so a
+  correctly BUILT binary still mis-scored if it was RUN without the module: 390
+  rows as spurious "increased". That cost two sessions.
+  It cannot happen now. The binary links no libquadmath at all, and MPFR/MPC are
+  correctly rounded, so the answer does not depend on which build of them is
+  found. MEASURED, not inferred: the same binary run under `env -i` with no
+  module and no `LD_LIBRARY_PATH` — resolving the SYSTEM `/usr/lib64`
+  libstdc++ and `/lib64` libgcc_s — produced `44f18a4a959f6c29` and a sweep
+  **byte-identical** in all 436,080 rows to the module-loaded run.
+  Still load `gcc/13.3.0` before cmake: this says nothing about building, only
+  about running, and the rest of the suite is not `sweep_accuracy`. And the
+  measurement is one host with one `/usr/lib64` MPFR; a different MPFR *should*
+  agree, because correct rounding leaves nothing to disagree about, but nobody
+  has run two. A fingerprint mismatch is no longer explained by the environment
+  — treat it as a real change in the reference.
 - The sweep is not bit-reproducible: ~23 rows shift between identical runs (as
   measured, on the 1,652-point real grid = 428,592 rows; `5f2fc90` widened it and
   the sweep is 436,080 rows today). That is what the monotone gate's noise floor

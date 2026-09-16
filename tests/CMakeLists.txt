@@ -431,21 +431,38 @@ endforeach()
 #   sweep_monotone_gate   no point worse than the committed baseline, past a
 #                         stated 0.1-digit noise floor.
 #
-# Both run the same binary over the same 428,592 points in about eight seconds,
-# so `ctest` alone is the whole correctness answer.
+# Both run the same binary over the same 436,080 points in about 35 seconds, so
+# `ctest` alone is the whole correctness answer. (It was eight seconds and
+# 428,592 points; `5f2fc90` widened the grid, and the oracle moving from
+# libquadmath to correctly-rounded MPFR/MPC at 400 bits accounts for the rest.
+# The TIMEOUTs at the bottom of this file were set against the old number and
+# still have room, but they are no longer 75x headroom -- check them before
+# adding work per point.)
 #
-# MPFR is an OPTIONAL measurement dependency, not a library one. The headers
-# in include/xp/ never use it; only the sweep's alternate oracle and the trig
-# reduction table test do. CI runners do not carry libmpfr-dev, and making it
-# mandatory broke every build on a machine without it (see sweep_accuracy.cpp
-# :250). Find it, use it when present, and degrade honestly when absent.
+# MPFR IS REQUIRED. It used to be optional -- "a measurement dependency, not a
+# library one", found when present and degraded around when absent -- because
+# the sweep's oracle was libquadmath and MPFR was an ALTERNATE reachable with
+# --oracle=mpfr. There is no alternate any more: sweep_accuracy scores every
+# point against MPFR/MPC and refuses --oracle=quadmath, so a build without MPFR
+# is not a build with less coverage, it is a build with no oracle. The source
+# says the same thing with an #error; this says it at configure time, where the
+# operator can still act on it, instead of after a full compile.
 #
-# MPC (complex MPFR) is found in the SAME conjunction rather than behind its own
-# XPMATH_HAVE_MPC. A build where --oracle=mpfr covers the real ops but leaves the
-# complex ops on libquadmath is exactly the split this arm exists to remove; a
-# second guard would make that half-state reachable by configuration and would
-# double the build configurations the CI target-count assertion has to cover.
-# One flag, one meaning: --oracle=mpfr is whole-library or it is unavailable.
+# This is still not a dependency of the LIBRARY. include/xp/ uses neither MPFR
+# nor libquadmath and compiles anywhere; what needs it is the apparatus that
+# judges the library.
+#
+# The optional-MPFR posture also cost something measurable while it lasted: four
+# ctest targets sat behind if(XPMATH_MPFR_FOUND), so a runner missing one -dev
+# package silently dropped them and stayed green. That is why the CI lanes
+# assert an exact target count. With MPFR required there is one configuration
+# instead of two and the count cannot drift for this reason.
+#
+# MPC (complex MPFR) is required in the SAME conjunction rather than behind its
+# own XPMATH_HAVE_MPC. A build where the real ops score against MPFR but the
+# complex ops fall back somewhere else is exactly the split this arc removed; a
+# second guard would make that half-state reachable by configuration.
+# One flag, one meaning: the oracle is whole-library or the build stops.
 find_path(MPFR_INCLUDE_DIR mpfr.h)
 find_library(MPFR_LIBRARY NAMES mpfr)
 find_library(GMP_LIBRARY NAMES gmp)
@@ -453,12 +470,10 @@ find_path(MPC_INCLUDE_DIR mpc.h)
 find_library(MPC_LIBRARY NAMES mpc)
 if(MPFR_INCLUDE_DIR AND MPFR_LIBRARY AND GMP_LIBRARY
    AND MPC_INCLUDE_DIR AND MPC_LIBRARY)
-  set(XPMATH_MPFR_FOUND TRUE)
   message(STATUS "MPFR found: ${MPFR_LIBRARY}")
-  message(STATUS "MPC  found: ${MPC_LIBRARY} -- the --oracle=mpfr arm is available "
-                 "for BOTH real and complex ops")
+  message(STATUS "MPC  found: ${MPC_LIBRARY} -- the oracle is available for BOTH "
+                 "real and complex ops")
 else()
-  set(XPMATH_MPFR_FOUND FALSE)
   # Name WHICH one is missing. The failure mode this replaces is a bare "NOT
   # found" followed ten minutes later by a link error naming a library the
   # operator was never told to install.
@@ -472,29 +487,37 @@ else()
   if(NOT MPC_INCLUDE_DIR OR NOT MPC_LIBRARY)
     string(APPEND _xp_missing " libmpc-dev")
   endif()
-  message(STATUS "MPFR/MPC NOT found (missing:${_xp_missing}) -- building without "
-                 "the --oracle=mpfr arm; trig_reduction_test and oracle_conv_test "
-                 "will be skipped")
-  unset(_xp_missing)
+  message(FATAL_ERROR
+          "MPFR/MPC NOT found (missing:${_xp_missing}).\n"
+          "  These are REQUIRED: sweep_accuracy scores every point against "
+          "MPFR at 400 bits\n"
+          "  and MPC, and both ctest gates run that binary. There is no "
+          "libquadmath fallback\n"
+          "  to degrade to -- it was removed because it mis-reduces trig above "
+          "~1e40 and its\n"
+          "  complex divide is round-then-cancel, so it scored correct results "
+          "as regressions.\n"
+          "  Install the packages above and reconfigure.")
 endif()
 
-# sweep_accuracy is a host-only tool: it needs libquadmath for the oracle and it
-# has no Kokkos in it. It is built here rather than in scripts/ so that a stale
-# hand-compiled binary in the source tree can never be what the gate runs.
+# sweep_accuracy is a host-only tool: it has no Kokkos in it. It is built here
+# rather than in scripts/ so that a stale hand-compiled binary in the source
+# tree can never be what the gate runs.
 add_executable(sweep_accuracy ${CMAKE_SOURCE_DIR}/scripts/sweep_accuracy.cpp)
 target_include_directories(sweep_accuracy PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_compile_features(sweep_accuracy PRIVATE cxx_std_17)
 target_compile_options(sweep_accuracy PRIVATE -fext-numeric-literals)
-# MPFR is the alternate oracle (--oracle=mpfr): libquadmath mis-reduces
-# trig above ~1e40, so large-|x| rows need a reference that does not.
-target_link_libraries(sweep_accuracy PRIVATE quadmath)
-if(XPMATH_MPFR_FOUND)
-  target_include_directories(sweep_accuracy PRIVATE ${MPFR_INCLUDE_DIR} ${MPC_INCLUDE_DIR})
-  # MPC before MPFR before GMP: mpc depends on mpfr depends on gmp, and static
-  # link lines are order-sensitive.
-  target_link_libraries(sweep_accuracy PRIVATE ${MPC_LIBRARY} ${MPFR_LIBRARY} ${GMP_LIBRARY})
-  target_compile_definitions(sweep_accuracy PRIVATE XPMATH_HAVE_MPFR=1)
-endif()
+# NO quadmath. __float128 is still the sweep's carrier -- ulp arithmetic, the
+# to_q() widenings, the CSV formatting -- but a __float128 is a COMPILER type
+# whose arithmetic lives in libgcc, and the `*q` elementary functions that DID
+# come from libquadmath are gone. Adding `quadmath` back here would relink a
+# library nothing calls and break the two acceptance checks in the header of
+# scripts/sweep_accuracy.cpp.
+target_include_directories(sweep_accuracy PRIVATE ${MPFR_INCLUDE_DIR} ${MPC_INCLUDE_DIR})
+# MPC before MPFR before GMP: mpc depends on mpfr depends on gmp, and static
+# link lines are order-sensitive.
+target_link_libraries(sweep_accuracy PRIVATE ${MPC_LIBRARY} ${MPFR_LIBRARY} ${GMP_LIBRARY})
+target_compile_definitions(sweep_accuracy PRIVATE XPMATH_HAVE_MPFR=1)
 
 add_test(NAME sweep_absolute_gate
          COMMAND sweep_accuracy --ulp
@@ -575,43 +598,31 @@ add_test(NAME exp_reduction_selftest
 # its own 4000-bit ground truth rather than citing a number it cannot check --
 # see the header comment for why that distinction matters here. No accuracy
 # verdict on sin/cos/tan: this scores the reduction, which the sweep cannot see.
-# MPFR-only: this test recomputes the reduction tables at high precision, so
-# there is nothing it can check without MPFR. Guarded at the TARGET level --
-# linking ${MPFR_LIBRARY} when it is NOTFOUND fails CMake's generate step, which
-# is how a missing libmpfr-dev took down the whole configure on CI.
-if(XPMATH_MPFR_FOUND)
-  add_executable(trig_reduction_test trig_reduction_test.cpp)
-  target_include_directories(trig_reduction_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
-  target_include_directories(trig_reduction_test PRIVATE ${MPFR_INCLUDE_DIR})
-  target_link_libraries(trig_reduction_test PRIVATE ${MPFR_LIBRARY} ${GMP_LIBRARY})
-  add_test(NAME trig_reduction_test COMMAND trig_reduction_test)
-endif()
+# This test recomputes the reduction tables at high precision, so there is
+# nothing it can check without MPFR. It used to be guarded at the TARGET level;
+# MPFR is required above now, so the guard is gone with it.
+add_executable(trig_reduction_test trig_reduction_test.cpp)
+target_include_directories(trig_reduction_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(trig_reduction_test PRIVATE ${MPFR_INCLUDE_DIR})
+target_link_libraries(trig_reduction_test PRIVATE ${MPFR_LIBRARY} ${GMP_LIBRARY})
+add_test(NAME trig_reduction_test COMMAND trig_reduction_test)
 
 # ... and the self-test that proves it can fail: four poisons, plus a check
 # that the committed table is byte-identical to what the generator emits.
-if(XPMATH_MPFR_FOUND)
 add_test(NAME trig_reduction_selftest
          COMMAND ${CMAKE_SOURCE_DIR}/validation/trig_reduction_selftest.sh
                  ${CMAKE_CURRENT_BINARY_DIR})
-endif()
 
-# The MPFR oracle's __float128 <-> mpfr conversions must be EXACT, not merely
+# The oracle's __float128 <-> mpfr conversions must be EXACT, not merely
 # round-trippable. The sweep has no oracle-error term, so a reference that is
 # wrong reads as a library that is wrong -- and the old conversion was wrong by
-# 1.28e11 ulps on precisely the large-|x| trig rows --oracle=mpfr exists to
-# measure. Runs the check, then poisons it four ways and requires each to fail.
-# MPFR-only, like the tests below it. Without MPFR the binary returns 77
-# ("nothing to check"), and ctest reports that as a FAILURE -- so register
-# the test only where it can actually check something, rather than leaving a
-# red mark that means "inapplicable".
-if(XPMATH_MPFR_FOUND)
-  add_test(NAME oracle_conv_test COMMAND sweep_accuracy --oracle-selftest)
-endif()
-if(XPMATH_MPFR_FOUND)
+# 1.28e11 ulps on precisely the large-|x| trig rows this oracle exists to
+# measure. Runs the check, then poisons it eight ways and requires each to fail.
+# No if(XPMATH_MPFR_FOUND): these now score the only oracle there is.
+add_test(NAME oracle_conv_test COMMAND sweep_accuracy --oracle-selftest)
 add_test(NAME oracle_conv_selftest
          COMMAND ${CMAKE_SOURCE_DIR}/validation/oracle_conv_selftest.sh
                  ${CMAKE_CURRENT_BINARY_DIR})
-endif()
 
 # The generated domain document must be what the generator currently emits from
 # the committed baseline. Pure Python, well under a second, no build products.
@@ -658,9 +669,5 @@ set_tests_properties(sweep_absolute_gate sweep_monotone_gate
                      PROPERTIES TIMEOUT 600)
 set_tests_properties(sweep_absolute_gate_selftest sweep_monotone_gate_selftest
                      PROPERTIES TIMEOUT 1200)
-# Five compiles of sweep_accuracy.cpp. Guarded with the test itself: setting a
-# property on an unregistered test is a hard CMake error, which is how the
-# no-MPFR configure died at tests/CMakeLists.txt:536.
-if(XPMATH_MPFR_FOUND)
-  set_tests_properties(oracle_conv_selftest PROPERTIES TIMEOUT 600)
-endif()
+# Nine compiles of sweep_accuracy.cpp, four at a time.
+set_tests_properties(oracle_conv_selftest PROPERTIES TIMEOUT 600)
