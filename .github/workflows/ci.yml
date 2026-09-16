@@ -494,6 +494,14 @@ jobs:
       - name: Build
         run: cmake --build build -j"$(nproc)"
 
+      # The regex is anchored and forbids underscores deliberately. libquadmath
+      # exports exactly 92 symbols ending in `q` and every one of them is bare
+      # lowercase (`expq`, `cpowq`); a looser `[a-z0-9_]+q` also matches GMP's
+      # `__gmpz_fdiv_q`, which MPFR pulls into the oracle binaries and which has
+      # nothing to do with libquadmath. MEASURED on this build: the anchored form
+      # matches 92/92 libquadmath exports and 0 symbols from gmp, mpfr, mpc,
+      # libm, libstdc++ or libc.
+      #
       # `ldd` is the WRONG check and would look like a failure: a Kokkos built
       # with the LIBQUADMATH TPL puts -lquadmath on every Kokkos-linked target's
       # link line and leaves a DT_NEEDED with not one symbol bound. Only the
@@ -507,9 +515,9 @@ jobs:
           echo "scanned $(echo "$bins" | wc -l) binaries"
           fail=0
           for b in $bins; do
-            if nm -D --undefined-only "$b" 2>/dev/null | grep -qE ' (c?[a-z0-9_]+q)$'; then
+            if nm -D --undefined-only "$b" 2>/dev/null | grep -qE ' (c?[a-z][a-z0-9]*q)$'; then
               echo "::error::$b has undefined libquadmath symbols"
-              nm -D --undefined-only "$b" | grep -E ' (c?[a-z0-9_]+q)$'
+              nm -D --undefined-only "$b" | grep -E ' (c?[a-z][a-z0-9]*q)$'
               fail=1
             fi
           done
