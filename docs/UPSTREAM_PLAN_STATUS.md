@@ -632,3 +632,82 @@ reached the install tree.
 3. `actionlint` in a lint lane, once CI can run it (it is not installable here).
 4. `qf_complex` at 230 s dominates `device-nvcc`; if that becomes painful,
    `ccache` or a coarser op selection would cut it.
+
+---
+
+## S8 — Cross-vendor device matrix — **PARTIAL, and this is not a pass**
+
+**Opened 2026-09-13, still open. Last commit `c14a72e`.** S8's own gate is an
+*honest matrix*, so the honest statement comes first: **one of four targets has
+been brought up, and not through Kokkos.** What was delivered instead is
+something the plan did not anticipate — two defects in AMD's compiler backend,
+both mitigated in-tree and guarded, one of them a silent-wrong-answer bug.
+
+### The matrix
+
+| target | headers compile for device | oracle-free tests | oracle tests | demos |
+|---|---|---|---|---|
+| **A100** (CUDA, `AMPERE80`) | yes — S1, and the 8-way `device-nvcc` CI matrix | yes, **but pre-restructure** (S1: 5 tests that are genuine device evidence, DD/FF only) | no — `__float128` cannot share a TU with device code | no — same |
+| **MI250X** (HIP, `gfx90a`) | **yes** — all 8 headers, real `hipcc` on ROCm 7.0.2 | **no** — no gfx90a Kokkos install exists anywhere; nothing has ever been built through Kokkos for this target | no | no |
+| **B200** (CUDA, `BLACKWELL100`) | not attempted | not attempted | not attempted | not attempted |
+| **Intel PVC** (SYCL) | not attempted | not attempted | not attempted | not attempted |
+
+Two cells deserve their caveat spelled out rather than inferred from the table:
+
+- **A100 has not been re-run since the restructure.** Deliverable 3 — "CUDA
+  re-run compared against the S1 baseline, restructure must not have moved
+  device results" — is **unmet**. The S1 numbers predate S2/S3/S5/S10. The
+  `validation/a100/` artifacts were also pruned; the S1 STATUS block is the
+  record.
+- **MI250X was brought up with `hipcc` directly, not Kokkos.** Every MI250
+  result here is a direct header compile or a standalone `.hip` binary. That
+  makes the "oracle-free tests" cell structurally unreachable today, not merely
+  unrun: the ctest suite requires `find_package(Kokkos)`, and no gfx90a Kokkos
+  has been built.
+
+### What MI250X actually produced: two upstream defects
+
+Both are registered in [`TOOLCHAIN_DEFECTS.md`](TOOLCHAIN_DEFECTS.md) as TD-1
+and TD-2, with drop-in issue text already written. **Neither is filed.**
+
+| | TD-1 branch relaxation | TD-2 recursive device stack |
+|---|---|---|
+| mechanism | `BranchRelaxation` scavenges the live `s[30:31]` return pair in an oversized callee | a device self-call sets `uses_dynamic_stack` and provisions nothing |
+| symptom | infinite loop (124) or wild store (134) | `hipErrorIllegalAddress` on FF/TF, **silently wrong values** on DD/QF |
+| mitigation | `XPMATH_NOINLINE_FUNCTION` (`48df439`) | de-recurse every self-call (`33e4767`) |
+| guard | lint tiers 1–3 | lint tier 4 |
+
+They pull against each other: the `noinline` that fixes TD-1 turns each link of
+the chain into a real frame and made TD-2 worse. That interaction is the single
+most important thing to carry forward.
+
+### Runtime verification of the TD-2 fix — `c14a72e`
+
+The fix had been verified only in emitted assembly and on the host. Job 1000936
+on `amdgpu04`: **17/17 arms correct at the default 1024 B stack, 0 HIP errors** —
+9 real arms that carried a self-call plus the 8 complex arms that reach them.
+
+One methodological result worth carrying into every future device test: the
+verdict is **ulps, not bit-exactness**. The first version demanded bit equality
+with the host and "failed" 4 of 9; scored against a binary128 oracle, two of
+those were 0.04 ulp and two had **the device more accurate than the host**.
+Host and device do not share a scalar math library. No device test in this repo
+can assert bit-equality with the host for any op touching a transcendental.
+
+### Deliverables, scored
+
+| # | deliverable | state |
+|---|---|---|
+| 1 | per-target build recipes | **partial** — `validation/mi250/run_mi250.sh` exists and works; `scripts/build_with_kokkos.sh` is still hardcoded to sm_100 and its HIP path has never executed |
+| 2 | per-target artifacts + matrix | **partial** — `validation/mi250/` committed with logs; no `validation/a100/` (pruned); matrix above is 1 of 4 |
+| 3 | CUDA re-run vs the S1 baseline | **not started** |
+| 4 | findings reported, not fixed | **exceeded, deliberately** — Rule 4 was broken on purpose for TD-1/TD-2, because the alternative was leaving a silent-wrong-answer bug live in four backends. Both mitigations are in `include/xp/`, both guarded, both recorded. |
+
+### Known gaps
+
+- The complex arms' **pre-fix** behaviour was never observed and now cannot be
+  without reverting; only post-fix is measured.
+- `hipcc`/`icpx` and the quadmath oracle: the plan assumes it "will likely be
+  unavailable" on clang-based toolchains. **Still unmeasured.** Clang supports
+  `__float128` on x86_64 host code, so this may work; nobody has tried.
+- A gfx90a Kokkos build is the largest single unknown remaining in S8.
