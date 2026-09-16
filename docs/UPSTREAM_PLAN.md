@@ -455,6 +455,14 @@ existing cross-reference and STATUS entry.
 
 ## S6 — Standalone packaging, example, oracle-conditional demos
 
+> **SUPERSEDED.** This section is no longer the plan of record and must not
+> be executed as written. The packaging half has already landed; the
+> device-TU split and the standalone example were re-planned as part of the
+> core arc, and the record of that work is
+> [`docs/CORE_PLAN_STATUS.md`](CORE_PLAN_STATUS.md), which carries one STATUS
+> block per completed section. The text below is retained unchanged for the
+> cross-references and STATUS entries that point at it.
+
 **Model: Sonnet.** Depends on: S5 + S10 (TF must exist before the
 backend set is packaged and tagged). Needs the x86_64 Linux host for the
 gates.
