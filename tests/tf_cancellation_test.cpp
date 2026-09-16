@@ -34,9 +34,10 @@
 // 19.0, leaving ~3 digits of headroom for accumulated round-off in composed /
 // 10⁶-term kernels.
 //
-// This whole file is #ifdef KOKKOS_EP_HAVE_QUADMATH guarded (the oracles are
-// __float128); without quadmath, main() returns KOKKOS_EP_SKIP (77) → CTest
-// "Skipped".
+// This whole file used to be #ifdef KOKKOS_EP_HAVE_QUADMATH guarded and to
+// return KOKKOS_EP_SKIP (77) → CTest "Skipped" without it. The oracles are
+// __float128, which is a compiler type, so there was never anything to gate on;
+// it runs unconditionally now.
 
 #include "test_utils.hpp"
 #include <xp/tf_math.hpp>
@@ -51,7 +52,6 @@ using namespace kokkos_ep;
 
 namespace tf = xp;
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
 
 // ----------------------------------------------------------------------------
 // TF <-> oracle and precision constants
@@ -69,7 +69,7 @@ static double tf_digits(const tf::TripleFloat& got, const float128& truth) {
   if (diff == 0.0Q) return kMaxDig;
   float128 rel = diff / truth;
   if (rel < 0.0Q) rel = -rel;
-  double d = -log10q(rel);
+  double d = -(double)q_log10(rel);
   if (d < 0.0) return 0.0;
   if (d > kMaxDig) return kMaxDig;
   return d;
@@ -104,7 +104,7 @@ static void test_K1() {
 
     // Oracle: 1/(x + sqrt(x²+1))  [the stable form, exact]
     float128 x_q = (float128)x;
-    float128 truth = 1.0Q / (sqrtq(x_q * x_q + 1.0Q) + x_q);
+    float128 truth = 1.0Q / (q_sqrt(x_q * x_q + 1.0Q) + x_q);
 
     double d_naive = tf_digits(naive, truth);
     double d_stable = tf_digits(stable, truth);
@@ -145,15 +145,15 @@ static void test_K2() {
     sum_q += 1.0Q / (k_q * k_q);
   }
 
-  // Arithmetic-precision comparison (TF vs quadmath partial)
+  // Arithmetic-precision comparison (TF vs binary128 partial)
   double d_arith = tf_digits(sum_tf, sum_q);
-  std::printf("  TF vs quadmath partial (N=%d): %.2f digits\n", N, d_arith);
+  std::printf("  TF vs binary128 partial (N=%d): %.2f digits\n", N, d_arith);
 
-  // Truncation check (quadmath partial vs π²/6)
+  // Truncation check (binary128 partial vs π²/6)
   float128 pi_q = 3.14159265358979323846264338327950288Q;
   float128 limit = pi_q * pi_q / 6.0Q;
-  float128 trunc_err = fabsq(sum_q - limit);
-  double trunc_dig = (trunc_err > 0.0Q) ? -log10q(trunc_err / limit) : kMaxDig;
+  float128 trunc_err = q_abs(sum_q - limit);
+  double trunc_dig = (trunc_err > 0.0Q) ? -(double)q_log10(trunc_err / limit) : kMaxDig;
   std::printf("  Quadmath partial vs π²/6: %.2f digits (truncation ~1/N)\n", trunc_dig);
 
   bool ok = d_arith >= kTol;
@@ -220,12 +220,12 @@ static void test_K4() {
 
   // Arithmetic-precision comparison
   double d_arith = tf_digits(sum_tf, sum_q);
-  std::printf("  TF vs quadmath partial (N=%d): %.2f digits\n", N, d_arith);
+  std::printf("  TF vs binary128 partial (N=%d): %.2f digits\n", N, d_arith);
 
-  // Truncation check (quadmath partial vs ln(2))
+  // Truncation check (binary128 partial vs ln(2))
   float128 ln2 = 0.69314718055994530941723212145817657Q;
-  float128 trunc_err = fabsq(sum_q - ln2);
-  double trunc_dig = (trunc_err > 0.0Q) ? -log10q(trunc_err / ln2) : kMaxDig;
+  float128 trunc_err = q_abs(sum_q - ln2);
+  double trunc_dig = (trunc_err > 0.0Q) ? -(double)q_log10(trunc_err / ln2) : kMaxDig;
   std::printf("  Quadmath partial vs ln(2): %.2f digits (truncation ~1/N)\n", trunc_dig);
 
   bool ok = d_arith >= kTol;
@@ -254,13 +254,3 @@ int main(int argc, char** argv) {
   return rc;
 }
 
-#else // !KOKKOS_EP_HAVE_QUADMATH
-
-int main(int argc, char** argv) {
-  Kokkos::initialize(argc, argv);
-  std::printf("=== tf_cancellation_test: SKIPPED (no __float128 oracle) ===\n");
-  Kokkos::finalize();
-  return KOKKOS_EP_SKIP;
-}
-
-#endif // KOKKOS_EP_HAVE_QUADMATH

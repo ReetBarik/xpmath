@@ -38,7 +38,10 @@ fail=0
 build_and_run() {   # <tag> <extra-defines...>
   local tag="$1"; shift
   local exe="${work}/ert_${tag}"
-  if ! "${CXX}" -O2 -std=c++17 -I "${inc}" "$@" "${src}" -o "${exe}" -lquadmath \
+  # -lmpfr -lgmp, not -lquadmath: ln2 is a REFERENCE and comes from MPFR (see the
+  # source's "WHY THIS LINKS MPFR AND NOT LIBQUADMATH" block). Kept in step with
+  # the target's link line in tests/CMakeLists.txt.
+  if ! "${CXX}" -O2 -std=c++17 -I "${inc}" "$@" "${src}" -o "${exe}" -lmpfr -lgmp \
        > "${work}/${tag}.build.log" 2>&1; then
     echo "  ${tag}: COMPILE FAILED (see ${work}/${tag}.build.log)"
     return 2

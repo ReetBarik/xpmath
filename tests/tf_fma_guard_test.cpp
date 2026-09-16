@@ -29,7 +29,7 @@
 // This is the TF analogue of qf_fma_guard_test.cpp (T3.5), ff_fma_guard_test.cpp
 // (T2.5), and dd_fma_guard_test.cpp (T1.5). Every design decision T3.5 locked in
 // carries over — single-source/two-targets, a contraction-immune FP64 oracle (no
-// quadmath), a twoSum CONTROL, host + device passes, OFF gates / ON reports with
+// __float128), a twoSum CONTROL, host + device passes, OFF gates / ON reports with
 // a committed baseline.
 //
 // TF DIVERGENCE FROM FF: DIRECT CALL TO SHIPPED PRIMITIVES (same as QF)

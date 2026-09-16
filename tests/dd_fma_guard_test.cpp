@@ -97,7 +97,6 @@ static const char* kPostureName = "OFF (-ffp-contract=off / --fmad=false)";
 static const char* kPostureName = "ON  (-ffp-contract=fast / --fmad=true)";
 #endif
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
 
 // ----------------------------------------------------------------------------
 // EFT primitives, COPIED VERBATIM from tests/dd_eft_test.cpp (T1.1).
@@ -347,14 +346,9 @@ static void check_baseline(long observed) {
 }
 #endif
 
-#endif  // KOKKOS_EP_HAVE_QUADMATH
 
 // ============================================================================
 int main(int argc, char** argv) {
-#ifndef KOKKOS_EP_HAVE_QUADMATH
-    std::printf("dd_fma_guard_test: SKIP — Kokkos built without LIBQUADMATH; no __float128 oracle.\n");
-    return KOKKOS_EP_SKIP;
-#else
     Kokkos::initialize(argc, argv);
     int rc = 0;
     {
@@ -428,5 +422,4 @@ int main(int argc, char** argv) {
     }
     Kokkos::finalize();
     return rc;
-#endif
 }

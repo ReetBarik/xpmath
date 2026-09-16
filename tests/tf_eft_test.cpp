@@ -11,7 +11,7 @@
 // ORACLE: FP64 (provable for twoSum/twoProd/twoSqr: 25-bit sum / 48-bit product fit
 // in FP64's 53-bit mantissa). renorm value-preservation uses ordered decomposition
 // of 53-bit doubles so output sum == input exactly in FP64, plus a __float128 wide-
-// spread check under KOKKOS_EP_HAVE_QUADMATH.
+// spread check (formerly gated on KOKKOS_EP_HAVE_QUADMATH; that gate is gone).
 //
 // TEST STRUCTURE
 //   Test A — tf_two_sum + tf_quick_two_sum bit-exactness (FP64 oracle)

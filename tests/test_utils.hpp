@@ -21,26 +21,31 @@
 //   share a base class they don't have; #ifdef per file would fork the source
 //   per backend, which is exactly what this harness exists to avoid.
 //
-// Oracle: the host __float128 oracle is provided by Kokkos's quadmath overloads
-//   (impl/Kokkos_QuadPrecisionMath.hpp), available only when Kokkos was built
-//   with Kokkos_ENABLE_LIBQUADMATH=ON. The build system (tests/CMakeLists.txt)
-//   defines KOKKOS_EP_HAVE_QUADMATH iff LIBQUADMATH is in Kokkos_TPLS. When it
-//   is absent, oracle-dependent code is #ifdef'd out and a test's main() should
-//   return KOKKOS_EP_SKIP (77), which CTest reports as "Skipped" (see
-//   SKIP_RETURN_CODE in tests/CMakeLists.txt). Graceful-degradation choice:
-//   SKIP, not fail-loud — a legitimately quadmath-less Kokkos config should not
-//   turn the whole suite red; a visible "Skipped" is the honest signal. Same
-//   posture T0.0/T0.3 used for the demos.
+// Oracle: THERE IS NO LONGER A LIBQUADMATH DEPENDENCE, AND SO NO SKIP.
+//   This header used to reach the __float128 oracle through Kokkos's quadmath
+//   overloads (impl/Kokkos_QuadPrecisionMath.hpp), which exist only when Kokkos
+//   was built with Kokkos_ENABLE_LIBQUADMATH=ON. tests/CMakeLists.txt defined
+//   KOKKOS_EP_HAVE_QUADMATH iff LIBQUADMATH was in Kokkos_TPLS; without it every
+//   oracle-dependent region was #ifdef'd out and the test's main() returned
+//   KOKKOS_EP_SKIP (77) -> CTest "Skipped".
+//
+//   That was graceful degradation while the oracle genuinely needed libquadmath.
+//   It stopped being graceful the moment it didn't: a skip is indistinguishable
+//   from a pass in a summary line, so a machine whose Kokkos happens to lack the
+//   TPL reported a green suite that had checked nothing. The MI250 install is
+//   exactly such a machine.
+//
+//   __float128 SURVIVES AS THE CARRIER — it is a COMPILER type, and its
+//   arithmetic comes from libgcc (__addtf3 and friends), not from libquadmath.
+//   What libquadmath supplied was only the `*q` spellings of the elementary
+//   functions, and every one this header needed is either an exact bit operation
+//   or an IEEE-mandated correctly-rounded one, so all of them move to glibc's
+//   `*f128` entry points via __builtin_. See the q_* block below, and
+//   scripts/sweep_accuracy.cpp's "WHAT <quadmath.h> USED TO SUPPLY" section for
+//   the same taxonomy applied to the sweep.
 // ============================================================================
 
 #include <Kokkos_Core.hpp>
-
-#ifdef KOKKOS_EP_HAVE_QUADMATH
-// Pulls in <quadmath.h> and the Kokkos:: __float128 math overloads used as the
-// oracle. Host-only (inline, not KOKKOS_INLINE_FUNCTION) — perfect for oracle
-// computation, which happens on host after results are copied back.
-#  include <impl/Kokkos_QuadPrecisionMath.hpp>
-#endif
 
 #include <dd_math.hpp>
 #include <ff_math.hpp>
@@ -61,12 +66,58 @@
 
 namespace kokkos_ep {
 
-// Exit code CTest maps to "Skipped" (see SKIP_RETURN_CODE in CMakeLists.txt).
-constexpr int KOKKOS_EP_SKIP = 77;
-
-#ifdef KOKKOS_EP_HAVE_QUADMATH
 using float128 = __float128;
-#endif
+
+// ---------------------------------------------------------------------------
+// WHAT THE Kokkos:: __float128 OVERLOADS USED TO SUPPLY, AND WHERE IT COMES
+// FROM NOW
+// ---------------------------------------------------------------------------
+// Every call below is either a BIT operation on binary128 (sign, magnitude, the
+// classification predicates) or an operation IEEE 754 requires to be correctly
+// rounded. None of them is an approximation, so none of them is a second
+// opinion about what the right answer is: there is exactly one, and the
+// compiler knows it. That is the same test scripts/sweep_accuracy.cpp applies,
+// and it is why these can move to __builtin_ without a measurement while a
+// genuine transcendental REFERENCE (exp_reduction_test's ln2) had to go to MPFR
+// instead.
+//
+// q_abs / q_isnan / q_isinf compile to inline bit arithmetic with no call at
+// all. q_sqrt and q_log10 resolve to glibc's binary128 entry points in libm.
+//
+// NAMED q_* AND NOT abs/isnan. Keeping the Kokkos:: spellings would have made
+// the diff smaller and every call site misleading: a reader who sees
+// Kokkos::abs(float128) reasonably concludes Kokkos_QuadPrecisionMath.hpp is
+// included and therefore that LIBQUADMATH is in the link line. The rename is
+// the point. (Mirrors the q_* block in scripts/sweep_accuracy.cpp, which made
+// the same move for the same reason.)
+inline float128 q_abs  (float128 v)   { return __builtin_fabsq(v); }
+inline bool     q_isnan(float128 v)   { return __builtin_isnan(v) != 0; }
+inline bool     q_isinf(float128 v)   { return __builtin_isinf(v) != 0; }
+
+// IEEE 754 REQUIRES sqrt to be correctly rounded, so glibc's sqrtf128 and a
+// 400-bit MPFR sqrt rounded to binary128 are the same number by definition.
+// That matters here because this one IS used as a reference (the K1 kernels'
+// truth value), unlike the rest of this block.
+//
+// MEASURED, AND IT IS NOT A WASH: over 50,000 random positive binary128 inputs
+// spanning 2^-300..2^300, arbitrated against mpfr_sqrt at 400 bits rounded once
+// to 113, __builtin_sqrtf128 was bit-exact in 50,000 of 50,000 -- and sqrtq,
+// the call this replaced, was WRONG IN 12,504 of them (25%, all by one ulp of
+// binary128). libquadmath's sqrtq is not correctly rounded. So this swap did
+// not downgrade the reference to keep the build simple; it removed a 1-ulp
+// error that the old reference had been injecting into the K1 truth value.
+inline float128 q_sqrt (float128 v)   { return __builtin_sqrtf128(v); }
+
+// log10 of a magnitude, used only to COUNT DECIMAL DIGITS of agreement. Every
+// caller casts straight to double, so the binary128 tail was never observable
+// and this is not a reference. Measured anyway, on the same 200,000-input
+// sweep: __builtin_log10f128 and log10q were BIT-IDENTICAL in every one, so
+// the digit counts this feeds are unchanged even before the cast.
+inline float128 q_log10(float128 v)   { return __builtin_log10f128(v); }
+
+// Exact: scale by a power of two. Used by ulp_error to apply 2^p, and to build
+// the exactly-representable 2^-k bounds in qf_eft_test.
+inline float128 q_ldexp(float128 v, int e) { return __builtin_ldexpf128(v, e); }
 
 // ============================================================================
 // Backend tags and traits
@@ -92,7 +143,7 @@ struct BackendTraits<DD> {
   static constexpr double u_squared = 1.0 / 9007199254740992.0    // 2^-53
                                     / 9007199254740992.0;         // * 2^-53 = 2^-106
 
-  // Oracle (quadmath) has ~34 digits; DD targets ~31.9. Cap digit counts at 31
+  // The __float128 oracle has ~34 digits; DD targets ~31.9. Cap digit counts at 31
   // to avoid reporting oracle noise as accuracy. Matches kMaxDigits_dd in
   // src/demo_real.cpp.
   static constexpr int max_digits = 31;
@@ -103,14 +154,12 @@ struct BackendTraits<DD> {
 
   static const char* name() { return "DD"; }
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
   // Widen a DD value to the oracle type. Bit-exact: hi + lo with no rounding
   // because |lo| <= 1/2 ulp(hi) and __float128 has far more mantissa. Mirrors
   // dd_to_q() in src/demo_real.cpp.
   static float128 to_quad(type x) {
     return (float128)x.hi + (float128)x.lo;
   }
-#endif
 };
 
 // ---------------------------------------------------------------------------
@@ -120,7 +169,7 @@ struct BackendTraits<DD> {
 //
 // This entry is what T2.1 is required to add even though the T2.1 EFT test is
 // self-contained (it does NOT call the run_* runners or digits_of_accuracy —
-// its oracle is exact FP64, not the __float128 quadmath oracle these helpers
+// its oracle is exact FP64, not the __float128 oracle these helpers
 // use). Provided here so the later FF layers are unblocked.
 // ---------------------------------------------------------------------------
 template <>
@@ -144,14 +193,12 @@ struct BackendTraits<FF> {
 
   static const char* name() { return "FF"; }
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
   // Widen an FF value to the oracle type. Bit-exact: hi + lo with no rounding
   // because |lo| <= 1/2 ulp(hi) and __float128 has far more mantissa. Mirrors
   // ff_to_q() in src/demo_ff_real.cpp.
   static float128 to_quad(type x) {
     return (float128)x.hi + (float128)x.lo;
   }
-#endif
 };
 
 // ============================================================================
@@ -189,8 +236,6 @@ inline InputDist uniform(double lo, double hi) {
 // Accuracy: relative error and digits-of-accuracy vs the oracle
 // ============================================================================
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
-
 // Relative error of a device-under-test result (already widened to float128 by
 // the caller via BackendTraits<Backend>::to_quad) against the oracle reference.
 // Returns 0 for an exact match; +inf sentinel handling is left to
@@ -200,7 +245,7 @@ inline float128 rel_err(float128 dut_quad, float128 ref) {
   if (ref == (float128)0.0) {
     return (dut_quad == (float128)0.0) ? (float128)0.0 : (float128)1.0;
   }
-  return Kokkos::abs((dut_quad - ref) / ref);
+  return q_abs((dut_quad - ref) / ref);
 }
 
 // Digits of accuracy = -log10(rel_err), clamped to [0, max_digits]. Extracted
@@ -209,16 +254,16 @@ inline float128 rel_err(float128 dut_quad, float128 ref) {
 template <typename Backend>
 inline double digits_of_accuracy(float128 dut_quad, float128 ref) {
   const double max_digits = (double)BackendTraits<Backend>::max_digits;
-  if (Kokkos::isnan(dut_quad) || Kokkos::isnan(ref)) return 0.0;
-  if (Kokkos::isinf(ref)) {
-    return (Kokkos::isinf(dut_quad) && (dut_quad > 0) == (ref > 0)) ? max_digits : 0.0;
+  if (q_isnan(dut_quad) || q_isnan(ref)) return 0.0;
+  if (q_isinf(ref)) {
+    return (q_isinf(dut_quad) && (dut_quad > 0) == (ref > 0)) ? max_digits : 0.0;
   }
   if (ref == (float128)0.0) {
     return (dut_quad == (float128)0.0) ? max_digits : 0.0;
   }
-  float128 rel = Kokkos::abs((dut_quad - ref) / ref);
+  float128 rel = q_abs((dut_quad - ref) / ref);
   if (rel == (float128)0.0) return max_digits;
-  double d = -(double)Kokkos::log10(rel);
+  double d = -(double)q_log10(rel);
   return d < 0.0 ? 0.0 : (d > max_digits ? max_digits : d);
 }
 
@@ -254,16 +299,15 @@ constexpr double kUlpUnscorable = -1.0;   // sentinel
 template <typename Backend>
 inline double ulp_error(float128 dut_quad, float128 ref) {
   const int p = BackendTraits<Backend>::sig_bits;
-  if (Kokkos::isnan(ref) || Kokkos::isinf(ref)) return kUlpUnscorable;
+  if (q_isnan(ref) || q_isinf(ref)) return kUlpUnscorable;
   if (ref == (float128)0.0) return (dut_quad == (float128)0.0) ? 0.0 : kUlpUnscorable;
-  if (Kokkos::isnan(dut_quad) || Kokkos::isinf(dut_quad)) return HUGE_VAL;
+  if (q_isnan(dut_quad) || q_isinf(dut_quad)) return HUGE_VAL;
   if (dut_quad == ref) return 0.0;
   // (|got-ref|/|ref|) * 2^p, scaled last so the ratio cannot overflow binary128.
-  const float128 rel = Kokkos::abs((dut_quad - ref) / ref);
-  return (double)ldexpq(rel, p);
+  const float128 rel = q_abs((dut_quad - ref) / ref);
+  return (double)q_ldexp(rel, p);
 }
 
-#endif  // KOKKOS_EP_HAVE_QUADMATH
 
 // ============================================================================
 // Stat reporting
@@ -407,8 +451,6 @@ inline const ExpectedMinDropAnnotation* lookup_expected_min_drop(const char* op_
 // device_op MUST be a device-callable functor (KOKKOS_LAMBDA / KOKKOS_FUNCTION)
 // so it can be captured by value into the kernel. host_oracle runs on host only.
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
-
 template <typename Backend, typename DeviceOp>
 AccStats run_unary_op(int n, uint64_t seed,
                       const InputDist& input_dist,
@@ -511,7 +553,6 @@ AccStats run_binary_op(int n, uint64_t seed,
 
 
 
-#endif  // KOKKOS_EP_HAVE_QUADMATH
 
 // ============================================================================
 // Assertion macro
