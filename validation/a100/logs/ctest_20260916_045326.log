@@ -1,0 +1,404 @@
+Internal ctest changing into directory: /home/rbarik/xpm-a100-validate/build-a100
+Test project /home/rbarik/xpm-a100-validate/build-a100
+      Start  1: hello_test
+Could not find executable /home/rbarik/xpm-a100-validate/build-a100/tests/hello_test
+Looked in the following places:
+/home/rbarik/xpm-a100-validate/build-a100/tests/hello_test
+/home/rbarik/xpm-a100-validate/build-a100/tests/hello_test
+/home/rbarik/xpm-a100-validate/build-a100/tests/Release/hello_test
+/home/rbarik/xpm-a100-validate/build-a100/tests/Release/hello_test
+/home/rbarik/xpm-a100-validate/build-a100/tests/Debug/hello_test
+/home/rbarik/xpm-a100-validate/build-a100/tests/Debug/hello_test
+/home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/hello_test
+/home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/hello_test
+/home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/hello_test
+/home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/hello_test
+/home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/hello_test
+/home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/hello_test
+/home/rbarik/xpm-a100-validate/build-a100/tests/Development/hello_test
+/home/rbarik/xpm-a100-validate/build-a100/tests/Development/hello_test
+home/rbarik/xpm-a100-validate/build-a100/tests/hello_test
+home/rbarik/xpm-a100-validate/build-a100/tests/hello_test
+home/rbarik/xpm-a100-validate/build-a100/tests/Release/hello_test
+home/rbarik/xpm-a100-validate/build-a100/tests/Release/hello_test
+home/rbarik/xpm-a100-validate/build-a100/tests/Debug/hello_test
+home/rbarik/xpm-a100-validate/build-a100/tests/Debug/hello_test
+home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/hello_test
+home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/hello_test
+home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/hello_test
+home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/hello_test
+home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/hello_test
+home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/hello_test
+home/rbarik/xpm-a100-validate/build-a100/tests/Development/hello_test
+home/rbarik/xpm-a100-validate/build-a100/tests/Development/hello_test
+Unable to find executable: /home/rbarik/xpm-a100-validate/build-a100/tests/hello_test
+ 1/49 Test  #1: hello_test .......................***Not Run   0.00 sec
+      Start  2: corpus_test
+ 2/49 Test  #2: corpus_test ......................   Passed    0.01 sec
+      Start  3: dd_invariant_test
+ 3/49 Test  #3: dd_invariant_test ................   Passed   85.56 sec
+      Start  4: ff_invariant_test
+ 4/49 Test  #4: ff_invariant_test ................   Passed   53.87 sec
+      Start  5: dd_property_test
+ 5/49 Test  #5: dd_property_test .................   Passed   45.47 sec
+      Start  6: dd_e2e_test
+ 6/49 Test  #6: dd_e2e_test ......................   Passed    0.64 sec
+      Start  7: dd_eft_test
+ 7/49 Test  #7: dd_eft_test ......................   Passed    0.98 sec
+      Start  8: ff_eft_test
+ 8/49 Test  #8: ff_eft_test ......................   Passed    0.37 sec
+      Start  9: ff_property_test
+ 9/49 Test  #9: ff_property_test .................   Passed   33.11 sec
+      Start 10: ff_cancellation_test
+10/49 Test #10: ff_cancellation_test .............   Passed    0.86 sec
+      Start 11: dd_fma_guard_test
+11/49 Test #11: dd_fma_guard_test ................   Passed    0.35 sec
+      Start 12: dd_fma_guard_test_contract_on
+12/49 Test #12: dd_fma_guard_test_contract_on ....   Passed    0.30 sec
+      Start 13: ff_fma_guard_test
+13/49 Test #13: ff_fma_guard_test ................   Passed    0.26 sec
+      Start 14: ff_fma_guard_test_contract_on
+14/49 Test #14: ff_fma_guard_test_contract_on ....   Passed    0.24 sec
+      Start 15: qf_eft_test
+15/49 Test #15: qf_eft_test ......................   Passed    6.47 sec
+      Start 16: qf_nonoverlap_test
+16/49 Test #16: qf_nonoverlap_test ...............   Passed   93.06 sec
+      Start 17: qf_property_test
+17/49 Test #17: qf_property_test .................   Passed   54.37 sec
+      Start 18: qf_fma_guard_test
+18/49 Test #18: qf_fma_guard_test ................   Passed    0.59 sec
+      Start 19: qf_fma_guard_test_contract_on
+19/49 Test #19: qf_fma_guard_test_contract_on ....   Passed    0.30 sec
+      Start 20: qf_cancellation_test
+20/49 Test #20: qf_cancellation_test .............   Passed    1.18 sec
+      Start 21: tf_eft_test
+21/49 Test #21: tf_eft_test ......................   Passed    0.63 sec
+      Start 22: tf_eft_test_contract_on
+22/49 Test #22: tf_eft_test_contract_on ..........   Passed    0.67 sec
+      Start 23: tf_property_test
+23/49 Test #23: tf_property_test .................   Passed    0.27 sec
+      Start 24: tf_cancellation_test
+24/49 Test #24: tf_cancellation_test .............   Passed    0.81 sec
+      Start 25: tf_fma_guard_test
+25/49 Test #25: tf_fma_guard_test ................   Passed    0.64 sec
+      Start 26: tf_fma_guard_test_contract_on
+26/49 Test #26: tf_fma_guard_test_contract_on ....   Passed    0.34 sec
+      Start 27: contraction_flags_guard
+27/49 Test #27: contraction_flags_guard ..........   Passed    0.01 sec
+      Start 28: contraction_flags_selftest
+28/49 Test #28: contraction_flags_selftest .......   Passed    0.07 sec
+      Start 29: dd_no_kokkos_smoke
+Could not find executable /home/rbarik/xpm-a100-validate/build-a100/tests/dd_no_kokkos_smoke
+Looked in the following places:
+/home/rbarik/xpm-a100-validate/build-a100/tests/dd_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/dd_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Release/dd_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Release/dd_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Debug/dd_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Debug/dd_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/dd_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/dd_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/dd_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/dd_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/dd_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/dd_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Development/dd_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Development/dd_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/dd_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/dd_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Release/dd_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Release/dd_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Debug/dd_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Debug/dd_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/dd_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/dd_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/dd_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/dd_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/dd_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/dd_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Development/dd_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Development/dd_no_kokkos_smoke
+Unable to find executable: /home/rbarik/xpm-a100-validate/build-a100/tests/dd_no_kokkos_smoke
+29/49 Test #29: dd_no_kokkos_smoke ...............***Not Run   0.00 sec
+      Start 30: dd_complex_no_kokkos_smoke
+Could not find executable /home/rbarik/xpm-a100-validate/build-a100/tests/dd_complex_no_kokkos_smoke
+Looked in the following places:
+/home/rbarik/xpm-a100-validate/build-a100/tests/dd_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/dd_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Release/dd_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Release/dd_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Debug/dd_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Debug/dd_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/dd_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/dd_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/dd_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/dd_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/dd_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/dd_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Development/dd_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Development/dd_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/dd_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/dd_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Release/dd_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Release/dd_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Debug/dd_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Debug/dd_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/dd_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/dd_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/dd_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/dd_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/dd_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/dd_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Development/dd_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Development/dd_complex_no_kokkos_smoke
+Unable to find executable: /home/rbarik/xpm-a100-validate/build-a100/tests/dd_complex_no_kokkos_smoke
+30/49 Test #30: dd_complex_no_kokkos_smoke .......***Not Run   0.00 sec
+      Start 31: ff_no_kokkos_smoke
+Could not find executable /home/rbarik/xpm-a100-validate/build-a100/tests/ff_no_kokkos_smoke
+Looked in the following places:
+/home/rbarik/xpm-a100-validate/build-a100/tests/ff_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/ff_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Release/ff_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Release/ff_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Debug/ff_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Debug/ff_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/ff_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/ff_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/ff_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/ff_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/ff_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/ff_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Development/ff_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Development/ff_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/ff_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/ff_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Release/ff_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Release/ff_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Debug/ff_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Debug/ff_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/ff_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/ff_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/ff_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/ff_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/ff_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/ff_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Development/ff_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Development/ff_no_kokkos_smoke
+Unable to find executable: /home/rbarik/xpm-a100-validate/build-a100/tests/ff_no_kokkos_smoke
+31/49 Test #31: ff_no_kokkos_smoke ...............***Not Run   0.00 sec
+      Start 32: ff_complex_no_kokkos_smoke
+Could not find executable /home/rbarik/xpm-a100-validate/build-a100/tests/ff_complex_no_kokkos_smoke
+Looked in the following places:
+/home/rbarik/xpm-a100-validate/build-a100/tests/ff_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/ff_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Release/ff_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Release/ff_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Debug/ff_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Debug/ff_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/ff_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/ff_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/ff_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/ff_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/ff_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/ff_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Development/ff_complex_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Development/ff_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/ff_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/ff_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Release/ff_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Release/ff_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Debug/ff_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Debug/ff_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/ff_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/ff_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/ff_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/ff_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/ff_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/ff_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Development/ff_complex_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Development/ff_complex_no_kokkos_smoke
+Unable to find executable: /home/rbarik/xpm-a100-validate/build-a100/tests/ff_complex_no_kokkos_smoke
+32/49 Test #32: ff_complex_no_kokkos_smoke .......***Not Run   0.00 sec
+      Start 33: qf_no_kokkos_smoke
+Could not find executable /home/rbarik/xpm-a100-validate/build-a100/tests/qf_no_kokkos_smoke
+Looked in the following places:
+/home/rbarik/xpm-a100-validate/build-a100/tests/qf_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/qf_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Release/qf_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Release/qf_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Debug/qf_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Debug/qf_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/qf_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/qf_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/qf_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/qf_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/qf_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/qf_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Development/qf_no_kokkos_smoke
+/home/rbarik/xpm-a100-validate/build-a100/tests/Development/qf_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/qf_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/qf_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Release/qf_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Release/qf_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Debug/qf_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Debug/qf_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/qf_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/qf_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/qf_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/qf_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/qf_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/qf_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Development/qf_no_kokkos_smoke
+home/rbarik/xpm-a100-validate/build-a100/tests/Development/qf_no_kokkos_smoke
+Unable to find executable: /home/rbarik/xpm-a100-validate/build-a100/tests/qf_no_kokkos_smoke
+33/49 Test #33: qf_no_kokkos_smoke ...............***Not Run   0.00 sec
+      Start 34: qf_complex_no_kokkos_smoke
+34/49 Test #34: qf_complex_no_kokkos_smoke .......   Passed    0.02 sec
+      Start 35: tf_complex_no_kokkos_smoke
+35/49 Test #35: tf_complex_no_kokkos_smoke .......   Passed    0.01 sec
+      Start 36: sweep_absolute_gate
+Could not find executable /home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy
+Looked in the following places:
+/home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Release/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Release/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Debug/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Debug/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Development/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Development/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Release/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Release/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Debug/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Debug/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Development/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Development/sweep_accuracy
+Unable to find executable: /home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy
+36/49 Test #36: sweep_absolute_gate ..............***Not Run   0.00 sec
+      Start 37: sweep_monotone_gate
+Could not find executable /home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy
+Looked in the following places:
+/home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Release/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Release/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Debug/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Debug/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Development/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Development/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Release/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Release/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Debug/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Debug/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Development/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Development/sweep_accuracy
+Unable to find executable: /home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy
+37/49 Test #37: sweep_monotone_gate ..............***Not Run   0.00 sec
+      Start 38: sweep_monotone_gate_selftest
+38/49 Test #38: sweep_monotone_gate_selftest .....***Failed    0.01 sec
+selftest: /home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy is not executable
+
+      Start 39: sweep_absolute_gate_selftest
+39/49 Test #39: sweep_absolute_gate_selftest .....***Failed    0.01 sec
+selftest: /home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy is not executable
+
+      Start 40: pow_domain_test
+40/49 Test #40: pow_domain_test ..................   Passed    0.01 sec
+      Start 41: exp_reduction_test
+41/49 Test #41: exp_reduction_test ...............   Passed    0.01 sec
+      Start 42: exp_reduction_selftest
+42/49 Test #42: exp_reduction_selftest ...........   Passed    0.63 sec
+      Start 43: trig_reduction_test
+43/49 Test #43: trig_reduction_test ..............   Passed    0.08 sec
+      Start 44: trig_reduction_selftest
+44/49 Test #44: trig_reduction_selftest ..........   Passed    8.12 sec
+      Start 45: oracle_conv_test
+Could not find executable /home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy
+Looked in the following places:
+/home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Release/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Release/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Debug/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Debug/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Development/sweep_accuracy
+/home/rbarik/xpm-a100-validate/build-a100/tests/Development/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Release/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Release/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Debug/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Debug/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/MinSizeRel/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/RelWithDebInfo/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Deployment/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Development/sweep_accuracy
+home/rbarik/xpm-a100-validate/build-a100/tests/Development/sweep_accuracy
+Unable to find executable: /home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy
+45/49 Test #45: oracle_conv_test .................***Not Run   0.00 sec
+      Start 46: oracle_conv_selftest
+46/49 Test #46: oracle_conv_selftest .............   Passed  100.11 sec
+      Start 47: consumer_package
+47/49 Test #47: consumer_package .................   Passed    7.74 sec
+      Start 48: domains_fresh
+48/49 Test #48: domains_fresh ....................   Passed    2.08 sec
+      Start 49: build_provenance
+49/49 Test #49: build_provenance .................   Passed    0.01 sec
+
+78% tests passed, 11 tests failed out of 49
+
+Label Time Summary:
+packaging    =   7.74 sec*proc (1 test)
+
+Total Test time (real) = 500.33 sec
+
+The following tests FAILED:
+	  1 - hello_test (Not Run)
+	 29 - dd_no_kokkos_smoke (Not Run)
+	 30 - dd_complex_no_kokkos_smoke (Not Run)
+	 31 - ff_no_kokkos_smoke (Not Run)
+	 32 - ff_complex_no_kokkos_smoke (Not Run)
+	 33 - qf_no_kokkos_smoke (Not Run)
+	 36 - sweep_absolute_gate (Not Run)
+	 37 - sweep_monotone_gate (Not Run)
+	 38 - sweep_monotone_gate_selftest (Failed)
+	 39 - sweep_absolute_gate_selftest (Failed)
+	 45 - oracle_conv_test (Not Run)
+Errors while running CTest

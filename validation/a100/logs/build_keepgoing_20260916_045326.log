@@ -1,0 +1,850 @@
+[  9%] Building CXX object CMakeFiles/kokkos_ep_demo_ff.dir/src/demo_ff_real.cpp.o
+[  9%] Building CXX object CMakeFiles/kokkos_ep_demo_tf.dir/src/demo_tf_real.cpp.o
+[  9%] Building CXX object CMakeFiles/kokkos_ep_demo_qf_complex.dir/src/demo_qf_complex.cpp.o
+[  9%] Building CXX object CMakeFiles/kokkos_ep_demo.dir/src/demo_real.cpp.o
+[  9%] Building CXX object CMakeFiles/kokkos_ep_demo_complex.dir/src/demo_complex.cpp.o
+[  9%] Building CXX object tests/CMakeFiles/hello_test.dir/hello_test.cpp.o
+[  9%] Building CXX object CMakeFiles/kokkos_ep_demo_qf.dir/src/demo_qf_real.cpp.o
+[ 17%] Building CXX object tests/CMakeFiles/ff_complex_no_kokkos_smoke.dir/standalone/ff_complex_no_kokkos_smoke.cpp.o
+[ 17%] Building CXX object tests/CMakeFiles/ff_no_kokkos_smoke.dir/standalone/ff_no_kokkos_smoke.cpp.o
+[ 17%] Building CXX object tests/CMakeFiles/sweep_accuracy.dir/__/scripts/sweep_accuracy.cpp.o
+[ 17%] Building CXX object CMakeFiles/kokkos_ep_demo_ff_complex.dir/src/demo_ff_complex.cpp.o
+[ 17%] Building CXX object tests/CMakeFiles/dd_complex_no_kokkos_smoke.dir/standalone/dd_complex_no_kokkos_smoke.cpp.o
+[ 17%] Building CXX object CMakeFiles/kokkos_ep_demo_tf_complex.dir/src/demo_tf_complex.cpp.o
+[ 17%] Building CXX object tests/CMakeFiles/qf_no_kokkos_smoke.dir/standalone/qf_no_kokkos_smoke.cpp.o
+[ 17%] Building CXX object tests/CMakeFiles/dd_no_kokkos_smoke.dir/standalone/dd_no_kokkos_smoke.cpp.o
+[ 17%] Building CXX object CMakeFiles/kokkos_ep_bench_cost.dir/src/bench_cost.cpp.o
+[ 28%] Built target pow_domain_test
+[ 28%] Built target qf_complex_no_kokkos_smoke
+[ 28%] Built target trig_reduction_test
+[ 28%] Built target exp_reduction_test
+[ 28%] Built target tf_complex_no_kokkos_smoke
+[ 63%] Built target qf_eft_test
+[ 82%] Built target ff_fma_guard_test_contract_on
+[ 82%] Built target dd_fma_guard_test
+[ 82%] Built target tf_fma_guard_test
+[ 82%] Built target dd_fma_guard_test_contract_on
+[ 82%] Built target qf_nonoverlap_test
+[ 82%] Built target tf_cancellation_test
+[ 82%] Built target ff_property_test
+[ 82%] Built target corpus_test
+[ 82%] Built target qf_fma_guard_test_contract_on
+[ 82%] Built target qf_property_test
+[ 82%] Built target dd_property_test
+[ 82%] Built target ff_invariant_test
+[ 82%] Built target tf_fma_guard_test_contract_on
+[ 82%] Built target dd_e2e_test
+[ 82%] Built target tf_eft_test
+[ 82%] Built target ff_cancellation_test
+[ 82%] Built target tf_property_test
+[ 82%] Built target dd_eft_test
+[ 82%] Built target qf_cancellation_test
+[ 82%] Built target qf_fma_guard_test
+[ 82%] Built target ff_fma_guard_test
+[ 82%] Built target dd_invariant_test
+[ 82%] Built target tf_eft_test_contract_on
+[ 82%] Built target ff_eft_test
+/home/rbarik/xpm-a100-validate/tests/standalone/dd_no_kokkos_smoke.cpp(95): error: no operator "<<" matches these operands
+            operand types are: std::ostringstream << const xp::DoubleDouble
+    os << pi;
+       ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(330): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::basic_ostream<_CharT, _Traits>::__streambuf_type *) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(__streambuf_type* __sb);
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(297): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::nullptr_t) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(nullptr_t)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(292): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(const void *) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(const void* __p)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(234): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(long double) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(long double __f)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(226): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(float) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(float __f)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(222): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(double) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(double __f)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(207): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned long long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned long long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(203): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(long long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(long long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(194): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned int) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned int __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(191): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(int) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(int __n);
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(183): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned short) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned short __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(180): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(short) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(short __n);
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(176): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(__nv_bool) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(bool __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(172): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(168): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(129): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::ios_base &(*)(std::ios_base &)) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(ios_base& (*__pf) (ios_base&))
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(119): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::basic_ostream<_CharT, _Traits>::__ios_type &(*)(std::basic_ostream<_CharT, _Traits>::__ios_type &)) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(__ios_type& (*__pf)(__ios_type&))
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(110): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::basic_ostream<_CharT, _Traits>::__ostream_type &(*)(std::basic_ostream<_CharT, _Traits>::__ostream_type &)) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(__ostream_type& (*__pf)(__ostream_type&))
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(801): note #3327-D: candidate function template "std::operator<<(_Ostream &&, const _Tp &)" failed deduction
+      operator<<(_Ostream&& __os, const _Tp& __x)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(680): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, const unsigned char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, const unsigned char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(675): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, const signed char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, const signed char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(662): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, const char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, const char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/bits/ostream.tcc(307): note #3326-D: function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<_CharT, _Traits>& __out, const char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(645): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const _CharT *)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __out, const _CharT* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(586): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, unsigned char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, unsigned char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(581): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, signed char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, signed char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(570): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(564): note #3326-D: function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<_CharT, _Traits>& __out, char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(554): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, _CharT)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __out, _CharT __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/system_error(339): note #3326-D: function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const std::error_code &)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<_CharT, _Traits>& __os, const error_code& __e)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/cstddef(124): note #3326-D: function template "std::operator<<(std::byte, _IntegerType) noexcept" does not match because argument #1 does not match parameter
+      operator<<(byte __b, _IntegerType __shift) noexcept
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/bits/basic_string.h(4032): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const std::__cxx11::basic_string<_CharT, _Traits, _Alloc> &)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __os,
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/string_view(761): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, std::basic_string_view<_CharT, _Traits>)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __os,
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/system_error(227): note #3328-D: built-in operator<<(<promoted integral>, <promoted integral>) does not match because argument #1 does not match parameter
+   = __enable_if_t<is_error_code_enum<_ErrorCodeEnum>::value>;
+                   ^
+
+/home/rbarik/xpm-a100-validate/tests/standalone/qf_no_kokkos_smoke.cpp(89): error: no operator "<<" matches these operands
+            operand types are: std::ostringstream << const xp::QuadFloat
+    os << pi;
+       ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(330): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::basic_ostream<_CharT, _Traits>::__streambuf_type *) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(__streambuf_type* __sb);
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(297): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::nullptr_t) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(nullptr_t)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(292): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(const void *) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(const void* __p)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(234): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(long double) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(long double __f)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(226): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(float) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(float __f)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(222): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(double) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(double __f)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(207): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned long long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned long long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(203): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(long long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(long long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(194): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned int) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned int __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(191): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(int) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(int __n);
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(183): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned short) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned short __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(180): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(short) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(short __n);
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(176): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(__nv_bool) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(bool __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(172): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(168): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(129): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::ios_base &(*)(std::ios_base &)) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(ios_base& (*__pf) (ios_base&))
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(119): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::basic_ostream<_CharT, _Traits>::__ios_type &(*)(std::basic_ostream<_CharT, _Traits>::__ios_type &)) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(__ios_type& (*__pf)(__ios_type&))
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(110): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::basic_ostream<_CharT, _Traits>::__ostream_type &(*)(std::basic_ostream<_CharT, _Traits>::__ostream_type &)) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(__ostream_type& (*__pf)(__ostream_type&))
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(801): note #3327-D: candidate function template "std::operator<<(_Ostream &&, const _Tp &)" failed deduction
+      operator<<(_Ostream&& __os, const _Tp& __x)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(680): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, const unsigned char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, const unsigned char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(675): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, const signed char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, const signed char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(662): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, const char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, const char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/bits/ostream.tcc(307): note #3326-D: function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<_CharT, _Traits>& __out, const char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(645): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const _CharT *)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __out, const _CharT* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(586): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, unsigned char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, unsigned char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(581): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, signed char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, signed char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(570): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(564): note #3326-D: function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<_CharT, _Traits>& __out, char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(554): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, _CharT)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __out, _CharT __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/system_error(339): note #3326-D: function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const std::error_code &)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<_CharT, _Traits>& __os, const error_code& __e)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/cstddef(124): note #3326-D: function template "std::operator<<(std::byte, _IntegerType) noexcept" does not match because argument #1 does not match parameter
+      operator<<(byte __b, _IntegerType __shift) noexcept
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/bits/basic_string.h(4032): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const std::__cxx11::basic_string<_CharT, _Traits, _Alloc> &)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __os,
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/string_view(761): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, std::basic_string_view<_CharT, _Traits>)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __os,
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/system_error(227): note #3328-D: built-in operator<<(<promoted integral>, <promoted integral>) does not match because argument #1 does not match parameter
+   = __enable_if_t<is_error_code_enum<_ErrorCodeEnum>::value>;
+                   ^
+
+/home/rbarik/xpm-a100-validate/tests/standalone/ff_no_kokkos_smoke.cpp(89): error: no operator "<<" matches these operands
+            operand types are: std::ostringstream << const xp::FloatFloat
+    os << pi;
+       ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(330): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::basic_ostream<_CharT, _Traits>::__streambuf_type *) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(__streambuf_type* __sb);
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(297): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::nullptr_t) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(nullptr_t)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(292): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(const void *) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(const void* __p)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(234): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(long double) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(long double __f)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(226): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(float) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(float __f)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(222): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(double) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(double __f)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(207): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned long long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned long long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(203): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(long long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(long long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(194): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned int) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned int __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(191): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(int) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(int __n);
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(183): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned short) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned short __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(180): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(short) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(short __n);
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(176): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(__nv_bool) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(bool __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(172): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(168): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(129): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::ios_base &(*)(std::ios_base &)) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(ios_base& (*__pf) (ios_base&))
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(119): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::basic_ostream<_CharT, _Traits>::__ios_type &(*)(std::basic_ostream<_CharT, _Traits>::__ios_type &)) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(__ios_type& (*__pf)(__ios_type&))
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(110): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::basic_ostream<_CharT, _Traits>::__ostream_type &(*)(std::basic_ostream<_CharT, _Traits>::__ostream_type &)) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(__ostream_type& (*__pf)(__ostream_type&))
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(801): note #3327-D: candidate function template "std::operator<<(_Ostream &&, const _Tp &)" failed deduction
+      operator<<(_Ostream&& __os, const _Tp& __x)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(680): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, const unsigned char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, const unsigned char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(675): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, const signed char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, const signed char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(662): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, const char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, const char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/bits/ostream.tcc(307): note #3326-D: function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<_CharT, _Traits>& __out, const char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(645): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const _CharT *)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __out, const _CharT* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(586): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, unsigned char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, unsigned char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(581): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, signed char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, signed char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(570): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(564): note #3326-D: function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<_CharT, _Traits>& __out, char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(554): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, _CharT)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __out, _CharT __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/system_error(339): note #3326-D: function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const std::error_code &)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<_CharT, _Traits>& __os, const error_code& __e)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/cstddef(124): note #3326-D: function template "std::operator<<(std::byte, _IntegerType) noexcept" does not match because argument #1 does not match parameter
+      operator<<(byte __b, _IntegerType __shift) noexcept
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/bits/basic_string.h(4032): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const std::__cxx11::basic_string<_CharT, _Traits, _Alloc> &)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __os,
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/string_view(761): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, std::basic_string_view<_CharT, _Traits>)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __os,
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/system_error(227): note #3328-D: built-in operator<<(<promoted integral>, <promoted integral>) does not match because argument #1 does not match parameter
+   = __enable_if_t<is_error_code_enum<_ErrorCodeEnum>::value>;
+                   ^
+
+/home/rbarik/xpm-a100-validate/tests/standalone/dd_complex_no_kokkos_smoke.cpp(121): error: no operator "<<" matches these operands
+            operand types are: std::ostringstream << const xp::DoubleDoubleComplex
+    os << z;
+       ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(330): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::basic_ostream<_CharT, _Traits>::__streambuf_type *) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(__streambuf_type* __sb);
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(297): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::nullptr_t) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(nullptr_t)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(292): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(const void *) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(const void* __p)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(234): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(long double) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(long double __f)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(226): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(float) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(float __f)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(222): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(double) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(double __f)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(207): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned long long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned long long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(203): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(long long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(long long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(194): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned int) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned int __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(191): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(int) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(int __n);
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(183): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned short) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned short __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(180): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(short) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(short __n);
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(176): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(__nv_bool) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(bool __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(172): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(168): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(129): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::ios_base &(*)(std::ios_base &)) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(ios_base& (*__pf) (ios_base&))
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(119): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::basic_ostream<_CharT, _Traits>::__ios_type &(*)(std::basic_ostream<_CharT, _Traits>::__ios_type &)) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(__ios_type& (*__pf)(__ios_type&))
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(110): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::basic_ostream<_CharT, _Traits>::__ostream_type &(*)(std::basic_ostream<_CharT, _Traits>::__ostream_type &)) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(__ostream_type& (*__pf)(__ostream_type&))
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(801): note #3327-D: candidate function template "std::operator<<(_Ostream &&, const _Tp &)" failed deduction
+      operator<<(_Ostream&& __os, const _Tp& __x)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(680): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, const unsigned char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, const unsigned char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(675): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, const signed char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, const signed char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(662): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, const char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, const char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/bits/ostream.tcc(307): note #3326-D: function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<_CharT, _Traits>& __out, const char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(645): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const _CharT *)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __out, const _CharT* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(586): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, unsigned char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, unsigned char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(581): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, signed char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, signed char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(570): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(564): note #3326-D: function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<_CharT, _Traits>& __out, char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(554): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, _CharT)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __out, _CharT __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/system_error(339): note #3326-D: function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const std::error_code &)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<_CharT, _Traits>& __os, const error_code& __e)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/cstddef(124): note #3326-D: function template "std::operator<<(std::byte, _IntegerType) noexcept" does not match because argument #1 does not match parameter
+      operator<<(byte __b, _IntegerType __shift) noexcept
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/bits/basic_string.h(4032): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const std::__cxx11::basic_string<_CharT, _Traits, _Alloc> &)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __os,
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/string_view(761): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, std::basic_string_view<_CharT, _Traits>)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __os,
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/system_error(227): note #3328-D: built-in operator<<(<promoted integral>, <promoted integral>) does not match because argument #1 does not match parameter
+   = __enable_if_t<is_error_code_enum<_ErrorCodeEnum>::value>;
+                   ^
+
+/home/rbarik/xpm-a100-validate/tests/standalone/ff_complex_no_kokkos_smoke.cpp(121): error: no operator "<<" matches these operands
+            operand types are: std::ostringstream << const xp::FloatFloatComplex
+    os << z;
+       ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(330): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::basic_ostream<_CharT, _Traits>::__streambuf_type *) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(__streambuf_type* __sb);
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(297): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::nullptr_t) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(nullptr_t)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(292): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(const void *) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(const void* __p)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(234): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(long double) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(long double __f)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(226): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(float) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(float __f)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(222): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(double) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(double __f)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(207): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned long long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned long long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(203): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(long long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(long long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(194): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned int) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned int __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(191): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(int) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(int __n);
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(183): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned short) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned short __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(180): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(short) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(short __n);
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(176): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(__nv_bool) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(bool __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(172): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(unsigned long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(unsigned long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(168): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(long) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(long __n)
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(129): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::ios_base &(*)(std::ios_base &)) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(ios_base& (*__pf) (ios_base&))
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(119): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::basic_ostream<_CharT, _Traits>::__ios_type &(*)(std::basic_ostream<_CharT, _Traits>::__ios_type &)) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(__ios_type& (*__pf)(__ios_type&))
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(110): note #3326-D: function "std::basic_ostream<_CharT, _Traits>::operator<<(std::basic_ostream<_CharT, _Traits>::__ostream_type &(*)(std::basic_ostream<_CharT, _Traits>::__ostream_type &)) [with _CharT=char, _Traits=std::char_traits<char>]" does not match because argument #1 does not match parameter
+        operator<<(__ostream_type& (*__pf)(__ostream_type&))
+        ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(801): note #3327-D: candidate function template "std::operator<<(_Ostream &&, const _Tp &)" failed deduction
+      operator<<(_Ostream&& __os, const _Tp& __x)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(680): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, const unsigned char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, const unsigned char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(675): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, const signed char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, const signed char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(662): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, const char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, const char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/bits/ostream.tcc(307): note #3326-D: function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const char *)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<_CharT, _Traits>& __out, const char* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(645): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const _CharT *)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __out, const _CharT* __s)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(586): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, unsigned char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, unsigned char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(581): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, signed char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, signed char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(570): note #3326-D: function template "std::operator<<(std::basic_ostream<char, _Traits> &, char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<char, _Traits>& __out, char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(564): note #3326-D: function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, char)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<_CharT, _Traits>& __out, char __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/ostream(554): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, _CharT)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __out, _CharT __c)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/system_error(339): note #3326-D: function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const std::error_code &)" does not match because argument #2 does not match parameter
+      operator<<(basic_ostream<_CharT, _Traits>& __os, const error_code& __e)
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/cstddef(124): note #3326-D: function template "std::operator<<(std::byte, _IntegerType) noexcept" does not match because argument #1 does not match parameter
+      operator<<(byte __b, _IntegerType __shift) noexcept
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/bits/basic_string.h(4032): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, const std::__cxx11::basic_string<_CharT, _Traits, _Alloc> &)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __os,
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/string_view(761): note #3327-D: candidate function template "std::operator<<(std::basic_ostream<_CharT, _Traits> &, std::basic_string_view<_CharT, _Traits>)" failed deduction
+      operator<<(basic_ostream<_CharT, _Traits>& __os,
+      ^
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/system_error(227): note #3328-D: built-in operator<<(<promoted integral>, <promoted integral>) does not match because argument #1 does not match parameter
+   = __enable_if_t<is_error_code_enum<_ErrorCodeEnum>::value>;
+                   ^
+
+1 error detected in the compilation of "/home/rbarik/xpm-a100-validate/tests/standalone/dd_no_kokkos_smoke.cpp".
+1 error detected in the compilation of "/home/rbarik/xpm-a100-validate/tests/standalone/qf_no_kokkos_smoke.cpp".
+1 error detected in the compilation of "/home/rbarik/xpm-a100-validate/tests/standalone/ff_no_kokkos_smoke.cpp".
+gmake[2]: *** [tests/CMakeFiles/dd_no_kokkos_smoke.dir/build.make:76: tests/CMakeFiles/dd_no_kokkos_smoke.dir/standalone/dd_no_kokkos_smoke.cpp.o] Error 1
+gmake[2]: Target 'tests/CMakeFiles/dd_no_kokkos_smoke.dir/build' not remade because of errors.
+gmake[1]: *** [CMakeFiles/Makefile2:1098: tests/CMakeFiles/dd_no_kokkos_smoke.dir/all] Error 2
+gmake[2]: *** [tests/CMakeFiles/qf_no_kokkos_smoke.dir/build.make:76: tests/CMakeFiles/qf_no_kokkos_smoke.dir/standalone/qf_no_kokkos_smoke.cpp.o] Error 1
+gmake[2]: Target 'tests/CMakeFiles/qf_no_kokkos_smoke.dir/build' not remade because of errors.
+gmake[1]: *** [CMakeFiles/Makefile2:1202: tests/CMakeFiles/qf_no_kokkos_smoke.dir/all] Error 2
+gmake[2]: *** [tests/CMakeFiles/ff_no_kokkos_smoke.dir/build.make:76: tests/CMakeFiles/ff_no_kokkos_smoke.dir/standalone/ff_no_kokkos_smoke.cpp.o] Error 1
+gmake[2]: Target 'tests/CMakeFiles/ff_no_kokkos_smoke.dir/build' not remade because of errors.
+gmake[1]: *** [CMakeFiles/Makefile2:1150: tests/CMakeFiles/ff_no_kokkos_smoke.dir/all] Error 2
+1 error detected in the compilation of "/home/rbarik/xpm-a100-validate/tests/standalone/dd_complex_no_kokkos_smoke.cpp".
+gmake[2]: *** [tests/CMakeFiles/dd_complex_no_kokkos_smoke.dir/build.make:76: tests/CMakeFiles/dd_complex_no_kokkos_smoke.dir/standalone/dd_complex_no_kokkos_smoke.cpp.o] Error 1
+gmake[2]: Target 'tests/CMakeFiles/dd_complex_no_kokkos_smoke.dir/build' not remade because of errors.
+gmake[1]: *** [CMakeFiles/Makefile2:1124: tests/CMakeFiles/dd_complex_no_kokkos_smoke.dir/all] Error 2
+1 error detected in the compilation of "/home/rbarik/xpm-a100-validate/tests/standalone/ff_complex_no_kokkos_smoke.cpp".
+gmake[2]: *** [tests/CMakeFiles/ff_complex_no_kokkos_smoke.dir/build.make:76: tests/CMakeFiles/ff_complex_no_kokkos_smoke.dir/standalone/ff_complex_no_kokkos_smoke.cpp.o] Error 1
+gmake[2]: Target 'tests/CMakeFiles/ff_complex_no_kokkos_smoke.dir/build' not remade because of errors.
+gmake[1]: *** [CMakeFiles/Makefile2:1176: tests/CMakeFiles/ff_complex_no_kokkos_smoke.dir/all] Error 2
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(60): error: "void (std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator, std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::size_type)" (aka "void (const __float128 *, std::size_t)") contains a 128-bit floating-point, which is not supported in device code
+        constexpr initializer_list(const_iterator __a, size_type __l)
+                  ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 997 of /home/rbarik/xpm-a100-validate/scripts/sweep_accuracy.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(73): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        begin() const noexcept { return _M_array; }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 997 of /home/rbarik/xpm-a100-validate/scripts/sweep_accuracy.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(77): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        end() const noexcept { return begin() + size(); }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 997 of /home/rbarik/xpm-a100-validate/scripts/sweep_accuracy.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(60): error: "void (std::initializer_list<std::vector<__float128, std::allocator<__float128>> *>::const_iterator, std::initializer_list<std::vector<__float128, std::allocator<__float128>> *>::size_type)" (aka "void (std::vector<__float128, std::allocator<__float128>> *const *, std::size_t)") contains a 128-bit floating-point, which is not supported in device code
+        constexpr initializer_list(const_iterator __a, size_type __l)
+                  ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=std::vector<__float128, std::allocator<__float128>> *]" at line 1022 of /home/rbarik/xpm-a100-validate/scripts/sweep_accuracy.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(73): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>> *>::const_iterator () const noexcept" (aka "std::vector<__float128, std::allocator<__float128>> *const *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        begin() const noexcept { return _M_array; }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=std::vector<__float128, std::allocator<__float128>> *]" at line 1022 of /home/rbarik/xpm-a100-validate/scripts/sweep_accuracy.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(77): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>> *>::const_iterator () const noexcept" (aka "std::vector<__float128, std::allocator<__float128>> *const *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        end() const noexcept { return begin() + size(); }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=std::vector<__float128, std::allocator<__float128>> *]" at line 1022 of /home/rbarik/xpm-a100-validate/scripts/sweep_accuracy.cpp
+
+/home/rbarik/xpm-a100-validate/scripts/sweep_accuracy.cpp(4218): warning #550-D: variable "out_set" was set but never used
+    bool quiet = false, out_set = false, ulp_gate = false;
+                        ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/home/rbarik/xpm-a100-validate/scripts/sweep_accuracy.cpp(273): warning #177-D: variable "<unnamed>::kDefaultOut" was declared but never referenced
+  const char* const kDefaultOut = "validation/sweep/sweep_baseline.csv";
+                    ^
+
+/home/rbarik/xpm-a100-validate/scripts/sweep_accuracy.cpp(276): warning #177-D: variable "<unnamed>::kDefaultClassifyFrac" was declared but never referenced
+  const double kDefaultClassifyFrac = 0.50;
+               ^
+
+/home/rbarik/xpm-a100-validate/scripts/sweep_accuracy.cpp(2739): warning #177-D: variable "<unnamed>::kRegionSubnormalLimb" was declared but never referenced
+  const char* const kRegionSubnormalLimb = "SUBNORMAL_LIMB";
+                    ^
+
+/home/rbarik/xpm-a100-validate/scripts/sweep_accuracy.cpp(2743): warning #177-D: variable "<unnamed>::kRegionJumpUnresolved" was declared but never referenced
+  const char* const kRegionJumpUnresolved = "JUMP_UNRESOLVED";
+                    ^
+
+6 errors detected in the compilation of "/home/rbarik/xpm-a100-validate/scripts/sweep_accuracy.cpp".
+gmake[2]: *** [tests/CMakeFiles/sweep_accuracy.dir/build.make:76: tests/CMakeFiles/sweep_accuracy.dir/__/scripts/sweep_accuracy.cpp.o] Error 1
+gmake[2]: Target 'tests/CMakeFiles/sweep_accuracy.dir/build' not remade because of errors.
+gmake[1]: *** [CMakeFiles/Makefile2:1280: tests/CMakeFiles/sweep_accuracy.dir/all] Error 2
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(60): error: "void (std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator, std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::size_type)" (aka "void (const __float128 *, std::size_t)") contains a 128-bit floating-point, which is not supported in device code
+        constexpr initializer_list(const_iterator __a, size_type __l)
+                  ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 471 of /home/rbarik/xpm-a100-validate/src/demo_qf_real.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(73): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        begin() const noexcept { return _M_array; }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 471 of /home/rbarik/xpm-a100-validate/src/demo_qf_real.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(77): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        end() const noexcept { return begin() + size(); }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 471 of /home/rbarik/xpm-a100-validate/src/demo_qf_real.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(60): error: "void (std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator, std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::size_type)" (aka "void (const __float128 *, std::size_t)") contains a 128-bit floating-point, which is not supported in device code
+        constexpr initializer_list(const_iterator __a, size_type __l)
+                  ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 125 of /home/rbarik/xpm-a100-validate/src/bench_cost.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(73): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        begin() const noexcept { return _M_array; }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 125 of /home/rbarik/xpm-a100-validate/src/bench_cost.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(77): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        end() const noexcept { return begin() + size(); }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 125 of /home/rbarik/xpm-a100-validate/src/bench_cost.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(60): error: "void (std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator, std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::size_type)" (aka "void (const __float128 *, std::size_t)") contains a 128-bit floating-point, which is not supported in device code
+        constexpr initializer_list(const_iterator __a, size_type __l)
+                  ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 440 of /home/rbarik/xpm-a100-validate/src/demo_ff_real.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(60): error: "void (std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator, std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::size_type)" (aka "void (const __float128 *, std::size_t)") contains a 128-bit floating-point, which is not supported in device code
+        constexpr initializer_list(const_iterator __a, size_type __l)
+                  ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 466 of /home/rbarik/xpm-a100-validate/src/demo_tf_real.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(73): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        begin() const noexcept { return _M_array; }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 440 of /home/rbarik/xpm-a100-validate/src/demo_ff_real.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(60): error: "void (std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator, std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::size_type)" (aka "void (const __float128 *, std::size_t)") contains a 128-bit floating-point, which is not supported in device code
+        constexpr initializer_list(const_iterator __a, size_type __l)
+                  ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 398 of /home/rbarik/xpm-a100-validate/src/demo_real.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(60): error: "void (std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator, std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::size_type)" (aka "void (const __float128 *, std::size_t)") contains a 128-bit floating-point, which is not supported in device code
+        constexpr initializer_list(const_iterator __a, size_type __l)
+                  ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 387 of /home/rbarik/xpm-a100-validate/src/demo_ff_complex.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(73): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        begin() const noexcept { return _M_array; }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 466 of /home/rbarik/xpm-a100-validate/src/demo_tf_real.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(77): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        end() const noexcept { return begin() + size(); }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 440 of /home/rbarik/xpm-a100-validate/src/demo_ff_real.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(60): error: "void (std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator, std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::size_type)" (aka "void (const __float128 *, std::size_t)") contains a 128-bit floating-point, which is not supported in device code
+        constexpr initializer_list(const_iterator __a, size_type __l)
+                  ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 354 of /home/rbarik/xpm-a100-validate/src/demo_complex.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(73): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        begin() const noexcept { return _M_array; }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 398 of /home/rbarik/xpm-a100-validate/src/demo_real.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(73): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        begin() const noexcept { return _M_array; }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 387 of /home/rbarik/xpm-a100-validate/src/demo_ff_complex.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(77): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        end() const noexcept { return begin() + size(); }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 466 of /home/rbarik/xpm-a100-validate/src/demo_tf_real.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(60): error: "void (std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator, std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::size_type)" (aka "void (const __float128 *, std::size_t)") contains a 128-bit floating-point, which is not supported in device code
+        constexpr initializer_list(const_iterator __a, size_type __l)
+                  ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 407 of /home/rbarik/xpm-a100-validate/src/demo_tf_complex.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(73): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        begin() const noexcept { return _M_array; }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 354 of /home/rbarik/xpm-a100-validate/src/demo_complex.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(77): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        end() const noexcept { return begin() + size(); }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 398 of /home/rbarik/xpm-a100-validate/src/demo_real.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(77): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        end() const noexcept { return begin() + size(); }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 387 of /home/rbarik/xpm-a100-validate/src/demo_ff_complex.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(73): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        begin() const noexcept { return _M_array; }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 407 of /home/rbarik/xpm-a100-validate/src/demo_tf_complex.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(77): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        end() const noexcept { return begin() + size(); }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 354 of /home/rbarik/xpm-a100-validate/src/demo_complex.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(77): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        end() const noexcept { return begin() + size(); }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 407 of /home/rbarik/xpm-a100-validate/src/demo_tf_complex.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(60): error: "void (std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator, std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::size_type)" (aka "void (const __float128 *, std::size_t)") contains a 128-bit floating-point, which is not supported in device code
+        constexpr initializer_list(const_iterator __a, size_type __l)
+                  ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 407 of /home/rbarik/xpm-a100-validate/src/demo_qf_complex.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(73): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        begin() const noexcept { return _M_array; }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 407 of /home/rbarik/xpm-a100-validate/src/demo_qf_complex.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(77): error: "std::initializer_list<std::vector<__float128, std::allocator<__float128>>::value_type>::const_iterator () const noexcept" (aka "const __float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        end() const noexcept { return begin() + size(); }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=__float128]" at line 407 of /home/rbarik/xpm-a100-validate/src/demo_qf_complex.cpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(60): error: "void (std::initializer_list<std::vector<kokkos_ep::float128, std::allocator<kokkos_ep::float128>>::value_type>::const_iterator, std::initializer_list<std::vector<kokkos_ep::float128, std::allocator<kokkos_ep::float128>>::value_type>::size_type)" (aka "void (const kokkos_ep::float128 *, std::size_t)") contains a 128-bit floating-point, which is not supported in device code
+        constexpr initializer_list(const_iterator __a, size_type __l)
+                  ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=kokkos_ep::float128]" at line 423 of /home/rbarik/xpm-a100-validate/tests/test_utils.hpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(73): error: "std::initializer_list<std::vector<kokkos_ep::float128, std::allocator<kokkos_ep::float128>>::value_type>::const_iterator () const noexcept" (aka "const kokkos_ep::float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        begin() const noexcept { return _M_array; }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=kokkos_ep::float128]" at line 423 of /home/rbarik/xpm-a100-validate/tests/test_utils.hpp
+
+/soft/compilers/gcc/13.3.0/x86_64-suse-linux/include/c++/13.3.0/initializer_list(77): error: "std::initializer_list<std::vector<kokkos_ep::float128, std::allocator<kokkos_ep::float128>>::value_type>::const_iterator () const noexcept" (aka "const kokkos_ep::float128 *() const noexcept") contains a 128-bit floating-point, which is not supported in device code
+        end() const noexcept { return begin() + size(); }
+        ^
+          detected during instantiation of class "std::initializer_list<_E> [with _E=kokkos_ep::float128]" at line 423 of /home/rbarik/xpm-a100-validate/tests/test_utils.hpp
+
+3 errors detected in the compilation of "/home/rbarik/xpm-a100-validate/src/bench_cost.cpp".
+gmake[2]: *** [CMakeFiles/kokkos_ep_bench_cost.dir/build.make:76: CMakeFiles/kokkos_ep_bench_cost.dir/src/bench_cost.cpp.o] Error 1
+gmake[2]: Target 'CMakeFiles/kokkos_ep_bench_cost.dir/build' not remade because of errors.
+gmake[1]: *** [CMakeFiles/Makefile2:396: CMakeFiles/kokkos_ep_bench_cost.dir/all] Error 2
+3 errors detected in the compilation of "/home/rbarik/xpm-a100-validate/tests/hello_test.cpp".
+gmake[2]: *** [tests/CMakeFiles/hello_test.dir/build.make:76: tests/CMakeFiles/hello_test.dir/hello_test.cpp.o] Error 1
+gmake[2]: Target 'tests/CMakeFiles/hello_test.dir/build' not remade because of errors.
+gmake[1]: *** [CMakeFiles/Makefile2:422: tests/CMakeFiles/hello_test.dir/all] Error 2
+3 errors detected in the compilation of "/home/rbarik/xpm-a100-validate/src/demo_complex.cpp".
+gmake[2]: *** [CMakeFiles/kokkos_ep_demo_complex.dir/build.make:76: CMakeFiles/kokkos_ep_demo_complex.dir/src/demo_complex.cpp.o] Error 1
+gmake[2]: Target 'CMakeFiles/kokkos_ep_demo_complex.dir/build' not remade because of errors.
+gmake[1]: *** [CMakeFiles/Makefile2:214: CMakeFiles/kokkos_ep_demo_complex.dir/all] Error 2
+3 errors detected in the compilation of "/home/rbarik/xpm-a100-validate/src/demo_real.cpp".
+3 errors detected in the compilation of "/home/rbarik/xpm-a100-validate/src/demo_ff_complex.cpp".
+gmake[2]: *** [CMakeFiles/kokkos_ep_demo.dir/build.make:76: CMakeFiles/kokkos_ep_demo.dir/src/demo_real.cpp.o] Error 1
+gmake[2]: Target 'CMakeFiles/kokkos_ep_demo.dir/build' not remade because of errors.
+gmake[1]: *** [CMakeFiles/Makefile2:188: CMakeFiles/kokkos_ep_demo.dir/all] Error 2
+3 errors detected in the compilation of "/home/rbarik/xpm-a100-validate/src/demo_qf_real.cpp".
+gmake[2]: *** [CMakeFiles/kokkos_ep_demo_ff_complex.dir/build.make:76: CMakeFiles/kokkos_ep_demo_ff_complex.dir/src/demo_ff_complex.cpp.o] Error 1
+gmake[2]: Target 'CMakeFiles/kokkos_ep_demo_ff_complex.dir/build' not remade because of errors.
+gmake[1]: *** [CMakeFiles/Makefile2:266: CMakeFiles/kokkos_ep_demo_ff_complex.dir/all] Error 2
+3 errors detected in the compilation of "/home/rbarik/xpm-a100-validate/src/demo_tf_complex.cpp".
+3 errors detected in the compilation of "/home/rbarik/xpm-a100-validate/src/demo_ff_real.cpp".
+gmake[2]: *** [CMakeFiles/kokkos_ep_demo_qf.dir/build.make:76: CMakeFiles/kokkos_ep_demo_qf.dir/src/demo_qf_real.cpp.o] Error 1
+gmake[2]: Target 'CMakeFiles/kokkos_ep_demo_qf.dir/build' not remade because of errors.
+gmake[1]: *** [CMakeFiles/Makefile2:292: CMakeFiles/kokkos_ep_demo_qf.dir/all] Error 2
+gmake[2]: *** [CMakeFiles/kokkos_ep_demo_tf_complex.dir/build.make:76: CMakeFiles/kokkos_ep_demo_tf_complex.dir/src/demo_tf_complex.cpp.o] Error 1
+gmake[2]: Target 'CMakeFiles/kokkos_ep_demo_tf_complex.dir/build' not remade because of errors.
+gmake[1]: *** [CMakeFiles/Makefile2:370: CMakeFiles/kokkos_ep_demo_tf_complex.dir/all] Error 2
+gmake[2]: *** [CMakeFiles/kokkos_ep_demo_ff.dir/build.make:76: CMakeFiles/kokkos_ep_demo_ff.dir/src/demo_ff_real.cpp.o] Error 1
+gmake[2]: Target 'CMakeFiles/kokkos_ep_demo_ff.dir/build' not remade because of errors.
+gmake[1]: *** [CMakeFiles/Makefile2:240: CMakeFiles/kokkos_ep_demo_ff.dir/all] Error 2
+3 errors detected in the compilation of "/home/rbarik/xpm-a100-validate/src/demo_tf_real.cpp".
+gmake[2]: *** [CMakeFiles/kokkos_ep_demo_tf.dir/build.make:76: CMakeFiles/kokkos_ep_demo_tf.dir/src/demo_tf_real.cpp.o] Error 1
+gmake[2]: Target 'CMakeFiles/kokkos_ep_demo_tf.dir/build' not remade because of errors.
+gmake[1]: *** [CMakeFiles/Makefile2:344: CMakeFiles/kokkos_ep_demo_tf.dir/all] Error 2
+3 errors detected in the compilation of "/home/rbarik/xpm-a100-validate/src/demo_qf_complex.cpp".
+gmake[2]: *** [CMakeFiles/kokkos_ep_demo_qf_complex.dir/build.make:76: CMakeFiles/kokkos_ep_demo_qf_complex.dir/src/demo_qf_complex.cpp.o] Error 1
+gmake[2]: Target 'CMakeFiles/kokkos_ep_demo_qf_complex.dir/build' not remade because of errors.
+gmake[1]: *** [CMakeFiles/Makefile2:318: CMakeFiles/kokkos_ep_demo_qf_complex.dir/all] Error 2
+gmake[1]: Target 'all' not remade because of errors.
+gmake: *** [Makefile:146: all] Error 2
+gmake: Target 'default_target' not remade because of errors.
