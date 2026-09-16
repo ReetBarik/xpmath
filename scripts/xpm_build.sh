@@ -41,9 +41,14 @@
 #   compiler        g++ (host), nvcc_wrapper wrapping nvcc+g++ (a100), hipcc
 #                   (mi250). There is no common compiler for three vendors.
 #   execution space Serial, Cuda, HIP.
-#   host oracle     libquadmath is present in the host and a100 Kokkos installs
-#                   and ABSENT from the mi250 one, so the oracle-scored tests
-#                   runtime-SKIP on mi250. A skipped test is not a passing one.
+#   host oracle     NO LONGER A DIFFERENCE, and the row is kept to say so. It
+#                   used to read: libquadmath is present in the host and a100
+#                   Kokkos installs and ABSENT from the mi250 one, so the
+#                   oracle-scored tests runtime-SKIP on mi250. The B-arc removed
+#                   the last libquadmath call site from tests/ and the skip that
+#                   hid it; sweep_accuracy's oracle is MPFR/MPC and links no
+#                   libquadmath on any arch. Whether the Kokkos install has
+#                   libquadmath no longer changes which tests score.
 #   device build    a100 and mi250 additionally compile every Kokkos-linked TU
 #                   through a device pass; host does not.
 #
@@ -206,9 +211,14 @@ CONTRACT=${ARCH_CONTRACT[$ARCH]}
 KOKKOS_PREFIX=${ARCH_KOKKOS_PREFIX[$ARCH]}
 
 # ---------------------------------------------------------------------------
-# Modules. A build made without gcc/13.3.0 links a different libquadmath, moves
-# the oracle fingerprint off 578322f998a329c8, and makes ~328 sweep rows read
-# as regressions that are not there. Loading them is not optional.
+# Modules. This used to be the libquadmath-fingerprint trap: a binary RUN
+# without gcc/13.3.0 resolved a different libquadmath, moved the oracle
+# fingerprint off 578322f998a329c8, and made ~390 sweep rows read as
+# regressions that were not there. That is RETIRED -- sweep_accuracy links no
+# libquadmath and MPFR/MPC are correctly rounded, so the answer no longer
+# depends on which build is found (CLAUDE.md, "Working on accuracy"). Load them
+# anyway: the rest of the suite is not sweep_accuracy, and this is the compiler
+# of record for every number in validation/.
 # ---------------------------------------------------------------------------
 if ! command -v module >/dev/null 2>&1 && [ -r /etc/profile.d/modules.sh ]; then
   # shellcheck disable=SC1091

@@ -7,7 +7,10 @@ repository issues a competing opinion.
 
 ## 1. The measurement
 
-**Error in ulps against a `__float128` / `__complex128` oracle.**
+**Error in ulps against an MPFR/MPC oracle at 400 bits, quantised into
+`__float128` / `__complex128`.** The carrier is `__float128`; the reference is
+not libquadmath — see §1's oracle paragraph below, which is the precise
+statement and the one to trust if this line and it ever drift apart.
 
 ```
 ulps = |got - true| / (|true| * 2^-p)          p = 106 (DD), 96 (QF), 72 (TF), 48 (FF)
@@ -240,6 +243,11 @@ degrades. It is guarded by the `domains_fresh` ctest target, so it cannot drift
 from the data.
 
 ## 5. Running it
+
+`scripts/xpm_build.sh --arch host --build-dir <dir>` does the three lines below
+for you and additionally stamps `build-info.txt`, which the `build_provenance`
+target checks. The explicit form is kept because it is what CI runs and what
+this section's claims are about:
 
 ```bash
 module use /soft/modulefiles && module load gcc/13.3.0 cmake/3.28.3   # gcc FIRST

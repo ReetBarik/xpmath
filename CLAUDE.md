@@ -114,7 +114,9 @@ compiled with that flag) and the complex oracle through
 patched into every Kokkos install by hand. A Kokkos with libquadmath OFF — the
 `~/xpm_device/kokkos-hip-gfx90a` (MI250) install among them — now CONFIGURES
 this project cleanly with no warning. Configures; that is a narrower claim than
-builds, and the MI250 build state is separate inherited work.
+builds, and the MI250 build state is now MEASURED rather than inherited: S8c
+(Cobalt `1000943`, 2026-09-16) configured on the card and then **39 of 49
+targets did not build**. See the S8c and STEP-2 CLOSEOUT blocks.
 
 **The wrapper is `scripts/xpm_build.sh`. Target hardware is an ARGUMENT.**
 
@@ -132,8 +134,11 @@ machine; `--kokkos build` delegates to `scripts/build_with_kokkos.sh`.
 `--opt` defaults to `O3` and travels as `CMAKE_CXX_FLAGS_RELEASE`.
 Read the header block of that script before comparing numbers across two
 arches — it states what is held identical (`-O` level, C++17, contraction off)
-and what is not (compiler, execution space, and the host oracle, which the
-mi250 Kokkos does **not** have).
+and what is not (compiler, execution space). The host oracle used to be on that
+"not held identical" list, because the mi250 Kokkos has no libquadmath and the
+oracle-scored tests runtime-SKIPped there. It is not any more: the oracle is
+MPFR/MPC and links no libquadmath on any arch, so whether the Kokkos install has
+it no longer changes which tests score.
 
 **Measured, 2026-09-16:** `--arch host` 49/49; `--arch host --no-kokkos` 21/21;
 `--arch a100` configures and then fails to compile, on the S6 `__float128`
@@ -223,7 +228,9 @@ splitter-overflow inputs) consumed by `corpus_test` and the invariant tests.
 
 Read **docs/CORRECTNESS.md** first. The short version:
 
-- One measurement: error in ulps against the `__float128` oracle.
+- One measurement: error in ulps against the MPFR/MPC oracle at 400 bits,
+  quantised into `__float128`. The carrier is still `__float128`; the reference
+  is not libquadmath any more.
 - One verdict per point: at or below its derived bound, or above it.
 - The gate allows `kUlpAllowance = 8.0` × the derived bound
   (`scripts/sweep_accuracy.cpp:1937`). A point can therefore exceed its raw
@@ -277,16 +284,31 @@ Read **docs/CORRECTNESS.md** first. The short version:
 - A STALE sweep binary yields structurally impossible results (cross-backend
   deltas from a single-backend change). Rebuild before believing a diff.
 
-**The accuracy record is host-measured, but this code HAS run on GPUs.** Two
+**The accuracy record is host-measured, but this code HAS run on GPUs.** Four
 campaigns executed it on real hardware: A100/sm_80 under CUDA (S1 — 7 of the
 then-23 ctest targets built and all 7 passed, though only 5 are device evidence,
-and DD/FF only), and MI250X/gfx90a under HIP (S8 bringup, JLSE jobs
+and DD/FF only), MI250X/gfx90a under HIP (S8 bringup, JLSE jobs
 1000794/1000851/1000909, 2026-09-13…15), which is where both ROCm defects in
-Platform Constraints were found. Neither produced an accuracy table — the
-`__float128` oracle cannot share a translation unit with device code — so every
-number in `validation/sweep/` and `docs/DOMAINS.md` is still CPU-measured, and
-`docs/DOMAINS.md` remains host-only and wrong below ~1e-31 under FTZ. The S1
-artifacts under `validation/a100/` were pruned; the record is the S1 STATUS block.
+Platform Constraints were found, and then the two step-2 wrapper validations of
+2026-09-16: A100 again (S8b, Cobalt `1000938` — 38 passed / 2 failed / 9 not
+built of 49, the five-test device gate GREEN) and MI250X again (S8c, Cobalt
+`1000943` — 8 passed / 2 failed / **39 not built** of 49, and not one of the 8
+compiles a line of gfx90a code). None produced an accuracy table — the
+`__float128` oracle cannot share a translation unit with device code (S6) — so
+every number in `validation/sweep/` and `docs/DOMAINS.md` is still CPU-measured,
+and `docs/DOMAINS.md` remains host-only and wrong below ~1e-31 under FTZ.
+
+`validation/a100/` is TRACKED AGAIN as of S8b and carries job `1000938`'s logs;
+the older S1 artifacts under that path were pruned and the S1 record is still
+its STATUS block. `validation/mi250/` carries S8c's. **Both campaign scripts
+(`validation/a100/run_a100.sh`, `validation/mi250/run_mi250_build.sh`) ran
+against `0230239`, which predates the oracle migration**, so their `ldd |
+grep quadmath` step is now vacuous — `sweep_accuracy` links no libquadmath to
+find. They are left byte-identical to what produced the committed logs. Do not
+read a silent quadmath step in those logs as a failure, and do not reuse that
+check in anything new: on a Kokkos-linked target `ldd` sees Kokkos's own
+libquadmath, so the acceptance check that means something is the `nm -D
+--undefined-only` one.
 
 ## Documentation
 
@@ -306,8 +328,11 @@ artifacts under `validation/a100/` were pruned; the record is the S1 STATUS bloc
 - **validation/sweep/open_defects.txt** — the ONLY list of open defects, enforced
   in both directions by the `sweep_absolute_gate` ctest target.
 - **docs/UPSTREAM_PLAN_STATUS.md** — one STATUS block per completed sub-plan; read this before starting one.
-  Blocks exist for S0–S3, S5, S7, S10. **S8 (cross-vendor device matrix) is the
-  active sub-plan and has no block yet** — the gfx90a work above is S8 in flight.
+  Blocks exist for S0–S3, S5, S7, S8, S8b, S8c, S10, and **STEP-2 CLOSEOUT**, which
+  covers the arch wrapper, the two device validations and the oracle migration as
+  one arc and lists what they do NOT cover. Read the closeout block first; it is
+  the only place the not-covered list is written down. S8 remains **PARTIAL** —
+  its own block says so, and S8b/S8c narrowed it without closing it.
 - **docs/TEST_SUITE_PLAN.md** — test suite architecture and conventions
 - **docs/PERF_PLAN.md** — performance measurement plan (PARKED pending the upstream restructure)
 

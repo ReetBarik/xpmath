@@ -1078,3 +1078,139 @@ for this). All 39 accounted for:
   "not built" to "built and skipped", and is the only one of the four that
   blocks a whole class of hardware rather than one toolchain. Defect 3 is a
   two-line generator guard. Defects 2 and 4 are real portability work.
+
+---
+
+## STEP-2 CLOSEOUT — the arch wrapper, two device runs, and the oracle migration
+
+**This block covers an arc, not a sub-plan.** Seven branches were reconciled
+into `step2/closeout` off `main`, in dependency order:
+`step2/arch-wrapper` → `step2/a100-validate` → `step2/mi250-validate` →
+`oracle/b0-fingerprint` → `b1-sweep` → `b2-tests` → `b3-demos`. Read it as the
+answer to one question: after all of that, what is measured, and what is still
+not?
+
+### What step 2 delivered (the A-arc)
+
+`scripts/xpm_build.sh` — 317 lines, `--arch {host|a100|mi250}` required. Target
+hardware became an ARGUMENT. Before it, the only recipe was
+`scripts/build_with_kokkos.sh`, whose GPU was the literal `Kokkos_ARCH_BLACKWELL100`
+on line 45 — sm_100, which is `CUDAFP128Kokkos`'s requirement and nothing on
+`main`'s target list — and whose HIP branch was unreachable because line 53
+assigned the CUDA flag row unconditionally. Retargeting meant editing two lines
+and remembering which two. The arch is now a row in a data table: modules,
+compiler, Kokkos prefix, `Kokkos_ARCH_*`, FP-contraction spelling.
+`build_with_kokkos.sh` survives, is driven by its environment, and its HIP branch
+is now reachable — **and still unexecuted.**
+
+Provenance: every configure, the wrapper's **or a bare `cmake -B build`**, stamps
+`build-info.txt` with arch, git HEAD (`-dirty` when the tree is not clean),
+compiler and version, Kokkos prefix, full `CMAKE_CXX_FLAGS`, `-O` level and a UTC
+timestamp. The stamp is written by the top-level `CMakeLists.txt`, not by the
+wrapper, on purpose: a stamp only the wrapper wrote would be absent from exactly
+the builds nobody can trace. The new `build_provenance` ctest target fails when
+it is missing or short a field. Three campaign artifacts in September 2026 could
+not be traced to a tree; that is the whole reason. **This is the one target the
+arc adds — 48 → 49 with Kokkos, 20 → 21 without.**
+
+### What the device runs delivered (A2, A3)
+
+| run | job | counts of 49 | what it establishes |
+|---|---|---|---|
+| **S8b** A100 / sm_80, node `gpu06` | Cobalt `1000938`, 2026-09-16 | **38 passed / 2 failed / 9 not built** | the `a100` row is real: `nvcc_wrapper`, `--fmad=false`, sm_80 prefix, `cuda/12.9.1`; Kokkos resolved to **Cuda**, not a silent Serial fallback. The five-test S1 device gate is GREEN. QF and TF get a device baseline for the first time — S1 had none. |
+| **S8c** MI250X / gfx90a, node `amdgpu04` | Cobalt `1000943`, 2026-09-16 | **8 passed / 2 failed / 39 not built** | the `mi250` row configures a real gfx90a build on the card with the intended compiler, arch and contraction flag, and the default execution space is HIP and executes. **Not one of the 8 passes compiles a line of gfx90a code** — they are the script- and CMake-driven targets. |
+
+Both ran against `0230239` (`step2/arch-wrapper`), which PREDATES the oracle
+migration. Neither produced an accuracy table.
+
+### What the oracle migration delivered (the B-arc)
+
+- **b0** — the libquadmath fingerprint was a property of the library loaded at
+  **run** time, not of the compiler that built the binary. That cost two
+  sessions. Recorded before it was fixed, so the fix could be measured against it.
+- **b1** — MPFR at 400 bits for the real ops, MPC at 400 bits for the complex
+  ones, `__float128` demoted from oracle to carrier. `sweep_accuracy` links
+  `-lmpc -lmpfr -lgmp` and **no `-lquadmath`**, asserted by two acceptance checks
+  in the source header (`ldd | grep -i quadmath` empty, `nm -D --undefined-only |
+  grep -E 'q$'` empty) rather than hoped for. MPFR/MPC became a configure
+  `FATAL_ERROR` instead of an `if(XPMATH_MPFR_FOUND)` that removed four targets
+  while leaving the lane green.
+- **b2** — the last libquadmath call sites in `tests/`, **and the runtime skip
+  that hid them**.
+- **b3** — the demo accuracy columns, and the non-upstream Kokkos patch header
+  they required (`impl/Kokkos_ComplexQuadPrecisionMath.hpp`, hand-patched into
+  every install). The demos are timing and smoke only now. `Kokkos_ENABLE_LIBQUADMATH=ON`
+  stopped being a build requirement of this project.
+
+The retirement of the b0 trap is MEASURED, not inferred: the same binary run
+under `env -i` with no module and no `LD_LIBRARY_PATH` produced a sweep
+**byte-identical in all 436,080 rows** to the module-loaded run.
+
+### Measured at closeout, by execution
+
+On this host, `gcc/13.3.0` + `cmake/3.28.3`, at the merge commit:
+
+| check | result |
+|---|---|
+| `xpm_build.sh --arch host` then ctest | **49/49 passed** |
+| `xpm_build.sh --arch host --no-kokkos` then ctest | **21/21 passed** |
+| `sweep_absolute_gate` / `sweep_monotone_gate` | both **Passed** |
+| `sweep_absolute_gate_selftest` / `sweep_monotone_gate_selftest` | both **Passed** |
+| `scripts/check_standalone_no_kokkos.sh` | **PASS** — 62,307 preprocessed lines, 0 Kokkos hits |
+| `build_provenance` | **Passed** in both configurations |
+
+49 and 21 are not typos for 48 and 20. Every B-arc section verified against
+48/20 and was right to: the B-arc adds no target. The A-arc adds
+`build_provenance`. `ci.yml` and `tests/README.md` therefore disagreed between
+the two arcs on lines git merges cleanly and wrongly; they were settled by
+running ctest, not by reading the diff.
+
+### WHAT THIS ARC DOES NOT COVER
+
+This is the part to read.
+
+- **S6 — the `__float128` device-TU split — is not done, and it is what blocks
+  the A100.** `std::vector<__float128>` will not compile under `nvcc`: Kokkos
+  exports `-arch=sm_XX` in its interface flags, so every consuming TU gets a
+  device pass, and nvcc rejects the 128-bit float in device code. No compiler
+  flag avoids it. 9 of 49 targets did not build on A100 for this reason plus a
+  second, distinct one (five standalone smokes that nvcc's frontend rejects with
+  `no operator "<<"` — about *who compiles* them, not who links them). Until S6
+  lands, **no accuracy verdict can come from any device build**, and the absence
+  of `sweep_*_gate` results in a device log is neither green nor red.
+- **`__float128` is still here.** The oracle migration removed libquadmath, not
+  `__float128`. It remains the arithmetic carrier in `scripts/sweep_accuracy.cpp`
+  (arithmetic from libgcc, elementary functions from glibc `*f128`) and the
+  measurement SUBJECT in `src/bench_cost.cpp`, which calls `::expq`/`::powq` and
+  still includes `<quadmath.h>`. So the x86_64 constraint on tests and demos has
+  **narrowed, not disappeared**. There is still no `CMAKE_SYSTEM_PROCESSOR` gate
+  anywhere in the tree; the only enforcement is that the x86 CI lanes are where
+  those targets are built. `-DKokkos_ENABLE_LIBQUADMATH=ON` survives in
+  `ci.yml` for exactly one consumer, `kokkos_ep_bench_cost`.
+- **39 of 49 targets do not build on gfx90a.** S8c's four defects are
+  unfixed by design. The S8 matrix cell "MI250X / oracle-free tests" stays **no**.
+- **`--arch mi250 --kokkos build` and the `build_with_kokkos.sh` HIP branch
+  remain unexecuted.** The branch is reachable now; nothing has built a Kokkos
+  through it.
+- **Per-test device attribution on A100 is not established.** Only the five gate
+  tests ran under `ctest -V`. Every binary in that build has
+  `DefaultExecutionSpace == Cuda`, but which of the other 33 passing tests launch
+  device kernels versus initialise CUDA and compute on the host is unknown.
+- **The two campaign scripts are now partly vacuous and were deliberately left
+  alone.** `validation/a100/run_a100.sh` and `validation/mi250/run_mi250_build.sh`
+  both check `ldd <build>/tests/sweep_accuracy | grep quadmath` and warn if it is
+  not the gcc/13.3.0 one. After b1 there is no libquadmath to find. They are kept
+  byte-identical to what produced the committed logs, because a script that no
+  longer matches its own log is worse than a stale check. Anything NEW must use
+  the `nm -D --undefined-only` form: on a Kokkos-linked target `ldd` sees
+  Kokkos's own libquadmath and says nothing about this repo.
+- **The fingerprint result is one host with one `/usr/lib64` MPFR.** A different
+  MPFR *should* agree — correct rounding leaves nothing to disagree about — but
+  nobody has run two. A mismatch is no longer explained by the environment;
+  treat it as a real change in the reference.
+- **S8 stays PARTIAL.** S8b and S8c narrowed it and did not close it. Deliverable
+  3 (CUDA re-run against the S1 baseline) is met for the scope S1 established;
+  the cross-vendor matrix is still 1 of 4 cells by the measure S8 set itself.
+- **`scripts/gen_corpus.cpp` still scores against libquadmath**, is referenced by
+  no `CMakeLists.txt`, and is never built. Its numbers are not comparable to the
+  sweep's point for point.

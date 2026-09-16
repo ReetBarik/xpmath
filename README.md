@@ -403,17 +403,32 @@ cmake -B build -DCMAKE_PREFIX_PATH=<kokkos-install-dir>
 cmake --build build -j$(nproc)
 ```
 
-On the JLSE testbed maintained by CELS at Argonne National Lab, load modules
-first and let the helper script fetch and install Kokkos:
+On the JLSE testbed maintained by CELS at Argonne National Lab, target hardware
+is an argument to `scripts/xpm_build.sh`, which loads the modules, picks the
+compiler, the Kokkos prefix and the FP-contraction spelling for that arch, and
+configures:
 
 ```bash
-source scripts/prepare.sh                      # JLSE modules
-source scripts/build_with_kokkos.sh <install-dir>
+scripts/xpm_build.sh --arch host  --build-dir /tmp/b_host
+scripts/xpm_build.sh --arch a100  --build-dir /tmp/b_a100
+scripts/xpm_build.sh --arch mi250 --build-dir /tmp/b_mi250
+scripts/xpm_build.sh --arch host --no-kokkos --build-dir /tmp/b_nok
 ```
 
-`scripts/prepare.sh` is JLSE-specific — it hardcodes JLSE module names and
-paths. Other Argonne resources (Polaris, Aurora, Improv) will need their own
-module recipe; the rest of the build flow is portable.
+Read that script's header before comparing numbers across two arches: it states
+what is held identical (`-O` level, C++17, contraction off) and what is not
+(compiler, execution space). `--kokkos build` delegates to
+`scripts/build_with_kokkos.sh`, which still fetches and installs Kokkos from
+source and is now driven by its environment rather than by literals.
+
+`scripts/xpm_build.sh` and `scripts/prepare.sh` are JLSE-specific — they
+hardcode JLSE module names and paths. Other Argonne resources (Polaris, Aurora,
+Improv) will need their own arch row; the rest of the build flow is portable.
+
+Every configure — the wrapper's or a bare `cmake -B build` — writes
+`build-info.txt` into the build directory recording the arch, git HEAD, compiler
+and version, Kokkos prefix, flags, `-O` level and a UTC timestamp. The
+`build_provenance` ctest target fails if it is missing or short a field.
 
 Kokkos raises the C++ standard to C++20 through its exported interface. No
 `Kokkos_ENABLE_LIBQUADMATH=ON` is needed: any Kokkos ≥5.1 built at C++20 works,
