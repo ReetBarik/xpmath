@@ -176,9 +176,19 @@ Read **docs/CORRECTNESS.md** first. The short version:
   produces uncompressed bytes under a `.gz` name. Write plain, then `gzip -9 -c`.
 - `ctest --test-dir` on a MISSING directory exits 0. Confirm the dir exists and
   that a nonzero test count ran, or the run proved nothing.
-- Build without the gcc module and a different libquadmath links: the oracle
-  fingerprint moves off `578322f998a329c8` and ~328 rows read as spurious
-  "increased". Load `gcc/13.3.0` in EVERY shell, before cmake.
+- The oracle fingerprint is a property of the libquadmath loaded at **run**
+  time, not of the compiler that built the binary — `sweep_accuracy` links
+  `-lquadmath` with no RPATH, so it resolves through `LD_LIBRARY_PATH`, which is
+  what the module sets. Every `/soft` gcc from 9.5.0 to 13.3.0 supplies the
+  libquadmath of record and yields `578322f998a329c8`; the system
+  `/usr/lib64/libquadmath.so.0` and the ubuntu-24.04 CI runner both yield
+  `54901e8104607a77`, differing in six of the 168 fingerprint fixtures (all
+  complex: `casinh` k=1,5, `csqrt` k=5, `casin`/`cacos`/`cacosh` k=7). So a
+  correctly BUILT binary still mis-scores if it is RUN without the module: 390
+  rows read as spurious "increased", 0 decreased, and the monotone gate exits 0
+  because it declines to interpret a mismatched fingerprint. Load `gcc/13.3.0`
+  in EVERY shell, before cmake **and** before ctest. A fingerprint mismatch is
+  this, until proven otherwise — it is not evidence that the baseline is stale.
 - The sweep is not bit-reproducible: ~23 rows shift between identical runs (as
   measured, on the 1,652-point real grid = 428,592 rows; `5f2fc90` widened it and
   the sweep is 436,080 rows today). That is what the monotone gate's noise floor
