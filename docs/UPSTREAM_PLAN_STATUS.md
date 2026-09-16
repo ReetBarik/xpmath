@@ -711,3 +711,211 @@ can assert bit-equality with the host for any op touching a transcendental.
   unavailable" on clang-based toolchains. **Still unmeasured.** Clang supports
   `__float128` on x86_64 host code, so this may work; nobody has tried.
 - A gfx90a Kokkos build is the largest single unknown remaining in S8.
+
+---
+
+## S8b — A100 re-validation of `scripts/xpm_build.sh --arch a100`
+
+**Commit:** this one (`validation/a100/run_a100.sh`, its logs, this block, and
+two `.gitignore` edits).
+
+**Run:** Cobalt job **`1000938`**, JLSE queue `gpu_a100`, node **`gpu06`**,
+`--mode script`, `-t 60`, 2026-09-16. Submitted 03:15:27 UTC, started 04:53:25,
+**task completed normally with an exit code of 0** at 05:06:03 — 12 min 38 s of
+node time after 1 h 38 m queued. Repo HEAD at build and run time: `0230239`
+(`step2/arch-wrapper`).
+
+**Counts: 38 passed / 2 failed / 9 not built, of 49 registered.**
+16 build targets failed to compile. The five-test S1 device gate is **GREEN**.
+
+**Outcome.** The `a100` row of the arch table is real. It selected
+`nvcc_wrapper`, `--fmad=false`, the sm_80 Kokkos prefix and `cuda/12.9.1`; the
+configure succeeded and `build-info.txt` recorded `arch: a100`. Kokkos resolved
+to CUDA — **not** a silent Serial fallback, which was the single largest risk to
+this run's value:
+
+```
+3: Oracle-independent (raw FP64 check). Execution space: Cuda
+4: Oracle-independent (raw FP32 check). Execution space: Cuda
+5: Execution space: Cuda
+```
+
+(`validation/a100/logs/ctest_gate_20260916_045326.log`, from `dd_invariant_test`,
+`ff_invariant_test` and `dd_property_test` respectively.) `nvidia-smi` on the
+node reports `NVIDIA A100-PCIE-40GB`; the install defines `KOKKOS_ENABLE_CUDA`,
+`KOKKOS_ENABLE_CUDA_LAMBDA`, `KOKKOS_ENABLE_CUDA_CONSTEXPR`,
+`KOKKOS_ENABLE_LIBQUADMATH` and `KOKKOS_ARCH_AMPERE80`, at `KOKKOS_ENABLE_CXX20`.
+
+### The S1 device regression gate — all five hold
+
+| test | S1 (`029180c`, gpu07) | S8b (`0230239`, gpu06) |
+|---|---|---|
+| `dd_invariant_test` | Passed 45.14 s | **Passed** 87.90 s |
+| `ff_invariant_test` | Passed 39.14 s | **Passed** 53.69 s |
+| `dd_property_test` | Passed 29.53 s | **Passed** 45.12 s |
+| `dd_eft_test` | Passed 0.95 s | **Passed** 1.26 s |
+| `ff_eft_test` | Passed 0.39 s | **Passed** 0.41 s |
+
+S2/S3/S5/S10 did not move a device result. S8 deliverable 3 — "CUDA re-run
+compared against the S1 baseline" — is **met** for the scope S1 established.
+The times roughly doubled; that is not analysed here and is not a correctness
+signal (different node, different driver: S1 saw driver `610.43.02`, this node
+reports KMD `610.57.04` / CUDA UMD `13.3`; `nvcc` is `12.9.86` in both).
+
+### Device coverage is far wider than S1's, and QF/TF appear for the first time
+
+S1 built 7 of 23 targets and stated flatly that there was **no QF device
+baseline at all**. This run passes 38 of 49, including every QF and TF test:
+`qf_eft_test`, `qf_nonoverlap_test` (93.06 s), `qf_property_test`,
+`qf_fma_guard_test` + `_contract_on`, `qf_cancellation_test`, `tf_eft_test` +
+`_contract_on`, `tf_property_test`, `tf_cancellation_test`, `tf_fma_guard_test`
++ `_contract_on`, plus `ff_property_test` and `ff_cancellation_test`.
+
+**Caveat, and it is a real one.** Only the five gate tests were run under
+`ctest -V`, so those are the only banners captured; the full run used
+`--output-on-failure`, which discards a passing test's output. Every binary in
+this build has `DefaultExecutionSpace == Cuda` — that is a compile-time property
+of the install, and the three banners above prove it — but *which* of the other
+33 passing tests actually launch device kernels, versus initialise CUDA and
+compute on the host, is **not** established by this run. S1 had to draw the same
+distinction (`corpus_test` and `dd_e2e_test` counted as "not device evidence").
+A future run wanting per-test attribution should run the whole suite under `-V`.
+
+### Findings — reported, not fixed
+
+**(a) The five `*_no_kokkos_smoke` targets fail to build, and the mechanism is
+NOT the one S1 recorded.** S1 attributed the breakage to Kokkos exporting
+`-arch=sm_80` in `INTERFACE_COMPILE_OPTIONS`, so every TU *linking*
+`Kokkos::kokkos` gets a device pass. These five link **no Kokkos at all** —
+`tests/CMakeLists.txt:374-379` only adds `include/` — and they still break,
+because on `--arch a100` the project-wide `CMAKE_CXX_COMPILER` is
+`nvcc_wrapper`, which sends every `.cpp` to `nvcc`, which gives every TU a
+device pass regardless of what it links. In that pass `XPMATH_ON_DEVICE` is
+defined (`include/xp/config.hpp:52-55`), so the host-only
+`operator<<(std::ostream&, const DoubleDouble&)` behind
+`#if !defined(XPMATH_ON_DEVICE)` (`include/xp/dd_math.hpp:175`) is not declared,
+and the ordinary host-side `os << pi` at
+`tests/standalone/dd_no_kokkos_smoke.cpp:95` has no overload:
+
+```
+tests/standalone/dd_no_kokkos_smoke.cpp(95): error: no operator "<<" matches these operands
+            operand types are: std::ostringstream << const xp::DoubleDouble
+```
+
+One error each in `dd`, `dd_complex`, `ff`, `ff_complex`, `qf`.
+`qf_complex_no_kokkos_smoke` and `tf_complex_no_kokkos_smoke` build and pass
+only because they never stream a value. Worth stating plainly: **the targets
+whose entire purpose is to prove the core needs no Kokkos are the ones broken by
+the Kokkos-shaped choice of compiler.** The remedy is in the same family as S6's
+TU split but is not the same edit, and the scope sentence in the S1 block — "the
+coupling lives entirely in the oracle-scoring code in `tests/` and `src/`" — is
+now too narrow.
+
+**(b) `sweep_accuracy` does not build under `--arch a100`, so both correctness
+gates are unavailable there.** Same device pass, the `__float128` rejection this
+time, 6 errors from `scripts/sweep_accuracy.cpp:997`. It links no Kokkos either.
+Consequence: `sweep_absolute_gate`, `sweep_monotone_gate` and `oracle_conv_test`
+are all `***Not Run`. **An a100 build cannot judge accuracy at all** — which is
+consistent with the accuracy record being host-measured, but should be said out
+loud rather than rediscovered.
+
+Corroboration that the *compiler selection*, and not `__float128` itself, is the
+trigger: `oracle_conv_selftest` **passed, in 100.11 s**, on this same node. It
+compiles that same `scripts/sweep_accuracy.cpp` nine times with
+`CXX="${CXX:-g++}"` (`validation/oracle_conv_selftest.sh:42`) — plain `g++`, not
+the build's CXX — and all nine succeeded.
+
+**(c) The two FAILs are a cascade of (b), not a library defect — and the
+selftests behaved correctly.** `sweep_monotone_gate_selftest` and
+`sweep_absolute_gate_selftest` are the only tests that built, ran, and failed.
+Both printed exactly:
+
+```
+selftest: /home/rbarik/xpm-a100-validate/build-a100/tests/sweep_accuracy is not executable
+```
+
+They refused to certify against a missing binary rather than passing vacuously.
+That is precisely the behaviour the `*_selftest` targets exist to have, so this
+pair of reds is a good result wearing a bad colour.
+
+**(d) Failing-TU accounting, complete.** 16 targets, 16 TUs, two causes and
+nothing else:
+
+| cause | errors/TU | TUs |
+|---|---|---|
+| `__float128` in device code | 3 | the 8 demos + `src/bench_cost.cpp` + `tests/hello_test.cpp` |
+| `__float128` in device code | 6 | `scripts/sweep_accuracy.cpp` |
+| host-only `operator<<` hidden by `XPMATH_ON_DEVICE` | 1 | the 5 `*_no_kokkos_smoke` above |
+
+36 `128-bit floating` diagnostics + 5 `operator "<<"` diagnostics, exactly.
+Twelve distinct instantiation sites appear in
+`validation/a100/logs/build_keepgoing_20260916_045326.log`, and S6 has to split
+every one of them. Ten instantiate `std::initializer_list<__float128>`
+directly — `src/demo_real.cpp:398`, `src/demo_complex.cpp:354`,
+`src/demo_ff_real.cpp:440`, `src/demo_ff_complex.cpp:387`,
+`src/demo_qf_real.cpp:471`, `src/demo_qf_complex.cpp:407`,
+`src/demo_tf_real.cpp:466`, `src/demo_tf_complex.cpp:407`,
+`src/bench_cost.cpp:125`, `scripts/sweep_accuracy.cpp:997`. Two reach the same
+error through a typedef or an indirection and are easy to miss when grepping for
+the literal type: `tests/test_utils.hpp:423` (`_E=kokkos_ep::float128`, reached
+from `tests/hello_test.cpp` — the header, not the test body, is what S6 must
+move) and `scripts/sweep_accuracy.cpp:1022`
+(`_E=std::vector<__float128> *`, which is why that TU emits 6 diagnostics and
+the others 3). Ordering within the log is `make -j` interleaving, not a
+dependency order, so "first" means only "first printed": that is
+`scripts/sweep_accuracy.cpp:997`. S1 could name only one site
+(`src/demo_ff_complex.cpp:387`) because its `make` had no `-k` and stopped
+there, leaving fourteen targets UNKNOWN rather than known-broken. **That gap is
+now closed**: this run built keep-going, every remaining target was attempted,
+and none is unknown.
+
+**(e) `scripts/xpm_build.sh`'s exit code 2 is ambiguous — reported, not fixed.**
+`die()` exits 2 for a configure or precondition failure, and line 315's
+`exit "$rc"` passes GNU make's exit code — also 2 — straight through for a
+*build* failure. This run exited 2 from the build, after a configure that
+succeeded. The two cases are distinguishable only by the message on stderr,
+which the wrapper does print correctly ("CONFIGURE SUCCEEDED, BUILD FAILED").
+Anything scripting around this wrapper must read the text, not the code. No file
+under `scripts/` was touched.
+
+**(f) Two `.gitignore` edits were necessary, and are the only changes outside
+`validation/` and `docs/`.** `/validation/a100/` was listed as per-sub-plan
+scratch after S1's artifacts were pruned, so this harness would have been
+silently untracked; and the blanket `*.output` / `*.error` / `*.cobaltlog` rules
+at the top of the file would have swallowed the job log that *is* the evidence.
+The directory entry is removed, and the three job-file patterns are negated for
+`validation/a100/logs/` only.
+
+**(g) `-t 60` was ample; S1's "a rerun needs `-t 120`" no longer applies.** The
+job used 12 min 38 s of its hour with the suite actually built. The expensive
+part of this exercise is the queue (1 h 38 m here), not the walltime.
+
+**(h) Benign, so nobody chases it.** `1000938.error` is 57 bytes and contains
+only `/home/rbarik/.bashrc: line 13: module: command not found` — identical to
+S1's, and harmless because `run_a100.sh` sources `/etc/profile.d/modules.sh` and
+loads its own modules. Separately, `build-info.txt` records
+`git-head: 0230239…-dirty`: the tree carried the modified `.gitignore` and the
+not-yet-committed `validation/a100/`, not any source change.
+
+### How the harness itself was validated before it burned a GPU hour
+
+`validation/a100/run_a100.sh` was first run end to end on the login node with
+`--arch a100` rewritten to `--arch host`. It reported **49/49 passed, 0 failed,
+0 not built** — matching the figure S8 deliverable 1 already records for
+`--arch host` — and, importantly, it printed `Execution space: Serial` and
+**refused to certify the run**, exactly as it must. Every parser in the script
+(the ctest pass / fail / not-built split, the keep-going failed-target
+extraction, the execution-space check, the libquadmath `ldd` check) was
+exercised against known-good output before the A100 job produced anything.
+
+### What the next A100 run should know
+
+- Run the full suite under `ctest -V`, not `--output-on-failure`, if you want
+  per-test execution-space attribution for the 33 passing tests beyond the gate
+  five.
+- Finding (a) is a second, distinct blocker from the S6 TU split, and a cheaper
+  one: it is about *who compiles* the standalone targets, not about who links
+  them.
+- Until (b) is resolved, **no accuracy verdict can come from an a100 build.**
+  Do not read the absence of `sweep_*_gate` results as either green or red.
+- `validation/a100/` is tracked again. Do not re-add it to `.gitignore`.
