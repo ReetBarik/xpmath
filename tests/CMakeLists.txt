@@ -12,7 +12,12 @@
 # oracle path; when absent, tests still BUILD but runtime-skip (exit code 77 ->
 # CTest "Skipped"). Graceful degradation = skip, not configure error, matching
 # the T0.0/T0.3 posture for the demos.
-if("LIBQUADMATH" IN_LIST Kokkos_TPLS)
+# Only meaningful when Kokkos is in the build: this oracle arrives THROUGH
+# Kokkos's LIBQUADMATH TPL, and it gates only the Kokkos-linked tests below.
+# sweep_accuracy links libquadmath directly and is unaffected either way.
+if(NOT XPMATH_WITH_KOKKOS)
+  set(KOKKOS_EP_QUADMATH_DEFINE "")
+elseif("LIBQUADMATH" IN_LIST Kokkos_TPLS)
   set(KOKKOS_EP_QUADMATH_DEFINE KOKKOS_EP_HAVE_QUADMATH)
   message(STATUS "tests: __float128 oracle enabled (LIBQUADMATH present)")
 else()
@@ -84,6 +89,8 @@ function(kokkos_ep_add_eft_test name)
   # dd_fma_guard_test.cpp keys its gate-vs-report behavior on this; other EFT
   # tests ignore it. Harmless where unused.
   target_compile_definitions(${name} PRIVATE KOKKOS_EP_CONTRACTION_MODE=0)
+  # For the contraction guard at the bottom of this file.
+  set_property(GLOBAL APPEND PROPERTY XPMATH_EFT_OFF_TARGETS ${name})
 endfunction()
 
 # --- Helper: companion EFT test with FMA contraction forced ON ------------
@@ -136,9 +143,16 @@ function(kokkos_ep_add_eft_test_contract_on name)
   target_compile_definitions(${tgt} PRIVATE
     KOKKOS_EP_CONTRACTION_MODE=1
     KOKKOS_EP_BASELINE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/${_base}_baseline.txt")
+  set_property(GLOBAL APPEND PROPERTY XPMATH_EFT_ON_TARGETS ${tgt})
 endfunction()
 
 # --- Registered tests -----------------------------------------------------
+# Everything from here to the "END KOKKOS-LINKED TESTS" marker links
+# Kokkos::kokkos, because it exercises the compat wrappers in
+# third_party/include/. The Kokkos-free tests -- both gates, pow_domain,
+# exp_reduction, trig_reduction, the standalone smokes, the consumer package --
+# are registered after that marker and build with XPMATH_WITH_KOKKOS=OFF.
+if(XPMATH_WITH_KOKKOS)
 kokkos_ep_add_test(hello_test)
 kokkos_ep_add_test(corpus_test)
 # T1.2 non-overlap invariant: oracle-independent, no contraction flags needed.
@@ -272,8 +286,97 @@ kokkos_ep_add_eft_test(tf_eft_test)                    # -> tf_eft_test         
 kokkos_ep_add_eft_test_contract_on(tf_eft_test)        # -> tf_eft_test_contract_on  (ON, reports)
 kokkos_ep_add_test(tf_property_test)                   # algebraic identities (Group A/B/C)
 kokkos_ep_add_test(tf_cancellation_test)               # e2e cancellation kernels (K1-K4)
+
 kokkos_ep_add_eft_test(tf_fma_guard_test)              # -> tf_fma_guard_test              (OFF, gates)
 kokkos_ep_add_eft_test_contract_on(tf_fma_guard_test)  # -> tf_fma_guard_test_contract_on  (ON, reports)
+
+# ---------------------------------------------------------------------------
+# THE CONTRACTION FLAG GUARD
+# ---------------------------------------------------------------------------
+# -ffp-contract=off on the EFT targets is what keeps the Dekker twoProduct an
+# error-free transform. Drop it and nothing fails -- the error term collapses
+# to zero and the EFT tests go on passing while validating a transform the
+# binary no longer performs. A requirement that fails silently needs a gate,
+# not a code comment, and especially so while the build is being restructured
+# around it.
+#
+# The manifest is built from each target's ACTUAL COMPILE_OPTIONS property, read
+# here where every target is already defined. It is deliberately not built from
+# a list of what the helpers intended to apply: that would pass by agreeing with
+# itself. Options are captured unevaluated -- file(GENERATE) cannot evaluate
+# COMPILE_LANGUAGE -- so the checker does a substring test on the genex text.
+get_property(_xp_eft_off GLOBAL PROPERTY XPMATH_EFT_OFF_TARGETS)
+get_property(_xp_eft_on  GLOBAL PROPERTY XPMATH_EFT_ON_TARGETS)
+set(_xp_manifest "")
+foreach(_t IN LISTS _xp_eft_off)
+  get_target_property(_o ${_t} COMPILE_OPTIONS)
+  if(NOT _o)
+    set(_o "")
+  endif()
+  string(REPLACE ";" " " _o "${_o}")
+  string(APPEND _xp_manifest "off|${_t}|${_o}\n")
+endforeach()
+foreach(_t IN LISTS _xp_eft_on)
+  get_target_property(_o ${_t} COMPILE_OPTIONS)
+  if(NOT _o)
+    set(_o "")
+  endif()
+  string(REPLACE ";" " " _o "${_o}")
+  string(APPEND _xp_manifest "on|${_t}|${_o}\n")
+endforeach()
+list(LENGTH _xp_eft_off _xp_n_off)
+list(LENGTH _xp_eft_on  _xp_n_on)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/contraction_manifest.txt" "${_xp_manifest}")
+
+# THE EXPECTED COUNTS ARE COMMITTED CONSTANTS, NOT ${_xp_n_off}/${_xp_n_on}.
+# Deriving them from the same list that builds the manifest would make the
+# check circular: delete a kokkos_ep_add_eft_test call and both the manifest
+# and the expectation shrink together, so the guard passes while a target has
+# silently lost its contraction flag by ceasing to exist. Same contract as
+# ci.yml's `expected=48` -- adding or removing a guarded target is a deliberate
+# act that updates a number here.
+set(XPMATH_EFT_OFF_EXPECTED 8)   # dd/ff/qf/tf _eft_test + dd/ff/qf/tf _fma_guard_test
+set(XPMATH_EFT_ON_EXPECTED  5)   # the four *_fma_guard_test_contract_on + tf_eft_test_contract_on
+message(STATUS "contraction guard: ${_xp_n_off} OFF targets, ${_xp_n_on} ON targets "
+               "(expected ${XPMATH_EFT_OFF_EXPECTED}/${XPMATH_EFT_ON_EXPECTED})")
+
+add_test(NAME contraction_flags_guard
+         COMMAND ${CMAKE_COMMAND}
+                 -DMANIFEST=${CMAKE_CURRENT_BINARY_DIR}/contraction_manifest.txt
+                 -DEXPECT_OFF=${XPMATH_EFT_OFF_EXPECTED}
+                 -DEXPECT_ON=${XPMATH_EFT_ON_EXPECTED}
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/check_contraction_flags.cmake)
+
+# ... and the poison test that proves the guard can fail, including a negative
+# control so a guard hard-wired to fail cannot satisfy it either.
+add_test(NAME contraction_flags_selftest
+         COMMAND ${CMAKE_SOURCE_DIR}/validation/contraction_flags_selftest.sh
+                 ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
+
+endif()  # ===================== END KOKKOS-LINKED TESTS =====================
+
+# ---------------------------------------------------------------------------
+# STANDALONE SMOKES -- the Kokkos-free core, as real ctest targets
+# ---------------------------------------------------------------------------
+# These compile include/xp/ against an include path containing ONLY include/,
+# so third_party/include/ cannot mask a missing dependency. They existed as
+# sources driven solely by scripts/check_standalone_no_kokkos.sh, which CI runs
+# and `ctest` did not -- so with Kokkos off the suite had nothing to say about
+# the very code that does not need Kokkos.
+#
+# This does NOT replace that script: it still does the part CMake cannot, which
+# is preprocessing each TU and grepping the output for the token Kokkos. A
+# successful compile only proves nothing is MISSING, not that nothing extra was
+# pulled in.
+#
+# tf_no_kokkos_smoke.cpp does not exist -- TF real is the one backend with no
+# executed standalone smoke. Deliberately not invented here; it is its own task.
+foreach(_sm dd dd_complex ff ff_complex qf qf_complex tf_complex)
+  add_executable(${_sm}_no_kokkos_smoke standalone/${_sm}_no_kokkos_smoke.cpp)
+  target_include_directories(${_sm}_no_kokkos_smoke PRIVATE ${CMAKE_SOURCE_DIR}/include)
+  target_compile_features(${_sm}_no_kokkos_smoke PRIVATE cxx_std_17)
+  add_test(NAME ${_sm}_no_kokkos_smoke COMMAND ${_sm}_no_kokkos_smoke)
+endforeach()
 
 # COMPLEX accuracy, all four backends. Until these landed, every target above
 # scored REAL arithmetic only — `grep -c complex tests/CMakeLists.txt` was 0 —

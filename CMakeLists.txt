@@ -29,6 +29,27 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
   endif()
 endif()
 
+# ---------------------------------------------------------------------------
+# KOKKOS IS OPTIONAL, AND THAT IS THE WHOLE POINT OF include/xp/.
+#
+# The library is the headers in include/xp/. They do not include or require
+# Kokkos -- every mention of it in them is a comment. Until this option existed
+# the BUILD did not believe that: find_package(Kokkos REQUIRED) sat at the top
+# of this file and gated everything downstream of it, including the header-only
+# export, its install rules, and the entire test suite. So you could not build,
+# install or TEST the Kokkos-free core without Kokkos, and `sweep_accuracy` --
+# the binary behind both correctness gates, which links no Kokkos and includes
+# only include/ -- was unreachable on a machine that had none.
+#
+# With XPMATH_WITH_KOKKOS=OFF you get: the installable package, both gates, and
+# every test that does not link Kokkos. What you lose is exactly what genuinely
+# needs it -- the nine demos and the tests that exercise the compat wrappers in
+# third_party/include/.
+# ---------------------------------------------------------------------------
+option(XPMATH_WITH_KOKKOS
+       "Build the Kokkos demos and the Kokkos-linked tests (needs a Kokkos install)" ON)
+
+if(XPMATH_WITH_KOKKOS)
 find_package(Kokkos REQUIRED)
 
 # The host __float128 oracle is provided by Kokkos's quadmath overloads
@@ -197,6 +218,13 @@ install(TARGETS kokkos_ep_demo
                 kokkos_ep_bench_cost
                 ${XP_COMPLEX_DEMO_TARGETS}
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+else()
+  message(STATUS
+    "XPMATH_WITH_KOKKOS=OFF: building the header-only package, both accuracy "
+    "gates and every Kokkos-free test. The nine demos and the wrapper-linked "
+    "tests are skipped -- they are the only things that need Kokkos.")
+endif()
 
 # ---- Installable package (header-only core) ---------------------------------
 #

@@ -74,6 +74,10 @@ execute_process(
           -DCMAKE_CXX_COMPILER=${XPMATH_CXX_COMPILER}
           -DCMAKE_BUILD_TYPE=Release
           -DKOKKOS_EP_BUILD_TESTS=OFF
+          # The package under test is header-only and Kokkos-free, so install
+          # it that way. This makes the nested build prove a second thing for
+          # free: that xpmath configures and installs with no Kokkos present.
+          -DXPMATH_WITH_KOKKOS=OFF
           -DCMAKE_INSTALL_PREFIX=${prefix_dir}
           "-DCMAKE_PREFIX_PATH=${XPMATH_PREFIX_PATH}"
           -DKokkos_DIR=${XPMATH_KOKKOS_DIR}
