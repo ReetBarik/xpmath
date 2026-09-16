@@ -711,3 +711,162 @@ can assert bit-equality with the host for any op touching a transcendental.
   unavailable" on clang-based toolchains. **Still unmeasured.** Clang supports
   `__float128` on x86_64 host code, so this may work; nobody has tried.
 - A gfx90a Kokkos build is the largest single unknown remaining in S8.
+  (Partly answered by S8c below: a gfx90a Kokkos install now exists and its
+  execution space resolves to HIP. The suite still does not build against it.)
+
+---
+
+## S8c — MI250 build-recipe validation — **the recipe runs; the suite does not**
+
+**2026-09-16. JLSE Cobalt job `1000943`, one node `amdgpu04` (8× MI250X,
+gfx90a, ROCm 7.0.2 / AMD clang 20.0.0).** Branch `step2/mi250-validate` off
+`step2/arch-wrapper` (`0230239`). Script: `validation/mi250/run_mi250_build.sh`
+(new — `run_mi250.sh` is untouched). Logs:
+`validation/mi250/logs/{build,ctest,keepgoing_build,ctest_keepgoing}_20260916_034147.log`.
+
+S8 deliverable 1 recorded `scripts/xpm_build.sh --arch mi250` as **unexecuted**
+— the row was written from the recorded configuration of an install and never
+run, because there is no `hipcc` on the JLSE login node. This ran it once,
+verbatim, on the card. **Nothing was fixed:** no change to `include/xp/`,
+`src/`, `tests/`, `run_mi250.sh`, `scripts/xpm_build.sh`, and no Kokkos rebuild.
+TD-1/TD-2 are untouched.
+
+### The four counts
+
+| registered | passed | failed | skipped | not built |
+|---|---|---|---|---|
+| **49** | **8** | **2** | **0** | **39** |
+
+`xpm_build.sh --arch mi250`: **configure SUCCEEDED, build FAILED (exit 2) after
+40 s.** The arch row itself is sound and this is the first evidence of it:
+modules load, `hipcc` is selected, `Kokkos_DIR` resolves, `-ffp-contract=off`
+reaches every compile line, `build-info.txt` is written and `build_provenance`
+passes on it. Everything downstream of the arch row is what fails.
+
+The 8 passes are every script- or CMake-driven target in the suite
+(`contraction_flags_guard`, `contraction_flags_selftest`,
+`exp_reduction_selftest`, `trig_reduction_selftest`, `oracle_conv_selftest`,
+`consumer_package`, `domains_fresh`, `build_provenance`). **Not one of them
+compiles a line of gfx90a code**: the two that do compile something shell out to
+`${CXX:-g++}` (`validation/oracle_conv_selftest.sh`) or configure a nested
+project with the default compiler (`tests/consumer/run_consumer_test.sh`), so
+they are host checks that happened to execute on an MI250 node. The 2 failures
+are `sweep_monotone_gate_selftest` and `sweep_absolute_gate_selftest`, and they
+are **vacuous**: the `sweep_accuracy` binary they poison never built.
+
+### Zero skipped — and that is the bad news, not the good news
+
+The Kokkos at `~/xpm_device/kokkos-hip-gfx90a` is built with
+`/* #undef KOKKOS_ENABLE_LIBQUADMATH */`, so `tests/CMakeLists.txt:11-14`
+predicts that the oracle-scored tests "still BUILD but runtime-skip (exit code
+77 -> CTest Skipped)". **Exactly 0 of the 49 targets skipped for want of
+libquadmath.** They did not degrade to a skip; 26 of them failed to BUILD, which
+is strictly worse — a skip is a recorded non-answer, a build failure is silence.
+The graceful-degradation posture documented in that file is unachievable on any
+Kokkos without libquadmath, for the reason in defect 1 below.
+
+### The execution space did resolve to HIP
+
+No repo binary links under this recipe, so there was nothing to ask
+`--kokkos-print-configuration`. `validation/mi250/kokkos_space_probe.cpp` (new,
+outside the test suite, built by the script into a throwaway CMake project from
+the recipe's own `CMakeCache.txt` toolchain) answers it instead:
+
+```
+resolved-default-execution-space: HIP
+resolved-default-host-execution-space: Serial
+probe-kernel: CORRECT (0 1 4 9 16 25 36 49)
+probe-verdict: HIP-EXECUTED
+```
+
+`Kokkos::print_configuration`: `Default Device: HIP`, `GPU architecture:
+AMD_GFX90A`, `Kokkos::HIP[0] gcnArch gfx90a:sramecc+:xnack- : Selected`,
+`HIP_VERSION 70051831`. A `parallel_for` ran there and its results came back off
+the device. This is Serial-fallback insurance only; it includes no `include/xp/`
+header and is **not** device evidence for DD/FF/QF/TF.
+
+### Why 39 targets did not build — reported, not fixed
+
+Each unbuilt target was rebuilt alone at `-j1` to attribute its first
+diagnostic (parallel clang output interleaves mid-line and cannot be trusted
+for this). All 39 accounted for:
+
+| # | first error | targets | where |
+|---|---|---|---|
+| 1 | `use of undeclared identifier 'kUlpUnscorable'` | **26** | `tests/test_utils.hpp:286` |
+| 2 | `use of undeclared identifier '__double_as_longlong'` (then `__int_as_float`, `__float_as_int`, `__longlong_as_double`) | **9** | `include/xp/trig_reduction.hpp:150` |
+| 3 | `unknown argument: '-fext-numeric-literals'` → no `sweep_accuracy`, so `gmake: No rule to make target` | **3** | `tests/CMakeLists.txt:487` |
+| 4 | `'quadmath.h' file not found` | **1** | `tests/exp_reduction_test.cpp:52` |
+
+1. **`kUlpUnscorable` — the headline, and compiler-independent.**
+   `constexpr double kUlpUnscorable` is declared at `tests/test_utils.hpp:252`,
+   *inside* the `#ifdef KOKKOS_EP_HAVE_QUADMATH` that spans 192–266.
+   `accumulate_ulps` at 286 is *outside* that guard and reads it. With Kokkos
+   present and LIBQUADMATH absent the header therefore does not compile at all.
+   Nothing about HIP or clang is involved — GCC on a quadmath-less Kokkos would
+   do the same. It survived because no CI lane builds that combination: every
+   with-Kokkos lane has LIBQUADMATH ON, and `-DXPMATH_WITH_KOKKOS=OFF` does not
+   register the 26 targets that include the header (`tests/CMakeLists.txt:155`).
+2. **HIP bit-cast intrinsics in a TU that includes no HIP runtime.** `hipcc`
+   compiles every `.cpp` as HIP (`-x hip` appears on all of them), so the device
+   pass defines `__HIP_DEVICE_COMPILE__`, so `XPMATH_ON_DEVICE_CUDA_OR_HIP`
+   selects the intrinsic branch of `xp_ph_ceil_exp` — but a Kokkos-free TU never
+   includes `hip/hip_runtime.h`, so `__double_as_longlong` has no declaration.
+   The predicate is right about the pass and wrong about availability. Hits
+   exactly the Kokkos-free TUs: the six `tests/standalone/*_no_kokkos_smoke`,
+   `tf_complex_no_kokkos_smoke`, `pow_domain_test`, `trig_reduction_test`. The
+   same TUs then hit `invalid operands to binary expression
+   ('std::ostringstream' ...)`, because `operator<<` is compiled out under
+   `#if !defined(XPMATH_ON_DEVICE)`.
+3. **A GCC-only flag applied unconditionally.** `tests/CMakeLists.txt:487` adds
+   `-fext-numeric-literals` to `sweep_accuracy`; clang hard-errors on unknown
+   arguments. `sweep_accuracy` is the binary behind `sweep_absolute_gate`,
+   `sweep_monotone_gate` and `oracle_conv_test` (the 3 "no rule to make target"
+   rows) and behind the 2 vacuous selftest FAILs. Five of the 49 registered
+   targets hang off this one flag.
+4. **`quadmath.h` is not on ROCm clang's include path**, even with gcc/13.3.0
+   loaded (`tests/exp_reduction_test.cpp:52`; `scripts/sweep_accuracy.cpp:250`
+   reaches the same wall once the flag above is removed). This is the S8 "known
+   gap" about hipcc and the quadmath oracle, now measured: it is an include-path
+   problem, not a language-support one.
+
+### Secondary observations
+
+- **`build-info.txt` records `cxx-standard: 17`; the Kokkos-linked compile
+  lines carry `-std=c++20`** (27 of them; the 11 non-Kokkos TUs really are
+  C++17). Kokkos's `INTERFACE_COMPILE_FEATURES cxx_std_20` wins over the
+  project's request, and the provenance stamp records the request. A stamp that
+  can disagree with the compile line is worth one line of thought before the
+  next person cites it.
+- **`CMAKE_C_COMPILER` is passed and ignored** — "Manually-specified variables
+  were not used by the project: CMAKE_C_COMPILER". The project is
+  `LANGUAGES CXX`, so `ARCH_CC[mi250]="gcc"` is a dead row for this repo.
+- **`--offload-arch=gfx90a` is repeated 8× per compile line**, and `-x hip` is
+  applied to `scripts/sweep_accuracy.cpp`, a host-only oracle TU. Harmless here
+  only because that TU never gets past the flag error.
+- **ROCm clang resolves libstdc++ from `/usr/lib64/gcc/x86_64-suse-linux/14/`**,
+  not from the gcc/13.3.0 module, while the run-time shell's libquadmath is the
+  module's. Two different GCCs in one build.
+- The `ldd <build>/tests/sweep_accuracy | grep quadmath` check **could not be
+  performed**: the binary does not exist. No oracle number was produced by this
+  run, so the fingerprint hazard never arose. The run-time shell was nevertheless
+  the toolchain of record —
+  `/soft/compilers/gcc/13.3.0/x86_64-suse-linux/lib64/libquadmath.so.0` on
+  `LD_LIBRARY_PATH`, `g++ 13.3.0` — and the script now records those lines in
+  `[0/6]` so a future reader can check rather than assume. (Job 1000942 was
+  cancelled for getting this wrong: `module load ... | sed` runs the `module`
+  shell function in a subshell, so ctest inherited `/usr/bin/g++ 7` while the
+  log said "loaded".)
+
+### What this run establishes, and what it does not
+
+- **Establishes:** the `mi250` arch row of `scripts/xpm_build.sh` configures a
+  real gfx90a Kokkos build, on the card, with the intended compiler, arch and
+  contraction flag; the resulting default execution space is HIP and executes.
+- **Does not establish:** anything about extended-precision accuracy, or about
+  any `include/xp/` header under Kokkos on gfx90a. 39 of 49 targets never
+  linked. The S8 matrix cell "MI250X / oracle-free tests" stays **no**.
+- **Next, in order:** defect 1 is one `#endif` away from moving 26 targets from
+  "not built" to "built and skipped", and is the only one of the four that
+  blocks a whole class of hardware rather than one toolchain. Defect 3 is a
+  two-line generator guard. Defects 2 and 4 are real portability work.
