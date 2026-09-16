@@ -1,9 +1,15 @@
 # `tests/` — the ctest suite
 
-39 registered targets. The count is asserted in CI (`.github/workflows/ci.yml`,
-`expected=39`), not assumed: four targets sit behind `if(XPMATH_MPFR_FOUND)`,
-and a missing optional dependency removes coverage while leaving the lane green.
-That is how this lane once ran 34 targets while reporting 31.
+48 registered targets with Kokkos, **20 without it**. The count is asserted in
+CI (`.github/workflows/ci.yml`, `expected=48`), not assumed: four targets sit
+behind `if(XPMATH_MPFR_FOUND)`, and a missing optional dependency removes
+coverage while leaving the lane green. That is how this lane once ran 34 targets
+while reporting 31.
+
+`-DXPMATH_WITH_KOKKOS=OFF` drops the 28 targets that link Kokkos and keeps the
+other 20 — both gates, both gate self-tests, the oracle-conversion and reduction
+pairs, `domains_fresh`, the consumer package test and the seven standalone
+smokes. Measured: 20/20 in 164 s with no Kokkos installed.
 
 **What judges correctness is `docs/CORRECTNESS.md`.** Read it before adding
 anything that issues a verdict; the whole point of the current arrangement is

@@ -133,6 +133,61 @@ jobs:
       - name: scripts/check_standalone_no_kokkos.sh
         run: bash scripts/check_standalone_no_kokkos.sh
 
+  # ---------------------------------------------------------------------------
+  # The build itself, with Kokkos switched off.
+  #
+  # The `standalone` lane above proves the HEADERS need no Kokkos. This one
+  # proves the BUILD does not either -- which was false until XPMATH_WITH_KOKKOS
+  # existed: find_package(Kokkos REQUIRED) gated the header-only export, its
+  # install rules and the whole test suite, so `sweep_accuracy` -- which links
+  # no Kokkos and is the binary behind BOTH correctness gates -- could not be
+  # built on a machine without it.
+  #
+  # Without a lane, that decoupling regresses the first time someone moves a
+  # target outside the guard and only ever configures with Kokkos on. Measured
+  # locally before this lane was written: 20/20 in 164 s.
+  # ---------------------------------------------------------------------------
+  no-kokkos-build:
+    name: build + ctest with XPMATH_WITH_KOKKOS=OFF
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install g++-13 and the oracle libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-13 libmpfr-dev libgmp-dev libmpc-dev
+
+      - name: Configure with no Kokkos anywhere
+        env:
+          CXX: g++-13
+        run: |
+          cmake -S . -B build-nokokkos \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DXPMATH_WITH_KOKKOS=OFF
+
+      # A Kokkos that is merely unused is not the same as one that is absent.
+      # If any target still links it, this fails at build time rather than
+      # quietly succeeding because the runner happens to have none installed.
+      - name: Build
+        run: cmake --build build-nokokkos -j"$(nproc)"
+
+      - name: Assert the Kokkos-free suite is the expected size
+        run: |
+          set -euo pipefail
+          expected=20
+          actual=$(ctest --test-dir build-nokokkos -N | awk '/^Total Tests: /{print $3}')
+          echo "registered without Kokkos: ${actual} (expected ${expected})"
+          if [ "${actual}" != "${expected}" ]; then
+            echo "::error::${actual} targets registered without Kokkos, expected ${expected}."
+            echo "::error::A target moved across the XPMATH_WITH_KOKKOS guard."
+            ctest --test-dir build-nokokkos -N
+            exit 1
+          fi
+
+      - name: ctest
+        run: ctest --test-dir build-nokokkos -j4 --timeout 1800 --output-on-failure
+
   # ==========================================================================
   # 3. THE MONOTONE GATE.  The single most valuable regression check here.
   #
@@ -362,7 +417,7 @@ jobs:
       - name: Assert the full suite is registered
         run: |
           set -euo pipefail
-          expected=39
+          expected=48
           actual=$(ctest --test-dir build -N | awk '/^Total Tests: /{print $3}')
           echo "registered targets: ${actual} (expected ${expected})"
           if [ "${actual}" != "${expected}" ]; then

@@ -22,9 +22,11 @@ install.
 
 [![CI](https://github.com/ReetBarik/xpmath/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ReetBarik/xpmath/actions/workflows/ci.yml)
 
-The badge covers six lanes: generated-doc freshness, the standalone no-Kokkos
-core on Linux **and** macOS/ARM, the 436,080-point monotone accuracy gate, the
-full Kokkos build + 39-test ctest suite, and per-header `nvcc` device compiles.
+The badge covers seven lanes: generated-doc freshness, the standalone no-Kokkos
+core on Linux **and** macOS/ARM, a full build + 20-test ctest run with
+`XPMATH_WITH_KOKKOS=OFF`, the 436,080-point monotone accuracy gate, the full
+Kokkos build + 48-test ctest suite, and per-header `nvcc` and `hipcc` device
+compiles.
 See `.github/workflows/ci.yml` and the S7 STATUS block in
 `docs/UPSTREAM_PLAN_STATUS.md`.
 

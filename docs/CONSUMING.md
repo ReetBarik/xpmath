@@ -19,6 +19,27 @@ cmake --build build -j
 cmake --install build
 ```
 
+### Building without Kokkos
+
+The build itself no longer requires Kokkos:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DXPMATH_WITH_KOKKOS=OFF
+cmake --build build -j
+ctest --test-dir build
+```
+
+That gets you the installable package, **both accuracy gates**, and every test
+that does not link Kokkos. What it skips is what genuinely needs Kokkos: the
+nine demos and the tests that exercise the compat wrappers in
+`third_party/include/`.
+
+This used to be impossible. `find_package(Kokkos REQUIRED)` sat at the top of
+the top-level `CMakeLists.txt` and gated everything below it — including the
+header-only export, its install rules, and the whole test suite — so the
+Kokkos-free core could not be built, installed or tested without Kokkos, and
+`sweep_accuracy`, which links no Kokkos at all, was unreachable without it.
+
 ## Use it from another project
 
 ```cmake

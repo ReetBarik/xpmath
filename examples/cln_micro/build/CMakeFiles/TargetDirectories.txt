@@ -1,3 +1,0 @@
-/home/rbarik/kokkos-extended-precision-demo/examples/cln_micro/build/CMakeFiles/cln_micro.dir
-/home/rbarik/kokkos-extended-precision-demo/examples/cln_micro/build/CMakeFiles/edit_cache.dir
-/home/rbarik/kokkos-extended-precision-demo/examples/cln_micro/build/CMakeFiles/rebuild_cache.dir
