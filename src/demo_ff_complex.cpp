@@ -1,6 +1,17 @@
-// Kokkos float-float demo — complex ops.
-// Benchmarks Kokkos::Experimental::FloatFloatComplex against the host
-// __complex128 oracle (Kokkos-wrapped quadmath, T0.0/T0.3).
+// Kokkos FF (float-float) complex ops demo -- TIMING AND SMOKE ONLY.
+// Each operation is run on Kokkos::Experimental::FloatFloatComplex and on
+// Kokkos::complex<double>. The table shows wall time for each, one row per op
+// (the real and imag parts share a kernel, so they shared a timing figure even
+// when this demo printed two rows).
+//
+// THIS DEMO DOES NOT MEASURE ACCURACY, DELIBERATELY. The accuracy record is
+// validation/sweep/, scored in ulps against an MPFR/MPC oracle with one verdict
+// per point (docs/CORRECTNESS.md). The oracle columns this demo used to print
+// duplicated that at lower resolution, and were the single most expensive part
+// of the project's libquadmath dependency: the __complex128 overloads they
+// called came from impl/Kokkos_ComplexQuadPrecisionMath.hpp, a header that is
+// NOT upstream in Kokkos and had to be patched into every Kokkos install by
+// hand. Deleting the columns deleted the patch.
 //
 // ============================================================
 // FF usage reference  (namespace ff = Kokkos::Experimental)
@@ -44,16 +55,6 @@
 #include <Kokkos_Core.hpp>
 #include <Kokkos_Complex.hpp>
 
-// Host __float128 oracle via Kokkos's quadmath overloads (namespace Kokkos).
-// This header transitively includes <quadmath.h> when Kokkos was built with
-// Kokkos_ENABLE_LIBQUADMATH=ON.
-#include <impl/Kokkos_QuadPrecisionMath.hpp>
-// Complex __complex128 oracle overloads (namespace Kokkos). Kokkos has no
-// upstream __complex128 wrapper, so this repo carries a local extension header
-// (applied from patches/kokkos_complex_quad_math.hpp — see patches/README.md).
-// Each overload is a one-line forward to ::c<fn>q, so it is bit-exact by
-// construction; routing the oracle through Kokkos:: matches the DD demos (T0.3).
-#include <impl/Kokkos_ComplexQuadPrecisionMath.hpp>
 
 #include <ff_math.hpp>
 #include <ff_complex.hpp>
@@ -76,8 +77,6 @@ namespace {
 constexpr int      kWarmupRuns     = 2;
 constexpr int      kDefaultRepeats = 5;
 constexpr uint64_t kDefaultSeed    = 12345ULL;
-constexpr double   kMaxDigits      = 14.0;
-
 // clang-format off
 enum class Op {
   Add, Sub, Mul, Div,
@@ -245,49 +244,6 @@ void fill_inputs(Op op, double* ha_re, double* ha_im,
   }
 }
 
-// ---- Host quadmath reference ------------------------------------------------
-
-void host_quadmath_reference(Op op,
-                             const double* ha_re, const double* ha_im,
-                             const double* hb_re, const double* hb_im,
-                             __float128* out_re, __float128* out_im, int n) {
-  for (int i = 0; i < n; ++i) {
-    __complex128 za; __real__ za=(__float128)ha_re[i]; __imag__ za=(__float128)ha_im[i];
-    __complex128 zb; __real__ zb=(__float128)hb_re[i]; __imag__ zb=(__float128)hb_im[i];
-    __complex128 res = 0.0q;
-    switch (op) {
-      case Op::Add:   res = za + zb;       break;
-      case Op::Sub:   res = za - zb;       break;
-      case Op::Mul:   res = za * zb;       break;
-      case Op::Div:   res = za / zb;       break;
-      case Op::Abs:   out_re[i]=Kokkos::abs(za); out_im[i]=0.0q; continue;
-      case Op::Conj:  res = Kokkos::conj(za);     break;
-      case Op::Sqrt:  res = Kokkos::sqrt(za);    break;
-      case Op::Exp:   res = Kokkos::exp(za);     break;
-      case Op::Log:   res = Kokkos::log(za);     break;
-      case Op::Log10: res = Kokkos::log10(za);   break;
-      case Op::Sin:   res = Kokkos::sin(za);     break;
-      case Op::Cos:   res = Kokkos::cos(za);     break;
-      case Op::Tan:   res = Kokkos::tan(za);     break;
-      case Op::Asin:  res = Kokkos::asin(za);    break;
-      case Op::Acos:  res = Kokkos::acos(za);    break;
-      case Op::Atan:  res = Kokkos::atan(za);    break;
-      case Op::Sinh:  res = Kokkos::sinh(za);    break;
-      case Op::Cosh:  res = Kokkos::cosh(za);    break;
-      case Op::Tanh:  res = Kokkos::tanh(za);    break;
-      case Op::Asinh: res = Kokkos::asinh(za);   break;
-      case Op::Acosh: res = Kokkos::acosh(za);   break;
-      case Op::Atanh: res = Kokkos::atanh(za);   break;
-      case Op::Pow:   res = Kokkos::pow(za,zb);  break;
-      case Op::Polar: {
-        __float128 r=(__float128)ha_re[i], th=(__float128)ha_im[i];
-        out_re[i]=r*Kokkos::cos(th); out_im[i]=r*Kokkos::sin(th); continue;
-      }
-    }
-    out_re[i]=Kokkos::real(res); out_im[i]=Kokkos::imag(res);
-  }
-}
-
 // ---- Timing ----------------------------------------------------------------
 
 struct TimeStats { double min_s=0, max_s=0, median_s=0, mean_s=0; };
@@ -317,55 +273,11 @@ TimeStats time_kernel_fence(int repeats, Launch&& launch) {
   return summarize_times(std::move(times));
 }
 
-// ---- Accuracy --------------------------------------------------------------
-
-struct AccStats { double min_d=kMaxDigits, max_d=0, mean_d=0, median_d=0; };
-
-static double element_digits(__float128 dev, __float128 ref) {
-  if (Kokkos::isnan(dev)||Kokkos::isnan(ref)) return 0.0;
-  if (Kokkos::isinf(ref)) return (Kokkos::isinf(dev)&&(dev>0)==(ref>0))?kMaxDigits:0.0;
-  if (ref==(__float128)0.0) return (dev==(__float128)0.0)?kMaxDigits:0.0;
-  __float128 rel=Kokkos::abs((dev-ref)/ref);
-  if (rel==(__float128)0.0) return kMaxDigits;
-  double d=-(double)Kokkos::log10(rel);
-  return d<0.0?0.0:(d>kMaxDigits?kMaxDigits:d);
-}
-
-static __float128 ff_to_q(Kokkos::Experimental::FloatFloat x) {
-  return (__float128)x.hi + (__float128)x.lo;
-}
-
-AccStats compute_acc_ff(const Kokkos::Experimental::FloatFloat* dev, const __float128* ref, int n) {
-  std::vector<double> digs((size_t)n);
-  for (int i=0;i<n;++i) digs[i]=element_digits(ff_to_q(dev[i]),ref[i]);
-  std::sort(digs.begin(),digs.end());
-  AccStats s;
-  s.min_d=digs.front(); s.max_d=digs.back();
-  s.mean_d=std::accumulate(digs.begin(),digs.end(),0.0)/(double)n;
-  size_t m=digs.size();
-  s.median_d=(m%2==1)?digs[m/2]:0.5*(digs[m/2-1]+digs[m/2]);
-  return s;
-}
-
-AccStats compute_acc_dbl(const double* dev, const __float128* ref, int n) {
-  std::vector<double> digs((size_t)n);
-  for (int i=0;i<n;++i) digs[i]=element_digits((__float128)dev[i],ref[i]);
-  std::sort(digs.begin(),digs.end());
-  AccStats s;
-  s.min_d=digs.front(); s.max_d=digs.back();
-  s.mean_d=std::accumulate(digs.begin(),digs.end(),0.0)/(double)n;
-  size_t m=digs.size();
-  s.median_d=(m%2==1)?digs[m/2]:0.5*(digs[m/2-1]+digs[m/2]);
-  return s;
-}
-
 // ---- Per-op result ---------------------------------------------------------
 
 struct ComplexOpResult {
   Op        op;
   TimeStats ff_timing, dbl_timing;
-  AccStats  ff_re, ff_im;
-  AccStats  dbl_re, dbl_im;
 };
 
 // ---- Execution space -------------------------------------------------------
@@ -383,10 +295,6 @@ ComplexOpResult run_op(Op op, const Config& cfg) {
 
   std::vector<double> ha_re(n),ha_im(n),hb_re(n),hb_im(n);
   fill_inputs(op, ha_re.data(),ha_im.data(), hb_re.data(),hb_im.data(), n, cfg.seed);
-
-  std::vector<__float128> href_re(n), href_im(n);
-  host_quadmath_reference(op, ha_re.data(),ha_im.data(), hb_re.data(),hb_im.data(),
-                          href_re.data(), href_im.data(), n);
 
   vffc qa("qa",n), qb("qb",n), qr("qr",n);
   vdc  da("da",n), db("db",n), dr("dr",n);
@@ -523,32 +431,26 @@ ComplexOpResult run_op(Op op, const Config& cfg) {
       });}); break;
   }
 
-  // ---- Download and compute accuracy ---------------------------------------
+  // ---- Download (smoke) ------------------------------------------------------
+  // Nothing scores these. The readback stays so the demo still exercises the
+  // whole round trip (kernel output -> mirror -> host) for a user-defined type,
+  // which is where a broken deep_copy would show up. Outside the timed region.
   auto mqr=Kokkos::create_mirror_view(qr); Kokkos::deep_copy(mqr,qr);
   auto mdr=Kokkos::create_mirror_view(dr); Kokkos::deep_copy(mdr,dr);
 
-  std::vector<ff::FloatFloat> qr_re(n), qr_im(n);
-  std::vector<double>     dr_re(n), dr_im(n);
-  for (int i=0;i<n;++i) {
-    qr_re[i]=mqr(i).re; qr_im[i]=mqr(i).im;
-    dr_re[i]=mdr(i).real(); dr_im[i]=mdr(i).imag();
-  }
-
-  return { op, st_ff, st_dbl,
-           compute_acc_ff(qr_re.data(), href_re.data(), n),
-           compute_acc_ff(qr_im.data(), href_im.data(), n),
-           compute_acc_dbl(dr_re.data(), href_re.data(), n),
-           compute_acc_dbl(dr_im.data(), href_im.data(), n) };
+  return { op, st_ff, st_dbl };
 }
 
 // ---- Table printing --------------------------------------------------------
+// One row per op. This used to be two rows, real part and imag part, because
+// the two carried separate accuracy figures; they never carried separate
+// timings (one kernel computes both), so with the accuracy columns gone the
+// split has nothing left to distinguish.
 
 static constexpr int kOpW = 12;
 static constexpr int kTW  =  9;
-static constexpr int kAW  =  7;
 static constexpr int kTSec = 4*kTW + 3;
-static constexpr int kASec = 4*kAW + 3;
-static constexpr int kBkW  = kTSec + 1 + kASec;
+static constexpr int kBkW  = kTSec;
 
 static std::string dashes(int n) { return std::string((size_t)n,'-'); }
 
@@ -560,63 +462,37 @@ static std::string center(const std::string& s, int w) {
 static void print_sep() {
   std::cout
     << '-' << dashes(kOpW) << "-+"
-    << dashes(kTSec) << "+" << dashes(kASec) << "+"
-    << dashes(kTSec) << "+" << dashes(kASec) << "+\n";
+    << dashes(kTSec) << "+" << dashes(kTSec) << "+\n";
 }
 
-static void print_header(const char* lbl1, const char* lbl2, const char* acc_label) {
+static void print_header(const char* lbl1, const char* lbl2) {
   using std::cout;
   cout << ' ' << std::string(kOpW,' ') << " |"
        << center(lbl1, kBkW) << "|"
        << center(lbl2, kBkW) << "|\n";
   cout << ' ' << std::string(kOpW,' ') << " |"
-       << center("Time (ms)", kTSec) << "|" << center(acc_label, kASec) << "|"
-       << center("Time (ms)", kTSec) << "|" << center(acc_label, kASec) << "|\n";
+       << center("Time (ms)", kTSec) << "|"
+       << center("Time (ms)", kTSec) << "|\n";
   print_sep();
   cout << ' ' << std::left << std::setw(kOpW) << "" << " |"
        << center("Min",kTW) << "|" << center("Max",kTW) << "|"
        << center("Med",kTW) << "|" << center("Mean",kTW) << "|"
-       << center("Min",kAW) << "|" << center("Max",kAW) << "|"
-       << center("Med",kAW) << "|" << center("Mean",kAW) << "|"
        << center("Min",kTW) << "|" << center("Max",kTW) << "|"
-       << center("Med",kTW) << "|" << center("Mean",kTW) << "|"
-       << center("Min",kAW) << "|" << center("Max",kAW) << "|"
-       << center("Med",kAW) << "|" << center("Mean",kAW) << "|\n";
+       << center("Med",kTW) << "|" << center("Mean",kTW) << "|\n";
   print_sep();
 }
 
-static void print_row(const char* name,
-                      const TimeStats& t1, const AccStats& a1,
-                      const TimeStats& t2, const AccStats& a2) {
+static void print_complex_op_rows(const ComplexOpResult& r) {
   using std::cout; using std::setw; using std::right; using std::fixed; using std::setprecision;
   auto T=[](double s){return s*1000.0;};
-  cout << ' ' << std::left << std::setw(kOpW) << name << " |"
+  const TimeStats& t1 = r.ff_timing;
+  const TimeStats& t2 = r.dbl_timing;
+  cout << ' ' << std::left << std::setw(kOpW) << op_name(r.op) << " |"
        << right << fixed << setprecision(4)
        << setw(kTW)<<T(t1.min_s)   <<"|"<< setw(kTW)<<T(t1.max_s)    <<"|"
        << setw(kTW)<<T(t1.median_s)<<"|"<< setw(kTW)<<T(t1.mean_s)   <<"|"
-       << setprecision(2)
-       << setw(kAW)<<a1.min_d      <<"|"<< setw(kAW)<<a1.max_d       <<"|"
-       << setw(kAW)<<a1.median_d   <<"|"<< setw(kAW)<<a1.mean_d      <<"|"
-       << setprecision(4)
        << setw(kTW)<<T(t2.min_s)   <<"|"<< setw(kTW)<<T(t2.max_s)    <<"|"
-       << setw(kTW)<<T(t2.median_s)<<"|"<< setw(kTW)<<T(t2.mean_s)   <<"|"
-       << setprecision(2)
-       << setw(kAW)<<a2.min_d      <<"|"<< setw(kAW)<<a2.max_d       <<"|"
-       << setw(kAW)<<a2.median_d   <<"|"<< setw(kAW)<<a2.mean_d      <<"|\n";
-}
-
-static void print_inner_sep() {
-  std::cout << ' ' << std::string(kOpW, ' ') << " +"
-            << dashes(kTSec) << "+" << dashes(kASec) << "+"
-            << dashes(kTSec) << "+" << dashes(kASec) << "+\n";
-}
-
-static void print_complex_op_rows(const ComplexOpResult& r) {
-  std::string re_n = std::string(op_name(r.op)) + " (real)";
-  std::string im_n = std::string(op_name(r.op)) + " (imag)";
-  print_row(re_n.c_str(), r.ff_timing, r.ff_re, r.dbl_timing, r.dbl_re);
-  print_inner_sep();
-  print_row(im_n.c_str(), r.ff_timing, r.ff_im, r.dbl_timing, r.dbl_im);
+       << setw(kTW)<<T(t2.median_s)<<"|"<< setw(kTW)<<T(t2.mean_s)   <<"|\n";
   print_sep();
 }
 
@@ -635,7 +511,7 @@ int main(int argc, char** argv) {
     std::cout << "\nbatch=" << cfg.batch << "  repeats=" << cfg.repeats
               << "  seed=" << cfg.seed << "  warmup=" << kWarmupRuns
               << "  timing=kernel+fence\n\n";
-    print_header("Kokkos FF (float-float)", "CUDA FP64", "Accuracy (dig)");
+    print_header("Kokkos FF (float-float)", "CUDA FP64");
     if (cfg.all_ops) {
       for (Op op : kAllOps) {
         print_complex_op_rows(run_op(op, cfg));

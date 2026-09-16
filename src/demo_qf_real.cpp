@@ -1,11 +1,14 @@
-// Kokkos quad-float demo — real ops.
-// Benchmarks Kokkos::Experimental::QuadFloat against the host __float128
-// oracle (Kokkos-wrapped quadmath, T0.0).
+// Kokkos quad-float demo — real ops. TIMING AND SMOKE ONLY.
+// Times Kokkos::Experimental::QuadFloat against FP64, op by op.
 //
-// Adapted from src/demo_ff_real.cpp (T2.0) for the QF backend (T3.0b):
-// FloatFloat -> QuadFloat, 14-digit -> ~29-digit accuracy cap, and a per-op
-// pass/fail verdict (RC 0 on all-pass, RC 1 on any non-conditioning-limited
-// miss) as the T3.0b deliverable.
+// THIS DEMO DOES NOT MEASURE ACCURACY, DELIBERATELY. The accuracy record is
+// validation/sweep/, scored in ulps against an MPFR/MPC oracle with one verdict
+// per point (docs/CORRECTNESS.md). The oracle columns this demo used to print
+// duplicated that at lower resolution, and cost the project its libquadmath
+// dependency: they routed through impl/Kokkos_QuadPrecisionMath.hpp, which
+// exists only in a Kokkos built with Kokkos_ENABLE_LIBQUADMATH=ON. The RC-0/RC-1
+// accuracy verdict they fed went with them: the contract allows exactly one
+// verdict per point, and the sweep gates are the ones that issue it.
 //
 // ============================================================
 // QF usage reference  (namespace qf = Kokkos::Experimental)
@@ -60,11 +63,6 @@
 
 #include <Kokkos_Core.hpp>
 
-// Host __float128 oracle via Kokkos's quadmath overloads (namespace Kokkos).
-// This header transitively includes <quadmath.h> when Kokkos was built with
-// Kokkos_ENABLE_LIBQUADMATH=ON, so ::*q symbols remain available too.
-#include <impl/Kokkos_QuadPrecisionMath.hpp>
-
 #include <qf_math.hpp>
 
 #include <algorithm>
@@ -85,12 +83,6 @@ namespace {
 constexpr int      kWarmupRuns     = 2;
 constexpr int      kDefaultRepeats = 5;
 constexpr uint64_t kDefaultSeed    = 12345ULL;
-constexpr double   kMaxDigits      = 29.0; // QF max ~28.9 decimal digits (24-bit FP32 mantissa x 4 = ~96 bits, u=2^-96)
-// Per-op pass gate for the RC-0/RC-1 verdict (mean digits vs __float128 oracle).
-// Set below QF's ~29 ceiling to leave room for argument-reduction / conditioning
-// losses (QD's own margins). Ops whose mean is conditioning-limited below this
-// are listed in kConditioningLimited and exempted from the fail verdict.
-constexpr double   kPassMeanDigits  = 24.0;
 
 // clang-format off
 enum class Op {
@@ -214,27 +206,6 @@ const char* op_name(Op op) {
   return "?";
 }
 
-// Ops whose mean accuracy is bounded by the operation's condition number (not by
-// QF quality), so a below-gate mean is expected, not a failure. Grounded in
-// PORT_NOTES.md §5 (the FP32 conditioning list, which applies unchanged to QF):
-//   * exp: e^a near FP32's smallest normal (a ~= -88) pushes the low-order QF
-//     words into FP32 denormal range, capping accuracy in the tail.
-//   * asin/acos near |a|=1: derivative 1/sqrt(1-a^2) -> inf.
-//   * atanh near |a|=1: 1/(1-a^2) -> inf.
-//   * fmod/remainder near a multiple of b: a - b*nint(a/b) cancels; relative
-//     precision bounded by eps*|a|/|result|, unbounded as result -> 0.
-//   * sub/fdim/fma: random near-cancellation, one digit lost per matched digit.
-bool is_conditioning_limited(Op op) {
-  switch (op) {
-    case Op::Exp: case Op::Asin: case Op::Acos: case Op::Atanh:
-    case Op::Fmod: case Op::Remainder:
-    case Op::Sub: case Op::Fdim: case Op::Fma:
-      return true;
-    default:
-      return false;
-  }
-}
-
 void print_usage(const char* argv0) {
   std::cerr
     << "Usage: " << argv0 << " [--op <name>] [--batch N] [--repeats N] [--seed N]\n"
@@ -278,8 +249,7 @@ bool parse_args(int argc, char** argv, Config& cfg) {
 }
 
 // Inputs are sampled in double precision then narrowed to FP32 for QF and to FP64 for the
-// FP64 baseline. The quadmath reference uses the doubles directly (sufficient for the FF
-// accuracy budget of ~29 digits).
+// FP64 baseline.
 void fill_inputs(Op op, double* ha, double* hb, double* hc, int n, uint64_t seed) {
   std::mt19937_64 gen(seed);
   auto unary = [&](double lo, double hi) {
@@ -327,54 +297,6 @@ void fill_inputs(Op op, double* ha, double* hb, double* hc, int n, uint64_t seed
   }
 }
 
-void host_quadmath_reference(Op op, const double* ha, const double* hb, const double* hc,
-                             __float128* out, int n) {
-  for (int i = 0; i < n; ++i) {
-    __float128 fa = (__float128)ha[i], fb = (__float128)hb[i], fc = (__float128)hc[i];
-    switch (op) {
-      case Op::Add:       out[i] = fa + fb;                      break;
-      case Op::Sub:       out[i] = fa - fb;                      break;
-      case Op::Mul:       out[i] = fa * fb;                      break;
-      case Op::Div:       out[i] = fa / fb;                      break;
-      case Op::Sqrt:      out[i] = Kokkos::sqrt(fa);                    break;
-      case Op::Abs:       out[i] = Kokkos::abs(fa);                    break;
-      case Op::Exp:       out[i] = Kokkos::exp(fa);                     break;
-      case Op::Log:       out[i] = Kokkos::log(fa);                     break;
-      case Op::Exp2:      out[i] = Kokkos::exp2(fa);                    break;
-      case Op::Exp10:     out[i] = Kokkos::pow((__float128)10.0, fa);   break;
-      case Op::Expm1:     out[i] = Kokkos::expm1(fa);                   break;
-      case Op::Log2:      out[i] = Kokkos::log2(fa);                    break;
-      case Op::Log10:     out[i] = Kokkos::log10(fa);                   break;
-      case Op::Log1p:     out[i] = Kokkos::log1p(fa);                   break;
-      case Op::Sin:       out[i] = Kokkos::sin(fa);                     break;
-      case Op::Cos:       out[i] = Kokkos::cos(fa);                     break;
-      case Op::Tan:       out[i] = Kokkos::tan(fa);                     break;
-      case Op::Asin:      out[i] = Kokkos::asin(fa);                    break;
-      case Op::Acos:      out[i] = Kokkos::acos(fa);                    break;
-      case Op::Atan:      out[i] = Kokkos::atan(fa);                    break;
-      case Op::Sinh:      out[i] = Kokkos::sinh(fa);                    break;
-      case Op::Cosh:      out[i] = Kokkos::cosh(fa);                    break;
-      case Op::Tanh:      out[i] = Kokkos::tanh(fa);                    break;
-      case Op::Acosh:     out[i] = Kokkos::acosh(fa);                   break;
-      case Op::Asinh:     out[i] = Kokkos::asinh(fa);                   break;
-      case Op::Atanh:     out[i] = Kokkos::atanh(fa);                   break;
-      case Op::Pow:       out[i] = Kokkos::pow(fa, fb);                 break;
-      case Op::Hypot:     out[i] = Kokkos::hypot(fa, fb);               break;
-      case Op::Fmod:      out[i] = Kokkos::fmod(fa, fb);                break;
-      case Op::Remainder: out[i] = Kokkos::remainder(fa, fb);           break;
-      case Op::Copysign:  out[i] = Kokkos::copysign(fa, fb);            break;
-      case Op::Fmax:      out[i] = Kokkos::fmax(fa, fb);                break;
-      case Op::Fmin:      out[i] = Kokkos::fmin(fa, fb);                break;
-      case Op::Fdim:      out[i] = Kokkos::fdim(fa, fb);                break;
-      case Op::Fma:       out[i] = Kokkos::fma(fa, fb, fc);             break;
-      case Op::Ceil:      out[i] = Kokkos::ceil(fa);                    break;
-      case Op::Floor:     out[i] = Kokkos::floor(fa);                   break;
-      case Op::Round:     out[i] = Kokkos::round(fa);                   break;
-      case Op::Trunc:     out[i] = Kokkos::trunc(fa);                   break;
-    }
-  }
-}
-
 // ---- Timing ----------------------------------------------------------------
 
 struct TimeStats { double min_s = 0, max_s = 0, median_s = 0, mean_s = 0; };
@@ -406,56 +328,9 @@ TimeStats time_kernel_fence(int repeats, Launch&& launch) {
   return summarize_times(std::move(times));
 }
 
-// ---- Accuracy --------------------------------------------------------------
-
-struct AccStats { double min_d = kMaxDigits, max_d = 0, mean_d = 0, median_d = 0; };
-
-static double element_digits(__float128 dev, __float128 ref) {
-  if (Kokkos::isnan(dev) || Kokkos::isnan(ref)) return 0.0;
-  if (Kokkos::isinf(ref)) return (Kokkos::isinf(dev) && (dev>0)==(ref>0)) ? kMaxDigits : 0.0;
-  if (ref == (__float128)0.0) return (dev == (__float128)0.0) ? kMaxDigits : 0.0;
-  __float128 rel = Kokkos::abs((dev - ref) / ref);
-  if (rel == (__float128)0.0) return kMaxDigits;
-  double d = -(double)Kokkos::log10(rel);
-  return d < 0.0 ? 0.0 : (d > kMaxDigits ? kMaxDigits : d);
-}
-
-// Convert QuadFloat to __float128 for accuracy comparison
-static __float128 qf_to_q(Kokkos::Experimental::QuadFloat x) {
-  return (__float128)x.f0 + (__float128)x.f1 + (__float128)x.f2 + (__float128)x.f3;
-}
-
-AccStats compute_accuracy_qf(const __float128* ref, const Kokkos::Experimental::QuadFloat* dev, int n) {
-  std::vector<double> digits((size_t)n);
-  for (int i = 0; i < n; ++i)
-    digits[i] = element_digits(qf_to_q(dev[i]), ref[i]);
-  std::sort(digits.begin(), digits.end());
-  AccStats s;
-  s.min_d  = digits.front();
-  s.max_d  = digits.back();
-  s.mean_d = std::accumulate(digits.begin(), digits.end(), 0.0) / (double)n;
-  size_t m = digits.size();
-  s.median_d = (m%2==1) ? digits[m/2] : 0.5*(digits[m/2-1]+digits[m/2]);
-  return s;
-}
-
-AccStats compute_accuracy_dbl(const __float128* ref, const double* dev, int n) {
-  std::vector<double> digits((size_t)n);
-  for (int i = 0; i < n; ++i)
-    digits[i] = element_digits((__float128)dev[i], ref[i]);
-  std::sort(digits.begin(), digits.end());
-  AccStats s;
-  s.min_d  = digits.front();
-  s.max_d  = digits.back();
-  s.mean_d = std::accumulate(digits.begin(), digits.end(), 0.0) / (double)n;
-  size_t m = digits.size();
-  s.median_d = (m%2==1) ? digits[m/2] : 0.5*(digits[m/2-1]+digits[m/2]);
-  return s;
-}
-
 // ---- Per-op runner ---------------------------------------------------------
 
-struct OpResult { Op op; TimeStats qf_timing, dbl_timing; AccStats qf_acc, dbl_acc; };
+struct OpResult { Op op; TimeStats qf_timing, dbl_timing; };
 
 using exec_space = Kokkos::DefaultExecutionSpace;
 using policy_1d  = Kokkos::RangePolicy<exec_space>;
@@ -467,11 +342,9 @@ namespace qf = Kokkos::Experimental;
 OpResult run_op(Op op, const Config& cfg) {
   const int n = cfg.batch;
 
-  std::vector<double>     ha(n), hb(n), hc(n, 0.0);
-  std::vector<__float128> href(n);
+  std::vector<double> ha(n), hb(n), hc(n, 0.0);
 
   fill_inputs(op, ha.data(), hb.data(), hc.data(), n, cfg.seed);
-  host_quadmath_reference(op, ha.data(), hb.data(), hc.data(), href.data(), n);
 
   vqf  aqf("aqf",n), bqf("bqf",n), cqf("cqf",n), rqf("rqf",n);
   vdbl ad("ad",n), bd("bd",n), cd("cd",n), rd("rd",n);
@@ -661,24 +534,24 @@ OpResult run_op(Op op, const Config& cfg) {
       st_dbl=time_kernel_fence(cfg.repeats,[&](){Kokkos::parallel_for("dbl_trunc",pol,KOKKOS_LAMBDA(int i){rd(i)=Kokkos::trunc(ad(i));});}); break;
   }
 
+  // Smoke: bring the results back host-side. Nothing scores them -- this is
+  // here so the demo still exercises the whole round trip (kernel output ->
+  // mirror -> host) for a user-defined type, which is where a broken deep_copy
+  // would show up. It sits outside the timed region.
   auto mrqf = Kokkos::create_mirror_view(rqf);
   Kokkos::deep_copy(mrqf, rqf);
   auto mrd = Kokkos::create_mirror_view(rd);
   Kokkos::deep_copy(mrd, rd);
 
-  AccStats qf_acc  = compute_accuracy_qf(href.data(), mrqf.data(), n);
-  AccStats dbl_acc = compute_accuracy_dbl(href.data(), mrd.data(), n);
-  return {op, st_qf, st_dbl, qf_acc, dbl_acc};
+  return {op, st_qf, st_dbl};
 }
 
 // ---- Table printing --------------------------------------------------------
 
 static constexpr int kOpW = 10;
 static constexpr int kTW  =  9;
-static constexpr int kAW  =  7;
 static constexpr int kTimeSec = 4*kTW + 3;
-static constexpr int kAccSec  = 4*kAW + 3;
-static constexpr int kBkndW   = kTimeSec + 1 + kAccSec;
+static constexpr int kBkndW   = kTimeSec;
 
 static std::string dashes(int n) { return std::string((size_t)n, '-'); }
 
@@ -690,8 +563,7 @@ static std::string center(const std::string& s, int w) {
 
 static void print_sep_real() {
   std::cout << '-' << dashes(kOpW) << "-+"
-            << dashes(kTimeSec) << "+" << dashes(kAccSec) << "+"
-            << dashes(kTimeSec) << "+" << dashes(kAccSec) << "+\n";
+            << dashes(kTimeSec) << "+" << dashes(kTimeSec) << "+\n";
 }
 
 static void print_header_real() {
@@ -700,21 +572,16 @@ static void print_header_real() {
        << " |" << center("Kokkos QF (quad-float)", kBkndW)
        << "|" << center("CUDA FP64", kBkndW) << "|\n";
   cout << ' ' << std::string(kOpW,' ')
-       << " |" << center("Time (ms)", kTimeSec) << "|" << center("Accuracy (digits)", kAccSec)
-       << "|" << center("Time (ms)", kTimeSec) << "|" << center("Accuracy (digits)", kAccSec) << "|\n";
+       << " |" << center("Time (ms)", kTimeSec)
+       << "|" << center("Time (ms)", kTimeSec) << "|\n";
   print_sep_real();
   cout << ' ' << std::left << std::setw(kOpW) << ""
        << " |" << center("Min",kTW) << "|" << center("Max",kTW)
        << "|" << center("Med",kTW)  << "|" << center("Mean",kTW)
-       << "|" << center("Min",kAW)  << "|" << center("Max",kAW)
-       << "|" << center("Med",kAW)  << "|" << center("Mean",kAW)
        << "|" << center("Min",kTW)  << "|" << center("Max",kTW)
-       << "|" << center("Med",kTW)  << "|" << center("Mean",kTW)
-       << "|" << center("Min",kAW)  << "|" << center("Max",kAW)
-       << "|" << center("Med",kAW)  << "|" << center("Mean",kAW) << "|\n";
+       << "|" << center("Med",kTW)  << "|" << center("Mean",kTW) << "|\n";
   cout << '=' << dashes(kOpW) << "=+"
-       << dashes(kTimeSec) << "+" << dashes(kAccSec) << "+"
-       << dashes(kTimeSec) << "+" << dashes(kAccSec) << "+\n";
+       << dashes(kTimeSec) << "+" << dashes(kTimeSec) << "+\n";
 }
 
 static void print_row_real(const OpResult& r) {
@@ -726,21 +593,10 @@ static void print_row_real(const OpResult& r) {
        << setw(kTW) << T(r.qf_timing.max_s)    << "|"
        << setw(kTW) << T(r.qf_timing.median_s) << "|"
        << setw(kTW) << T(r.qf_timing.mean_s)   << "|"
-       << setprecision(2)
-       << setw(kAW) << r.qf_acc.min_d    << "|"
-       << setw(kAW) << r.qf_acc.max_d    << "|"
-       << setw(kAW) << r.qf_acc.median_d << "|"
-       << setw(kAW) << r.qf_acc.mean_d   << "|"
-       << setprecision(4)
        << setw(kTW) << T(r.dbl_timing.min_s)    << "|"
        << setw(kTW) << T(r.dbl_timing.max_s)    << "|"
        << setw(kTW) << T(r.dbl_timing.median_s) << "|"
-       << setw(kTW) << T(r.dbl_timing.mean_s)   << "|"
-       << setprecision(2)
-       << setw(kAW) << r.dbl_acc.min_d    << "|"
-       << setw(kAW) << r.dbl_acc.max_d    << "|"
-       << setw(kAW) << r.dbl_acc.median_d << "|"
-       << setw(kAW) << r.dbl_acc.mean_d   << "|\n";
+       << setw(kTW) << T(r.dbl_timing.mean_s)   << "|\n";
 }
 
 }  // namespace
@@ -756,7 +612,6 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  int rc = 0;
   Kokkos::initialize(argc, argv);
   {
     std::cout << "\nbatch=" << cfg.batch << "  repeats=" << cfg.repeats
@@ -772,33 +627,7 @@ int main(int argc, char** argv) {
     }
     for (const OpResult& r : results) { print_row_real(r); print_sep_real(); }
     std::cout << "\n";
-
-    // ---- Pass/fail verdict (T3.0b deliverable) --------------------------------
-    // Each op must reach kPassMeanDigits mean accuracy vs the __float128 oracle,
-    // unless it is conditioning-limited (is_conditioning_limited). Any other
-    // shortfall sets RC 1.
-    std::cout << "Accuracy verdict (gate: mean >= " << std::fixed << std::setprecision(1)
-              << kPassMeanDigits << " digits vs __float128; conditioning-limited ops exempt)\n";
-    int n_pass = 0, n_cond = 0, n_fail = 0;
-    for (const OpResult& r : results) {
-      bool cond = is_conditioning_limited(r.op);
-      bool ok   = r.qf_acc.mean_d >= kPassMeanDigits;
-      const char* tag;
-      if (ok)             { tag = "PASS";        ++n_pass; }
-      else if (cond)      { tag = "PASS (cond)"; ++n_cond; }
-      else                { tag = "FAIL";        ++n_fail; rc = 1; }
-      if (!ok) {
-        std::cout << "  " << std::left << std::setw(10) << op_name(r.op)
-                  << " mean=" << std::right << std::fixed << std::setprecision(2)
-                  << std::setw(6) << r.qf_acc.mean_d
-                  << "  min=" << std::setw(6) << r.qf_acc.min_d
-                  << "  " << tag << "\n";
-      }
-    }
-    std::cout << "\nSummary: " << n_pass << " pass, " << n_cond
-              << " pass (conditioning-limited), " << n_fail << " fail  ->  RC "
-              << rc << "\n\n";
   }
   Kokkos::finalize();
-  return rc;
+  return 0;
 }

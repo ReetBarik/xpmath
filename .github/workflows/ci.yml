@@ -428,11 +428,15 @@ jobs:
           git clone --depth 1 --branch "${KOKKOS_TAG}" \
             https://github.com/kokkos/kokkos.git /tmp/kokkos-src
 
-          # Local extension, NOT upstream: the __complex128 oracle overloads
-          # that src/demo_complex.cpp needs.  See patches/README.md.  Copied
-          # into the Kokkos SOURCE tree before configure so it is installed.
-          cp patches/kokkos_complex_quad_math.hpp \
-             /tmp/kokkos-src/core/src/impl/Kokkos_ComplexQuadPrecisionMath.hpp
+          # This step used to copy patches/kokkos_complex_quad_math.hpp into the
+          # Kokkos SOURCE tree, because the four complex demos included
+          # impl/Kokkos_ComplexQuadPrecisionMath.hpp for their __complex128
+          # accuracy columns and that header is not upstream in Kokkos.  B3
+          # deleted the columns and the patch with them; the demos are timing and
+          # smoke only now.  LIBQUADMATH stays ON below for ONE target,
+          # kokkos_ep_bench_cost, which benchmarks the backends AGAINST
+          # __float128 and so calls ::expq/::powq directly.  No demo and no test
+          # needs it.
 
           # KI-3: Kokkos itself REQUIRES C++20.  This is not the standard the
           # consuming repo is built at (see the next step, which uses 17).
@@ -444,12 +448,6 @@ jobs:
             -DKokkos_ENABLE_SERIAL=ON \
             -DKokkos_ENABLE_LIBQUADMATH=ON
           cmake --build /tmp/kokkos-build -j"$(nproc)" --target install
-
-      - name: Confirm the complex-quadmath wrapper reached the install tree
-        run: |
-          ls -l "${HOME}/kokkos-install/include/impl/Kokkos_ComplexQuadPrecisionMath.hpp" \
-            || { echo "::error::patches/kokkos_complex_quad_math.hpp did not install;" \
-                      "the complex __complex128 oracle will be absent."; exit 1; }
 
       # KI-3, other half: THIS repo is C++17.  Do not unify the two numbers.
       - name: Configure xpmath (C++17, -O3 -DNDEBUG)

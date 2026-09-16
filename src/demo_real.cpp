@@ -1,14 +1,15 @@
-// Kokkos DD (double-double) real ops demo.
+// Kokkos DD (double-double) real ops demo -- TIMING AND SMOKE ONLY.
 // Each operation is run on double-double (DD) and FP64. The table shows
-// slowdown vs FP64 (min/max/med/mean across repeats) and accuracy in
-// decimal digits for DD.
+// slowdown vs FP64 (min/max/med/mean across repeats).
+//
+// THIS DEMO DOES NOT MEASURE ACCURACY, DELIBERATELY. The accuracy record is
+// validation/sweep/, scored in ulps against an MPFR/MPC oracle with one verdict
+// per point (docs/CORRECTNESS.md). The oracle columns this demo used to print
+// duplicated that at lower resolution, and cost the project its libquadmath
+// dependency: they routed through impl/Kokkos_QuadPrecisionMath.hpp, which
+// exists only in a Kokkos built with Kokkos_ENABLE_LIBQUADMATH=ON.
 
 #include <Kokkos_Core.hpp>
-
-// Host __float128 oracle via Kokkos's quadmath overloads (namespace Kokkos).
-// This header transitively includes <quadmath.h> when Kokkos was built with
-// Kokkos_ENABLE_LIBQUADMATH=ON, so ::*q symbols remain available too.
-#include <impl/Kokkos_QuadPrecisionMath.hpp>
 
 #include <dd_math.hpp>
 
@@ -33,8 +34,6 @@ namespace {
 constexpr int      kWarmupRuns     = 2;
 constexpr int      kDefaultRepeats = 5;
 constexpr uint64_t kDefaultSeed    = 12345ULL;
-
-constexpr double kMaxDigits_dd    = 31.0;
 
 // clang-format off
 enum class Op {
@@ -247,54 +246,6 @@ void fill_inputs(Op op, double* ha, double* hb, double* hc, int n, uint64_t seed
   }
 }
 
-void host_quadmath_reference(Op op, const double* ha, const double* hb, const double* hc,
-                             __float128* out, int n) {
-  for (int i = 0; i < n; ++i) {
-    __float128 fa = (__float128)ha[i], fb = (__float128)hb[i], fc = (__float128)hc[i];
-    switch (op) {
-      case Op::Add:       out[i] = fa + fb;                      break;
-      case Op::Sub:       out[i] = fa - fb;                      break;
-      case Op::Mul:       out[i] = fa * fb;                      break;
-      case Op::Div:       out[i] = fa / fb;                      break;
-      case Op::Sqrt:      out[i] = Kokkos::sqrt(fa);             break;
-      case Op::Abs:       out[i] = Kokkos::abs(fa);              break;
-      case Op::Exp:       out[i] = Kokkos::exp(fa);              break;
-      case Op::Log:       out[i] = Kokkos::log(fa);              break;
-      case Op::Exp2:      out[i] = Kokkos::exp2(fa);             break;
-      case Op::Exp10:     out[i] = Kokkos::pow((__float128)10.0, fa); break;
-      case Op::Expm1:     out[i] = Kokkos::expm1(fa);            break;
-      case Op::Log2:      out[i] = Kokkos::log2(fa);             break;
-      case Op::Log10:     out[i] = Kokkos::log10(fa);            break;
-      case Op::Log1p:     out[i] = Kokkos::log1p(fa);            break;
-      case Op::Sin:       out[i] = Kokkos::sin(fa);              break;
-      case Op::Cos:       out[i] = Kokkos::cos(fa);              break;
-      case Op::Tan:       out[i] = Kokkos::tan(fa);              break;
-      case Op::Asin:      out[i] = Kokkos::asin(fa);             break;
-      case Op::Acos:      out[i] = Kokkos::acos(fa);             break;
-      case Op::Atan:      out[i] = Kokkos::atan(fa);             break;
-      case Op::Sinh:      out[i] = Kokkos::sinh(fa);             break;
-      case Op::Cosh:      out[i] = Kokkos::cosh(fa);             break;
-      case Op::Tanh:      out[i] = Kokkos::tanh(fa);             break;
-      case Op::Acosh:     out[i] = Kokkos::acosh(fa);            break;
-      case Op::Asinh:     out[i] = Kokkos::asinh(fa);            break;
-      case Op::Atanh:     out[i] = Kokkos::atanh(fa);            break;
-      case Op::Pow:       out[i] = Kokkos::pow(fa, fb);          break;
-      case Op::Hypot:     out[i] = Kokkos::hypot(fa, fb);        break;
-      case Op::Fmod:      out[i] = Kokkos::fmod(fa, fb);         break;
-      case Op::Remainder: out[i] = Kokkos::remainder(fa, fb);    break;
-      case Op::Copysign:  out[i] = Kokkos::copysign(fa, fb);     break;
-      case Op::Fmax:      out[i] = Kokkos::fmax(fa, fb);         break;
-      case Op::Fmin:      out[i] = Kokkos::fmin(fa, fb);         break;
-      case Op::Fdim:      out[i] = Kokkos::fdim(fa, fb);         break;
-      case Op::Fma:       out[i] = Kokkos::fma(fa, fb, fc);      break;
-      case Op::Ceil:      out[i] = Kokkos::ceil(fa);             break;
-      case Op::Floor:     out[i] = Kokkos::floor(fa);            break;
-      case Op::Round:     out[i] = Kokkos::round(fa);            break;
-      case Op::Trunc:     out[i] = Kokkos::trunc(fa);            break;
-    }
-  }
-}
-
 // ---- Timing ----------------------------------------------------------------
 
 struct TimeStats { double min_s = 0, max_s = 0, median_s = 0, mean_s = 0; };
@@ -326,38 +277,6 @@ TimeStats time_kernel_fence(int repeats, Launch&& launch) {
   return summarize_times(std::move(times));
 }
 
-// ---- Accuracy --------------------------------------------------------------
-
-struct AccStats { double min_d = 0, max_d = 0, mean_d = 0, median_d = 0; };
-
-static double element_digits(__float128 dev, __float128 ref, double max_digits) {
-  if (Kokkos::isnan(dev) || Kokkos::isnan(ref)) return 0.0;
-  if (Kokkos::isinf(ref)) return (Kokkos::isinf(dev) && (dev>0)==(ref>0)) ? max_digits : 0.0;
-  if (ref == (__float128)0.0) return (dev == (__float128)0.0) ? max_digits : 0.0;
-  __float128 rel = Kokkos::abs((dev - ref) / ref);
-  if (rel == (__float128)0.0) return max_digits;
-  double d = -(double)Kokkos::log10(rel);
-  return d < 0.0 ? 0.0 : (d > max_digits ? max_digits : d);
-}
-
-static __float128 dd_to_q(dd::DoubleDouble x) {
-  return (__float128)x.hi + (__float128)x.lo;
-}
-
-AccStats compute_accuracy_dd(const __float128* ref, const dd::DoubleDouble* dev, int n) {
-  std::vector<double> digs((size_t)n);
-  for (int i = 0; i < n; ++i)
-    digs[i] = element_digits(dd_to_q(dev[i]), ref[i], kMaxDigits_dd);
-  std::sort(digs.begin(), digs.end());
-  AccStats s;
-  s.min_d    = digs.front();
-  s.max_d    = digs.back();
-  s.mean_d   = std::accumulate(digs.begin(), digs.end(), 0.0) / (double)n;
-  size_t m   = digs.size();
-  s.median_d = (m%2==1) ? digs[m/2] : 0.5*(digs[m/2-1]+digs[m/2]);
-  return s;
-}
-
 // ---- Slowdown stats --------------------------------------------------------
 
 struct SlowdownStats { double min_x = 1, max_x = 1, median_x = 1, mean_x = 1; };
@@ -381,7 +300,6 @@ static std::string fmt_slow(double x) {
 struct OpResult {
   Op        op;
   TimeStats dd_timing, fp64_timing;
-  AccStats  dd_acc;
 };
 
 // ---- View types ------------------------------------------------------------
@@ -394,11 +312,9 @@ using vdbl       = Kokkos::View<double*,          Kokkos::LayoutRight, exec_spac
 OpResult run_op(Op op, const Config& cfg) {
   const int n = cfg.batch;
 
-  std::vector<double>     ha(n), hb(n), hc(n, 0.0);
-  std::vector<__float128> href(n);
+  std::vector<double> ha(n), hb(n), hc(n, 0.0);
 
   fill_inputs(op, ha.data(), hb.data(), hc.data(), n, cfg.seed);
-  host_quadmath_reference(op, ha.data(), hb.data(), hc.data(), href.data(), n);
 
   vdd_t  add("add",n),   bdd("bdd",n),   cdd("cdd",n),   rdd("rdd",n);
   vdbl   ad("ad",n),     bd("bd",n),     cd("cd",n),     rd("rd",n);
@@ -585,23 +501,23 @@ OpResult run_op(Op op, const Config& cfg) {
       st_dbl=time_kernel_fence(cfg.repeats,[&](){Kokkos::parallel_for("dbl_trunc",pol,KOKKOS_LAMBDA(int i){rd(i)=Kokkos::trunc(ad(i));});}); break;
   }
 
+  // Smoke: bring the results back host-side. Nothing scores them -- this is
+  // here so the demo still exercises the whole round trip (kernel output ->
+  // mirror -> host) for a user-defined type, which is where a broken deep_copy
+  // would show up. It sits outside the timed region.
   auto mrdd  = Kokkos::create_mirror_view(rdd);  Kokkos::deep_copy(mrdd, rdd);
 
-  AccStats dd_acc = compute_accuracy_dd(href.data(), mrdd.data(), n);
-
-  return {op, st_dd, st_dbl, dd_acc};
+  return {op, st_dd, st_dbl};
 }
 
 // ---- Table printing --------------------------------------------------------
-// Layout: op(10) | DD: slow×4 acc×4 |
-// kSW=7 fits "100.0x" (6 chars) right-aligned; kAW=7 fits "31.00" right-aligned.
+// Layout: op(10) | DD: slow×4 |
+// kSW=7 fits "100.0x" (6 chars) right-aligned.
 
 static constexpr int kOpW     = 10;
 static constexpr int kSW      =  7;
-static constexpr int kAW      =  7;
 static constexpr int kSlowSec = 4*kSW + 3;   // 31
-static constexpr int kAccSec  = 4*kAW + 3;   // 31
-static constexpr int kBkndW   = kSlowSec + 1 + kAccSec; // 63
+static constexpr int kBkndW   = kSlowSec;    // 31
 
 static std::string dashes(int n) { return std::string((size_t)n, '-'); }
 
@@ -612,8 +528,7 @@ static std::string center(const std::string& s, int w) {
 }
 
 static void print_sep_real() {
-  std::cout << '-' << dashes(kOpW) << "-+"
-            << dashes(kSlowSec) << "+" << dashes(kAccSec) << "+\n";
+  std::cout << '-' << dashes(kOpW) << "-+" << dashes(kSlowSec) << "+\n";
 }
 
 static void print_header_real() {
@@ -621,32 +536,23 @@ static void print_header_real() {
   cout << ' ' << std::string(kOpW,' ')
        << " |" << center("Kokkos DD (double-double)", kBkndW) << "|\n";
   cout << ' ' << std::string(kOpW,' ')
-       << " |" << center("Slowdown vs FP64", kSlowSec)
-       << "|" << center("Accuracy (digits)", kAccSec) << "|\n";
+       << " |" << center("Slowdown vs FP64", kSlowSec) << "|\n";
   print_sep_real();
   cout << ' ' << std::left << std::setw(kOpW) << ""
        << " |" << center("Min",kSW) << "|" << center("Max",kSW)
-       << "|" << center("Med",kSW)  << "|" << center("Mean",kSW)
-       << "|" << center("Min",kAW)  << "|" << center("Max",kAW)
-       << "|" << center("Med",kAW)  << "|" << center("Mean",kAW) << "|\n";
-  cout << '=' << dashes(kOpW) << "=+"
-       << dashes(kSlowSec) << "+" << dashes(kAccSec) << "+\n";
+       << "|" << center("Med",kSW)  << "|" << center("Mean",kSW) << "|\n";
+  cout << '=' << dashes(kOpW) << "=+" << dashes(kSlowSec) << "+\n";
 }
 
 static void print_row_real(const OpResult& r) {
-  using std::cout; using std::setw; using std::right; using std::fixed; using std::setprecision;
+  using std::cout; using std::setw; using std::right;
   SlowdownStats sd = compute_slowdown(r.dd_timing,    r.fp64_timing);
   cout << ' ' << std::left << std::setw(kOpW) << op_name(r.op) << " |"
        << right
        << setw(kSW) << fmt_slow(sd.min_x)    << "|"
        << setw(kSW) << fmt_slow(sd.max_x)    << "|"
        << setw(kSW) << fmt_slow(sd.median_x) << "|"
-       << setw(kSW) << fmt_slow(sd.mean_x)   << "|"
-       << fixed << setprecision(2)
-       << setw(kAW) << r.dd_acc.min_d    << "|"
-       << setw(kAW) << r.dd_acc.max_d    << "|"
-       << setw(kAW) << r.dd_acc.median_d << "|"
-       << setw(kAW) << r.dd_acc.mean_d   << "|\n";
+       << setw(kSW) << fmt_slow(sd.mean_x)   << "|\n";
 }
 
 
