@@ -214,6 +214,18 @@ within a phase after the first task lands.
   `CMakeLists.txt`, and `tests/test_utils.hpp` carries the Kokkos-wrapped
   quadmath oracle behind `KOKKOS_EP_HAVE_QUADMATH`.
 
+- **SUPERSEDED (B2). `KOKKOS_EP_HAVE_QUADMATH` AND THE SKIP-77 PLUMBING NO
+  LONGER EXIST.** Every DONE block below that says a file is
+  `#ifdef KOKKOS_EP_HAVE_QUADMATH`-guarded, runtime-SKIPs 77, or "runs
+  unconditionally, unlike the gated tests" describes the suite as it was, and is
+  left as written rather than retconned. What changed: no test calls a `*q`
+  function any more, so there is nothing for the gate to answer to.
+  `__float128` stays as the CARRIER (a compiler type; libgcc supplies its
+  arithmetic), and the elementary functions moved to `__builtin_*f128` or, for
+  the one genuine reference, to MPFR. The gate had to GO rather than merely
+  being redundant: on a Kokkos without the TPL it reported `Skipped`, which
+  reads as a pass in a summary line. See the header of `tests/test_utils.hpp`.
+
 - Remove `find_library(QUADMATH_LIBRARY ...)` and the x86_64 gate from
   `CMakeLists.txt`. Replace with detection of
   `Kokkos_ENABLE_LIBQUADMATH` and fail gracefully (skip tests, not

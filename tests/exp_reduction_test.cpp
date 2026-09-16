@@ -45,14 +45,70 @@
 //                PRODUCT's exactness is the claim, so we widen to __float128
 //                (113 bits) and compare bit-for-bit.
 // ============================================================================
+//
+// WHY THIS LINKS MPFR AND NOT LIBQUADMATH
+// ----------------------------------------
+// __float128 is still the carrier for the tail arithmetic below — it is a
+// COMPILER type whose arithmetic comes from libgcc, not from libquadmath. What
+// libquadmath supplied was the `*q` elementary functions, and this file called
+// exactly two of them:
+//
+//   fabsq   an exact bit operation -> __builtin_fabsq, no library at all.
+//   logq    ln2, and this one IS A REFERENCE. P3 measures the TAIL of the piece
+//           decomposition against it, at magnitudes down to 2^-136 — so an ln2
+//           that is off by one ulp of binary128 (2^-113) moves the very number
+//           the assertion reads. libquadmath's logq is not correctly rounded and
+//           carried no error bound; MPFR at 400 bits, rounded once to binary128,
+//           does. It goes through MPFR.
+//
+// WHAT THAT ACTUALLY CHANGED, MEASURED: nothing, at this one point. The MPFR
+// value and logq((__float128)2) are BIT-IDENTICAL, so every number P3 asserts
+// is unchanged and this is a provenance fix, not a correction. Stated plainly
+// because the reverse would be easy to imply: logq happened to be correctly
+// rounded at 2, it is not in general, and the test had no way to know which it
+// was getting. (Its sibling sqrtq is the counterexample -- wrong by one ulp on
+// 25% of inputs; see the q_sqrt note in tests/test_utils.hpp.)
+//
+// That is the same taxonomy scripts/sweep_accuracy.cpp applies (see its "WHAT
+// <quadmath.h> USED TO SUPPLY" section): bit-exact and IEEE-mandated operations
+// move to __builtin_, genuine approximations move to MPFR. Nothing is silently
+// downgraded to double.
+// ============================================================================
 #include <cstdio>
 #include <cstring>
 #include <cmath>
 #include <cstdint>
-#include <quadmath.h>
+#include <mpfr.h>
 
 static int failures = 0;
 static int checks   = 0;
+
+// ln2 as binary128, from MPFR. Correctly rounded, unlike the logq() this
+// replaced.
+//
+// SPECIALIZED, DELIBERATELY. scripts/sweep_accuracy.cpp's mpfr_to_q() is the
+// general conversion and carries scaling and saturation for references that
+// reach 1e434; none of that applies to a single constant in [0.5, 1), where
+// MPFR's exponent is 0 and no scaling happens at all. The exact three-double
+// read is the same, and is what makes this exact: 113 bits fit in 3 x 53, each
+// residual is exactly representable, and the three-term sum is exact in
+// binary128.
+static __float128 ln2_binary128() {
+    mpfr_t t;
+    mpfr_init2(t, 400);
+    mpfr_const_log2(t, MPFR_RNDN);
+    // Round ONCE, to binary128's own precision — the rounding binary128 would
+    // do itself — and then read the result exactly.
+    mpfr_prec_round(t, 113, MPFR_RNDN);
+    __float128 acc = 0;
+    for (int i = 0; i < 3 && !mpfr_zero_p(t); ++i) {
+        const double d = mpfr_get_d(t, MPFR_RNDN);
+        acc += (__float128)d;
+        mpfr_sub_d(t, t, d, MPFR_RNDN);
+    }
+    mpfr_clear(t);
+    return acc;
+}
 
 static void ok(bool cond, const char* what) {
     ++checks;
@@ -161,17 +217,19 @@ int main() {
     //   FF n=3 -> 105.7 ulps   TF n=4 -> 242   QF n=5 -> 1.33e4
     std::printf("\nP3: tail pins the piece count\n");
     {
-        // ln2 in __float128 (113 bits) as ground truth for the tail. Derived by
-        // logq rather than an M_LN2q literal so no quadmath literal suffix is
-        // needed (the suffix requires -fext-numeric-literals on some fronts).
-        __float128 ln2q = logq((__float128)2);
+        // ln2 in __float128 (113 bits) as ground truth for the tail, correctly
+        // rounded from MPFR at 400 bits. A literal was avoided here originally
+        // so no Q literal suffix was needed (it requires -fext-numeric-literals
+        // on some fronts); computing it keeps that property and now also gets a
+        // reference with an error bound. See ln2_binary128() above.
+        const __float128 ln2q = ln2_binary128();
         struct { const char* name; int n; int p; } cfg[] = {
             {"FF", FF_N, 48}, {"TF", TF_N, 72}, {"QF", QF_N, 96}
         };
         for (auto& c : cfg) {
             __float128 s = 0;
             for (int i = 0; i < c.n; ++i) s += (__float128)f_ln2[i];
-            __float128 tail = fabsq(ln2q - s);
+            __float128 tail = __builtin_fabsq(ln2q - s);
             double t = (double)tail;
             double ulps = std::ldexp(151.0 * t, c.p);
             std::printf("   %s %d pieces: tail 2^%.1f -> %.3g ulps of 2^-%d\n",
@@ -180,13 +238,13 @@ int main() {
             // one short must NOT satisfy the same criterion
             __float128 s1 = 0;
             for (int i = 0; i < c.n - 1; ++i) s1 += (__float128)f_ln2[i];
-            double t1 = (double)fabsq(ln2q - s1);
+            double t1 = (double)__builtin_fabsq(ln2q - s1);
             double u1 = std::ldexp(151.0 * t1, c.p);
             ok(u1 >= 0.5, "one piece fewer would also pass — count is not pinned");
         }
         __float128 s = 0;
         for (int i = 0; i < DD_N; ++i) s += (__float128)dd_ln2[i];
-        double t = (double)fabsq(ln2q - s);
+        double t = (double)__builtin_fabsq(ln2q - s);
         // NOTE: 3 x 42 = 126 bits of DD pieces EXCEEDS binary128's 113-bit
         // mantissa, so __float128 cannot resolve the DD tail — it reports
         // exactly 0 (2^-inf). That would make this assertion vacuous, so the
@@ -201,7 +259,7 @@ int main() {
         // and the count must still be pinned: two pieces must be visibly bad
         __float128 s2 = 0;
         for (int i = 0; i < DD_N - 1; ++i) s2 += (__float128)dd_ln2[i];
-        double t2 = (double)fabsq(ln2q - s2);
+        double t2 = (double)__builtin_fabsq(ln2q - s2);
         ok(t2 > 0.0 && std::ldexp(1075.0 * t2, 106) >= 0.5,
            "DD with one piece fewer would also pass — count is not pinned");
     }

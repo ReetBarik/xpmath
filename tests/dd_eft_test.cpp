@@ -29,8 +29,10 @@
 //     (__float128)s + (__float128)e  ==  (__float128)a + (__float128)b
 //     (__float128)p + (__float128)e  ==  (__float128)a * (__float128)b
 // is a *provable* bit-equality, not an approximate "close enough" check. The
-// oracle is Kokkos's quadmath overloads (impl/Kokkos_QuadPrecisionMath.hpp),
-// available only when Kokkos was built with LIBQUADMATH (else this test SKIPs).
+// oracle is __float128 arithmetic, which comes from libgcc and is available on
+// every x86_64 build. (It used to come through Kokkos's quadmath overloads in
+// impl/Kokkos_QuadPrecisionMath.hpp, so this test SKIPped when Kokkos was built
+// without LIBQUADMATH; that gate is gone -- see test_utils.hpp.)
 //
 // WHY -ffp-contract=off IS REQUIRED (DEKKER SPLITTER CORRECTNESS)
 // --------------------------------------------------------------
@@ -69,7 +71,6 @@
 
 using namespace kokkos_ep;
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
 
 // ----------------------------------------------------------------------------
 // The two EFT primitives under test, mirrored from dd_math.hpp for RAW doubles.
@@ -114,7 +115,7 @@ KOKKOS_INLINE_FUNCTION TwoOut two_prod_dekker(double a, double b) {
 }
 
 // ----------------------------------------------------------------------------
-// Oracle comparisons (host only — quadmath is host-only).
+// Oracle comparisons (host only — __float128 is host-only).
 // ----------------------------------------------------------------------------
 inline bool sum_is_exact(double a, double b) {
     TwoOut r = two_sum(a, b);
@@ -349,7 +350,7 @@ static NamedResult run_named_cases() {
 
 // ----------------------------------------------------------------------------
 // Test D — device parity. Run the SAME helpers inside a Kokkos parallel_for,
-// copy results back, and compare bit-exactly against the host quadmath oracle.
+// copy results back, and compare bit-exactly against the host __float128 oracle.
 // On a Serial-only Kokkos this reduces to host execution (still a valid run); on
 // CUDA/HIP/SYCL it catches device-side FP differences (subnormal flush,
 // contraction) the host pass cannot see. Inputs are drawn from the splitter- and
@@ -420,14 +421,9 @@ static NamedResult run_device_parity() {
     return R;
 }
 
-#endif  // KOKKOS_EP_HAVE_QUADMATH
 
 // ============================================================================
 int main(int argc, char** argv) {
-#ifndef KOKKOS_EP_HAVE_QUADMATH
-    std::printf("dd_eft_test: SKIP — Kokkos built without LIBQUADMATH; no __float128 oracle.\n");
-    return KOKKOS_EP_SKIP;
-#else
     Kokkos::initialize(argc, argv);
     int rc = 0;
     {
@@ -459,12 +455,11 @@ int main(int argc, char** argv) {
                     Kokkos::DefaultExecutionSpace::name());
         NamedResult D = run_device_parity();
         std::printf("  Test D device parity: %d/%d passed\n\n", D.passed, D.total);
-        KOKKOS_EP_ASSERT(D.passed == D.total, "device EFT parity mismatch vs host quadmath oracle");
+        KOKKOS_EP_ASSERT(D.passed == D.total, "device EFT parity mismatch vs host binary128 oracle");
 
         rc = ep_exit_code();
         std::printf("=== dd_eft_test: %s ===\n", rc == 0 ? "ALL PASSED" : "FAILURES PRESENT");
     }
     Kokkos::finalize();
     return rc;
-#endif
 }

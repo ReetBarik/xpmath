@@ -19,8 +19,9 @@
 //     Pythagorean sin²+cos², sin/cos symmetry, tan·cos, double-angle, and the
 //     DEMOTED multiply-commutativity (see below). These carry a rounding
 //     tolerance and are reported in "digits of accuracy" via the __float128
-//     machinery in test_utils.hpp, so Group B (and Test C) are #ifdef'd on
-//     KOKKOS_EP_HAVE_QUADMATH; without it, main() returns KOKKOS_EP_SKIP (77).
+//     machinery in test_utils.hpp. Group B and Test C used to be #ifdef'd on
+//     KOKKOS_EP_HAVE_QUADMATH and to SKIP (77) without it; they now run
+//     unconditionally, because __float128 needs no TPL.
 //
 //   TEST C — named-constant regressions.  sin(π)≈0, log(e)≈1, exp(log2)≈2,
 //     √2·√2≈2, log(10)≈ln(10) constant — each to ≥30 digits.
@@ -229,7 +230,6 @@ static GroupAResult run_group_a_binary(const char* name, uint64_t seed,
   return GroupAResult{name, n, skipped, fails};
 }
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
 // ============================================================================
 // GROUP B — approximate identities (tolerance-based, needs the __float128 path)
 // ============================================================================
@@ -295,7 +295,6 @@ static InputDist loguniform(double explo, double exphi) {
     return std::pow(10.0, d(g));
   };
 }
-#endif  // KOKKOS_EP_HAVE_QUADMATH
 
 // ============================================================================
 // Device pass. 3 Group A (A1, A3, A5) + 2 Group B (B1, B4) on 10^5 inputs.
@@ -395,7 +394,6 @@ int main(int argc, char** argv) {
 
     for (const auto& r : ga) groupA_failures += r.failures;
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
     // ------------------------------------------------------------------------
     // GROUP B — approximate identities (tolerance, digits vs oracle).
     // ------------------------------------------------------------------------
@@ -519,7 +517,6 @@ int main(int argc, char** argv) {
                   "conditioning near a=±pi*k (%s)\n", b4.min_d,
                   ann ? ann->reason : "sin near +/-pi; PORT_NOTES §5");
     }
-#endif  // KOKKOS_EP_HAVE_QUADMATH
 
     // ------------------------------------------------------------------------
     // Device pass: 3 Group A (bit-exact) + 2 Group B (tolerance) on 10^5 inputs.
@@ -563,7 +560,6 @@ int main(int argc, char** argv) {
                   "A5_abs_branch", kDeviceN, f, f == 0 ? "PASS" : "FAIL");
     }
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
     // Device B1: sqrt(a)² ≈ a.
     {
       std::vector<double> x, hi, lo;
@@ -598,9 +594,7 @@ int main(int argc, char** argv) {
       std::printf("  [device] %-14s n=%d min=%.2f mean=%.2f tol=%.2f status=%s\n",
                   "B4_pythag", kDeviceN, s.min, s.mean, tol, pass ? "PASS" : "FAIL");
     }
-#endif
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
     // ------------------------------------------------------------------------
     // TEST C — named-constant regressions (each ≥30 digits).
     // ------------------------------------------------------------------------
@@ -624,11 +618,11 @@ int main(int argc, char** argv) {
       dd::DoubleDouble sp = dd::sin(dd::DoubleDouble_pi());
       float128 v = BackendTraits<DD>::to_quad(sp);
       double zero_digits = (v == (float128)0.0) ? kMaxDig
-                           : -(double)Kokkos::log10(Kokkos::abs(v));
+                           : -(double)q_log10(q_abs(v));
       const auto* ann = lookup_expected_min_drop("sin");
       bool ok = zero_digits >= kNamedMin;
       std::printf("    %-14s |sin(pi)|=%.3e zero_digits=%6.2f  %s  (%s)\n",
-                  "C1_sin_pi", (double)Kokkos::abs(v), zero_digits,
+                  "C1_sin_pi", (double)q_abs(v), zero_digits,
                   ok ? "PASS" : "FAIL", ann ? ann->reason : "sin near pi");
       if (ok) ++c_pass;
     }
@@ -653,7 +647,6 @@ int main(int argc, char** argv) {
                 "DD oracle in dd_math.hpp)\n", "C6_gamma");
 
     std::printf("  Test C: %d/%d passed\n", c_pass, c_total);
-#endif  // KOKKOS_EP_HAVE_QUADMATH
 
     // ------------------------------------------------------------------------
     // ANTI-TESTS — identities DELIBERATELY NOT tested, and why.
@@ -686,13 +679,11 @@ int main(int argc, char** argv) {
     KOKKOS_EP_ASSERT(groupA_failures == 0,
                      "a Group A bit-exact identity did not hold to the last bit");
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
     long groupB_failed = 0; for (const auto& r : gb) if (!r.pass) ++groupB_failed;
     std::printf("  Group B: %zu identities, mean below tolerance=%ld\n", gb.size(), groupB_failed);
     KOKKOS_EP_ASSERT(groupB_failed == 0,
                      "a Group B identity's MEAN digits fell below the -log10(N*u^2) tolerance");
     KOKKOS_EP_ASSERT(c_pass == c_total, "a Test C named-constant regression fell below 30 digits");
-#endif
 
     std::printf("  Device: total failures=%ld\n", device_failures);
     KOKKOS_EP_ASSERT(device_failures == 0, "a device identity check failed");
@@ -703,14 +694,5 @@ int main(int argc, char** argv) {
   }
   Kokkos::finalize();
 
-#ifndef KOKKOS_EP_HAVE_QUADMATH
-  // Group A ran and gated above; but Group B / Test C need the oracle. Signal the
-  // partial run honestly as CTest "Skipped" (matches the suite's posture), unless
-  // Group A already found a hard failure (then report the failure).
-  if (rc == 0) {
-    std::printf("(no __float128 oracle: Group A passed; Group B / Test C skipped)\n");
-    return KOKKOS_EP_SKIP;
-  }
-#endif
   return rc;
 }

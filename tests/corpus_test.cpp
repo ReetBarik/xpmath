@@ -6,8 +6,9 @@
 // harness: it checks that corpus.hpp loads, the categories/flags behave, and the
 // PORT_NOTES §4 regression accessors contain the specific called-out values. It
 // does NOT run any DD math op — DD correctness against these inputs begins in
-// Phase 1 (T1.x). No __float128 oracle is touched, so no KOKKOS_EP_HAVE_QUADMATH
-// guard is needed (unlike hello_test): corpus data itself needs no oracle.
+// Phase 1 (T1.x). No __float128 oracle is touched: corpus data itself needs no
+// oracle. (This used to be phrased as "needs no KOKKOS_EP_HAVE_QUADMATH guard,
+// unlike hello_test" — that guard is gone from every test, see test_utils.hpp.)
 // ============================================================================
 
 #include "test_utils.hpp"

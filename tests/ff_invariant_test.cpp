@@ -20,9 +20,10 @@
 // different float and the equality would fail. Every FF op is supposed to return
 // a renormalized, non-overlapping pair; a violation localizes a normalization
 // bug to that exact op — no reference value and no wider type is needed to see
-// it. That is why this test carries NO __float128 oracle and NO
-// KOKKOS_EP_HAVE_QUADMATH guard: it runs (and must run) even on a quadmath-less
-// Kokkos. Accuracy-vs-oracle is a separate concern handled in T2.4.
+// it. That is why this test carries NO __float128 oracle at all: it runs (and
+// must run) on the narrowest possible toolchain. (It never carried the
+// KOKKOS_EP_HAVE_QUADMATH guard either; that guard is now gone from the tests
+// that DID carry it.) Accuracy-vs-oracle is a separate concern handled in T2.4.
 //
 // WHY RAW FP32 EQUALITY, NOT A double OR float128 PROMOTION
 // --------------------------------------------------------
@@ -330,7 +331,7 @@ static InvSummary run_binary(const BinaryOp& op, uint64_t seed) {
 // ----------------------------------------------------------------------------
 // Device tripwire (Test B). Same invariant, computed on device for 5 ops.
 // A custom runner is required: test_utils.hpp's run_unary_op/run_binary_op return
-// digits-of-accuracy AccStats (and are quadmath-guarded), not the raw FF outputs
+// digits-of-accuracy AccStats (and are scored against __float128), not the raw FF outputs
 // this test needs — so we mirror their host->device->host View plumbing but ship
 // hi/lo back and check non-overlap on host. Mirrors T1.2's device_unary/binary.
 // ----------------------------------------------------------------------------
