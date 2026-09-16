@@ -35,14 +35,14 @@
 //   It is NOT a replacement for the tolerance tables. Those say "this op is this
 //   accurate"; this says "this op is no less accurate than it was".
 //
-// RELATIONSHIP TO scripts/gen_corpus.cpp
+// RELATIONSHIP TO scripts/attic/gen_corpus.cpp
 //   Same posture (standalone host tool) and the same determinism discipline.
 //   gen_corpus still scores against libquadmath; this tool no longer does, and
 //   the two are not comparable point for point. The deterministic sampling
 //   primitives — splitmix64, fnv1a, struct Rng, stream_seed — and the per-op
-//   domain repair table are taken from gen_corpus.cpp rather than reinvented;
-//   see the DETERMINISM and PER-OP DOMAIN POLICY sections of that file for the
-//   reasoning behind each.
+//   domain repair table are taken from scripts/attic/gen_corpus.cpp rather than
+//   reinvented; see the DETERMINISM and PER-OP DOMAIN POLICY sections of that
+//   file for the reasoning behind each.
 //
 //   The difference is the INPUT SET. gen_corpus draws a large random sample from
 //   a log-uniform distribution and stores it; this walks a small FIXED grid
@@ -381,8 +381,8 @@ const double      kDefaultClassifyFrac = 0.50;
 const uint64_t    kDefaultSeed   = 12345ull;   // same default as gen_corpus and the demos
 
 // ---------------------------------------------------------------------------
-// Deterministic sampling primitives. Copied from scripts/gen_corpus.cpp; see the
-// DETERMINISM section of that file for why each choice is what it is.
+// Deterministic sampling primitives. Copied from scripts/attic/gen_corpus.cpp;
+// see the DETERMINISM section of that file for why each choice is what it is.
 // ---------------------------------------------------------------------------
 uint64_t splitmix64(uint64_t x) {
   x += 0x9E3779B97F4A7C15ull;
@@ -446,8 +446,8 @@ uint64_t oracle_fingerprint() {
 }
 
 // ---------------------------------------------------------------------------
-// Op inventory. Identical order and naming to scripts/gen_corpus.cpp, so a
-// sweep row and a corpus record refer to the same operation.
+// Op inventory. Identical order and naming to scripts/attic/gen_corpus.cpp, so
+// a sweep row and a corpus record refer to the same operation.
 // ---------------------------------------------------------------------------
 enum R {
   R_Add, R_Sub, R_Mul, R_Div,
@@ -678,8 +678,9 @@ std::vector<GridPoint> build_complex_grid() {
 
 // ---------------------------------------------------------------------------
 // Per-op domain repair, applied to the shared grid value so that a point is
-// evaluated somewhere the op is defined. Transcribed from gen_corpus.cpp's
-// repair_real(); see its PER-OP DOMAIN POLICY section for the rationale.
+// evaluated somewhere the op is defined. Transcribed from
+// scripts/attic/gen_corpus.cpp's repair_real(); see its PER-OP DOMAIN POLICY
+// section for the rationale.
 //
 // Note the asymmetry with the complex side: NO repair is applied to the complex
 // grid. The complex grid exists precisely to sit on branch cuts and poles, and
@@ -1393,7 +1394,8 @@ int oracle_conv_selftest() {
     // So compare the oracle against ITSELF at twice kOraclePrec, on arguments
     // that CANCEL. log(z) at |z| = 1 + 2^-60 loses ~60 bits to cancellation;
     // 113 bits of working precision leaves ~53, while 400 leaves ~340. Same
-    // shape as probe_complex_oracle's --selfcheck, promoted from probe to gate.
+    // shape as scripts/attic/probe_complex_oracle.cpp's --selfcheck, promoted from
+    // probe to gate.
     {
       mpc_t lo, hi, zl, zh;
       mpc_init2(lo, kMpcPrec);
@@ -1716,13 +1718,14 @@ __float128 reference_real(int id, double da, double db, double dc) {
 // MPC GRINDS on some arguments: tan with a large imaginary part and tanh with a
 // large real part both drive an internal exp() past the point where the binary128
 // result carries any information, and MPC's Ziv loop will sit there computing
-// it -- probe_complex_oracle.cpp measured the requirement at ~5.6e7 bits. The
-// ceiling below is ported from that probe. Past 2|y| = 11400 the small component
+// it -- scripts/attic/probe_complex_oracle.cpp measured the requirement at
+// ~5.6e7 bits. The ceiling below is ported from that probe. Past 2|y| = 11400
+// the small component
 // is below binary128's smallest subnormal (~6.5e-4966), so the answer IS the
 // analytic limit and nothing is being approximated away; the limit is evaluated
 // below, at 400 bits, AND THE POINT IS COUNTED -- a silent per-point fallback
 // would be a hybrid oracle that nothing declares.
-static const double kMpcGrindCeiling = 5700.0;   // probe_complex_oracle.cpp
+static const double kMpcGrindCeiling = 5700.0;   // scripts/attic/probe_complex_oracle.cpp
 long g_mpc_fallbacks = 0;
 
 bool mpc_would_grind(int id, __float128 are, __float128 aim) {

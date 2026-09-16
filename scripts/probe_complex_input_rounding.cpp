@@ -304,7 +304,8 @@ typename Tr<T>::C apply(int op, const typename Tr<T>::C& z) {
 }
 
 // mpc_tan/mpc_tanh drive Ziv's loop for a very long time near the poles of the
-// grid; probe_complex_oracle.cpp carries the same ceiling for the same reason.
+// grid; scripts/attic/probe_complex_oracle.cpp carries the same ceiling for the
+// same reason.
 const double kMpcTanCeiling = 5700.0;
 bool would_grind(int op, double re, double im) {
     if (std::strcmp(kOps[op].name, "tan") == 0) return std::fabs(im) > kMpcTanCeiling;

@@ -121,7 +121,8 @@
 // left to fix.  But nq = 0 on DD was measured ON THE SWEEP to cut DD+FF real
 // trig only 24.9% (898 -> 674 rows above 1 ulp) while REGRESSING DD complex pow
 // by up to +30.85 ulps (point 251: 6.136 -> 36.98).  Complex pow reads cos's low
-// bits through exp(w*log z) -- probe_cpow.cpp later showed why that coupling is
+// bits through exp(w*log z) -- scripts/attic/probe_cpow.cpp later showed why
+// that coupling is
 // so tight: exp maps an ABSOLUTE perturbation of its argument to a RELATIVE one,
 // so cos's low bits are amplified by 2^p, and with exact inputs the residual of
 // complex pow on DD is 259 rows at max 3.41 ulps against a worst shipped sin of

@@ -2911,8 +2911,8 @@ QF does not exist yet. Phase 3 = build + validate. Model after QD's
   FF onto `main` behind `Kokkos::Experimental`, so `main` already carries the
   full FF infrastructure this branch inherits).
 - **What shipped (6 files, +1332).** `qf_math.hpp` (756),
-  `scripts/test_qfmul.cpp` (243), `docs/PORT_NOTES_QF.md` (186),
-  `scripts/gen_qf_constants.cpp` (84),
+  `scripts/attic/test_qfmul.cpp` (243), `docs/PORT_NOTES_QF.md` (186),
+  `scripts/attic/gen_qf_constants.cpp` (84),
   `LICENSES/LicenseRef-LBNL-BSD-License.txt` (61), `.gitignore` (+2).
 - **QD 2.3.24 source citations (every non-trivial routine cites its QD
   location, in-header):** `renorm` / `renorm_4` (Priest/Alg-3,

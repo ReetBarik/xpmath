@@ -24,10 +24,10 @@
 //   cross-backend comparability and a fixed target for new backends.
 //
 // BUILD (standalone host tool; NOT wired into the CMake build, same posture as
-// scripts/gen_qf_constants.cpp — run from the repository root):
+// scripts/attic/gen_qf_constants.cpp — run from the repository root):
 //
-//   g++ -std=c++17 -fext-numeric-literals -O2 scripts/gen_corpus.cpp \
-//       -lquadmath -o scripts/gen_corpus
+//   g++ -std=c++17 -fext-numeric-literals -O2 scripts/attic/gen_corpus.cpp \
+//       -lquadmath -o scripts/attic/gen_corpus
 //
 //   (-fext-numeric-literals is required for the __float128 'Q' suffix under
 //    -std=c++17; drop it if building with -std=gnu++NN. Toolchain of record is
@@ -36,11 +36,11 @@
 //    the system g++ 7.5 and g++ 14.)
 //
 // RUN
-//   ./scripts/gen_corpus                          # default: n = 1,000,000 per op
-//   ./scripts/gen_corpus --n 1000                 # small file for smoke tests
-//   ./scripts/gen_corpus --real-only              # skip the 24 complex ops
-//   ./scripts/gen_corpus --with-nan               # opt NaN inputs in
-//   ./scripts/gen_corpus --verify scripts/xp_corpus.bin
+//   ./scripts/attic/gen_corpus                          # default: n = 1,000,000 per op
+//   ./scripts/attic/gen_corpus --n 1000                 # small file for smoke tests
+//   ./scripts/attic/gen_corpus --real-only              # skip the 24 complex ops
+//   ./scripts/attic/gen_corpus --with-nan               # opt NaN inputs in
+//   ./scripts/attic/gen_corpus --verify scripts/xp_corpus.bin
 //
 //   Default output path is scripts/xp_corpus.bin, which .gitignore excludes.
 //   The generator is committed; the corpus it emits never is.

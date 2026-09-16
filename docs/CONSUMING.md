@@ -27,9 +27,7 @@ demos scored themselves against a host `__float128` oracle reached through
 `impl/Kokkos_QuadPrecisionMath.hpp` (and, for the complex demos, a non-upstream
 patch header this repo carried). Those accuracy columns are gone — the accuracy
 record is `validation/sweep/` — so a Kokkos with libquadmath OFF, such as a
-`hip/gfx90a` install, configures cleanly. One target, `kokkos_ep_bench_cost`,
-still links libquadmath, because `__float128` is the incumbent it benchmarks
-against rather than an oracle.
+`hip/gfx90a` install, configures cleanly. No target here uses libquadmath.
 
 ### Building without Kokkos
 

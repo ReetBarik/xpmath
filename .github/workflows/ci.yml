@@ -450,10 +450,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/kokkos-install
-          # Bump the trailing integer to force a rebuild.
-          key: kokkos-${{ env.KOKKOS_TAG }}-serial-quadmath-cxx20-gcc13-ubuntu24-v1
+          # Bump the trailing integer to force a rebuild. v1→v2 reflects the
+          # removal of -DKokkos_ENABLE_LIBQUADMATH=ON, which invalidates the cached
+          # tree.
+          key: kokkos-${{ env.KOKKOS_TAG }}-serial-noquadmath-cxx20-gcc13-ubuntu24-v2
 
-      - name: Build Kokkos ${{ env.KOKKOS_TAG }} (Serial + LIBQUADMATH)
+      - name: Build Kokkos ${{ env.KOKKOS_TAG }} (Serial)
         if: steps.kokkos-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
@@ -465,10 +467,9 @@ jobs:
           # impl/Kokkos_ComplexQuadPrecisionMath.hpp for their __complex128
           # accuracy columns and that header is not upstream in Kokkos.  B3
           # deleted the columns and the patch with them; the demos are timing and
-          # smoke only now.  LIBQUADMATH stays ON below for ONE target,
-          # kokkos_ep_bench_cost, which benchmarks the backends AGAINST
-          # __float128 and so calls ::expq/::powq directly.  No demo and no test
-          # needs it.
+          # smoke only now.  The LIBQUADMATH TPL is gone: the one consumer was
+          # kokkos_ep_bench_cost (which benchmarked backends against __float128),
+          # and it is deleted.
 
           # KI-3: Kokkos itself REQUIRES C++20.  This is not the standard the
           # consuming repo is built at (see the next step, which uses 17).
@@ -477,8 +478,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="${HOME}/kokkos-install" \
             -DCMAKE_CXX_COMPILER=g++-13 \
             -DCMAKE_CXX_STANDARD=20 \
-            -DKokkos_ENABLE_SERIAL=ON \
-            -DKokkos_ENABLE_LIBQUADMATH=ON
+            -DKokkos_ENABLE_SERIAL=ON
           cmake --build /tmp/kokkos-build -j"$(nproc)" --target install
 
       # KI-3, other half: THIS repo is C++17.  Do not unify the two numbers.
@@ -493,6 +493,27 @@ jobs:
 
       - name: Build
         run: cmake --build build -j"$(nproc)"
+
+      # `ldd` is the WRONG check and would look like a failure: a Kokkos built
+      # with the LIBQUADMATH TPL puts -lquadmath on every Kokkos-linked target's
+      # link line and leaves a DT_NEEDED with not one symbol bound. Only the
+      # undefined-symbol check means anything. See tests/CMakeLists.txt lines
+      # 50-65 for the full explanation.
+      - name: No built binary calls libquadmath
+        run: |
+          set -euo pipefail
+          bins=$(find build -type f -executable -not -name '*.cmake' -not -path '*/CMakeFiles/*')
+          test -n "$bins" || { echo "::error::no binaries found under build/ - guard did not run"; exit 1; }
+          echo "scanned $(echo "$bins" | wc -l) binaries"
+          fail=0
+          for b in $bins; do
+            if nm -D --undefined-only "$b" 2>/dev/null | grep -qE ' (c?[a-z0-9_]+q)$'; then
+              echo "::error::$b has undefined libquadmath symbols"
+              nm -D --undefined-only "$b" | grep -E ' (c?[a-z0-9_]+q)$'
+              fail=1
+            fi
+          done
+          exit $fail
 
       # A SUITE THAT SHRINKS SILENTLY IS A SUITE THAT PASSES SILENTLY.
       #

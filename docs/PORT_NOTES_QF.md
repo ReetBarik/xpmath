@@ -148,7 +148,7 @@ well-conditioned at every FP32 magnitude, so the FF bug has no analogue here and
 
 ## 5. Constant generation precision
 
-`scripts/gen_qf_constants.cpp` extends the FF Route-A generator to four words by
+`scripts/attic/gen_qf_constants.cpp` extends the FF Route-A generator to four words by
 **successive splitting** of a 113-bit `__float128` source constant:
 `f0=(float)x; r=x−f0; f1=(float)r; …` four times. `__float128` carries 113 bits
 vs QF's ~96, ~17 bits (5 decimal digits) of headroom — ample. Reconstruction
@@ -226,7 +226,7 @@ the T3.6 adversarial goal. This is a direct benefit of the wider type, available
 Every ported transcendental still **cites the QD 2.3.24 routine it mirrors
 mathematically** and flags where it follows dd/ff structure. `sin_table`,
 `cos_table`, and `inv_fact` are therefore **not** added to
-`gen_qf_constants.cpp` (§5 above is unchanged — only the six scalar constants are
+`scripts/attic/gen_qf_constants.cpp` (§5 above is unchanged — only the six scalar constants are
 generated). The Newton skeletons (`log`, `atan2`) ARE faithful QD ports.
 
 ## 7. `exp` term-count derivation (T3.0b deliverable)
