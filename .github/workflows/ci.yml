@@ -11,10 +11,16 @@
 #   monotone-gate   Did any of the 436,080 scored sweep points get LESS accurate?
 #   build-and-test  Does the full Kokkos build + the WHOLE ctest suite pass?
 #                   "Whole" is asserted, not assumed: the lane installs
-#                   libmpfr-dev/libgmp-dev and then checks the registered
-#                   target count against XPMATH_EXPECTED_TESTS below. Four
-#                   targets sit behind if(XPMATH_MPFR_FOUND) and this lane used
-#                   to run 34 of 38 while reporting "31 tests" and green.
+#                   libmpfr-dev/libgmp-dev/libmpc-dev and then checks the
+#                   registered target count against XPMATH_EXPECTED_TESTS
+#                   below. Four targets used to sit behind if(XPMATH_MPFR_FOUND)
+#                   and this lane once ran 34 of 38 while reporting "31 tests"
+#                   and green. That guard is GONE — MPFR/MPC are now a hard
+#                   requirement of tests/CMakeLists.txt, so a runner without
+#                   them fails at CONFIGURE time instead of silently shedding
+#                   coverage. The count assertion stays anyway: it is the thing
+#                   that catches a target moving across a guard, not just a
+#                   missing dependency.
 #   device-nvcc     Does each of the eight headers compile for a CUDA device?
 #   device-hip      Same for HIP/ROCm, plus the gfx90a codegen guard over the
 #                   emitted device asm: branch reach (tiers 1-3) and recursive
@@ -29,14 +35,22 @@
 #    17 (cmake/kokkos_test_cxx_std.cmake:89).  THIS repo builds at C++17.  Both
 #    numbers below are deliberate and must stay different.
 #
-#  * ORACLE FINGERPRINT.  The monotone gate's reference is libquadmath, whose
-#    transcendental results are a property of the GCC version.  The committed
-#    baseline records `oracle-fingerprint: 578322f998a329c8`.  Measured locally:
-#    gcc 12.2.0, 13.1.0 and 13.3.0 all produce that value; gcc 14.1.0 produces
-#    54901e8104607a77.  So the gate pins g++-13 and REFUSES TO INTERPRET the
-#    diff if the fingerprint moves — a mismatch means the reference moved, not
-#    that the library regressed, and re-baselining under a CI toolchain must be
-#    a human decision.
+#  * ORACLE FINGERPRINT.  The monotone gate's reference is MPFR/MPC at 400
+#    bits.  It used to be libquadmath, whose transcendental results are a
+#    property of the GCC version: gcc 12.2.0, 13.1.0 and 13.3.0 all produced
+#    `578322f998a329c8`, gcc 14.1.0 produced `54901e8104607a77`, and the Ubuntu
+#    runner produced 54901e… even while reporting g++ 13.3.0.  The committed
+#    baseline now records `oracle-fingerprint: 44f18a4a959f6c29`.
+#
+#    MPFR is correctly rounded, so that value SHOULD be portable across
+#    runners and MPFR versions in a way the libquadmath one provably was not.
+#    THAT IS AN EXPECTATION, NOT A MEASUREMENT — nobody has yet read the
+#    fingerprint off a GitHub runner.  So the gate below still scores PARENT
+#    vs HEAD on one runner rather than trusting the committed file, and still
+#    REFUSES TO INTERPRET a diff whose fingerprint moved.  If the runner does
+#    turn out to reproduce 44f18a4a959f6c29, this lane can be simplified to a
+#    single build against the committed baseline; until someone reads it, it
+#    cannot.
 #
 #  * NO __float128 IN A DEVICE TU.  nvcc's device pass walks STL member
 #    signatures and rejects std::vector<__float128> even in host-only code.  No
@@ -145,7 +159,8 @@ jobs:
   #
   # Without a lane, that decoupling regresses the first time someone moves a
   # target outside the guard and only ever configures with Kokkos on. Measured
-  # locally before this lane was written: 20/20 in 164 s.
+  # locally before this lane was written: 20/20 in 164 s; 21/21 in 169 s since
+  # build_provenance joined the Kokkos-free set.
   # ---------------------------------------------------------------------------
   no-kokkos-build:
     name: build + ctest with XPMATH_WITH_KOKKOS=OFF
@@ -175,7 +190,7 @@ jobs:
       - name: Assert the Kokkos-free suite is the expected size
         run: |
           set -euo pipefail
-          expected=20
+          expected=21
           actual=$(ctest --test-dir build-nokokkos -N | awk '/^Total Tests: /{print $3}')
           echo "registered without Kokkos: ${actual} (expected ${expected})"
           if [ "${actual}" != "${expected}" ]; then
@@ -191,13 +206,17 @@ jobs:
   # ==========================================================================
   # 3. THE MONOTONE GATE.  The single most valuable regression check here.
   #
-  # Rebuilds every one of the 436,080 scored sweep points against a libquadmath
-  # oracle and fails if ANY point's digit count DECREASED.  The per-op tolerance
-  # tables in ctest gate on a mean against a threshold, so they cannot see a fix
-  # that buys 30 digits in one op by quietly spending 2 in another.  This can.
+  # Rebuilds every one of the 436,080 scored sweep points against an MPFR/MPC
+  # oracle at 400 bits and fails if ANY point's digit count DECREASED.  The
+  # per-op tolerance tables in ctest gate on a mean against a threshold, so they
+  # cannot see a fix that buys 30 digits in one op by quietly spending 2 in
+  # another.  This can.
   #
-  # Measured on the toolchain of record (gcc 13.3.0): 7 s to compile, 4 s to run
-  # the full sweep.  It is cheap enough to run on every push.
+  # Measured on the toolchain of record (gcc 13.3.0): 13 s to compile and 35 s
+  # to run the full sweep, TWICE -- parent and HEAD -- so budget ~100 s.  It was
+  # 7 s and 4 s under the libquadmath oracle; correct rounding at 400 bits is
+  # ~8x the arithmetic and that is the price of the reference being right.
+  # Still cheap enough to run on every push.
   # ==========================================================================
   monotone-gate:
     name: monotone accuracy gate (parent vs HEAD)
@@ -207,7 +226,7 @@ jobs:
         with:
           fetch-depth: 2          # need HEAD^ to score the parent commit
 
-      - name: Install g++-13
+      - name: Install g++-13 and the oracle libraries
         run: |
           # Third-party apt sources shipped with the runner image (Chrome,
           # Microsoft) are not used by this project and have broken the build
@@ -218,23 +237,32 @@ jobs:
                      /etc/apt/sources.list.d/*chrome*.list \
                      /etc/apt/sources.list.d/*microsoft*.list || true
           sudo apt-get update || (sleep 15 && sudo apt-get update)
-          sudo apt-get install -y g++-13
+          # libmpfr-dev/libgmp-dev/libmpc-dev are NOT optional here any more.
+          # sweep_accuracy.cpp #errors without XPMATH_HAVE_MPFR, and the two
+          # hand-compiles below are the whole lane. This install line was the
+          # last thing in CI still assuming a libquadmath oracle: it used to
+          # fetch g++-13 and nothing else.
+          sudo apt-get install -y g++-13 libmpfr-dev libgmp-dev libmpc-dev
           g++-13 -dumpfullversion
       # WHY NOT COMPARE AGAINST validation/sweep/sweep_baseline.csv.gz?
       #
-      # Because the oracle is libquadmath, and its transcendental results are a
-      # property of the libquadmath BUILD -- not, as first assumed, of the gcc
-      # version. Measured in the first CI run: this runner reports g++ 13.3.0,
-      # the same version as the toolchain of record, and still produces
-      # 54901e8104607a77 against the baseline's 578322f998a329c8. JLSE is
-      # x86_64-suse-linux with glibc 2.38; the runner is Ubuntu 24.04 with
-      # glibc 2.39. No pinnable gcc version closes that gap.
+      # The historical reason was that the oracle was libquadmath and its
+      # transcendental results are a property of the libquadmath BUILD -- not,
+      # as first assumed, of the gcc version. Measured in the first CI run: this
+      # runner reports g++ 13.3.0, the same version as the toolchain of record,
+      # and still produced 54901e8104607a77 against the baseline's
+      # 578322f998a329c8. JLSE is x86_64-suse-linux with glibc 2.38; the runner
+      # is Ubuntu 24.04 with glibc 2.39. No pinnable gcc version closed that gap.
       #
-      # So compare the PARENT COMMIT against HEAD, both scored on THIS runner
-      # with THIS libquadmath. The oracle is identical on both sides and cancels
-      # exactly, and the question CI actually needs answered -- "did this commit
-      # make any of the 436,080 points worse?" -- is answered without depending
-      # on a reference recorded somewhere else.
+      # The oracle is MPFR/MPC now, and correctly rounded results should not
+      # vary that way -- but SHOULD is not MEASURED, and nobody has read a
+      # fingerprint off this runner yet. Until someone does, keep the structure
+      # that does not depend on the answer: compare the PARENT COMMIT against
+      # HEAD, both scored on THIS runner with THIS MPFR. Whatever the oracle is,
+      # it is identical on both sides and cancels exactly, and the question CI
+      # actually needs answered -- "did this commit make any of the 436,080
+      # points worse?" -- is answered without depending on a reference recorded
+      # somewhere else.
       #
       # The committed baseline remains the reference for work done on the
       # toolchain of record; it is reported below, non-gating, for continuity.
@@ -254,9 +282,49 @@ jobs:
             echo "skipped=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          g++-13 -std=c++17 -fext-numeric-literals -O2 -I/tmp/parent/include \
-                 /tmp/parent/scripts/sweep_accuracy.cpp -lquadmath -o /tmp/sweep_parent
-          /tmp/sweep_parent --out /tmp/parent_baseline.csv --quiet > /dev/null
+          # THE PARENT IS COMPILED FOR EITHER SHAPE, ON PURPOSE. Across the
+          # commit that made MPFR the only oracle, HEAD^ is the last source that
+          # still had a libquadmath arm; on every later commit it will not.
+          # -DXPMATH_HAVE_MPFR=1 is what the new source demands and the old one
+          # merely honours; -lquadmath is what the old source needs and the new
+          # one does not call. Linking a library nothing calls costs a DT_NEEDED
+          # entry in a throwaway binary and buys a lane that does not have to be
+          # edited twice. It is NOT a licence to reintroduce -lquadmath on the
+          # HEAD line below -- that one is an acceptance check.
+          g++-13 -std=c++17 -fext-numeric-literals -O2 -DXPMATH_HAVE_MPFR=1 \
+                 -I/tmp/parent/include /tmp/parent/scripts/sweep_accuracy.cpp \
+                 -lmpc -lmpfr -lgmp -lquadmath -o /tmp/sweep_parent
+          # --oracle=mpfr narrows the gap across the transition but DOES NOT
+          # CLOSE IT, and the claim that it did is now measured false. On any
+          # post-transition parent it is an exact no-op -- verified: the same
+          # binary with and without the flag yields the identical fingerprint
+          # 44f18a4a959f6c29 and a 436,080-row comparison with zero drift. On a
+          # PRE-transition parent it selects that source's OWN MPFR arm, which
+          # is not the arm HEAD uses: the oracle commit also rewrote mpfr_to_q,
+          # whose clamped scale had been turning exp/sinh/cosh references above
+          # 2^1000001 into NaN. So the two sides still disagree, and the flag
+          # cannot fix it.
+          #
+          # MEASURED on PR #26, the one PR that crosses the transition. NOTE
+          # THAT ON A PR `HEAD^` IS THE BASE BRANCH, not the previous commit on
+          # the branch -- Actions checks out an ephemeral merge commit -- so
+          # the parent here was `main` (8cfeae7, pre-transition, fingerprint
+          # 735ef724fa491ebd) against HEAD's 44f18a4a959f6c29. Result: 0
+          # decreased, 0 state moved, 0 bound drift, and 20 rows of DIGIT drift
+          # (DD and FF real `exp`, 0.00 -> 31.00 / 14.00) which are the
+          # mpfr_to_q fix becoming visible. Exit 3, because the fingerprint arm
+          # below drops unattributable IMPROVEMENTS but `drifted` is evaluated
+          # regardless of it.
+          #
+          # THIS IS A ONE-TIME CONDITION AND IT SELF-HEALS: once the oracle
+          # commit is on main, every later PR compares MPFR against MPFR. Do not
+          # "fix" it by relaxing the gate under schedule pressure -- the comment
+          # block in sweep_accuracy.cpp records getting this exact call wrong
+          # twice. If it is ever worth fixing properly, the narrow change is to
+          # let a fingerprint mismatch drop drift_digits the way it already
+          # drops improvements, leaving drift_bound and state_moved gating, and
+          # to ship a poison self-test proving the relaxed gate can still fail.
+          /tmp/sweep_parent --oracle=mpfr --out /tmp/parent_baseline.csv --quiet > /dev/null
           echo "parent  $(git rev-parse --short HEAD^)  fingerprint: \
             $(sed -n 's/^# oracle-fingerprint: //p' /tmp/parent_baseline.csv | head -1)"
           echo "skipped=false" >> "$GITHUB_OUTPUT"
@@ -265,8 +333,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          g++-13 -std=c++17 -fext-numeric-literals -O2 -Iinclude \
-                 scripts/sweep_accuracy.cpp -lquadmath -o /tmp/sweep_head
+          # NO -lquadmath, and that is load-bearing rather than tidy. The two
+          # acceptance checks in the header of scripts/sweep_accuracy.cpp say
+          # the shipped binary links and calls nothing from libquadmath;
+          # spelling it here would let this lane stay green through a change
+          # that reintroduced a dependency on it. __float128 still works --
+          # its arithmetic is libgcc's (__addtf3), and the elementary
+          # functions this TU reaches for are glibc's *f128 entry points.
+          g++-13 -std=c++17 -fext-numeric-literals -O2 -DXPMATH_HAVE_MPFR=1 \
+                 -Iinclude scripts/sweep_accuracy.cpp \
+                 -lmpc -lmpfr -lgmp -o /tmp/sweep_head
+          if ldd /tmp/sweep_head | grep -i quadmath; then
+            echo "::error::sweep_accuracy pulled in libquadmath; see the two"
+            echo "::error::acceptance checks in scripts/sweep_accuracy.cpp."
+            exit 1
+          fi
           echo "HEAD    $(git rev-parse --short HEAD)"
           # Exit 5 is IMPROVEMENT DRIFT, and this lane is the one place it is
           # not a defect. The parent baseline is regenerated from the parent's
@@ -339,14 +420,19 @@ jobs:
                      /etc/apt/sources.list.d/*chrome*.list \
                      /etc/apt/sources.list.d/*microsoft*.list || true
           sudo apt-get update || (sleep 15 && sudo apt-get update)
-          # libmpfr-dev/libgmp-dev/libmpc-dev are what make the MPFR oracle arm
-          # exist. MPC is the complex half and is required by the same guard:
-          # --oracle=mpfr is whole-library or it is unavailable.
-          # Without them XPMATH_MPFR_FOUND is FALSE and four targets --
+          # libmpfr-dev/libgmp-dev/libmpc-dev are what make THE oracle exist --
+          # not an arm of it, the whole of it. MPC is the complex half and is
+          # required by the same rule: the oracle is whole-library or it is
+          # unavailable.
+          #
+          # These were optional once, behind XPMATH_MPFR_FOUND, and the failure
+          # mode is worth keeping written down: without them four targets --
           # trig_reduction_test, trig_reduction_selftest, oracle_conv_test and
-          # oracle_conv_selftest -- are never registered. Both halves of the
-          # oracle self-test are in that set, so CI was validating the sweep
-          # against a reference whose conversions it never checked.
+          # oracle_conv_selftest -- were never registered, so CI validated the
+          # sweep against a reference whose conversions it never checked, and
+          # reported green. tests/CMakeLists.txt now FATAL_ERRORs instead, which
+          # turns a missing package here into a configure failure rather than
+          # silent lost coverage.
           sudo apt-get install -y g++-13 cmake ninja-build libmpfr-dev libgmp-dev libmpc-dev
           g++-13 -dumpfullversion
           cmake --version | head -1
@@ -366,11 +452,15 @@ jobs:
           git clone --depth 1 --branch "${KOKKOS_TAG}" \
             https://github.com/kokkos/kokkos.git /tmp/kokkos-src
 
-          # Local extension, NOT upstream: the __complex128 oracle overloads
-          # that src/demo_complex.cpp needs.  See patches/README.md.  Copied
-          # into the Kokkos SOURCE tree before configure so it is installed.
-          cp patches/kokkos_complex_quad_math.hpp \
-             /tmp/kokkos-src/core/src/impl/Kokkos_ComplexQuadPrecisionMath.hpp
+          # This step used to copy patches/kokkos_complex_quad_math.hpp into the
+          # Kokkos SOURCE tree, because the four complex demos included
+          # impl/Kokkos_ComplexQuadPrecisionMath.hpp for their __complex128
+          # accuracy columns and that header is not upstream in Kokkos.  B3
+          # deleted the columns and the patch with them; the demos are timing and
+          # smoke only now.  LIBQUADMATH stays ON below for ONE target,
+          # kokkos_ep_bench_cost, which benchmarks the backends AGAINST
+          # __float128 and so calls ::expq/::powq directly.  No demo and no test
+          # needs it.
 
           # KI-3: Kokkos itself REQUIRES C++20.  This is not the standard the
           # consuming repo is built at (see the next step, which uses 17).
@@ -382,12 +472,6 @@ jobs:
             -DKokkos_ENABLE_SERIAL=ON \
             -DKokkos_ENABLE_LIBQUADMATH=ON
           cmake --build /tmp/kokkos-build -j"$(nproc)" --target install
-
-      - name: Confirm the complex-quadmath wrapper reached the install tree
-        run: |
-          ls -l "${HOME}/kokkos-install/include/impl/Kokkos_ComplexQuadPrecisionMath.hpp" \
-            || { echo "::error::patches/kokkos_complex_quad_math.hpp did not install;" \
-                      "the complex __complex128 oracle will be absent."; exit 1; }
 
       # KI-3, other half: THIS repo is C++17.  Do not unify the two numbers.
       - name: Configure xpmath (C++17, -O3 -DNDEBUG)
@@ -417,7 +501,7 @@ jobs:
       - name: Assert the full suite is registered
         run: |
           set -euo pipefail
-          expected=48
+          expected=49
           actual=$(ctest --test-dir build -N | awk '/^Total Tests: /{print $3}')
           echo "registered targets: ${actual} (expected ${expected})"
           if [ "${actual}" != "${expected}" ]; then

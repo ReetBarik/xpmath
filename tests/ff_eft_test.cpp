@@ -35,16 +35,17 @@
 //     (double)p + (double)e  ==  (double)a * (double)b
 // is a *provable* bit-equality, not an approximate "close enough" check.
 //
-// This is a STRONGER oracle than DD's: DD's ground truth is __float128 (quadmath),
-// which is exact for DD EFTs but only because binary128's 113-bit mantissa happens
+// This is a STRONGER oracle than DD's: DD's ground truth is __float128, which is
+// exact for DD EFTs but only because binary128's 113-bit mantissa happens
 // to exceed the 106-bit DD product — it is a higher-precision type doing the job.
-// FF's FP64 oracle is exact by the same headroom argument but needs NO external
-// library: it is algebraically provable with the hardware double every compiler
-// already has. Consequently this test:
-//   * does NOT need KOKKOS_EP_HAVE_QUADMATH,
-//   * does NOT need a runtime SKIP-77 quadmath fallback,
-//   * runs UNCONDITIONALLY on every build.
+// FF's FP64 oracle is exact by the same headroom argument but needs no type
+// wider than a machine word: it is algebraically provable with the hardware
+// double every compiler already has, and so runs on any target, not just x86_64.
 // This is the single deliberate divergence from T1.1's shape.
+//
+// (This block used to add "does NOT need KOKKOS_EP_HAVE_QUADMATH / does NOT need
+// a runtime SKIP-77 fallback / runs UNCONDITIONALLY". That is now true of every
+// test in the suite — the gate is gone — so it no longer distinguishes this one.)
 //
 // WHY -ffp-contract=off IS REQUIRED (DEKKER SPLITTER CORRECTNESS)
 // --------------------------------------------------------------
@@ -141,7 +142,7 @@ KOKKOS_INLINE_FUNCTION TwoOut two_prod_dekker(float a, float b) {
 
 // ----------------------------------------------------------------------------
 // Oracle comparisons (host). Ground truth is plain FP64 — provably exact (25-bit
-// sum / 48-bit product both fit in FP64's 53-bit mantissa). No quadmath.
+// sum / 48-bit product both fit in FP64's 53-bit mantissa). No __float128.
 // ----------------------------------------------------------------------------
 inline bool sum_is_exact(float a, float b) {
     TwoOut r = two_sum(a, b);

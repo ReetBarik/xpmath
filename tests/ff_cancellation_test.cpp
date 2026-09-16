@@ -29,7 +29,7 @@
 //       precision, i.e. only ~6 digits agree with the closed form. A SANITY CHECK
 //       on the sum shape, NOT a precision claim — a competent FP32 sum reaches the
 //       same ~6 digits. So the FF-vs-closed-form gate subtracts the ~6-digit
-//       truncation floor before gating; the FF-vs-quadmath-partial-sum comparison
+//       truncation floor before gating; the FF-vs-binary128-partial-sum comparison
 //       is what carries the arithmetic-precision claim.
 //
 // PASS GATE.  mean_digits ≥ kTol, with kTol = 11.0.  DERIVED, not fabricated, by
@@ -44,9 +44,10 @@
 // (conditioning/arithmetic-round-off limit vs library defect), NOT silently
 // re-gated — same posture as T1.6's K1 deviation.
 //
-// This whole file is #ifdef KOKKOS_EP_HAVE_QUADMATH guarded (the oracles are
-// __float128); without quadmath, main() returns KOKKOS_EP_SKIP (77) → CTest
-// "Skipped", same posture as T2.4 / T1.6.
+// This whole file used to be #ifdef KOKKOS_EP_HAVE_QUADMATH guarded and to
+// return KOKKOS_EP_SKIP (77) → CTest "Skipped" without it. The oracles are
+// __float128, which is a compiler type, so there was never anything to gate on;
+// it runs unconditionally now.
 //
 // NAMESPACE PATH.  Uses the explicit Kokkos::Experimental path via the
 // `namespace ff = Kokkos::Experimental` alias (ff::add / ff::sqrt / ff::atan / …),
@@ -82,7 +83,6 @@
 using namespace kokkos_ep;
 namespace ff = Kokkos::Experimental;
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
 
 // ----------------------------------------------------------------------------
 // Widen an FF value to the __float128 oracle type (bit-exact: |lo| ≤ ½ ulp(hi)
@@ -118,7 +118,6 @@ static AccStats stats_of(const std::vector<double>& d) {
   return compute_stats(d.data(), (int)d.size());
 }
 
-#endif  // KOKKOS_EP_HAVE_QUADMATH
 
 // ============================================================================
 int main(int argc, char** argv) {
@@ -130,13 +129,8 @@ int main(int argc, char** argv) {
     std::printf("Execution space: %s\n", Kokkos::DefaultExecutionSpace::name());
     std::printf("Host-side kernels (inherently serial); gate = mean_digits >= %.2f "
                 "(= max_digits 14 - 3 headroom).\n\n",
-#ifdef KOKKOS_EP_HAVE_QUADMATH
                 kTol);
-#else
-                11.0);
-#endif
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
     long kernel_failures = 0;
 
     // ========================================================================
@@ -226,7 +220,7 @@ int main(int argc, char** argv) {
 
         // Oracle: the non-cancelling rearrangement in __float128 (34 digits).
         float128 xf  = (float128)x;
-        float128 ref = (float128)1.0 / (Kokkos::sqrt(xf * xf + (float128)1.0) + xf);
+        float128 ref = (float128)1.0 / (q_sqrt(xf * xf + (float128)1.0) + xf);
 
         stable_digits.push_back(digits_of_accuracy<FF>(Q(stable), ref));
         naive_ff[i]   = digits_of_accuracy<FF>(Q(naive), ref);
@@ -398,16 +392,8 @@ int main(int argc, char** argv) {
     rc = ep_exit_code();
     std::printf("\n=== ff_cancellation_test: %s ===\n",
                 rc == 0 ? "ALL PASSED" : "FAILURES PRESENT");
-#endif  // KOKKOS_EP_HAVE_QUADMATH
   }
   Kokkos::finalize();
 
-#ifndef KOKKOS_EP_HAVE_QUADMATH
-  // All four kernels compare against __float128 oracles, so without LIBQUADMATH
-  // there is nothing to run. Signal CTest "Skipped" (matches the suite posture).
-  std::printf("(no __float128 oracle: T2.5 kernels require quadmath; skipping)\n");
-  return KOKKOS_EP_SKIP;
-#else
   return rc;
-#endif
 }

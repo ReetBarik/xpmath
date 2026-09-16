@@ -1,0 +1,24 @@
+Jobid: 1000938
+qsub -A pepper_hep -n 1 -t 60 -q gpu_a100 --mode script validation/a100/run_a100.sh
+Wed Sep 16 03:15:27 2026 +0000 (UTC) submitted with cwd set to: /home/rbarik/xpm-a100-validate
+Wed Sep 16 04:53:25 2026 +0000 (UTC) 
+Wed Sep 16 04:53:25 2026 +0000 (UTC) Command: '/usr/bin/ssh' 'gpu06' '/usr/libexec/cobalt/cobalt-launcher.py' '--nf' '/var/tmp/cobalt.1000938' '--jobid' '1000938' '--cwd' '/home/rbarik/xpm-a100-validate' '--env' 'COBALT_JOBID=1000938' '/home/rbarik/xpm-a100-validate/validation/a100/run_a100.sh'
+Wed Sep 16 04:53:25 2026 +0000 (UTC) 
+Wed Sep 16 04:53:25 2026 +0000 (UTC) Environment:
+Wed Sep 16 04:53:25 2026 +0000 (UTC) SHELL=/bin/bash
+Wed Sep 16 04:53:25 2026 +0000 (UTC) COBALT_NODEFILE=/tmp/tmp63CvYz
+Wed Sep 16 04:53:25 2026 +0000 (UTC) COBALT_PARTNAME=gpu06
+Wed Sep 16 04:53:25 2026 +0000 (UTC) COBALT_JOBID=1000938
+Wed Sep 16 04:53:25 2026 +0000 (UTC) COBALT_STARTTIME=1789534392
+Wed Sep 16 04:53:25 2026 +0000 (UTC) LOGNAME=rbarik
+Wed Sep 16 04:53:25 2026 +0000 (UTC) USER=rbarik
+Wed Sep 16 04:53:25 2026 +0000 (UTC) COBALT_ENDTIME=1789537992
+Wed Sep 16 04:53:25 2026 +0000 (UTC) COBALT_PARTSIZE=1
+Wed Sep 16 04:53:25 2026 +0000 (UTC) HOME=/home/rbarik
+Wed Sep 16 04:53:25 2026 +0000 (UTC) COBALT_JOBSIZE=1
+Wed Sep 16 04:53:25 2026 +0000 (UTC) 
+Wed Sep 16 04:53:25 2026 +0000 (UTC) Info: stdin received from /dev/null
+Wed Sep 16 04:53:25 2026 +0000 (UTC) Info: stdout sent to /home/rbarik/xpm-a100-validate/1000938.output
+Wed Sep 16 04:53:25 2026 +0000 (UTC) Info: stderr sent to /home/rbarik/xpm-a100-validate/1000938.error
+Wed Sep 16 04:53:25 2026 +0000 (UTC) 
+Wed Sep 16 05:06:03 2026 +0000 (UTC) Info: task completed normally with an exit code of 0; initiating job cleanup and removal

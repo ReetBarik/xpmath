@@ -68,17 +68,17 @@
 //     e_ref = (float)((double)a * (double)b - (double)p_ref)  // exact, fits in a float
 // is a *provable* decomposition, not an approximate "close enough" check.
 //
-// This is a STRONGER oracle than DD's: DD's ground truth is __float128 (quadmath),
-// exact for DD EFTs only because binary128's 113-bit mantissa exceeds the 106-bit
-// DD product. FF's FP64 oracle is exact by the same headroom argument but needs NO
-// external library — it is algebraically provable with the hardware double every
-// compiler already has. Consequently this test, exactly like ff_eft_test:
-//   * does NOT need KOKKOS_EP_HAVE_QUADMATH,
-//   * does NOT runtime-SKIP-77,
-//   * runs UNCONDITIONALLY on every build.
-// (DD's dd_fma_guard_test is #ifdef'd on quadmath and SKIPs without it; the FF
-// analogue never needs to. Reported as the one shape divergence — see the T2.5
-// report / DONE block.)
+// This is a STRONGER oracle than DD's: DD's ground truth is __float128, exact
+// for DD EFTs only because binary128's 113-bit mantissa exceeds the 106-bit
+// DD product. FF's FP64 oracle is exact by the same headroom argument but needs
+// no type wider than a machine word — it is algebraically provable with the
+// hardware double every compiler already has, and so runs on any target rather
+// than x86_64 only. Reported as the one shape divergence from T1.1 — see the
+// T2.5 report / DONE block.
+//
+// (This block used to add "does NOT need KOKKOS_EP_HAVE_QUADMATH / does NOT
+// runtime-SKIP-77 / runs UNCONDITIONALLY", contrasting with dd_fma_guard_test.
+// That gate is gone from every test now, so the contrast has no subject.)
 //
 // WHY THE ORACLE CANNOT BE CORRUPTED BY CONTRACTION
 // -------------------------------------------------
@@ -91,8 +91,8 @@
 // `fma(a, b, -p_ref)` and the two-op form yield the identical value because there
 // is no rounding to disagree about. The reference is therefore ground truth
 // regardless of how aggressively the surrounding TU is built. (The DD oracle is
-// immune for the same headroom reason, with the extra belt that its __float128 ops
-// are libquadmath *function calls* a compiler cannot fuse at all.)
+// immune for the same headroom reason: binary128 add/sub/mul are libgcc soft-float
+// CALLS (__addtf3 and friends), which a compiler cannot fuse at all.)
 //
 // SCOPE (docs/TEST_SUITE_PLAN.md T2.5, layer 5): the Dekker twoProduct ONLY — the
 // one FF primitive where contraction is a documented hazard. twoSum is built from
@@ -444,7 +444,7 @@ int main(int argc, char** argv) {
         std::printf("=== ff_fma_guard_test (T2.5): FMA-contraction guard for FF Dekker twoProduct ===\n");
         std::printf("contraction posture: %s\n", kPostureName);
         std::printf("execution space: %s\n", Kokkos::DefaultExecutionSpace::name());
-        std::printf("Oracle: FP64 exact product (contraction-immune; 48 <= 53 bits, no quadmath)\n\n");
+        std::printf("Oracle: FP64 exact product (contraction-immune; 48 <= 53 bits, no __float128)\n\n");
 
         // Build inputs + contraction-immune reference once.
         std::vector<std::pair<float,float>> inputs = build_inputs();

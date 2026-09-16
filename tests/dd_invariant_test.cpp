@@ -17,8 +17,10 @@
 // the equality would fail. Every DD op is supposed to return a renormalized,
 // non-overlapping pair; a violation localizes a normalization bug to that exact
 // op — no reference value and no wider type is needed to see it. That is why this
-// test carries NO __float128 oracle and NO KOKKOS_EP_HAVE_QUADMATH guard: it runs
-// (and must run) even on a quadmath-less Kokkos. Accuracy-vs-oracle is a separate
+// test carries NO __float128 oracle at all: it runs (and must run) on the
+// narrowest possible toolchain. (It never carried the KOKKOS_EP_HAVE_QUADMATH
+// guard either; that guard is now gone from the tests that DID carry it, so the
+// distinction no longer separates this file from them.) Accuracy-vs-oracle is a separate
 // concern handled in T1.4.
 //
 // WHY RAW FP64 EQUALITY, NOT A float128 PROMOTION
@@ -296,7 +298,7 @@ static InvSummary run_binary(const BinaryOp& op, uint64_t seed) {
 // ----------------------------------------------------------------------------
 // Device tripwire (Test B). Same invariant, computed on device for 5 ops.
 // A custom runner is required: test_utils.hpp's run_unary_op/run_binary_op return
-// digits-of-accuracy AccStats (and are quadmath-guarded), not the raw DD outputs
+// digits-of-accuracy AccStats (and are scored against __float128), not the raw DD outputs
 // this test needs — so we mirror their host->device->host View plumbing but ship
 // hi/lo back and check non-overlap on host.
 // ----------------------------------------------------------------------------
@@ -703,7 +705,7 @@ int main(int argc, char** argv) {
     // sign from the FP32 note — not because DD is wrong, but because the true
     // quotient sits on the far side of the half-integer boundary at this precision.
     // We therefore gate DD's sign against the FP64 IEEE oracle (std::remainder,
-    // always available — no quadmath needed), which documents "no equivalent DD
+    // always available — no wide type needed), which documents "no equivalent DD
     // bug": DD lands on the precision-appropriate sign the FF path missed.
     {
       ++c_total;

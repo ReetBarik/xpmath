@@ -70,6 +70,14 @@ default builds to it.
 
 #### Complex oracle (T0.3)
 
+> **SUPERSEDED 2026-09-16.** The complex demos no longer have an oracle. Their
+> accuracy columns were deleted along with `patches/kokkos_complex_quad_math.hpp`,
+> `scripts/smoke_kokkos_complex_quad.cpp`, the `check_cxx_source_compiles` probe
+> and the `Kokkos_ENABLE_LIBQUADMATH=ON` requirement; the accuracy record is
+> `validation/sweep/` (`docs/CORRECTNESS.md`). Nothing below is a live
+> instruction — it is kept as the record of why the patch existed. See
+> `patches/README.md`.
+
 Kokkos ships **no** `__complex128` wrapper upstream — `Kokkos_QuadPrecisionMath.hpp`
 covers only real `__float128`. The complex demo (`src/demo_complex.cpp`) needs a
 `__complex128` oracle (`cexpq`, `csqrtq`, `csinq`, …).
@@ -213,6 +221,18 @@ within a phase after the first task lands.
   `find_library(QUADMATH_LIBRARY ...)` and the x86_64 gate are gone from
   `CMakeLists.txt`, and `tests/test_utils.hpp` carries the Kokkos-wrapped
   quadmath oracle behind `KOKKOS_EP_HAVE_QUADMATH`.
+
+- **SUPERSEDED (B2). `KOKKOS_EP_HAVE_QUADMATH` AND THE SKIP-77 PLUMBING NO
+  LONGER EXIST.** Every DONE block below that says a file is
+  `#ifdef KOKKOS_EP_HAVE_QUADMATH`-guarded, runtime-SKIPs 77, or "runs
+  unconditionally, unlike the gated tests" describes the suite as it was, and is
+  left as written rather than retconned. What changed: no test calls a `*q`
+  function any more, so there is nothing for the gate to answer to.
+  `__float128` stays as the CARRIER (a compiler type; libgcc supplies its
+  arithmetic), and the elementary functions moved to `__builtin_*f128` or, for
+  the one genuine reference, to MPFR. The gate had to GO rather than merely
+  being redundant: on a Kokkos without the TPL it reported `Skipped`, which
+  reads as a pass in a summary line. See the header of `tests/test_utils.hpp`.
 
 - Remove `find_library(QUADMATH_LIBRARY ...)` and the x86_64 gate from
   `CMakeLists.txt`. Replace with detection of
@@ -3967,10 +3987,14 @@ for Argonne open-source releases.
 - README updated: three portable extended-precision backends
   (DD ~32 digits, QF ~29 digits, FF ~14 digits) benchmarked side-by-
   side against FP64 baseline, accuracy validated to published bounds.
-- **Complex oracle dependency (T0.3).** The complex demos' `__complex128`
+- **Complex oracle dependency (T0.3).** ~~The complex demos' `__complex128`
   oracle depends on the local Kokkos extension header
   `impl/Kokkos_ComplexQuadPrecisionMath.hpp`, which is **not upstream in
   Kokkos**. Future contributors must apply `patches/kokkos_complex_quad_math.hpp`
   per `patches/README.md` and rebuild Kokkos with
   `-DKokkos_ENABLE_LIBQUADMATH=ON` before building the complex demos; otherwise
-  CMake warns and the complex-oracle compile fails.
+  CMake warns and the complex-oracle compile fails.~~ **Retired 2026-09-16 —
+  there is no complex oracle any more.** The demos are timing and smoke only,
+  the patch and the probe are deleted, and any Kokkos ≥5.1 at C++20 builds all
+  nine targets except `kokkos_ep_bench_cost`, which needs libquadmath because
+  `__float128` is the thing it measures.

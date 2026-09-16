@@ -63,8 +63,10 @@
 // the sum/product THERE is EXACT — no rounding. So
 //     (double)s + (double)e  ==  (double)a + (double)b
 //     (double)p + (double)e  ==  (double)a * (double)b
-// is a *provable* bit-equality. This half of the test needs NO quadmath, no
-// SKIP-77 fallback, and runs unconditionally — same posture as T2.1.
+// is a *provable* bit-equality. This half of the test needs no type wider than
+// a machine word — same posture as T2.1. (It used to be contrasted with the
+// wide-spread half as "needs no quadmath, no SKIP-77 fallback"; that gate is
+// gone and both halves now run unconditionally.)
 //
 // renorm's INPUT CONTRACT (why the words must be ORDERED)
 // -------------------------------------------------------
@@ -88,11 +90,12 @@
 // capacity, so renorm drops NOTHING and value-preservation is exact:
 //     (double)(b0+b1+b2+b3)  ==  x   bit-for-bit  (x = the source double).
 // This unconditional, provable FP64 check is the primary value-preservation gate
-// (matches T2.1's "provable FP64, no quadmath" philosophy). A SECOND, wide-spread
-// value-preservation test (input = ordered decomposition of a ~113-bit float128,
-// where renorm genuinely truncates the tail below word 4) runs only under
-// KOKKOS_EP_HAVE_QUADMATH and checks relative agreement within the QF truncation
-// threshold (see that block). Observed max rel there ~1.6e-30 (~2^-99).
+// (matches T2.1's "provable FP64, machine word only" philosophy). A SECOND,
+// wide-spread value-preservation test (input = ordered decomposition of a
+// ~113-bit float128, where renorm genuinely truncates the tail below word 4)
+// checks relative agreement within the QF truncation threshold (see that
+// block). Observed max rel there ~1.6e-30 (~2^-99). That second block used to
+// run only under KOKKOS_EP_HAVE_QUADMATH; it runs unconditionally now.
 //
 // WHY -ffp-contract=off IS REQUIRED (DEKKER SPLITTER CORRECTNESS)
 // --------------------------------------------------------------
@@ -115,7 +118,7 @@
 //            overflow and under/overflow regimes skipped)
 //   Test C — renorm_4 (len 5->4) + renorm (len 4->4): Priest non-overlap
 //            invariant |f_{i+1}| <= 1/2 ulp(f_i) (oracle-independent) + exact FP64
-//            value-preservation (ordered 53-bit-source input) + quadmath
+//            value-preservation (ordered 53-bit-source input) + binary128
 //            wide-spread (~113-bit-source) truncation check
 //   Test D — named hard cases (zero, +/-ulp, cancellation, subnormals, inf/nan)
 //   Test E — device parity (run the SAME primitives in a Kokkos parallel_for)
@@ -139,7 +142,7 @@ namespace qf = Kokkos::Experimental;
 // ----------------------------------------------------------------------------
 // Oracle comparisons for the additive/multiplicative EFTs (host). Ground truth
 // is plain FP64 — provably exact (25-bit sum / 48-bit product both fit in FP64's
-// 53-bit mantissa). No quadmath. Calls the SHIPPED qf_math.hpp primitives.
+// 53-bit mantissa). No __float128. Calls the SHIPPED qf_math.hpp primitives.
 // ----------------------------------------------------------------------------
 inline bool sum_is_exact(float a, float b) {
     float e;
@@ -505,7 +508,6 @@ static RenormResult test_renorm_bounded(int n, uint64_t seed) {
     return R;
 }
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
 // Wide-spread renorm_4: the input is an ORDERED 5-word decomposition of a random
 // ~113-bit __float128 (not a 53-bit double), so the words span the full ~96-bit QF
 // range and renorm genuinely truncates the tail below word 4. Value-preservation
@@ -524,14 +526,14 @@ static RenormResult test_renorm_4_wide(int n, uint64_t seed) {
     std::uniform_int_distribution<int>     de(-40, 40);
     std::uniform_real_distribution<double> dm(-1.0, 1.0);
     int samples_left = 5;
-    const float128 kRelBound = Kokkos::pow((float128)2.0, (float128)-88);
+    const float128 kRelBound = q_ldexp((float128)1.0, -88);
     for (int i = 0; i < n; ++i) {
         // Build a random ~113-bit value: three FP64 mantissa chunks at 2^0/2^-40/2^-80.
         int e0 = de(g);
         float128 x = ((float128)dm(g)
-                    + (float128)dm(g) * Kokkos::pow((float128)2.0, (float128)-40)
-                    + (float128)dm(g) * Kokkos::pow((float128)2.0, (float128)-80))
-                    * Kokkos::pow((float128)2.0, (float128)e0);
+                    + (float128)dm(g) * q_ldexp((float128)1.0, -40)
+                    + (float128)dm(g) * q_ldexp((float128)1.0, -80))
+                    * q_ldexp((float128)1.0, e0);
         // ORDERED decomposition into 5 FP32 words (renorm's precondition).
         float128 r = x; float c[5];
         for (int k = 0; k < 5; ++k) { c[k] = (float)r; r -= (float128)c[k]; }
@@ -545,7 +547,7 @@ static RenormResult test_renorm_4_wide(int n, uint64_t seed) {
         R.skips += local_skips;
         float128 out_sum = (float128)b0 + (float128)b1 + (float128)b2 + (float128)b3;
         if (in_sum != (float128)0.0) {
-            float128 rel = Kokkos::abs((out_sum - in_sum) / in_sum);
+            float128 rel = q_abs((out_sum - in_sum) / in_sum);
             if (rel > kRelBound) {
                 ++R.value_fail;
                 if (samples_left > 0) {
@@ -560,7 +562,6 @@ static RenormResult test_renorm_4_wide(int n, uint64_t seed) {
     }
     return R;
 }
-#endif  // KOKKOS_EP_HAVE_QUADMATH
 
 // ----------------------------------------------------------------------------
 // Test D — named hard cases. A named case reports PASS / SKIP / FAIL; the gate
@@ -828,15 +829,11 @@ int main(int argc, char** argv) {
         KOKKOS_EP_ASSERT(C2.overlap_fail == 0, "renorm produced an overlapping (non-Priest) length-4 result");
         KOKKOS_EP_ASSERT(C2.value_fail   == 0, "renorm did not preserve value exactly on bounded-spread input");
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
         RenormResult C3 = test_renorm_4_wide(1'000'000, 67890ULL);
-        std::printf("    renorm_4 wide-spread (quadmath, rel <= 2^-88): tested=%ld  non-overlap-fail=%ld  value-fail=%ld  (pair-skips=%ld)\n",
+        std::printf("    renorm_4 wide-spread (binary128, rel <= 2^-88): tested=%ld  non-overlap-fail=%ld  value-fail=%ld  (pair-skips=%ld)\n",
                     C3.tested, C3.overlap_fail, C3.value_fail, C3.skips);
         KOKKOS_EP_ASSERT(C3.overlap_fail == 0, "renorm_4 produced an overlapping result on wide-spread input");
         KOKKOS_EP_ASSERT(C3.value_fail   == 0, "renorm_4 exceeded the QF truncation threshold on wide-spread input");
-#else
-        std::printf("    renorm_4 wide-spread: SKIPPED (no LIBQUADMATH; exact FP64 bounded test above still gates)\n");
-#endif
         std::printf("\n");
 
         // -- Test D: named cases --------------------------------------------

@@ -52,60 +52,23 @@ option(XPMATH_WITH_KOKKOS
 if(XPMATH_WITH_KOKKOS)
 find_package(Kokkos REQUIRED)
 
-# The host __float128 oracle is provided by Kokkos's quadmath overloads
-# (impl/Kokkos_QuadPrecisionMath.hpp), which are compiled and linked when Kokkos
-# itself is built with Kokkos_ENABLE_LIBQUADMATH=ON. No separate find_library or
-# x86_64 gate is needed here — linking Kokkos::kokkos brings in libquadmath.
-# Kokkos exposes its enabled TPLs via the Kokkos_TPLS list (there is no
-# Kokkos_ENABLE_LIBQUADMATH variable for TPLs).
-if("LIBQUADMATH" IN_LIST Kokkos_TPLS)
-  message(STATUS "Kokkos built with LIBQUADMATH: host __float128 oracle enabled")
-else()
-  message(WARNING
-    "Kokkos was NOT built with Kokkos_ENABLE_LIBQUADMATH=ON; the host "
-    "__float128 oracle in the demos will not compile. Rebuild Kokkos with "
-    "-DKokkos_ENABLE_LIBQUADMATH=ON.")
-endif()
-
-# The complex __complex128 oracle in src/demo_complex.cpp routes through a LOCAL
-# Kokkos extension header, impl/Kokkos_ComplexQuadPrecisionMath.hpp, which is NOT
-# upstream in Kokkos (see patches/README.md). Probe the Kokkos install for it and,
-# if absent, warn and continue — same graceful-degradation posture used above for
-# LIBQUADMATH itself. Only kokkos_ep_demo_complex depends on this header.
-if("LIBQUADMATH" IN_LIST Kokkos_TPLS)
-  include(CheckCXXSourceCompiles)
-  get_target_property(_kokkos_inc Kokkos::kokkos INTERFACE_INCLUDE_DIRECTORIES)
-  set(CMAKE_REQUIRED_INCLUDES ${_kokkos_inc})
-  set(CMAKE_REQUIRED_FLAGS "-fext-numeric-literals")
-  # Link against Kokkos so libquadmath (the ::c<fn>q symbols the wrapper forwards
-  # to) resolves, exactly as kokkos_ep_demo_complex does. Without this the probe
-  # compiles but fails to link (undefined reference to cexpq), a false negative.
-  set(CMAKE_REQUIRED_LIBRARIES Kokkos::kokkos)
-  check_cxx_source_compiles("
-    #include <impl/Kokkos_ComplexQuadPrecisionMath.hpp>
-    int main() {
-      __complex128 z; __real__ z = 1.0Q; __imag__ z = 2.0Q;
-      __complex128 w = Kokkos::exp(z);
-      return (int)Kokkos::real(w) * 0;
-    }" KOKKOS_HAS_COMPLEX_QUADMATH_WRAPPER)
-  unset(CMAKE_REQUIRED_INCLUDES)
-  unset(CMAKE_REQUIRED_FLAGS)
-  unset(CMAKE_REQUIRED_LIBRARIES)
-  if(KOKKOS_HAS_COMPLEX_QUADMATH_WRAPPER)
-    message(STATUS
-      "Kokkos install has impl/Kokkos_ComplexQuadPrecisionMath.hpp: "
-      "complex __complex128 oracle enabled")
-  else()
-    message(WARNING
-      "Kokkos install is MISSING impl/Kokkos_ComplexQuadPrecisionMath.hpp; "
-      "the four complex demos (kokkos_ep_demo_complex, _ff_complex, "
-      "_qf_complex, _tf_complex) are SKIPPED — they are the only targets that "
-      "need it. Everything else, including the whole ctest suite, still "
-      "configures and builds. This header is a local extension carried in this "
-      "repo — apply it per patches/README.md, then rebuild Kokkos with "
-      "-DKokkos_ENABLE_LIBQUADMATH=ON to get the complex demos back.")
-  endif()
-endif()
+# There is deliberately no libquadmath probe here any more, and no
+# Kokkos_ENABLE_LIBQUADMATH requirement. Until B3 this file warned when the
+# Kokkos install lacked the LIBQUADMATH TPL, and then ran a
+# check_cxx_source_compiles probe for impl/Kokkos_ComplexQuadPrecisionMath.hpp
+# (a header that is NOT upstream in Kokkos — this repo carried it as a patch)
+# to decide whether the four complex demos could be added at all. Both existed
+# only to serve the accuracy columns the demos used to print. Those columns are
+# gone: the demos are timing and smoke only, and the accuracy record is
+# validation/sweep/, scored in ulps against an MPFR/MPC oracle with one verdict
+# per point (docs/CORRECTNESS.md). With them went the patch, the probe, and the
+# requirement — a Kokkos built WITHOUT libquadmath, such as the MI250
+# (hip/gfx90a) install, is a first-class supported target.
+#
+# src/bench_cost.cpp is the one file left under src/ that includes <quadmath.h>.
+# There libquadmath is the measurement SUBJECT — the incumbent that DD and QF are
+# timed against — not an oracle, so it stays, and it still resolves ::expq/::powq
+# through whatever supplies them (today, Kokkos's TPL when it is enabled).
 
 set(THIRD_PARTY_INCLUDE "${CMAKE_SOURCE_DIR}/third_party/include")
 
@@ -121,102 +84,68 @@ add_executable(kokkos_ep_demo src/demo_real.cpp)
 target_include_directories(kokkos_ep_demo PRIVATE ${THIRD_PARTY_INCLUDE})
 target_link_libraries(kokkos_ep_demo PRIVATE Kokkos::kokkos)
 
-# KI-21. Defined only when the probe above found the header. Without the
-# guard the WARNING promised degradation and then the build failed anyway:
-# src/demo_complex.cpp includes the oracle unconditionally, so `make` stopped
-# here and 27 of the 34 ctest targets — none of which need the header —
-# never linked and read as `***Not Run`.
-if(KOKKOS_HAS_COMPLEX_QUADMATH_WRAPPER)
-  add_executable(kokkos_ep_demo_complex src/demo_complex.cpp)
-  target_include_directories(kokkos_ep_demo_complex PRIVATE ${THIRD_PARTY_INCLUDE})
-  target_link_libraries(kokkos_ep_demo_complex PRIVATE Kokkos::kokkos)
-  list(APPEND XP_COMPLEX_DEMO_TARGETS kokkos_ep_demo_complex)
-endif()
+add_executable(kokkos_ep_demo_complex src/demo_complex.cpp)
+target_include_directories(kokkos_ep_demo_complex PRIVATE ${THIRD_PARTY_INCLUDE})
+target_link_libraries(kokkos_ep_demo_complex PRIVATE Kokkos::kokkos)
 
 # ---- FF (float-float) demos (T2.0) ------------------------------------------
-# Same oracle plumbing as the DD demos: the __float128 real oracle comes through
-# Kokkos::kokkos (LIBQUADMATH TPL, T0.0); kokkos_ep_demo_ff_complex additionally
-# needs the local impl/Kokkos_ComplexQuadPrecisionMath.hpp wrapper (T0.3, probed
-# above). -fext-numeric-literals is already set globally for GCC.
+# Timing and smoke only, like the DD demos: no oracle, no libquadmath.
+# -fext-numeric-literals is already set globally for GCC.
 add_executable(kokkos_ep_demo_ff src/demo_ff_real.cpp)
 target_include_directories(kokkos_ep_demo_ff PRIVATE ${THIRD_PARTY_INCLUDE})
 target_link_libraries(kokkos_ep_demo_ff PRIVATE Kokkos::kokkos)
 
-# KI-21. Defined only when the probe above found the header. Without the
-# guard the WARNING promised degradation and then the build failed anyway:
-# src/demo_ff_complex.cpp includes the oracle unconditionally, so `make` stopped
-# here and 27 of the 34 ctest targets — none of which need the header —
-# never linked and read as `***Not Run`.
-if(KOKKOS_HAS_COMPLEX_QUADMATH_WRAPPER)
-  add_executable(kokkos_ep_demo_ff_complex src/demo_ff_complex.cpp)
-  target_include_directories(kokkos_ep_demo_ff_complex PRIVATE ${THIRD_PARTY_INCLUDE})
-  target_link_libraries(kokkos_ep_demo_ff_complex PRIVATE Kokkos::kokkos)
-  list(APPEND XP_COMPLEX_DEMO_TARGETS kokkos_ep_demo_ff_complex)
-endif()
+add_executable(kokkos_ep_demo_ff_complex src/demo_ff_complex.cpp)
+target_include_directories(kokkos_ep_demo_ff_complex PRIVATE ${THIRD_PARTY_INCLUDE})
+target_link_libraries(kokkos_ep_demo_ff_complex PRIVATE Kokkos::kokkos)
 
 # ---- QF (quad-float, 4xFP32) demos (T3.0b real, T3.0c complex) ---------------
-# Real transcendentals exercised against the __float128 oracle (T3.0b) and
-# complex ops against the __complex128 oracle (T3.0c), same plumbing as the
-# DD/FF demos. kokkos_ep_demo_qf_complex additionally needs the local
-# impl/Kokkos_ComplexQuadPrecisionMath.hpp wrapper (T0.3, probed above), exactly
-# as kokkos_ep_demo_ff_complex does.
+# Timing and smoke only. These two used to carry the RC-0/RC-1 accuracy verdict
+# that B3 removed -- the correctness contract allows one verdict per point and
+# the sweep gates issue it (docs/CORRECTNESS.md).
 add_executable(kokkos_ep_demo_qf src/demo_qf_real.cpp)
 target_include_directories(kokkos_ep_demo_qf PRIVATE ${THIRD_PARTY_INCLUDE})
 target_link_libraries(kokkos_ep_demo_qf PRIVATE Kokkos::kokkos)
 
-# KI-21. Defined only when the probe above found the header. Without the
-# guard the WARNING promised degradation and then the build failed anyway:
-# src/demo_qf_complex.cpp includes the oracle unconditionally, so `make` stopped
-# here and 27 of the 34 ctest targets — none of which need the header —
-# never linked and read as `***Not Run`.
-if(KOKKOS_HAS_COMPLEX_QUADMATH_WRAPPER)
-  add_executable(kokkos_ep_demo_qf_complex src/demo_qf_complex.cpp)
-  target_include_directories(kokkos_ep_demo_qf_complex PRIVATE ${THIRD_PARTY_INCLUDE})
-  target_link_libraries(kokkos_ep_demo_qf_complex PRIVATE Kokkos::kokkos)
-  list(APPEND XP_COMPLEX_DEMO_TARGETS kokkos_ep_demo_qf_complex)
-endif()
+add_executable(kokkos_ep_demo_qf_complex src/demo_qf_complex.cpp)
+target_include_directories(kokkos_ep_demo_qf_complex PRIVATE ${THIRD_PARTY_INCLUDE})
+target_link_libraries(kokkos_ep_demo_qf_complex PRIVATE Kokkos::kokkos)
 
 # ---- TF (triple-float, 3xFP32) demos (S10 Phase 5 real + complex) ----------
-# TF real transcendentals exercised against the __float128 oracle (S10 P5) and
-# complex ops against the __complex128 oracle, same plumbing as the DD/FF/QF
-# demos. kokkos_ep_demo_tf_complex additionally needs the local
-# impl/Kokkos_ComplexQuadPrecisionMath.hpp wrapper (T0.3, probed in CMakeLists
-# lines 43-73), exactly as kokkos_ep_demo_ff_complex and kokkos_ep_demo_qf_complex do.
+# Timing and smoke only, same shape as the QF pair above.
 add_executable(kokkos_ep_demo_tf src/demo_tf_real.cpp)
 target_include_directories(kokkos_ep_demo_tf PRIVATE ${THIRD_PARTY_INCLUDE})
 target_link_libraries(kokkos_ep_demo_tf PRIVATE Kokkos::kokkos)
 
-# KI-21. Defined only when the probe above found the header. Without the
-# guard the WARNING promised degradation and then the build failed anyway:
-# src/demo_tf_complex.cpp includes the oracle unconditionally, so `make` stopped
-# here and 27 of the 34 ctest targets — none of which need the header —
-# never linked and read as `***Not Run`.
-if(KOKKOS_HAS_COMPLEX_QUADMATH_WRAPPER)
-  add_executable(kokkos_ep_demo_tf_complex src/demo_tf_complex.cpp)
-  target_include_directories(kokkos_ep_demo_tf_complex PRIVATE ${THIRD_PARTY_INCLUDE})
-  target_link_libraries(kokkos_ep_demo_tf_complex PRIVATE Kokkos::kokkos)
-  list(APPEND XP_COMPLEX_DEMO_TARGETS kokkos_ep_demo_tf_complex)
-endif()
+add_executable(kokkos_ep_demo_tf_complex src/demo_tf_complex.cpp)
+target_include_directories(kokkos_ep_demo_tf_complex PRIVATE ${THIRD_PARTY_INCLUDE})
+target_link_libraries(kokkos_ep_demo_tf_complex PRIVATE Kokkos::kokkos)
 
 # ---- Cost benchmark ----------------------------------------------------------
 # Times each backend against the incumbent at comparable precision (FF vs FP64,
-# DD/QF vs __float128) rather than against FP64 across the board. Same oracle
-# plumbing as the demos: __float128 arrives through Kokkos::kokkos (LIBQUADMATH
-# TPL, T0.0).
+# DD/QF vs __float128) rather than against FP64 across the board. This is the ONE
+# target here that still wants libquadmath, and not as an oracle: __float128 is
+# the incumbent being benchmarked, so src/bench_cost.cpp includes <quadmath.h>
+# and calls ::expq/::powq directly. It resolves them through Kokkos::kokkos when
+# Kokkos carries the LIBQUADMATH TPL; against a Kokkos built without it, this one
+# target does not link. Every other target here is libquadmath-free.
 add_executable(kokkos_ep_bench_cost src/bench_cost.cpp)
 target_include_directories(kokkos_ep_bench_cost PRIVATE ${THIRD_PARTY_INCLUDE})
 target_link_libraries(kokkos_ep_bench_cost PRIVATE Kokkos::kokkos)
 
-# KI-21: the four complex demos are named through XP_COMPLEX_DEMO_TARGETS, which
-# is empty when the probe did not find impl/Kokkos_ComplexQuadPrecisionMath.hpp.
-# Naming a target that was never added is a hard configure error, so this list
-# cannot be spelled out literally.
+# KI-21 is closed by deletion. The four complex demos used to be named through
+# XP_COMPLEX_DEMO_TARGETS because the probe could leave them unbuilt, and naming
+# a target that was never added is a hard configure error. Every demo is now
+# added unconditionally, so the list can be spelled out.
 install(TARGETS kokkos_ep_demo
+                kokkos_ep_demo_complex
                 kokkos_ep_demo_ff
+                kokkos_ep_demo_ff_complex
                 kokkos_ep_demo_qf
+                kokkos_ep_demo_qf_complex
                 kokkos_ep_demo_tf
+                kokkos_ep_demo_tf_complex
                 kokkos_ep_bench_cost
-                ${XP_COMPLEX_DEMO_TARGETS}
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
 else()
@@ -293,6 +222,99 @@ install(FILES
 # go back to a repository they may never have cloned.
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
         DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/xpmath")
+
+# ---------------------------------------------------------------------------
+# BUILD PROVENANCE -- build-info.txt
+# ---------------------------------------------------------------------------
+# Three campaign artifacts produced this month could not be traced back to the
+# tree that produced them. This is the fix: every configure stamps the build
+# directory with what it was, and the ctest target `build_provenance` fails if
+# the stamp is missing or short a field.
+#
+# WRITTEN HERE, NOT BY scripts/xpm_build.sh. A stamp only the wrapper wrote
+# would be absent from exactly the builds nobody can trace -- the ones made by
+# calling cmake directly, which is what CI does and what anybody debugging
+# does. CMake is the one thing every build goes through, and it is also the
+# only place that knows the RESOLVED compiler version and the FINAL flags
+# (this file mutates CMAKE_CXX_FLAGS above, and Kokkos adds to the picture
+# through its interface).
+#
+# XPMATH_ARCH and XPMATH_OPT are supplied by the wrapper. A direct cmake call
+# leaves them at their defaults below, which says so rather than guessing.
+set(XPMATH_ARCH "unspecified" CACHE STRING
+    "Name of the target-hardware configuration this build was made for")
+set(XPMATH_OPT "from-CMAKE_CXX_FLAGS_RELEASE" CACHE STRING
+    "Optimization level requested by scripts/xpm_build.sh --opt")
+
+# git HEAD, with -dirty when the tree carries uncommitted changes to tracked
+# files. `git describe --dirty` is not used: this repo has tags, so it would
+# report a tag name where a SHA is wanted.
+set(_xp_git_head "unknown")
+find_package(Git QUIET)
+if(GIT_FOUND)
+  execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+                  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                  OUTPUT_VARIABLE _xp_sha OUTPUT_STRIP_TRAILING_WHITESPACE
+                  ERROR_QUIET RESULT_VARIABLE _xp_rc)
+  if(_xp_rc EQUAL 0 AND _xp_sha)
+    set(_xp_git_head "${_xp_sha}")
+    # --quiet exits 1 when there is a difference. Tracked files only, which is
+    # the conventional meaning of "dirty"; an untracked scratch file is not a
+    # change to the tree that produced the binary.
+    execute_process(COMMAND "${GIT_EXECUTABLE}" diff --quiet HEAD --
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                    RESULT_VARIABLE _xp_dirty ERROR_QUIET)
+    if(NOT _xp_dirty EQUAL 0)
+      set(_xp_git_head "${_xp_sha}-dirty")
+    endif()
+  endif()
+endif()
+
+# The flags the compiler ACTUALLY gets: the global set plus the per-config set
+# for the configuration being built. Single-config generators only; a
+# multi-config generator has no one answer at configure time and says so.
+if(CMAKE_BUILD_TYPE)
+  string(TOUPPER "${CMAKE_BUILD_TYPE}" _xp_cfg)
+  set(_xp_all_flags "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${_xp_cfg}}")
+else()
+  set(_xp_all_flags "${CMAKE_CXX_FLAGS} (multi-config generator: per-config flags vary)")
+endif()
+string(STRIP "${_xp_all_flags}" _xp_all_flags)
+
+if(XPMATH_WITH_KOKKOS)
+  set(_xp_kokkos_prefix "${Kokkos_DIR}")
+  if(NOT _xp_kokkos_prefix)
+    set(_xp_kokkos_prefix "${CMAKE_PREFIX_PATH}")
+  endif()
+else()
+  set(_xp_kokkos_prefix "(none: XPMATH_WITH_KOKKOS=OFF)")
+endif()
+
+string(TIMESTAMP _xp_stamp_utc "%Y-%m-%dT%H:%M:%SZ" UTC)
+
+# check_build_provenance.cmake parses `key: value`, so every field is one line
+# and no value may be empty.
+file(WRITE "${CMAKE_BINARY_DIR}/build-info.txt"
+"# xpmath build provenance -- written by CMakeLists.txt at configure time.
+# Regenerated on every configure. Do not edit; do not commit.
+arch: ${XPMATH_ARCH}
+git-head: ${_xp_git_head}
+compiler: ${CMAKE_CXX_COMPILER}
+compiler-id: ${CMAKE_CXX_COMPILER_ID}
+compiler-version: ${CMAKE_CXX_COMPILER_VERSION}
+kokkos: ${XPMATH_WITH_KOKKOS}
+kokkos-prefix: ${_xp_kokkos_prefix}
+cxx-standard: ${CMAKE_CXX_STANDARD}
+build-type: ${CMAKE_BUILD_TYPE}
+opt-level: ${XPMATH_OPT}
+cxx-flags: ${_xp_all_flags}
+timestamp-utc: ${_xp_stamp_utc}
+")
+
+if(_xp_git_head MATCHES "-dirty$")
+  message(STATUS "build provenance: tree is DIRTY -- build-info.txt records ${_xp_git_head}")
+endif()
+message(STATUS "build provenance: ${CMAKE_BINARY_DIR}/build-info.txt (arch=${XPMATH_ARCH})")
 
 # ---- Tests (T0.1: backend-parameterized harness) ----------------------------
 # THIRD_PARTY_INCLUDE (set above) is consumed by tests/CMakeLists.txt.

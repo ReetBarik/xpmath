@@ -46,7 +46,10 @@ backends usable in plain C++, CUDA, HIP, SYCL, and Kokkos — **DD** (double-dou
 (float-float), **QF** (quad-float), and **TF** (triple-float). All four are written against Kokkos
 alone, carry no hardware dependency, and compile for any Kokkos execution space:
 CPU, GPU, and everything else Kokkos targets. Each is validated for accuracy
-against a `__float128` (libquadmath) host oracle.
+against a host oracle carried in `__float128`: the accuracy record
+(`validation/sweep/`) computes that oracle with MPFR/MPC at 400 bits. The demo
+tables in Section 2 below are an older libquadmath measurement, kept as a
+record — **the demos no longer measure accuracy and cannot regenerate them.**
 
 ## Section 2 — Backends: types, ops, measured accuracy
 
@@ -102,6 +105,15 @@ All four complex layers expose the same 24 complex operations:
 
 Decimal digits of accuracy versus the `__float128` (libquadmath) host oracle,
 per operation, one table per backend.
+
+**These tables are a historical capture, not a live measurement.** The demos
+used to print these columns and no longer do: they are timing and smoke only,
+and the accuracy record is `validation/sweep/` — error in ulps against an
+MPFR/MPC oracle at 400 bits, one verdict per point, two ctest gates over it
+(`docs/CORRECTNESS.md`). Running a demo today will not reproduce what follows.
+The columns were removed because they duplicated the sweep at lower resolution
+while requiring a Kokkos built with `Kokkos_ENABLE_LIBQUADMATH=ON` plus a
+non-upstream patch header; see `patches/README.md`.
 
 **Measurement conditions.** `--batch 1000000 --repeats 5 --seed 12345`, 2 warmup
 launches, Kokkos 5.1 Serial execution space, GCC 13.3.0 / CMake 3.28.3, on an
@@ -306,7 +318,8 @@ third_party/include/
     tf_complex.hpp     TF complex layer (TripleFloatComplex)
 
 patches/
-    kokkos_complex_quad_math.hpp   Kokkos-style companion to Kokkos_QuadPrecisionMath.hpp
+    README.md                      no patches -- records the Kokkos extension header
+                                   that was deleted with the demo oracle columns
 
 src/
     demo_real.cpp          DD real-operation demo      -> kokkos_ep_demo
@@ -390,21 +403,44 @@ cmake -B build -DCMAKE_PREFIX_PATH=<kokkos-install-dir>
 cmake --build build -j$(nproc)
 ```
 
-On the JLSE testbed maintained by CELS at Argonne National Lab, load modules
-first and let the helper script fetch and install Kokkos:
+On the JLSE testbed maintained by CELS at Argonne National Lab, target hardware
+is an argument to `scripts/xpm_build.sh`, which loads the modules, picks the
+compiler, the Kokkos prefix and the FP-contraction spelling for that arch, and
+configures:
 
 ```bash
-source scripts/prepare.sh                      # JLSE modules
-source scripts/build_with_kokkos.sh <install-dir>
+scripts/xpm_build.sh --arch host  --build-dir /tmp/b_host
+scripts/xpm_build.sh --arch a100  --build-dir /tmp/b_a100
+scripts/xpm_build.sh --arch mi250 --build-dir /tmp/b_mi250
+scripts/xpm_build.sh --arch host --no-kokkos --build-dir /tmp/b_nok
 ```
 
-`scripts/prepare.sh` is JLSE-specific — it hardcodes JLSE module names and
-paths. Other Argonne resources (Polaris, Aurora, Improv) will need their own
-module recipe; the rest of the build flow is portable.
+Read that script's header before comparing numbers across two arches: it states
+what is held identical (`-O` level, C++17, contraction off) and what is not
+(compiler, execution space). `--kokkos build` delegates to
+`scripts/build_with_kokkos.sh`, which still fetches and installs Kokkos from
+source and is now driven by its environment rather than by literals.
 
-Kokkos raises the C++ standard to C++20 through its exported interface, and
-`libquadmath` (the host accuracy oracle) is x86_64-only — CMake enforces the
-platform requirement.
+`scripts/xpm_build.sh` and `scripts/prepare.sh` are JLSE-specific — they
+hardcode JLSE module names and paths. Other Argonne resources (Polaris, Aurora,
+Improv) will need their own arch row; the rest of the build flow is portable.
+
+Every configure — the wrapper's or a bare `cmake -B build` — writes
+`build-info.txt` into the build directory recording the arch, git HEAD, compiler
+and version, Kokkos prefix, flags, `-O` level and a UTC timestamp. The
+`build_provenance` ctest target fails if it is missing or short a field.
+
+Kokkos raises the C++ standard to C++20 through its exported interface. No
+`Kokkos_ENABLE_LIBQUADMATH=ON` is needed: any Kokkos ≥5.1 built at C++20 works,
+including one with libquadmath OFF.
+
+There is no CMake platform gate, and there never was — an earlier version of
+this paragraph said CMake enforced an x86_64 requirement and no such check
+exists anywhere in the tree. What is x86_64-specific is `__float128` itself,
+which `scripts/sweep_accuracy.cpp` and `src/bench_cost.cpp` still use as a
+carrier (`tests/CMakeLists.txt` and the CI x86 lanes are where that lands). The
+installable library, `include/xp/`, has no such dependency and compiles
+anywhere.
 
 ### Templated kernel
 
@@ -466,9 +502,7 @@ through explicit per-type accessors (`hi`/`lo` for DD and FF, `f0`–`f3` for QF
 
 This repository is dual-licensed. Repository-default is Apache-2.0 (see
 `LICENSE`). The DDFUN-derived headers carry `LicenseRef-DHB-License`; the
-QD-derived QF headers carry `LicenseRef-LBNL-BSD-License`;
-`patches/kokkos_complex_quad_math.hpp` is `Apache-2.0 WITH LLVM-exception` to
-match Kokkos. Full mapping, license texts, and the plain-English explanation of
+QD-derived QF headers carry `LicenseRef-LBNL-BSD-License`. Full mapping, license texts, and the plain-English explanation of
 the DHB-License §3 grant-back clause live in `NOTICE.md` and `LICENSES/`.
 
 | File | License |
@@ -479,7 +513,6 @@ the DHB-License §3 grant-back clause live in `NOTICE.md` and `LICENSES/`.
 | `third_party/include/ff_complex.hpp` | `LicenseRef-DHB-License` |
 | `third_party/include/qf_math.hpp` | `LicenseRef-LBNL-BSD-License` |
 | `third_party/include/qf_complex.hpp` | `LicenseRef-LBNL-BSD-License` |
-| `patches/kokkos_complex_quad_math.hpp` | `Apache-2.0 WITH LLVM-exception` |
 | Everything else | `Apache-2.0` |
 
 ## Section 7 — References
@@ -489,9 +522,10 @@ the DHB-License §3 grant-back clause live in `NOTICE.md` and `LICENSES/`.
 - **QD 2.3.24** — Yozo Hida, Xiaoye S. Li, David H. Bailey (LBNL).
   <https://www.davidhbailey.com/dhbsoftware/qd-2.3.24.tar.gz>
 - **Kokkos** — <https://github.com/kokkos/kokkos>
-- **`Kokkos_QuadPrecisionMath.hpp`** — the Kokkos header that
-  `patches/kokkos_complex_quad_math.hpp` extends, at
-  `kokkos/core/src/impl/Kokkos_QuadPrecisionMath.hpp` in upstream Kokkos.
+- **`Kokkos_QuadPrecisionMath.hpp`** — the Kokkos `__float128` header the demo
+  oracle used to route through, at
+  `kokkos/core/src/impl/Kokkos_QuadPrecisionMath.hpp` in upstream Kokkos. Nothing
+  in this repo includes it any more; see `patches/README.md`.
 
 Repository owner: Reet Barik. DDFUN questions: David H. Bailey
 (<dhbailey@lbl.gov>).

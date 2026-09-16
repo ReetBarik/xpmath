@@ -7,7 +7,7 @@
 // oracle comparison, pass/fail reporting) on the most trivial possible identity:
 //
 //   for 10^6 random FP64 inputs x:
-//     dd::DoubleDouble(x) round-trips to quadmath as exactly x, i.e.
+//     dd::DoubleDouble(x) round-trips to binary128 as exactly x, i.e.
 //     BackendTraits<DD>::to_quad(dd::DoubleDouble(x)) == (__float128)x
 //
 // This holds by construction: dd::DoubleDouble(x) stores {hi=x, lo=0}, and
@@ -21,13 +21,6 @@
 using namespace kokkos_ep;
 
 int main(int argc, char** argv) {
-#ifndef KOKKOS_EP_HAVE_QUADMATH
-  // Graceful degradation: no __float128 oracle available. This trivial identity
-  // doesn't actually need the oracle, but the harness's accuracy path does, and
-  // Phase 1 tests will — so we treat a quadmath-less config uniformly as SKIP.
-  std::printf("hello_test: SKIP — Kokkos built without LIBQUADMATH; no __float128 oracle.\n");
-  return KOKKOS_EP_SKIP;
-#else
   Kokkos::initialize(argc, argv);
   int rc = 0;
   {
@@ -54,7 +47,7 @@ int main(int argc, char** argv) {
       }
     }
 
-    KOKKOS_EP_ASSERT(mism == 0, "DD round-trip to quadmath was not bit-exact");
+    KOKKOS_EP_ASSERT(mism == 0, "DD round-trip to binary128 was not bit-exact");
     std::printf("hello_test: DD round-trip identity  %d/%d passed\n", n - mism, n);
 
     // Also exercise the device runner primitive so the smoke test covers the
@@ -72,5 +65,4 @@ int main(int argc, char** argv) {
   }
   Kokkos::finalize();
   return rc;
-#endif
 }

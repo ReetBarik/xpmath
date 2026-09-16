@@ -29,11 +29,12 @@
 // redundant / contradictory bits and the ~29-digit precision claim would be
 // false for that op.  A violation localizes a normalization bug to that exact op
 // — no reference value and no wider type is needed to SEE it.  So this test
-// carries NO oracle and runs unconditionally, even on a quadmath-less Kokkos
-// (matching T2.2).  Accuracy-vs-oracle is the separate concern of T3.4.  The
-// ONLY use of __float128 here is to ENRICH the inputs to full ~96-bit width (see
-// below); that enrichment is KOKKOS_EP_HAVE_QUADMATH-gated, the invariant check
-// is not.
+// carries NO oracle and runs unconditionally (matching T2.2).  Accuracy-vs-
+// oracle is the separate concern of T3.4.  The ONLY use of __float128 here is to
+// ENRICH the inputs to full ~96-bit width (see below); that enrichment used to
+// be KOKKOS_EP_HAVE_QUADMATH-gated while the invariant check was not, so on a
+// Kokkos without the TPL this test ran but tested narrower inputs than it
+// claimed.  The gate is gone; the enrichment always happens.
 //
 // TWO-TIER CLASSIFICATION (strict Priest 1/2-ulp vs QD-weak <=ulp)
 // ---------------------------------------------------------------
@@ -283,10 +284,10 @@ inline bool invariant_holds(const qf::QuadFloat& d) {
 // Enrich a nominal double x to a full ~96-bit ordered QuadFloat: add sub-leading
 // -ulp tail terms (relative 2^-28 / 2^-56 / 2^-84, each below 1/2 ulp of f0 so
 // f0 stays == (float)x), then decompose the wide value into four ordered FP32
-// words by successive round-to-nearest (the T3.1 construction). Without quadmath,
-// fall back to the ordered QuadFloat(double) split (~2-3 words) — still normalized.
+// words by successive round-to-nearest (the T3.1 construction). This used to have
+// a no-__float128 fallback to the ordered QuadFloat(double) split (~2-3 words);
+// the enrichment is unconditional now, so the fallback is gone with the gate.
 inline qf::QuadFloat make_wide_input(double x, std::mt19937_64& g) {
-#ifdef KOKKOS_EP_HAVE_QUADMATH
   std::uniform_real_distribution<double> dt(-1.0, 1.0);
   float128 v = (float128)x;
   v += (float128)x * (float128)(dt(g) * 0x1p-28);   // ~2^-28 relative (fills word 1)
@@ -297,10 +298,6 @@ inline qf::QuadFloat make_wide_input(double x, std::mt19937_64& g) {
   float w2 = (float)r;             r -= (float128)w2;
   float w3 = (float)r;
   return qf::QuadFloat(w0, w1, w2, w3);
-#else
-  (void)g;
-  return qf::QuadFloat(x);
-#endif
 }
 
 // ----------------------------------------------------------------------------
@@ -641,11 +638,7 @@ int main(int argc, char** argv) {
                 "|f_{i+1}| <= 1/2 ulp(f_i) for every QF op ===\n");
     std::printf("Oracle-independent (mathematical 1/2-ulp check). Execution space: %s\n",
                 Kokkos::DefaultExecutionSpace::name());
-#ifdef KOKKOS_EP_HAVE_QUADMATH
     std::printf("Inputs enriched to ~96-bit width via __float128 ordered decomposition.\n\n");
-#else
-    std::printf("Inputs from QuadFloat(double) (~2-3 words); quadmath enrichment unavailable.\n\n");
-#endif
 
     std::vector<InvSummary> summary;
 

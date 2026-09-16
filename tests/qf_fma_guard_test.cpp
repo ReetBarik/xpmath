@@ -36,7 +36,7 @@
 // This is the QF analogue of tests/ff_fma_guard_test.cpp (T2.5, the FP32 twoProduct
 // guard) and tests/dd_fma_guard_test.cpp (T1.5). Every design decision T2.5 locked
 // in carries over — single-source/two-targets, a contraction-immune FP64 oracle
-// (no quadmath), a twoSum CONTROL, host + device passes, OFF gates / ON reports
+// (no __float128), a twoSum CONTROL, host + device passes, OFF gates / ON reports
 // with a committed baseline.
 //
 // TWO DELIBERATE DIVERGENCES FROM T2.5 (both reported in the DONE block)
@@ -110,9 +110,9 @@
 // operand to double and multiplying THERE is EXACT — no rounding. So
 //     p_ref = (float)((double)a * (double)b)               // == fl(a*b)
 //     e_ref = (float)((double)a * (double)b - (double)p_ref)  // exact residual
-// is a *provable* decomposition, not an approximate check. This oracle needs NO
-// external library, does NOT gate on KOKKOS_EP_HAVE_QUADMATH, does NOT runtime-
-// SKIP-77, and runs UNCONDITIONALLY. It is also contraction-immune: `(double)a *
+// is a *provable* decomposition, not an approximate check. This oracle needs no
+// type wider than a machine word, so it runs on any target rather than x86_64
+// only. It is also contraction-immune: `(double)a *
 // (double)b` is exactly representable in FP64 (48 <= 53), so the residual
 // `exact - p_ref` is the same value whether computed as two ops or one fused FMA.
 //
@@ -614,7 +614,7 @@ int main(int argc, char** argv) {
                     "qf_two_prod + qf_two_sqr ===\n");
         std::printf("contraction posture: %s\n", kPostureName);
         std::printf("execution space: %s\n", Kokkos::DefaultExecutionSpace::name());
-        std::printf("Oracle: FP64 exact product (contraction-immune; 48 <= 53 bits, no quadmath)\n");
+        std::printf("Oracle: FP64 exact product (contraction-immune; 48 <= 53 bits, no __float128)\n");
         std::printf("Primitives called DIRECTLY from qf_math.hpp (no mirror-and-comment; "
                     "cf. T3.1 qf_eft_test)\n\n");
 

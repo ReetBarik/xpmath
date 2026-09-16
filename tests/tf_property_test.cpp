@@ -40,8 +40,9 @@
 //     multiply-commutativity (demoted, same reason as QF/DD/FF), Pythagorean
 //     sin^2+cos^2, addition formulas, hyperbolic cosh^2-sinh^2 / tanh, inverse
 //     pairs asin(sin)/atan(tan), pow(x,2)/sqrt(x*x)/hypot. Reported in "digits of
-//     accuracy" via the __float128 oracle, so Group B (and Test C) are #ifdef'd
-//     on KOKKOS_EP_HAVE_QUADMATH; without it main() returns KOKKOS_EP_SKIP (77).
+//     accuracy" via the __float128 oracle. Group B and Test C used to be
+//     #ifdef'd on KOKKOS_EP_HAVE_QUADMATH and to SKIP (77) without it; they now
+//     run unconditionally, because __float128 needs no TPL.
 //
 //   TEST C — named-constant regressions.  log(e)~=1, exp(log2)~=2, sqrt2^2~=2,
 //     log(10)~=ln10 constant, |sin(pi)|~=0 — each to a named floor scaled to
@@ -81,7 +82,6 @@ namespace tf = xp;
 // ----------------------------------------------------------------------------
 static constexpr double kMaxDig = 21.7;   // TF ~21.68 decimal digits (3x24 ~= 72 bits)
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
 static float128 tf_to_q(const tf::TripleFloat& x) {
   return (float128)x.f0 + (float128)x.f1 + (float128)x.f2;
 }
@@ -92,12 +92,11 @@ static double tf_digits(const tf::TripleFloat& got, const float128& truth) {
   if (diff == 0.0Q) return kMaxDig;
   float128 rel = diff / truth;
   if (rel < 0.0Q) rel = -rel;
-  double d = -log10q(rel);
+  double d = -(double)q_log10(rel);
   if (d < 0.0) return 0.0;
   if (d > kMaxDig) return kMaxDig;
   return d;
 }
-#endif
 
 // ----------------------------------------------------------------------------
 // Exact equality (Group A gate)
@@ -232,7 +231,6 @@ static void run_group_a_mulpwr2(const std::vector<tf::TripleFloat>& xs, GroupARe
 }
 
 // ----------------------------------------------------------------------------
-#ifdef KOKKOS_EP_HAVE_QUADMATH
 // ----------------------------------------------------------------------------
 
 static constexpr double kTolDefault = 19.63;  // 10 ulp of 2^-72
@@ -383,12 +381,12 @@ static void run_test_c(double& sum_dig, int& count) {
 
   auto pi = xp::TripleFloat_pi();
   auto sin_pi = xp::sin(pi);
-  double d4 = (fabsq(tf_to_q(sin_pi)) < 1e-19Q) ? kMaxDig : -log10q(fabsq(tf_to_q(sin_pi)));
+  double d4 = (q_abs(tf_to_q(sin_pi)) < 1e-19Q) ? kMaxDig
+                                                : -(double)q_log10(q_abs(tf_to_q(sin_pi)));
   sum_dig += d4; ++count;
   std::printf("  |sin(pi)| = %.6f digits\n", d4);
 }
 
-#endif // KOKKOS_EP_HAVE_QUADMATH
 
 // ============================================================================
 int main(int argc, char** argv) {
@@ -415,7 +413,6 @@ int main(int argc, char** argv) {
     std::printf("  Group A: %d passed, %d failed, %d skipped (of %d)\n", A.pass, A.fail, A.skip, A.total);
     KOKKOS_EP_ASSERT(A.fail == 0, "Group A bit-exact identity failed");
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
     std::printf("\n[Group B] Approximate identities (oracle-scored)\n");
     GroupBResult B_mul, B_sqrt, B_exp, B_pyth, B_hyp, B_inv;
     run_group_b_mul_comm(xs, B_mul);
@@ -463,12 +460,8 @@ int main(int argc, char** argv) {
     if (!(ok_mul && ok_sqrt && ok_exp && ok_pyth && ok_hyp && ok_inv && ok_c)) {
       rc = ep_exit_code();
     }
-#else
-    std::printf("\n[Group B / Test C] Skipped (no __float128 oracle)\n");
-    rc = KOKKOS_EP_SKIP;
-#endif
 
-    std::printf("\n=== tf_property_test: %s ===\n", rc == 0 ? "ALL PASSED" : (rc == KOKKOS_EP_SKIP ? "SKIPPED" : "FAILURES PRESENT"));
+    std::printf("\n=== tf_property_test: %s ===\n", rc == 0 ? "ALL PASSED" : "FAILURES PRESENT");
   }
   Kokkos::finalize();
   return rc;

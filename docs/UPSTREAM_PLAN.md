@@ -62,9 +62,10 @@ a thin `Kokkos::Experimental` wrapper, so Kokkos users see today's API
 unchanged.
 
 **Where to run.** Doc-only sub-plans run anywhere. Sub-plans whose gates
-build or run code (S2, S3, S5, S6) need the x86_64 Linux host with the
-Kokkos 5.1 + `Kokkos_ENABLE_LIBQUADMATH=ON` install (see
-`scripts/prepare.sh` / `patches/README.md` for the environment) — run
+build or run code (S2, S3, S5, S6) need the x86_64 Linux host with a
+Kokkos 5.1 install (see `scripts/prepare.sh` for the environment; the
+`Kokkos_ENABLE_LIBQUADMATH=ON` that used to be required here is not any
+more — see `patches/README.md` for what dropped it) — run
 the session there, or fall back to the hybrid protocol (S1 describes
 it). GPU sub-plans (S1, S8) are always hybrid.
 
@@ -530,11 +531,12 @@ A100 (CUDA, `Kokkos_ARCH_AMPERE80`), B200 (CUDA,
 Intel PVC (SYCL, `Kokkos_ARCH_INTEL_PVC`). Known constraint: hipcc/icpx
 are clang-based, so the GCC-flavored quadmath oracle
 (`-fext-numeric-literals`, `Kokkos_ENABLE_LIBQUADMATH`) will likely be
-unavailable there — oracle-dependent tests skip (exit 77) by design and
-demos are oracle-conditional since S6. The meaningful per-arch signal is:
+unavailable there — oracle-dependent tests skip (exit 77) by design. The
+demos are no longer among them: they stopped carrying accuracy columns and
+need no oracle at all. The meaningful per-arch signal is:
 library headers compile for device; oracle-free tests (`ff_eft_test`,
 `qf_eft_test`, `tf_eft_test`, the FF/QF/TF FMA guards, and the three
-invariant tests) run green; demos run where the oracle exists.
+invariant tests) run green; demos build and run.
 
 **Read:** the S1 STATUS block (protocol + CUDA baseline); `validation/`
 layout; `tests/README.md` "graceful degradation" section.

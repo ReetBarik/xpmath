@@ -47,8 +47,9 @@
 //     formulas, hyperbolic cosh^2-sinh^2 / tanh, inverse pairs asin(sin)/atan(tan),
 //     pow(x,2)/sqrt(x*x)/hypot, and the small-argument exp(a+eps) sensitivity (the
 //     T2.3 B4 pattern — see its note). Reported in "digits of accuracy" via the
-//     __float128 oracle, so Group B (and Test C) are #ifdef'd on
-//     KOKKOS_EP_HAVE_QUADMATH; without it main() returns KOKKOS_EP_SKIP (77).
+//     __float128 oracle. Group B and Test C used to be #ifdef'd on
+//     KOKKOS_EP_HAVE_QUADMATH and to SKIP (77) without it; they now run
+//     unconditionally, because __float128 needs no TPL.
 //
 //   TEST C — named-constant regressions.  log(e)~=1, exp(log2)~=2, sqrt2^2~=2,
 //     log(10)~=ln10 constant, |sin(pi)|~=0 — each to a named floor scaled to QF's
@@ -143,7 +144,6 @@ namespace qf = Kokkos::Experimental;
 // ----------------------------------------------------------------------------
 static constexpr double kMaxDig = 29.0;   // QF ~28.9 decimal digits (4x24 ~= 96 bits)
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
 static float128 qf_to_q(const qf::QuadFloat& x) {
   return (float128)x.f0 + (float128)x.f1 + (float128)x.f2 + (float128)x.f3;
 }
@@ -152,13 +152,13 @@ static float128 qf_to_q(const qf::QuadFloat& x) {
 // at QF's 29-digit ceiling. Mirrors demo_qf_real.cpp element_digits / test_utils
 // digits_of_accuracy semantics (NaN/inf/zero handling included).
 static double qf_digits(float128 computed, float128 ref) {
-  if (Kokkos::isnan(computed) || Kokkos::isnan(ref)) return 0.0;
-  if (Kokkos::isinf(ref))
-    return (Kokkos::isinf(computed) && (computed > 0) == (ref > 0)) ? kMaxDig : 0.0;
+  if (q_isnan(computed) || q_isnan(ref)) return 0.0;
+  if (q_isinf(ref))
+    return (q_isinf(computed) && (computed > 0) == (ref > 0)) ? kMaxDig : 0.0;
   if (ref == (float128)0.0) return (computed == (float128)0.0) ? kMaxDig : 0.0;
-  float128 rel = Kokkos::abs((computed - ref) / ref);
+  float128 rel = q_abs((computed - ref) / ref);
   if (rel == (float128)0.0) return kMaxDig;
-  double d = -(double)Kokkos::log10(rel);
+  double d = -(double)q_log10(rel);
   return d < 0.0 ? 0.0 : (d > kMaxDig ? kMaxDig : d);
 }
 
@@ -182,7 +182,6 @@ static const double kTolDefault = 27.90;   // 10 ulp  = -log10(10 * 2^-96), the 
 // reason. Evidence: scripts/probe_b1_sqrt_sq.cpp.
 static const double kTolB1SqrtSq = 27.80;   // exactly-rounded floor is 27.8887
 static const double kTolSection10 = 27.42; // 30 ulp: exp-denormal-tail-limited round-trips (§10)
-#endif  // KOKKOS_EP_HAVE_QUADMATH
 
 // ----------------------------------------------------------------------------
 // Bit-pattern helpers (qf_eft / qf_nonoverlap hex format).
@@ -279,7 +278,7 @@ static constexpr int kDeviceN = 100'000;    // 10^5 for the device pass
 // constructor already yields a normalized non-overlapping expansion (so we exercise
 // the op, not renorm — same reasoning as T3.2's make_wide_input choice). We do NOT
 // need the ~96-bit __float128 enrichment here (that is a Group-B accuracy concern),
-// so Group A runs WITHOUT the quadmath gate, exactly as T2.3's Group A does.
+// so Group A touches no __float128 at all, exactly as T2.3's Group A does.
 
 struct GroupAResult { std::string name; long n; long skipped; long failures; };
 
@@ -406,7 +405,6 @@ static GroupAResult run_group_a_mulpwr2(const char* name, uint64_t seed,
   return GroupAResult{name, n, skipped, fails};
 }
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
 // ============================================================================
 // GROUP B — approximate identities (tolerance-based, needs the __float128 path)
 // ============================================================================
@@ -462,7 +460,6 @@ static InputDist loguniform(double explo, double exphi) {
     return std::pow(10.0, d(g));
   };
 }
-#endif  // KOKKOS_EP_HAVE_QUADMATH
 
 // ============================================================================
 // Device pass. 3 Group A (bit-exact) + 2 Group B (tolerance) on 10^5 inputs. A
@@ -588,7 +585,6 @@ int main(int argc, char** argv) {
 
     for (const auto& r : ga) groupA_failures += r.failures;
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
     // ------------------------------------------------------------------------
     // GROUP B — approximate identities (tolerance, digits vs oracle).
     // ------------------------------------------------------------------------
@@ -761,7 +757,6 @@ int main(int argc, char** argv) {
                   "output-denormal tail (%s)\n", kTolSection10,
                   ann ? ann->reason : "exp denormal tail; PORT_NOTES_QF §10");
     }
-#endif  // KOKKOS_EP_HAVE_QUADMATH
 
     // ------------------------------------------------------------------------
     // Device pass: 3 Group A (bit-exact) + 2 Group B (tolerance) on 10^5 inputs.
@@ -814,7 +809,6 @@ int main(int argc, char** argv) {
                   "A9_abs_branch", kDeviceN, f, f == 0 ? "PASS" : "FAIL");
     }
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
     // Device B1: sqrt(a)^2 ~= a.
     {
       std::vector<double> x; std::vector<float> f0, f1, f2, f3;
@@ -847,9 +841,7 @@ int main(int argc, char** argv) {
       std::printf("  [device] %-14s n=%d min=%.2f mean=%.2f tol=%.2f status=%s\n",
                   "B4_pythag", kDeviceN, s.min, s.mean, kTolDefault, pass ? "PASS" : "FAIL");
     }
-#endif
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
     // ------------------------------------------------------------------------
     // TEST C — named-constant regressions.
     // ------------------------------------------------------------------------
@@ -877,12 +869,12 @@ int main(int argc, char** argv) {
       qf::QuadFloat sp = qf::sin(qf::QuadFloat_pi());
       float128 v = qf_to_q(sp);
       double zero_digits = (v == (float128)0.0) ? kMaxDig
-                           : -(double)Kokkos::log10(Kokkos::abs(v));
+                           : -(double)q_log10(q_abs(v));
       const auto* ann = lookup_expected_min_drop("sin");
       const double kSinPiFloor = 27.0;   // QF resolves pi to ~U, so |sin(pi)| ~ 2^-96
       bool ok = zero_digits >= kSinPiFloor;
       std::printf("    %-16s |sin(pi)|=%.3e zero_digits=%6.2f  %s  (floor=%.1f; %s)\n",
-                  "C1_sin_pi", (double)Kokkos::abs(v), zero_digits,
+                  "C1_sin_pi", (double)q_abs(v), zero_digits,
                   ok ? "PASS" : "FAIL", kSinPiFloor, ann ? ann->reason : "sin near pi");
       if (ok) ++c_pass;
     }
@@ -902,7 +894,6 @@ int main(int argc, char** argv) {
                 "QF oracle in qf_math.hpp)\n", "C6_gamma");
 
     std::printf("  Test C: %d/%d passed\n", c_pass, c_total);
-#endif  // KOKKOS_EP_HAVE_QUADMATH
 
     // ------------------------------------------------------------------------
     // ANTI-TESTS — identities DELIBERATELY NOT tested, and why.
@@ -931,13 +922,11 @@ int main(int argc, char** argv) {
     KOKKOS_EP_ASSERT(groupA_failures == 0,
                      "a Group A bit-exact identity did not hold to the last bit");
 
-#ifdef KOKKOS_EP_HAVE_QUADMATH
     long groupB_failed = 0; for (const auto& r : gb) if (!r.pass) ++groupB_failed;
     std::printf("  Group B: %zu identities, mean below tolerance=%ld\n", gb.size(), groupB_failed);
     KOKKOS_EP_ASSERT(groupB_failed == 0,
                      "a Group B identity's MEAN digits fell below its ulp tolerance");
     KOKKOS_EP_ASSERT(c_pass == c_total, "a Test C named-constant regression fell below its floor");
-#endif
 
     std::printf("  Device: total failures=%ld\n", device_failures);
     KOKKOS_EP_ASSERT(device_failures == 0, "a device identity check failed");
@@ -948,13 +937,5 @@ int main(int argc, char** argv) {
   }
   Kokkos::finalize();
 
-#ifndef KOKKOS_EP_HAVE_QUADMATH
-  // Group A ran and gated above; Group B / Test C need the oracle. Signal the
-  // partial run honestly as CTest "Skipped", unless Group A already hard-failed.
-  if (rc == 0) {
-    std::printf("(no __float128 oracle: Group A passed; Group B / Test C skipped)\n");
-    return KOKKOS_EP_SKIP;
-  }
-#endif
   return rc;
 }

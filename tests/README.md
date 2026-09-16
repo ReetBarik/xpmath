@@ -1,15 +1,16 @@
 # `tests/` — the ctest suite
 
-48 registered targets with Kokkos, **20 without it**. The count is asserted in
-CI (`.github/workflows/ci.yml`, `expected=48`), not assumed: four targets sit
-behind `if(XPMATH_MPFR_FOUND)`, and a missing optional dependency removes
-coverage while leaving the lane green. That is how this lane once ran 34 targets
-while reporting 31.
+49 registered targets with Kokkos, **21 without it**. The count is asserted in
+CI (`.github/workflows/ci.yml`, `expected=49`), not assumed. That is how this
+lane once ran 34 targets while reporting 31. Four targets used to sit behind
+`if(XPMATH_MPFR_FOUND)`, so a runner missing a `-dev` package lost coverage and
+stayed green; that guard is gone — MPFR/MPC are the sweep oracle now, and a
+missing package is a configure `FATAL_ERROR`.
 
 `-DXPMATH_WITH_KOKKOS=OFF` drops the 28 targets that link Kokkos and keeps the
-other 20 — both gates, both gate self-tests, the oracle-conversion and reduction
-pairs, `domains_fresh`, the consumer package test and the seven standalone
-smokes. Measured: 20/20 in 164 s with no Kokkos installed.
+other 21 — both gates, both gate self-tests, the oracle-conversion and reduction
+pairs, `domains_fresh`, `build_provenance`, the consumer package test and the
+seven standalone smokes. Measured: 21/21 in 169 s with no Kokkos installed.
 
 **What judges correctness is `docs/CORRECTNESS.md`.** Read it before adding
 anything that issues a verdict; the whole point of the current arrangement is
@@ -64,6 +65,7 @@ Four backends: `dd` (2×FP64, p=106), `ff` (2×FP32, p=48), `qf` (4×FP32, p=96)
 |---|---|
 | `consumer_package` | A separate CMake project can `find_package(xpmath)` against the install tree and compile against it. |
 | `domains_fresh` | `docs/DOMAINS.md` still matches what the CSVs imply. |
+| `build_provenance` | The build directory carries a `build-info.txt` naming the arch, git HEAD (with `-dirty`), the resolved compiler and version, the Kokkos prefix, the full `CMAKE_CXX_FLAGS`, the `-O` level and a UTC timestamp. Written by the top-level `CMakeLists.txt` on **every** configure, not by `scripts/xpm_build.sh` — a stamp only the wrapper wrote would be missing from exactly the builds nobody can trace. Judges presence and non-emptiness of the fields, never their values; see the header of `check_build_provenance.cmake`. |
 
 ## Scaffolding
 

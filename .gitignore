@@ -1,4 +1,5 @@
 /build/
+/build-a100/
 /build_opt/
 /README_PARKED.md
 /build_logs/
@@ -25,7 +26,11 @@ scripts/xp_corpus.bin
 # Per-sub-plan validation scratch. These were captures taken to prove one
 # restructure byte-identical, then never read again; the numbers of record are
 # validation/sweep/ and docs/DOMAINS.md.
-/validation/a100/
+#
+# /validation/a100/ WAS listed here, because S1's artifacts were pruned. S8b
+# put a device-validation harness back in that directory -- run_a100.sh plus
+# its logs, the same shape as validation/mi250/ -- and an ignore rule would
+# have silently swallowed it. Removed deliberately; do not re-add.
 /validation/s2/
 /validation/s3/
 /validation/s5/
@@ -38,6 +43,14 @@ scripts/xp_corpus.bin
 /validation/sweep/sweep_baseline.csv
 /validation/sweep/sweep_classified.csv
 .run.log
+
+# Cobalt's own job files. The blanket *.output / *.error / *.cobaltlog rules at
+# the top of this file exist so a job submitted from the repo root leaves no
+# droppings -- but the A100 job's .output IS the evidence, so the copies filed
+# under validation/a100/logs/ are exempted.
+!/validation/a100/logs/*.output
+!/validation/a100/logs/*.error
+!/validation/a100/logs/*.cobaltlog
 
 # Device-validation build products. validation/mi250/run_mi250.sh compiles on
 # the compute node with --save-temps=obj, which drops ~25 MB of .bc/.hipi/.o/.s
