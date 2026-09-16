@@ -4,6 +4,16 @@
 #
 # Byte-identical gate — timing stripper (layout-independent).
 #
+# THE GATE THIS SERVED IS RETIRED. The demos no longer print accuracy columns:
+# they are timing and smoke only, and the accuracy record is validation/sweep/,
+# scored in ulps against an MPFR/MPC oracle with one verdict per point (see
+# docs/CORRECTNESS.md and the "Validation conventions" section of CLAUDE.md).
+# This script still works exactly as described below, but on a modern demo
+# capture every data row hits the `kept == 0` path and prints verbatim, timings
+# and all — so diffing two stripped captures compares wall-clock jitter and
+# nothing else. It is kept for reading historical captures under validation/,
+# not for gating changes.
+#
 # WHY THIS REPLACES validation/s3/strip_timing.sh
 # -----------------------------------------------
 # The S2/S3 stripper hard-coded the DD table shape: `NF == 10` pipe fields with

@@ -62,7 +62,7 @@ left is submitting it, not composing it.
 
 ## Related, but not defects
 
-- **Kokkos has no `__complex128` math wrapper.** `impl/Kokkos_ComplexQuadPrecisionMath.hpp` is a local extension carried in `patches/`, not upstream. See `patches/README.md`. A missing feature, not a bug — but it is why four demos are behind a CMake probe.
+- **Kokkos has no `__complex128` math wrapper, and this repo no longer cares.** `impl/Kokkos_ComplexQuadPrecisionMath.hpp` was a local extension carried in `patches/`, not upstream, and it is why the four complex demos used to sit behind a CMake probe. Both are deleted: the demos stopped printing accuracy columns, which is all the wrapper ever served. See `patches/README.md`.
 - **`nvcc` rejects `__float128` in device code.** Documented behaviour, not a defect. It is a real constraint on this repo (it forces the host-oracle/device-code TU split scheduled for S6), recorded in the S1 STATUS block.
 
 ---

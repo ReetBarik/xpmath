@@ -58,8 +58,9 @@ not comparable to the sweep's point for point.
 
 ## Executables
 
-Nine targets in CMakeLists.txt (the four complex demos are inside a
-`Kokkos_ENABLE_LIBQUADMATH` conditional):
+Nine targets in CMakeLists.txt, all unconditional. (The four complex demos used
+to sit inside a `KOKKOS_HAS_COMPLEX_QUADMATH_WRAPPER` conditional; that probe and
+the patch header behind it are gone.)
 
 - `kokkos_ep_demo` — DD real (39 ops)
 - `kokkos_ep_demo_complex` — DD complex (24 ops)
@@ -71,8 +72,20 @@ Nine targets in CMakeLists.txt (the four complex demos are inside a
 - `kokkos_ep_demo_tf_complex` — TF complex (24 ops)
 - `kokkos_ep_bench_cost` — cost benchmark across backends
 
-**Never run the demos casually** — they are hours of kernel time. The accuracy
-record is `validation/sweep/`, not the demos.
+**The demos are TIMING AND SMOKE ONLY.** They print per-op wall time (DD: the
+slowdown vs FP64) and nothing else. They used to print accuracy columns scored
+against a host `__float128` oracle, and the QF/TF pairs used to issue an
+RC-0/RC-1 verdict on them; all of it is deleted. The accuracy record is
+`validation/sweep/`, and the correctness contract allows exactly one verdict per
+point (`docs/CORRECTNESS.md`). Each demo still exercises every op it always did
+and still reads its results back host-side — that round trip is the smoke.
+
+**Never run the demos casually** — they are hours of kernel time.
+
+`kokkos_ep_bench_cost` is the one target under `src/` that still includes
+`<quadmath.h>`. There `__float128` is the incumbent being benchmarked, not an
+oracle, so it stays; it is also the only reason CI still builds its Kokkos with
+`Kokkos_ENABLE_LIBQUADMATH=ON`.
 
 ## Branch Structure
 
@@ -90,8 +103,18 @@ work restarts from there.
 
 ## Build
 
-Requires Kokkos ≥5.1 built at **C++20** with `Kokkos_ENABLE_LIBQUADMATH=ON`, GCC
-13.3.0, CMake 3.28.3. The consuming project stays at C++17.
+Requires Kokkos ≥5.1 built at **C++20**, GCC 13.3.0, CMake 3.28.3. The consuming
+project stays at C++17.
+
+**`Kokkos_ENABLE_LIBQUADMATH=ON` is NOT required any more, and neither is a
+patched Kokkos.** It was, until the demos stopped printing accuracy columns: the
+real oracle came through `impl/Kokkos_QuadPrecisionMath.hpp` (upstream, but only
+compiled with that flag) and the complex oracle through
+`impl/Kokkos_ComplexQuadPrecisionMath.hpp`, which is NOT upstream and had to be
+patched into every Kokkos install by hand. A Kokkos with libquadmath OFF — the
+`~/xpm_device/kokkos-hip-gfx90a` (MI250) install among them — now CONFIGURES
+this project cleanly with no warning. Configures; that is a narrower claim than
+builds, and the MI250 build state is separate inherited work.
 
 **The wrapper is `scripts/xpm_build.sh`. Target hardware is an ARGUMENT.**
 
@@ -167,15 +190,24 @@ is ~219 µs, so each QF demo is ~18 minutes of kernel time at `--batch 1000000
 
 ## Validation conventions
 
-**Byte-identical gate.** Any mechanical restructure must leave the demo accuracy
-columns unchanged. Run the affected demos before and after with identical
-arguments, strip timing with **`validation/strip_timing.sh`**, and diff. Timing
-columns are exempt; accuracy columns are not.
+**The byte-identical gate is RETIRED, because its subject no longer exists.**
+It read: any mechanical restructure must leave the demo accuracy columns
+unchanged — run the affected demos before and after with identical arguments,
+strip timing with `validation/strip_timing.sh`, and diff. The demos do not print
+accuracy columns any more. `validation/strip_timing.sh` still runs, and it does
+not fail silently — it keys on number format and only accepts a row as data if
+at least one two-decimal accuracy field survives. With none left, `kept == 0` on
+every demo row, so every row prints VERBATIM, timings included. The diff it
+feeds is therefore pure wall-clock jitter: it will report differences, none of
+which mean anything. Do not invoke the gate to bless a change — a red diff from
+it is now noise, and there is no accuracy content for it to protect.
 
-Use `validation/strip_timing.sh`. (An older `validation/s3/strip_timing.sh`
-hard-coded the DD table shape and silently stripped nothing from FF/QF layouts,
-producing diffs full of wall-clock jitter; it and the rest of the per-sub-plan
-capture directories were pruned once `validation/sweep/` became the record.)
+What replaced it: the demos are timing and smoke only, so a restructure that
+touches them is checked by *compiling and running one* at a small batch
+(`--batch 1000 --repeats 1`), and everything about accuracy is checked by the
+two ctest gates over `validation/sweep/` (`docs/CORRECTNESS.md`). Those were
+always the stronger measurement — the demo columns duplicated them at lower
+resolution.
 
 **Shared corpus — `scripts/gen_corpus.cpp`, on `main`, unused.** It emits one
 shared set of inputs plus a `__float128` reference per (op, element), covering 39
@@ -281,9 +313,18 @@ artifacts under `validation/a100/` were pruned; the record is the S1 STATUS bloc
 
 ## Platform Constraints
 
-- **`libquadmath` (host oracle) is x86_64 only**, and CMake enforces it. This
-  constrains the *tests and demos*, not the library: `include/xp/` has no
-  quadmath dependency and compiles anywhere.
+- **`__float128` is an x86_64-ism, and CMake does NOT enforce it.** The claim
+  that it did was checked and is false: there is no `CMAKE_SYSTEM_PROCESSOR`
+  test anywhere in `CMakeLists.txt`, `tests/CMakeLists.txt`, or any `.cmake`
+  file — only comments referring to a gate that was never written. What is
+  actually x86-bound is now narrower than it was: `libquadmath` is gone from the
+  sweep oracle (MPFR/MPC replaced it) and gone from the demos (they carry no
+  oracle), and the remaining users are `__float128` as a CARRIER in
+  `scripts/sweep_accuracy.cpp` — arithmetic from libgcc, elementary functions
+  from glibc `*f128`, neither of them libquadmath — plus `src/bench_cost.cpp`,
+  which does call `::expq`/`::powq`. The library, `include/xp/`, has no such
+  dependency and compiles anywhere. The enforcement that does exist is in CI:
+  the x86 lanes are where those targets are built.
 - **`std::vector<__float128>` will not compile under `nvcc`.** Kokkos exports
   `-arch=sm_XX` in its interface flags, so every consuming TU gets a device pass;
   nvcc then instantiates `std::initializer_list<__float128>` and rejects the

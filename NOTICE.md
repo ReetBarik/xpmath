@@ -28,7 +28,6 @@ The mapping below is authoritative.
 | `third_party/include/ff_complex.hpp` | DHB-License | DD→FF mechanical translation; PORT_NOTES.md documents FP32-specific fixes. See `LICENSES/LicenseRef-DHB-License.txt`. |
 | `third_party/include/qf_math.hpp` | LBNL-BSD-License | C++/Kokkos port of QD 2.3.24 quad-double (real), retargeted from 4×FP64 to 4×FP32. **Not** a DDFUN derivative. See `LICENSES/LicenseRef-LBNL-BSD-License.txt`. |
 | `third_party/include/qf_complex.hpp` | LBNL-BSD-License | QF complex layer composed on the QD-derived real four-word algorithms. **Not** a DDFUN derivative. See `LICENSES/LicenseRef-LBNL-BSD-License.txt`. |
-| `patches/kokkos_complex_quad_math.hpp` | Apache-2.0 WITH LLVM-exception | Kokkos-style extension header (a companion to `Kokkos_QuadPrecisionMath.hpp`), **not** a DDFUN derivative. Licensed to match Kokkos for eventual upstream compatibility. |
 | Everything else (demos, tests, harness, corpus, scripts, docs) | Apache-2.0 | Covered by the top-level `LICENSE`. |
 
 ## The DDFUN-derived files

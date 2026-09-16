@@ -1,102 +1,52 @@
 # Local Kokkos patches
 
-## `kokkos_complex_quad_math.hpp`
+**There are none, and that is the point of this file.**
 
-### What it is
+This directory used to carry `kokkos_complex_quad_math.hpp`, a local extension
+to Kokkos's `core/src/impl/Kokkos_QuadPrecisionMath.hpp` adding the
+`__complex128` overloads (`Kokkos::exp`, `Kokkos::sqrt`, `Kokkos::conj`, …)
+that Kokkos does not ship. Every overload was a one-line forward to the
+corresponding `libquadmath` `::c<fn>q`. Building the four complex demos meant
+copying the header into a Kokkos SOURCE tree and rebuilding Kokkos with
+`-DKokkos_ENABLE_LIBQUADMATH=ON`, so the repo did not consume a Kokkos install
+— it consumed a *patched* one.
 
-A local extension to Kokkos's `core/src/impl/Kokkos_QuadPrecisionMath.hpp`.
-That upstream header provides `__float128` overloads in `namespace Kokkos`
-(`Kokkos::exp`, `Kokkos::sin`, …) so a host-side quadmath oracle can be spelled
-in Kokkos terms. This patch adds the **`__complex128`** counterparts
-(`Kokkos::exp`, `Kokkos::sqrt`, `Kokkos::conj`, `Kokkos::real`, …), which Kokkos
-does not ship.
+It existed for one reason: the `__complex128` accuracy columns the complex
+demos printed. Those columns are gone. The demos are timing and smoke only, and
+the accuracy record is `validation/sweep/` — error in ulps against an MPFR/MPC
+oracle at 400 bits, one verdict per point, two ctest gates over it
+(`docs/CORRECTNESS.md`). The demo columns duplicated that measurement at lower
+resolution while costing the project a patched Kokkos.
 
-Each overload is a one-line forward to the corresponding `libquadmath`
-`::c<fn>q` function (e.g. `Kokkos::exp((__complex128)z)` → `::cexpq(z)`), so it is
-**bit-exact against `::c<fn>q` by construction**.
+Deleting them deleted, in one move:
 
-Overloads provided (namespace `Kokkos`):
+- `patches/kokkos_complex_quad_math.hpp` and its verifier
+  `scripts/smoke_kokkos_complex_quad.cpp`;
+- the `check_cxx_source_compiles` probe for
+  `impl/Kokkos_ComplexQuadPrecisionMath.hpp` in `CMakeLists.txt`, and the
+  `KOKKOS_HAS_COMPLEX_QUADMATH_WRAPPER` guards that left four demo targets
+  unbuilt when it failed (KI-21);
+- the `Kokkos_ENABLE_LIBQUADMATH=ON` requirement on the Kokkos install, and the
+  configure-time WARNING when it was absent.
 
-- `abs`, `real`, `imag` (return `__float128`)
-- `conj`
-- `exp`, `log`, `log10`
-- `pow`, `sqrt`
-- `sin`, `cos`, `tan`, `asin`, `acos`, `atan`
-- `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`
+**Any Kokkos ≥5.1 built at C++20 now works, libquadmath or not.** The MI250
+(`hip/gfx90a`) install, which has libquadmath OFF, is a first-class supported
+target for configuration.
 
-This set is exactly what `src/demo_complex.cpp` needs for its `__complex128`
-oracle. `arg` (`::cargq`) is intentionally omitted because the demo does not use
-it; add it if a future consumer needs it.
+## The one remaining libquadmath consumer
 
-### It is NOT upstream
+`src/bench_cost.cpp` includes `<quadmath.h>` and calls `::expq` / `::powq`
+directly. That is not an oracle: `__float128` is the *incumbent* the DD and QF
+backends are timed against, so removing it would delete the measurement rather
+than relocate it. `kokkos_ep_bench_cost` is therefore the single target in this
+repo that still needs libquadmath at link time, and it is the reason CI still
+builds its Kokkos with `-DKokkos_ENABLE_LIBQUADMATH=ON`. No demo, no test, and
+no installed header needs it.
 
-This header is not part of Kokkos. It is carried locally in this repo for
-reproducibility and applied to the local Kokkos install used to build the demos.
+## If you need the header back
 
-### Why not upstream (yet)
-
-Reet's call: keep it local until the extended-precision test suite stabilizes.
-Once the oracle surface (real + complex) is settled by the test suite, this can
-be proposed upstream as a companion to `Kokkos_QuadPrecisionMath.hpp`.
-
-### How to apply
-
-Copy the header into your Kokkos **source** tree, then rebuild/reinstall Kokkos
-with libquadmath enabled:
-
-```bash
-cp patches/kokkos_complex_quad_math.hpp \
-   <kokkos-source>/core/src/impl/Kokkos_ComplexQuadPrecisionMath.hpp
-
-# reconfigure/rebuild Kokkos with libquadmath:
-cmake -S <kokkos-source> -B <kokkos-build> \
-      -DCMAKE_INSTALL_PREFIX=<kokkos-install> \
-      -DKokkos_ENABLE_LIBQUADMATH=ON <other-flags>
-cmake --build <kokkos-build> -j --target install
-```
-
-Then confirm it landed in the install tree:
-
-```bash
-ls <kokkos-install>/include/impl/Kokkos_ComplexQuadPrecisionMath.hpp
-```
-
-If your Kokkos build does not install `impl/` headers automatically, copy the
-header directly into the install tree:
-
-```bash
-cp patches/kokkos_complex_quad_math.hpp \
-   <kokkos-install>/include/impl/Kokkos_ComplexQuadPrecisionMath.hpp
-```
-
-A standalone verifier lives at `scripts/smoke_kokkos_complex_quad.cpp`; compile
-and run it against the install tree to confirm the wrapper is present and
-bit-exact against `::cexpq`.
-
-### Tested against
-
-- Kokkos 5.1.0 (`KOKKOS_VERSION 50100`), built with
-  `-DKokkos_ENABLE_LIBQUADMATH=ON`, Serial backend, GCC 13.3.0.
-- Install prefix used for the demos: `/home/rbarik/kokkos-install-quadmath`.
-
-### License
-
-`kokkos_complex_quad_math.hpp` is licensed **Apache-2.0 WITH
-LLVM-exception**, matching Kokkos's own license — carried in its SPDX
-header:
-
-```
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-// SPDX-FileCopyrightText: Copyright Contributors to the Kokkos project
-```
-
-This is deliberate: the file is a Kokkos-style extension header (a
-companion to `Kokkos_QuadPrecisionMath.hpp`), **not** a DDFUN derivative.
-Licensing it to match Kokkos means it can be upstreamed verbatim if a
-Kokkos PR is ever opened, with no relicensing step.
-
-This is separate from the DDFUN-derived files
-(`third_party/include/dd_math.hpp`, `dd_complex.hpp`), which are C++/Kokkos
-ports of DDFUN and carry the **DHB-License** instead. See the top-level
-`NOTICE.md` for the full per-file license mapping and
-`docs/TEST_SUITE_PLAN.md` "Licensing" section for the rationale.
+It is not lost — it is in the history. `git log --diff-filter=D --
+patches/kokkos_complex_quad_math.hpp` finds the commit that removed it, and the
+file is intact in that commit's parent, along with the version of this README
+that explained how to apply it. It was Apache-2.0 WITH LLVM-exception, matching
+Kokkos, so it could still be upstreamed verbatim.

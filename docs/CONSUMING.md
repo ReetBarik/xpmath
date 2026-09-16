@@ -19,6 +19,18 @@ cmake --build build -j
 cmake --install build
 ```
 
+### Building with Kokkos
+
+Kokkos ≥5.1 built at C++20, and nothing else. In particular **no
+`Kokkos_ENABLE_LIBQUADMATH=ON`**: that used to be a hard requirement because the
+demos scored themselves against a host `__float128` oracle reached through
+`impl/Kokkos_QuadPrecisionMath.hpp` (and, for the complex demos, a non-upstream
+patch header this repo carried). Those accuracy columns are gone — the accuracy
+record is `validation/sweep/` — so a Kokkos with libquadmath OFF, such as a
+`hip/gfx90a` install, configures cleanly. One target, `kokkos_ep_bench_cost`,
+still links libquadmath, because `__float128` is the incumbent it benchmarks
+against rather than an oracle.
+
 ### Building without Kokkos
 
 The build itself no longer requires Kokkos:
