@@ -8,7 +8,7 @@
 //
 //   for 10^6 random FP64 inputs x:
 //     dd::DoubleDouble(x) round-trips to binary128 as exactly x, i.e.
-//     BackendTraits<DD>::to_quad(dd::DoubleDouble(x)) == (__float128)x
+//     OracleTraits<DD>::to_quad(dd::DoubleDouble(x)) == (__float128)x
 //
 // This holds by construction: dd::DoubleDouble(x) stores {hi=x, lo=0}, and
 // to_quad = (float128)hi + (float128)lo = (float128)x exactly. So a passing run
@@ -16,7 +16,7 @@
 // Real DD correctness coverage begins in Phase 1 (T1.1..T1.6).
 // ============================================================================
 
-#include "test_utils.hpp"
+#include "test_utils_host.hpp"
 
 using namespace kokkos_ep;
 
@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
     for (int i = 0; i < n; ++i) {
       double   x    = dist(gen);
       dd::DoubleDouble x_dd(x);
-      float128 back = BackendTraits<DD>::to_quad(x_dd);
+      float128 back = OracleTraits<DD>::to_quad(x_dd);
       if (back != (float128)x) {
         if (mism < 5) {
           std::printf("MISMATCH i=%d  x=%.17g  back!=x\n", i, x);

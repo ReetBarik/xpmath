@@ -72,7 +72,11 @@
 //   KOKKOS_EP_CONTRACTION_MODE=0 (OFF) or =1 (ON)
 //   KOKKOS_EP_BASELINE_PATH=... (ON only, drift detection)
 
-#include "test_utils.hpp"
+// The device half of the test harness names only the xp core, so the Kokkos
+// runtime this TU drives (View / parallel_for / initialize) is included here
+// rather than arriving transitively through the harness header.
+#include <Kokkos_Core.hpp>
+#include "test_utils_device.hpp"
 #include "corpus.hpp"
 #include <xp/tf_math.hpp>
 

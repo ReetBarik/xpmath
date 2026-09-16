@@ -197,7 +197,7 @@ have to be either flat (wrong) or per-op-tolerance-shaped (the provenance
 problem this change exists to remove).
 
 Converted to report ulps: the four real tests, `tests/{dd,ff,qf,tf}_accuracy_test.cpp`,
-via `ulp_error<Backend>()` and the `AccStats` ulp fields in `tests/test_utils.hpp`.
+via `ulp_error<Backend>()` and the `AccStats` ulp fields in `tests/test_utils_host.hpp`.
 Each op line now carries `worst_ulp=`, `ulp_n=` and `ulp_unscorable=`.
 
 Not converted: the four `*_complex_accuracy_test.cpp` files. They score against a

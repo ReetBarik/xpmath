@@ -71,7 +71,7 @@
 // template); "The six test layers" layer 6.
 // ============================================================================
 
-#include "test_utils.hpp"
+#include "test_utils_host.hpp"
 #include <ff_math.hpp>
 
 #include <algorithm>
@@ -86,11 +86,11 @@ namespace ff = Kokkos::Experimental;
 
 // ----------------------------------------------------------------------------
 // Widen an FF value to the __float128 oracle type (bit-exact: |lo| ≤ ½ ulp(hi)
-// and __float128 has far more mantissa). Same as BackendTraits<FF>::to_quad;
+// and __float128 has far more mantissa). Same as OracleTraits<FF>::to_quad;
 // wrapped here for terse call sites in the kernels below.
 // ----------------------------------------------------------------------------
 static inline float128 Q(const ff::FloatFloat& f) {
-  return BackendTraits<FF>::to_quad(f);
+  return OracleTraits<FF>::to_quad(f);
 }
 
 // ----------------------------------------------------------------------------

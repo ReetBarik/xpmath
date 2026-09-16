@@ -139,7 +139,7 @@
 // template); "The six test layers" layer 2.
 // ============================================================================
 
-#include "test_utils.hpp"
+#include "test_utils_host.hpp"
 #include "corpus.hpp"
 #include <qf_math.hpp>
 

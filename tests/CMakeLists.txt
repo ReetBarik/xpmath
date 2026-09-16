@@ -17,7 +17,7 @@
 # arithmetic is libgcc's -- while the handful of elementary functions the tests
 # needed moved to __builtin_ (bit-exact and IEEE-mandated ones) or to MPFR (the
 # one genuine reference, exp_reduction_test's ln2). See the q_* block in
-# tests/test_utils.hpp.
+# tests/test_utils_host.hpp.
 #
 # REMOVING IT IS THE POINT, NOT A TIDY-UP. Left in place it would now be
 # ACTIVELY HARMFUL: it would keep reporting Skipped on a machine where the test
@@ -711,6 +711,33 @@ add_test(NAME build_provenance
          COMMAND ${CMAKE_COMMAND}
                  -DINFO=${CMAKE_BINARY_DIR}/build-info.txt
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/check_build_provenance.cmake)
+
+# ---------------------------------------------------------------------------
+# DEVICE-TU PURITY
+# ---------------------------------------------------------------------------
+# tests/test_utils_device.hpp is the half of the test harness a device
+# translation unit may include, and the one thing that would make it unusable
+# there is __float128: nvcc walks STL member signatures during the device pass
+# and rejects the 128-bit float. That is not hypothetical -- std::vector<__float128>
+# in the unsplit tests/test_utils.hpp put the type into all 21 test TUs that
+# included the header, and A100 (S8b) could not build 9 of 49 targets.
+#
+# Registered OUTSIDE the XPMATH_WITH_KOKKOS guard, like build_provenance above,
+# and for a stronger reason than convenience: the device header names the xp
+# core rather than the third_party Kokkos wrappers, so this gate needs no
+# Kokkos install to run. It counts in both configurations: 49 -> 50 with
+# Kokkos, 21 -> 22 without.
+#
+# NOT a `grep __float128`, which is what you would write first and which would
+# have been red from the day it was written -- /usr/include/bits/floatn.h
+# typedefs the type on x86_64 whether or not anyone uses it. The script
+# attributes each occurrence to its originating file via the preprocessor's
+# line markers and fails only on hits from inside this repository.
+#
+# It takes no contraction flags and adds no target, so
+# XPMATH_EFT_OFF_EXPECTED / XPMATH_EFT_ON_EXPECTED above stay at 8 / 5.
+add_test(NAME device_tu_purity
+         COMMAND ${CMAKE_SOURCE_DIR}/scripts/check_device_tu_purity.sh)
 
 set_tests_properties(sweep_absolute_gate sweep_monotone_gate
                      PROPERTIES TIMEOUT 600)

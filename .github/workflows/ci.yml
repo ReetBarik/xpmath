@@ -160,7 +160,10 @@ jobs:
   # Without a lane, that decoupling regresses the first time someone moves a
   # target outside the guard and only ever configures with Kokkos on. Measured
   # locally before this lane was written: 20/20 in 164 s; 21/21 in 169 s since
-  # build_provenance joined the Kokkos-free set.
+  # build_provenance joined the Kokkos-free set; 22/22 since device_tu_purity
+  # joined it too. That gate needs no Kokkos on purpose -- it preprocesses
+  # tests/test_utils_device.hpp, which names the xp core rather than the compat
+  # wrappers -- so this lane, not the Kokkos one, is where it belongs.
   # ---------------------------------------------------------------------------
   no-kokkos-build:
     name: build + ctest with XPMATH_WITH_KOKKOS=OFF
@@ -190,7 +193,7 @@ jobs:
       - name: Assert the Kokkos-free suite is the expected size
         run: |
           set -euo pipefail
-          expected=21
+          expected=22
           actual=$(ctest --test-dir build-nokokkos -N | awk '/^Total Tests: /{print $3}')
           echo "registered without Kokkos: ${actual} (expected ${expected})"
           if [ "${actual}" != "${expected}" ]; then
@@ -538,7 +541,7 @@ jobs:
       - name: Assert the full suite is registered
         run: |
           set -euo pipefail
-          expected=49
+          expected=50
           actual=$(ctest --test-dir build -N | awk '/^Total Tests: /{print $3}')
           echo "registered targets: ${actual} (expected ${expected})"
           if [ "${actual}" != "${expected}" ]; then

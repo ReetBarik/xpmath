@@ -216,3 +216,185 @@ scripts/attic/test_qfmul.cpp
   grep.
 - `tests/` was not touched by this section at all (`git diff main -- tests/`
   is empty), by arrangement with C2.
+
+---
+
+## C2 — Split `test_utils.hpp` into a device-safe half and a host-oracle half
+
+**Branch:** `core/c2-split-test-utils`. **Base:** `main` @ `93f4b53`, rebased
+onto C1 (`a470834`) before merge so that this section's STATUS block lands after
+C1's rather than conflicting with it. Both gates below were measured on
+C2-over-`93f4b53`, before that rebase. The two sections are disjoint outside
+`.github/workflows/ci.yml`, `.gitignore` and this file -- C1 touched no file
+under `tests/` -- and the rebase resolved exactly one conflict, the
+append-append on this file.
+
+The combined tree was then MEASURED rather than assumed, since neither section's
+gates had built the other's code. Both configurations were rebuilt on the
+rebased tree and run with the three ~11-minute selftests excluded -- those had
+already passed in both gates above and are re-run by CI:
+
+```
+C1+C2, --arch host        build 0 errors, 50 registered, 47/47 pass
+C1+C2, --no-kokkos        build 0 errors, 22 registered, 19/19 pass
+```
+
+**Outcome.** Green. `tests/test_utils.hpp` is gone, split into
+`tests/test_utils_device.hpp` (what a device translation unit may include) and
+`tests/test_utils_host.hpp` (that header plus the oracle surface). No forwarding
+shim was left at the old name, deliberately: a shim would let a device TU pull
+in the oracle by accident, which is the failure this section exists to prevent.
+Counts moved 49 -> 50 and 21 -> 22, both as the plan predicted, the one new
+target being `device_tu_purity`.
+
+**Gate 1** — `scripts/xpm_build.sh --arch host --build-dir /tmp/c2_host`, then
+`ctest --test-dir /tmp/c2_host -j8 --timeout 1800`:
+
+```
+50/50 Test #38: sweep_monotone_gate_selftest .....   Passed  672.85 sec
+
+100% tests passed, 0 tests failed out of 50
+Label Time Summary:
+packaging    =   4.91 sec*proc (1 test)
+Total Test time (real) = 702.50 sec
+```
+
+**Gate 2** — `scripts/xpm_build.sh --arch host --no-kokkos --build-dir /tmp/c2_nok`,
+then `ctest --test-dir /tmp/c2_nok -j8 --timeout 1800`:
+
+```
+22/22 Test #10: sweep_monotone_gate_selftest .....   Passed  674.30 sec
+
+100% tests passed, 0 tests failed out of 22
+Label Time Summary:
+packaging    =   4.92 sec*proc (1 test)
+Total Test time (real) = 674.31 sec
+```
+
+### What the split actually moved
+
+`to_quad` was the hinge. It returns `__float128`, so it cannot sit in a
+device-safe header, but it lived in `BackendTraits<B>` alongside `max_digits`
+and `sig_bits`, which are device-safe and which device code needs. Splitting the
+struct rather than the header would have duplicated the metadata. So
+`BackendTraits<B>` stays whole in the device header and the host header adds
+`OracleTraits<B> : BackendTraits<B>`, carrying `to_quad` alone. That is the
+whole reason `dd_property_test.cpp` and `ff_property_test.cpp` show ~60 changed
+lines each while every other TU shows one or two: they are
+`BackendTraits<X>::to_quad` -> `OracleTraits<X>::to_quad` renames, not logic
+changes.
+
+### Three findings the next sections need
+
+**1. It is 21 includers, not 22.** Measured at `93f4b53`:
+`git grep -l 'include "test_utils.hpp"'` returns 21 test TUs. The 22nd file is
+`tests/corpus.hpp`, which names the header in a comment and does not include it.
+Its comment was repointed. Nothing else about the file changed.
+
+**2. The plan's motivating example is wrong, and C4 must not inherit it.** The
+C2 text says `hello_test` "contains no `__float128` of its own" and was an A100
+casualty merely for including the header. It is not: `hello_test.cpp:41` uses
+`float128` and `OracleTraits`, and `:56` uses `AccStats`. That was already true
+at `93f4b53`, before this section touched the file. The same claim had been
+written into `tests/test_utils_device.hpp`, `scripts/check_device_tu_purity.sh`
+and `tests/CMakeLists.txt` during this section and was corrected in all three
+before commit.
+
+The correction matters because it changes what the split buys. **Splitting the
+header rescues no currently-registered test for device.** Every host-classified
+TU uses an oracle symbol of its own. What it buys is an honest boundary: five
+TUs now include no oracle at all, and C4 has a header its device TUs can include
+without dragging one in. The "9 of 49 not built on A100" figure is S8b's and is
+unchanged by this section.
+
+**3. Classification was done by compiling, and all 16 host TUs earned it.** The
+plan requires classifying by compiling rather than reading, so each
+host-classified TU was re-compiled with its include swapped to the device
+header. All 16 failed, so none is over-assigned:
+
+```
+corpus_test 30 errors      dd_e2e 455      dd_eft 449      dd_fma_guard 435
+dd_invariant 447           dd_property 590 ff_cancellation 455
+ff_invariant 447           ff_property 590 hello_test 16   qf_cancellation 454
+qf_eft 447                 qf_nonoverlap 465               qf_property 551
+tf_cancellation 37         tf_property 27
+```
+
+The five device-classified TUs are `ff_eft_test`, `ff_fma_guard_test`,
+`qf_fma_guard_test`, `tf_eft_test` and `tf_fma_guard_test`. `corpus_test`,
+`tf_property_test` and `tf_cancellation_test` are the nearest misses at 30, 27
+and 37 errors, and are the first places C4 should look for a cheap device half.
+
+### Deviation from the plan, and why it is the plan's own intent
+
+The plan says register `device_tu_purity` in the Kokkos-free set and add it to
+the `no-kokkos-build` lane. As first written, the device header included
+`<Kokkos_Core.hpp>` -- `BackendTraits<DD>::type` was
+`Kokkos::Experimental::DoubleDouble` -- so the gate could not run without a
+Kokkos install. MEASURED both ways before deciding:
+
+```
+with    -I<kokkos>/include : ok, 130341 preprocessed lines, 0 in-repo __float128
+without                    : FAIL -- Kokkos_Core.hpp: No such file or directory
+```
+
+Rather than register it in the Kokkos set and defer, the device header was
+pointed at the xp core (`<xp/dd_math.hpp>`) instead of the `third_party/include`
+compat wrappers. This costs no type churn:
+`third_party/include/dd_math.hpp:53` is `using DoubleDouble = xp::DoubleDouble`,
+a true alias rather than a distinct wrapper, so the core spelling names exactly
+the type the Kokkos spelling names. After the change the same probe reads
+`ok, 56339 preprocessed lines` **with or without** Kokkos on the include path,
+and the gate is registered in the Kokkos-free set as written.
+
+The five device TUs each gained an explicit `#include <Kokkos_Core.hpp>`: they
+drive `Kokkos::View` / `parallel_for` / `initialize` directly and had been
+receiving the declaration transitively through the harness header. The host
+header took over supplying `<Kokkos_Core.hpp>` and the two compat wrappers, so
+every host TU sees exactly what it saw before the split.
+
+`device_tu_purity` enters the `no-kokkos-build` CI lane by being registered in
+the Kokkos-free set, not by a bespoke step -- which is stronger, since the
+lane's `expected=22` assertion now fails if the gate ever silently unregisters.
+
+### The gate can fail, and was made to
+
+A gate nobody has seen go red is indistinguishable from one that cannot. The
+device header was poisoned with `using poisoned_t = __float128;`, and:
+
+```
+poisoned : FAIL: tests/test_utils_device.hpp -- __float128 reaches a device TU
+           from files in this repo:  1 .../tests/test_utils_device.hpp   rc=1
+restored : ok  (56339 preprocessed lines, 0 in-repo __float128)          rc=0
+```
+
+with the file verified byte-identical afterwards.
+
+`scripts/check_device_tu_purity.sh` is deliberately **not** `grep __float128`,
+which is what one would write first and which would have been red from birth:
+`/usr/include/bits/floatn.h` typedefs the type on x86_64 whether anyone uses it
+or not. The script walks the preprocessor's `# <line> "<file>"` markers,
+attributes each occurrence to its originating file, and fails only on hits from
+inside this repository -- system headers excluded by provenance rather than by a
+name allowlist that would rot.
+
+**Notes for later sections.**
+
+- `FILES` in `scripts/check_device_tu_purity.sh` is the maintained list and holds
+  one entry today. C4 extends it with every `*_test_device.cpp` it creates; the
+  script already accepts extra `-I` arguments for that.
+- The counts of record are now **50 with Kokkos, 22 without**, asserted in
+  `.github/workflows/ci.yml` (`expected=50`, `expected=22`) and stated in
+  `tests/README.md`.
+- Stale `tests/test_utils.hpp` citations remain in `docs/TEST_SUITE_PLAN.md`,
+  `docs/PORT_NOTES_TF.md` (`:530`, `ep_exit_code`), `docs/UPSTREAM_PLAN_STATUS.md`
+  and `docs/history/KNOWN_ISSUES.md`. The last two are historical records and
+  correctly name the file as it was. The first two are C1's files this cycle and
+  were left alone to avoid a conflict; they want a docs pass, not a C2 edit.
+- `.claude/` is now in `.gitignore`. Worktrees created under
+  `.claude/worktrees/` live inside the checkout, so without it a `git add -A` in
+  the main checkout commits a whole parallel working tree.
+- Gate 1's build predates three comment-only corrections (finding 2 above, in
+  `tests/test_utils_device.hpp`, `scripts/check_device_tu_purity.sh` and
+  `tests/CMakeLists.txt`) and the `.gitignore` line. None is code. Gate 2 built
+  the final tree, and `device_tu_purity` was re-run against it directly.

@@ -8,10 +8,10 @@
 // does NOT run any DD math op — DD correctness against these inputs begins in
 // Phase 1 (T1.x). No __float128 oracle is touched: corpus data itself needs no
 // oracle. (This used to be phrased as "needs no KOKKOS_EP_HAVE_QUADMATH guard,
-// unlike hello_test" — that guard is gone from every test, see test_utils.hpp.)
+// unlike hello_test" — that guard is gone from every test, see test_utils_device.hpp.)
 // ============================================================================
 
-#include "test_utils.hpp"
+#include "test_utils_host.hpp"
 
 #include <cmath>
 #include <limits>

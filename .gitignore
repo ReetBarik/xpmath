@@ -11,6 +11,13 @@
 *.output
 PLAN_*.md
 
+# Claude Code session state, and -- the reason this entry earns its keep --
+# git worktrees created under .claude/worktrees/. Those live INSIDE this
+# checkout, so without this line a `git add -A` here sweeps an entire parallel
+# working tree into a commit. Two sections of the core plan were developed
+# concurrently that way, one per worktree.
+.claude/
+
 # Standalone host tools compiled by g++ directly into scripts/ (not via cmake).
 scripts/gen_ff_constants
 scripts/test_ffmul

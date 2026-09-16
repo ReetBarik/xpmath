@@ -47,7 +47,7 @@
 // root-cause classification (conditioning/arithmetic-round-off limit vs library
 // defect), NOT silently re-gated — same posture as T1.6/T2.6.
 //
-// WHY A QF-LOCAL kMaxDig (not BackendTraits<QF>::max_digits).  test_utils.hpp
+// WHY A QF-LOCAL kMaxDig (not BackendTraits<QF>::max_digits).  test_utils_device.hpp
 // carries BackendTraits<DD> and <FF> but NOT <QF> (its backend-tag block has a
 // TODO(Phase 3) placeholder for QF; the primary template is undefined). Rather than touch
 // the shared harness other tasks own (rule 1/4), this file carries the QF-local
@@ -83,7 +83,7 @@
 // layer 6.
 // ============================================================================
 
-#include "test_utils.hpp"
+#include "test_utils_host.hpp"
 #include <qf_math.hpp>
 
 #include <algorithm>
@@ -101,7 +101,7 @@ namespace qf = Kokkos::Experimental;
 // ----------------------------------------------------------------------------
 // QF <-> oracle, precision constants, digit metric. Formerly shared with
 // qf_accuracy_test (retired)
-// (T3.4) and qf_property_test (T3.3): test_utils.hpp has BackendTraits<DD>/<FF>
+// (T3.4) and qf_property_test (T3.3): test_utils_device.hpp has BackendTraits<DD>/<FF>
 // but NOT <QF>, so — rather than touch the shared harness other tasks own — this
 // file carries the QF-local helpers directly. qf_to_q mirrors src/demo_qf_real.cpp.
 // ----------------------------------------------------------------------------
@@ -117,7 +117,7 @@ static inline float128 Q(const qf::QuadFloat& x) {
 
 // Digits of accuracy of a QF result (already widened) against the oracle, capped
 // at QF's 29-digit ceiling. NaN/inf/zero handling included (mirrors
-// digits_of_accuracy in test_utils.hpp).
+// digits_of_accuracy in test_utils_host.hpp).
 static double qf_digits(float128 computed, float128 ref) {
   if (q_isnan(computed) || q_isnan(ref)) return 0.0;
   if (q_isinf(ref))

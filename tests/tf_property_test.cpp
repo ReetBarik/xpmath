@@ -57,7 +57,7 @@
 //     addends and FP addition is not associative.
 //   * Multiply-based A-identities gate on dom_dekker (splitter-overflow bound).
 
-#include "test_utils.hpp"
+#include "test_utils_host.hpp"
 #include "corpus.hpp"
 #include <xp/tf_math.hpp>
 

@@ -39,7 +39,7 @@
 // __float128, which is a compiler type, so there was never anything to gate on;
 // it runs unconditionally now.
 
-#include "test_utils.hpp"
+#include "test_utils_host.hpp"
 #include <xp/tf_math.hpp>
 
 #include <algorithm>
