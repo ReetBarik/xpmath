@@ -698,7 +698,7 @@ can assert bit-equality with the host for any op touching a transcendental.
 
 | # | deliverable | state |
 |---|---|---|
-| 1 | per-target build recipes | **partial** — `validation/mi250/run_mi250.sh` exists and works; `scripts/build_with_kokkos.sh` is still hardcoded to sm_100 and its HIP path has never executed |
+| 1 | per-target build recipes | **partial** — `validation/mi250/run_mi250.sh` exists and works. `scripts/xpm_build.sh --arch {host\|a100\|mi250}` (step2) replaced the sm_100 literals with a data table and made the HIP branch of `scripts/build_with_kokkos.sh` reachable; `--arch host` is measured at 49/49 and `--arch a100` configures. **`--arch mi250` and `--kokkos build` are still unexecuted** — no hipcc on the login node, and nothing has built a Kokkos through the parameterized script. |
 | 2 | per-target artifacts + matrix | **partial** — `validation/mi250/` committed with logs; no `validation/a100/` (pruned); matrix above is 1 of 4 |
 | 3 | CUDA re-run vs the S1 baseline | **not started** |
 | 4 | findings reported, not fixed | **exceeded, deliberately** — Rule 4 was broken on purpose for TD-1/TD-2, because the alternative was leaving a silent-wrong-answer bug live in four backends. Both mitigations are in `include/xp/`, both guarded, both recorded. |

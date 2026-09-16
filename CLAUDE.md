@@ -36,11 +36,11 @@ derived from the format and the condition number, and **two** ctest gates over
 that number (`sweep_absolute_gate`, `sweep_monotone_gate`), each with a self-test
 target (`*_selftest`) that poisons its input and requires it to fail. Read
 **docs/CORRECTNESS.md** before adding anything that judges correctness; the whole
-point is that nothing else issues a competing verdict. 48 ctest targets with
-Kokkos and **20 without** (`-DXPMATH_WITH_KOKKOS=OFF`), all passing on `main` —
+point is that nothing else issues a competing verdict. 49 ctest targets with
+Kokkos and **21 without** (`-DXPMATH_WITH_KOKKOS=OFF`), all passing on `main` —
 asserted by CI, not assumed, because four sit behind `if(XPMATH_MPFR_FOUND)`
 and a missing optional dependency removes coverage while leaving the lane
-green. The Kokkos-free 20 include both gates: `sweep_accuracy` links no Kokkos
+green. The Kokkos-free 21 include both gates: `sweep_accuracy` links no Kokkos
 and never needed it, but until `XPMATH_WITH_KOKKOS` existed the build required
 it anyway.
 
@@ -81,24 +81,50 @@ work restarts from there.
 Requires Kokkos ≥5.1 built at **C++20** with `Kokkos_ENABLE_LIBQUADMATH=ON`, GCC
 13.3.0, CMake 3.28.3. The consuming project stays at C++17.
 
+**The wrapper is `scripts/xpm_build.sh`. Target hardware is an ARGUMENT.**
+
 ```bash
-source scripts/prepare.sh
-source scripts/build_with_kokkos.sh <install-dir>
+scripts/xpm_build.sh --arch host  --build-dir /tmp/b_host
+scripts/xpm_build.sh --arch a100  --build-dir /tmp/b_a100
+scripts/xpm_build.sh --arch mi250 --build-dir /tmp/b_mi250
+scripts/xpm_build.sh --arch host --no-kokkos --build-dir /tmp/b_nok
 ```
 
-**Known trap:** `scripts/build_with_kokkos.sh` is hardcoded to the **wrong
-GPU** for this branch — `Kokkos_ARCH_BLACKWELL100` (line 45) plus
-`-DCMAKE_CUDA_ARCHITECTURES=100` (line 77), i.e. sm_100, which is
-`CUDAFP128Kokkos`'s requirement and nothing on `main`'s target list. It also
-defines `HIP_EXTRA_FLAGS` (line 51) and never uses it: line 53 hardcodes
-`EXTRA_FLAGS=$CUDA_EXTRA_FLAGS`, so the HIP path in that script has never been
-executed. Edit both arch lines before using it for A100 (`AMPERE80` / `80`).
+`--arch {host|a100|mi250}` is required and selects a data row: modules,
+compiler, Kokkos prefix, `Kokkos_ARCH_*` macro, FP-contraction spelling.
+`--kokkos use-existing` (default) points at the install already on this
+machine; `--kokkos build` delegates to `scripts/build_with_kokkos.sh`.
+`--opt` defaults to `O3` and travels as `CMAKE_CXX_FLAGS_RELEASE`.
+Read the header block of that script before comparing numbers across two
+arches — it states what is held identical (`-O` level, C++17, contraction off)
+and what is not (compiler, execution space, and the host oracle, which the
+mi250 Kokkos does **not** have).
 
-(The older C++17-vs-20 trap this paragraph used to describe is FIXED. `dd6d00a`
-changed both Kokkos configure lines to `-DCMAKE_CXX_STANDARD=20` on 2026-09-02;
-lines 67 and 74 read 20 today. The consuming repo still builds at C++17.)
+**Measured, 2026-09-16:** `--arch host` 49/49; `--arch host --no-kokkos` 21/21;
+`--arch a100` configures and then fails to compile, on the S6 `__float128`
+device-TU blocker plus five standalone smokes that nvcc's frontend rejects
+(`no operator "<<"`). Neither is this wrapper's to fix.
 
-If Kokkos is already installed:
+Every configure — the wrapper's or a bare `cmake -B build` — stamps
+`build-info.txt` into the build directory with the arch, git HEAD (`-dirty`
+when the tree is not clean), compiler and version, Kokkos prefix, the full
+`CMAKE_CXX_FLAGS`, the `-O` level and a UTC timestamp. The `build_provenance`
+ctest target fails when it is missing or short a field. Three campaign
+artifacts this month could not be traced to a tree; that is the whole reason.
+
+`scripts/build_with_kokkos.sh` still exists and still builds Kokkos from
+source, but is now driven by its environment (`KOKKOS_BACKEND`,
+`KOKKOS_ARCH_FLAG`, `KOKKOS_CUDA_ARCHITECTURES`, `KOKKOS_CXX`,
+`KOKKOS_LIBQUADMATH`, `KOKKOS_ONLY`, `REPO_BUILD_DIR`). The Blackwell/sm_100
+values are now just its defaults. Its HIP branch is now reachable — `EXTRA_FLAGS`
+is chosen by backend instead of being assigned the CUDA row unconditionally —
+but **still unexecuted**: nothing has yet built a Kokkos through it.
+
+(The older C++17-vs-20 trap this section used to describe is FIXED. `dd6d00a`
+changed both Kokkos configure lines to `-DCMAKE_CXX_STANDARD=20` on 2026-09-02.
+The consuming repo still builds at C++17.)
+
+A bare configure also works, and is what CI does:
 
 ```bash
 cmake -B build -DCMAKE_PREFIX_PATH=<kokkos-install-dir>
