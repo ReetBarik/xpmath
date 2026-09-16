@@ -9,7 +9,9 @@ drop-in issue text plus the repo-facing notes.
 - **Local fix:** de-recurse. Every device self-call in `include/xp/` is gone —
   `asinh` (DD/FF/QF/TF) and `tanh` (DD/FF/QF) reflect by a sign *fold*,
   `tgamma` (DD/FF) reflects by calling a split-out Lanczos core. Proven
-  bit-identical on the host over 90,453 points × 15 functions.
+  bit-identical on the host over 90,453 points × 15 functions, and **verified
+  at runtime on MI250X** — 17/17 arms, 9 real plus the 8 complex ones that
+  reach them, at the default 1024 B stack (job 1000936).
 - **Local regression guard:** tier 4 of `scripts/xpm_lint_device_asm.sh`, wired
   into the `device-hip` lane of `.github/workflows/ci.yml`.
 - **Status:** not yet filed upstream.
@@ -236,6 +238,29 @@ in would mean the tier-4 gate below had to ship with a permanent exception.
 | `uses_dynamic_stack` on the probe kernel | **1 → 0** (posture L and posture H) |
 | `private_segment_fixed_size` on the probe kernel | 2560 → 1936 B |
 | `scripts/xpm_lint_device_asm.sh` | exit 1 pre-fix, exit 0 post-fix |
+| **runtime on MI250X, default 1024 B stack** | **17/17 arms correct**, 0 HIP errors — 9 real (asinh ×4, tanh ×3, tgamma ×2) + 8 complex (asinh ×4, tanh ×4). Job 1000936, 2026-09-16 |
+| … device-vs-host agreement | bit-identical on 11 of 17; the other 6 differ in the **last limb only**, worst 3.794 ulp (`tgamma FF`) |
+
+Everything above the last two rows is static or host-side — emitted assembly,
+descriptor fields, a lint exit code. The runtime rows are
+`validation/mi250/derecursion_runtime.hip`, driven by
+`validation/mi250/run_mi250.sh`, and they are what actually observes the two
+pre-fix symptoms being gone: no `hipErrorIllegalAddress`, and no silently wrong
+value on the reflected arm.
+
+**The runtime criterion is ulps, not bit-exactness, and that was a correction.**
+The first version of that test demanded bit equality with the host and "failed"
+4 of 9 cases. Scoring those four against a binary128 oracle showed `asinh`
+QF/TF differing by 0.04 ulp and `tgamma` DD/FF where **the device was the more
+accurate of the two** (325.3 vs 327.5 ulp, and 11.7 vs 15.5 ulp). Host and
+device do not share a scalar math library — glibc against ROCm's OCML, neither
+correctly rounded for `log`/`exp`/`sqrt` — so the seed difference lands in the
+last limb of the expansion, which is where every one of those differences
+appeared. Bit equality across two math libraries was never achievable, and
+demanding it would have made host behaviour the specification, which is the
+mistake `docs/CORRECTNESS.md` retired the per-op tolerance tables for. The
+consequence generalises: **no device test in this repo can assert bit-equality
+with the host for any op that touches a transcendental.**
 
 The host grid is deliberately symmetric and straddles every internal branch
 point (0.5, `kSqHi`, the `tanh` saturation knee, the `tgamma` poles), because the
@@ -331,9 +356,14 @@ not the guard, which was run locally against ROCm 7.0.2 both ways.
   measured under the defect and are not usable; see the note in that file's
   vicinity. Note that it records device-vs-host *agreement*, not accuracy — the
   host record in `validation/sweep/` is untouched by any of this.
-- **The complex kernels.** The `ComplexFunctor` kernels for DD, FF and QF also
-  carry `uses_dynamic_stack=1` in the pre-fix asm, by reaching the real `asinh`
-  and `tanh` through their complex counterparts. The de-recursion removes the
-  cause for them too, but no complex arm was ever *measured* on device in this
-  campaign, so their pre-fix behaviour is unknown and their post-fix behaviour
-  is asserted only structurally.
+- **The complex kernels — post-fix now measured, pre-fix still not.** The
+  `ComplexFunctor` kernels for DD, FF and QF carry `uses_dynamic_stack=1` in
+  the pre-fix asm, by reaching the real `asinh` and `tanh` through their
+  complex counterparts. Their **post-fix** behaviour is no longer merely
+  structural: job 1000936 ran complex `asinh` and `tanh` on all four backends
+  on MI250X and all eight passed — complex `tanh` bit-identical to the host on
+  every point, complex `asinh` differing in the last limb only, worst 0.394
+  ulp. What remains unknown is their **pre-fix** behaviour: no complex arm was
+  ever run on device before the fix, so whether they took the illegal-address
+  arm or the silent-wrong-value arm was never observed and now cannot be
+  without reverting.

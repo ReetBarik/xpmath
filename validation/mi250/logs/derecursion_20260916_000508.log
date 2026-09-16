@@ -1,0 +1,156 @@
+===========================================================
+ gfx90a de-recursion runtime verification
+ date      : 2026-09-16T00:05:08+00:00
+ host      : amdgpu04
+ repo      : /home/rbarik/kokkos-extended-precision-demo
+ commit    : 417c89d
+ log       : /home/rbarik/kokkos-extended-precision-demo/validation/mi250/logs/derecursion_20260916_000508.log
+===========================================================
+  fell back to ROCM_ROOT=/soft/compilers/rocm/rocm-7.0.2
+
+--- [0/3] provenance ---
+  HIP version: 7.0.51831-7c9236b16
+  AMD clang version 20.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.0.2 25385 0dda3adf56766e0aac0d03173ced3759e1ffecbc)
+  Target: x86_64-unknown-linux-gnu
+  Thread model: posix
+  InstalledDir: /soft/compilers/rocm/rocm-7.0.2/lib/llvm/bin
+  
+  
+  ============================ ROCm System Management Interface ============================
+  ====================================== Product Info ======================================
+  GPU[0]		: Card Series: 		AMD Instinct MI250X / MI250
+  GPU[0]		: Card Model: 		0x740c
+  GPU[0]		: Card Vendor: 		Advanced Micro Devices, Inc. [AMD/ATI]
+  GPU[0]		: Card SKU: 		D65210
+  GPU[0]		: Subsystem ID: 	0x0b0c
+  GPU[0]		: Device Rev: 		0x01
+  GPU[0]		: Node ID: 		4
+  GPU[0]		: GUID: 		57586
+
+--- [1/3] compile (arch=gfx90a) ---
++ hipcc -std=c++17 --offload-arch=gfx90a -O3 -ffp-contract=off --save-temps=obj -I/home/rbarik/kokkos-extended-precision-demo/include /home/rbarik/kokkos-extended-precision-demo/validation/mi250/derecursion_runtime.hip -o /home/rbarik/kokkos-extended-precision-demo/validation/mi250/work/derecursion_runtime
+/home/rbarik/kokkos-extended-precision-demo/validation/mi250/derecursion_runtime.hip:127:5: warning: ignoring return value of function declared with 'nodiscard' attribute [-Wunused-result]
+  127 |     hipMemcpy(d_in, in, nb_in, hipMemcpyHostToDevice);
+      |     ^~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/rbarik/kokkos-extended-precision-demo/validation/mi250/derecursion_runtime.hip:128:5: warning: ignoring return value of function declared with 'nodiscard' attribute [-Wunused-result]
+  128 |     hipMemset(d_out, 0, nb_out);
+      |     ^~~~~~~~~ ~~~~~~~~~~~~~~~~
+/home/rbarik/kokkos-extended-precision-demo/validation/mi250/derecursion_runtime.hip:139:9: warning: ignoring return value of function declared with 'nodiscard' attribute [-Wunused-result]
+  139 |         hipFree(d_in); hipFree(d_out);
+      |         ^~~~~~~ ~~~~
+/home/rbarik/kokkos-extended-precision-demo/validation/mi250/derecursion_runtime.hip:139:24: warning: ignoring return value of function declared with 'nodiscard' attribute [-Wunused-result]
+  139 |         hipFree(d_in); hipFree(d_out);
+      |                        ^~~~~~~ ~~~~~
+/home/rbarik/kokkos-extended-precision-demo/validation/mi250/derecursion_runtime.hip:145:5: warning: ignoring return value of function declared with 'nodiscard' attribute [-Wunused-result]
+  145 |     hipMemcpy(got, d_out, nb_out, hipMemcpyDeviceToHost);
+      |     ^~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/rbarik/kokkos-extended-precision-demo/validation/mi250/derecursion_runtime.hip:161:5: warning: ignoring return value of function declared with 'nodiscard' attribute [-Wunused-result]
+  161 |     hipFree(d_in); hipFree(d_out);
+      |     ^~~~~~~ ~~~~
+/home/rbarik/kokkos-extended-precision-demo/validation/mi250/derecursion_runtime.hip:161:20: warning: ignoring return value of function declared with 'nodiscard' attribute [-Wunused-result]
+  161 |     hipFree(d_in); hipFree(d_out);
+      |                    ^~~~~~~ ~~~~~
+/home/rbarik/kokkos-extended-precision-demo/validation/mi250/derecursion_runtime.hip:179:5: warning: ignoring return value of function declared with 'nodiscard' attribute [-Wunused-result]
+  179 |     hipDeviceGetLimit(&stack, hipLimitStackSize);
+      |     ^~~~~~~~~~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/rbarik/kokkos-extended-precision-demo/validation/mi250/derecursion_runtime.hip:219:5: warning: ignoring return value of function declared with 'nodiscard' attribute [-Wunused-result]
+  219 |     hipDeviceGetLimit(&stack, hipLimitStackSize);
+      |     ^~~~~~~~~~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~
+9 warnings generated when compiling for gfx90a.
+/home/rbarik/kokkos-extended-precision-demo/validation/mi250/derecursion_runtime.hip:127:5: warning: ignoring return value of function declared with 'nodiscard' attribute [-Wunused-result]
+  127 |     hipMemcpy(d_in, in, nb_in, hipMemcpyHostToDevice);
+      |     ^~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/rbarik/kokkos-extended-precision-demo/validation/mi250/derecursion_runtime.hip:128:5: warning: ignoring return value of function declared with 'nodiscard' attribute [-Wunused-result]
+  128 |     hipMemset(d_out, 0, nb_out);
+      |     ^~~~~~~~~ ~~~~~~~~~~~~~~~~
+/home/rbarik/kokkos-extended-precision-demo/validation/mi250/derecursion_runtime.hip:139:9: warning: ignoring return value of function declared with 'nodiscard' attribute [-Wunused-result]
+  139 |         hipFree(d_in); hipFree(d_out);
+      |         ^~~~~~~ ~~~~
+/home/rbarik/kokkos-extended-precision-demo/validation/mi250/derecursion_runtime.hip:139:24: warning: ignoring return value of function declared with 'nodiscard' attribute [-Wunused-result]
+  139 |         hipFree(d_in); hipFree(d_out);
+      |                        ^~~~~~~ ~~~~~
+/home/rbarik/kokkos-extended-precision-demo/validation/mi250/derecursion_runtime.hip:145:5: warning: ignoring return value of function declared with 'nodiscard' attribute [-Wunused-result]
+  145 |     hipMemcpy(got, d_out, nb_out, hipMemcpyDeviceToHost);
+      |     ^~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/rbarik/kokkos-extended-precision-demo/validation/mi250/derecursion_runtime.hip:161:5: warning: ignoring return value of function declared with 'nodiscard' attribute [-Wunused-result]
+  161 |     hipFree(d_in); hipFree(d_out);
+      |     ^~~~~~~ ~~~~
+/home/rbarik/kokkos-extended-precision-demo/validation/mi250/derecursion_runtime.hip:161:20: warning: ignoring return value of function declared with 'nodiscard' attribute [-Wunused-result]
+  161 |     hipFree(d_in); hipFree(d_out);
+      |                    ^~~~~~~ ~~~~~
+/home/rbarik/kokkos-extended-precision-demo/validation/mi250/derecursion_runtime.hip:179:5: warning: ignoring return value of function declared with 'nodiscard' attribute [-Wunused-result]
+  179 |     hipDeviceGetLimit(&stack, hipLimitStackSize);
+      |     ^~~~~~~~~~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/rbarik/kokkos-extended-precision-demo/validation/mi250/derecursion_runtime.hip:219:5: warning: ignoring return value of function declared with 'nodiscard' attribute [-Wunused-result]
+  219 |     hipDeviceGetLimit(&stack, hipLimitStackSize);
+      |     ^~~~~~~~~~~~~~~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~
+9 warnings generated when compiling for host.
++ rc_compile=0
++ set +x
+  ok; device asm:
+    -rw-r--r-- 1 rbarik jlse 3668343 Sep 16 00:05 /home/rbarik/kokkos-extended-precision-demo/validation/mi250/work/derecursion_runtime-hip-amdgcn-amd-amdhsa-gfx90a.s
+
+--- [2/3] static device-codegen guard (tiers 1-4) ---
+== /home/rbarik/kokkos-extended-precision-demo/validation/mi250/work/derecursion_runtime-hip-amdgcn-amd-amdhsa-gfx90a.s
+  TIER1 ok     no callee scavenges s[30:31] for a relaxed branch
+  TIER2 ok     no branch relaxation in any callee
+  TIER3 ok     every callee is inside the 131068 B branch reach
+  TIER4 ok     no function calls itself
+  tier4 note   9 kernel descriptor(s) with a bounded stack
+  summary      24 callees (largest 31538 B, _ZN2xp3expENS_9QuadFloatE), 9 kernels (exempt, largest 74516 B)
+  lint exit: 0  (0 = clean; tier 4 fires on any self-call)
+
+--- [3/3] RUNTIME on device, default stack ---
+=== gfx90a de-recursion RUNTIME verification ===
+device        : AMD Instinct MI250X / MI250 (gfx90a:sramecc+:xnack-)
+stack limit   : 1024 B  (DEFAULT -- not raised; raising it hides the defect)
+cases         : 9 functions that carried a device self-call at 6ddcb2d
+
+  [1/9] asinh  DD ... ok
+  [2/9] asinh  FF ... ok
+  [3/9] asinh  QF ...       MISMATCH x=-2         limb 3  dev=-1.25206740699230640e-24  host=-1.25206819585321162e-24
+      MISMATCH x= 2         limb 3  dev= 1.25206740699230640e-24  host= 1.25206819585321162e-24
+      2/64 limbs differ  <-- the SILENT arm of the defect
+FAIL
+  [4/9] asinh  TF ...       MISMATCH x=-2         limb 2  dev= 1.80795767989861788e-16  host= 1.80795754754971988e-16
+      MISMATCH x= 2         limb 2  dev=-1.80795767989861788e-16  host=-1.80795754754971988e-16
+      2/48 limbs differ  <-- the SILENT arm of the defect
+FAIL
+  [5/9] tanh   DD ... ok
+  [6/9] tanh   FF ... ok
+  [7/9] tanh   QF ... ok
+  [8/9] tgamma DD ...       MISMATCH x= 6         limb 1  dev=-4.81195761857359005e-28  host=-4.84351205478243052e-28
+      1/24 limbs differ  <-- the SILENT arm of the defect
+FAIL
+  [9/9] tgamma FF ...       MISMATCH x=-4.7       limb 1  dev=-1.13302534021642032e-10  host=-1.13303255666608038e-10
+      1/24 limbs differ  <-- the SILENT arm of the defect
+FAIL
+
+--- pass 1 (default stack): 5 ok, 4 wrong-value, 0 HIP-error ---
+
+--- pass 2: retrying ONLY the 4 failures at a 64 KB stack ---
+    stack limit now 65536 B
+  [1/4] asinh  QF ...       MISMATCH x=-2         limb 3  dev=-1.25206740699230640e-24  host=-1.25206819585321162e-24
+      MISMATCH x= 2         limb 3  dev= 1.25206740699230640e-24  host= 1.25206819585321162e-24
+      2/64 limbs differ  <-- the SILENT arm of the defect
+still FAIL
+  [2/4] asinh  TF ...       MISMATCH x=-2         limb 2  dev= 1.80795767989861788e-16  host= 1.80795754754971988e-16
+      MISMATCH x= 2         limb 2  dev=-1.80795767989861788e-16  host=-1.80795754754971988e-16
+      2/48 limbs differ  <-- the SILENT arm of the defect
+still FAIL
+  [3/4] tgamma DD ...       MISMATCH x= 6         limb 1  dev=-4.81195761857359005e-28  host=-4.84351205478243052e-28
+      1/24 limbs differ  <-- the SILENT arm of the defect
+still FAIL
+  [4/4] tgamma FF ...       MISMATCH x=-4.7       limb 1  dev=-1.13302534021642032e-10  host=-1.13303255666608038e-10
+      1/24 limbs differ  <-- the SILENT arm of the defect
+still FAIL
+
+RESULT: FAIL.
+        0 of 4 recovered at a raised stack -> at least one failure
+        is NOT the stack defect and needs separate diagnosis.
+
+===========================================================
+ compile : 0   static guard : 0   runtime : 1
+ VERDICT : FAIL — see above. Report, do not fix in place (Rule 4).
+ log     : /home/rbarik/kokkos-extended-precision-demo/validation/mi250/logs/derecursion_20260916_000508.log
+===========================================================

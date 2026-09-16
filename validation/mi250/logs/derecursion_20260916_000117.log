@@ -1,0 +1,24 @@
+===========================================================
+ gfx90a de-recursion runtime verification
+ date      : 2026-09-16T00:01:17+00:00
+ host      : amdgpu04
+ repo      : /home/rbarik/kokkos-extended-precision-demo
+ commit    : 417c89d
+ log       : /home/rbarik/kokkos-extended-precision-demo/validation/mi250/logs/derecursion_20260916_000117.log
+===========================================================
+
+--- [0/3] provenance ---
+  /home/rbarik/kokkos-extended-precision-demo/validation/mi250/run_mi250.sh: line 76: hipcc: command not found
+  
+  
+  ============================ ROCm System Management Interface ============================
+  ====================================== Product Info ======================================
+  GPU[0]		: Card Series: 		AMD Instinct MI250X / MI250
+  GPU[0]		: Card Model: 		0x740c
+  GPU[0]		: Card Vendor: 		Advanced Micro Devices, Inc. [AMD/ATI]
+  GPU[0]		: Card SKU: 		D65210
+  GPU[0]		: Subsystem ID: 	0x0b0c
+  GPU[0]		: Device Rev: 		0x01
+  GPU[0]		: Node ID: 		4
+  GPU[0]		: GUID: 		57586
+FATAL: hipcc not on PATH after loading rocm/7.0.2
