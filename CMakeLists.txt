@@ -49,6 +49,49 @@ endif()
 option(XPMATH_WITH_KOKKOS
        "Build the Kokkos demos and the Kokkos-linked tests (needs a Kokkos install)" ON)
 
+# ---------------------------------------------------------------------------
+# WHICH SIDE OF THE BUILD TO PRODUCE -- CORE_PLAN C5 step 1
+# ---------------------------------------------------------------------------
+# CMake supports exactly ONE CXX compiler per project and has no per-target
+# override, so "host tools with g++, device tests with nvcc/hipcc" can only be
+# two build trees. These two options are what lets one source tree produce
+# either half. C5's remaining steps (the wrapper driving both trees) are a
+# separate change; this one only makes the halves addressable.
+#
+# BOTH DEFAULT ON, AND THAT IS LOAD-BEARING. With both ON the build is exactly
+# what it was before this option existed -- one tree, one compiler, all 61
+# ctest targets. That is the `cmake -B build` path documented in CLAUDE.md and
+# it is what CI runs; a default that changed the target set would be a silent
+# CI change wearing a refactor's clothes.
+#
+# THE FAILURE THIS PREVENTS is a host-only tool compiled by a device compiler.
+# On A100 (job 1000938) `xpm_build.sh --arch a100` set nvcc_wrapper
+# project-wide, so sweep_accuracy -- which links no Kokkos and no device code
+# at all -- went through nvcc and failed, taking both gates, oracle_conv_test
+# and both gate selftests down with it. Five of that job's eleven red results
+# were that one mistake.
+#
+# EVERY registered test is tagged host or device, and the assertion at the
+# bottom of tests/CMakeLists.txt fails the CONFIGURE if one is not. A target
+# that is silently built in both trees is the other half of the same defect:
+# it gets compiled twice, and the tree it does not belong to is the one that
+# will eventually break it.
+option(XPMATH_BUILD_HOST_TARGETS
+       "Build the host-side targets: the oracle-scored tools, the gates and the host test halves" ON)
+option(XPMATH_BUILD_DEVICE_TARGETS
+       "Build the device-side targets: the *_test_device halves, the harness self-test and the demos" ON)
+
+if(NOT XPMATH_BUILD_HOST_TARGETS AND NOT XPMATH_BUILD_DEVICE_TARGETS)
+  # Not a philosophical objection -- this configuration registers zero tests,
+  # and `ctest` over zero tests exits 0. That is the same trap as
+  # `ctest --test-dir` on a missing directory, and it would report a green run
+  # having measured nothing.
+  message(FATAL_ERROR
+          "XPMATH_BUILD_HOST_TARGETS and XPMATH_BUILD_DEVICE_TARGETS are both "
+          "OFF: this build would contain no targets and `ctest` over it would "
+          "exit 0 having measured nothing. Turn at least one back ON.")
+endif()
+
 if(XPMATH_WITH_KOKKOS)
 find_package(Kokkos REQUIRED)
 
@@ -78,6 +121,28 @@ set(THIRD_PARTY_INCLUDE "${CMAKE_SOURCE_DIR}/third_party/include")
 # needs it as well. Appended to the same variable (which tests/CMakeLists.txt
 # also consumes) so no individual target's include list has to change.
 list(APPEND THIRD_PARTY_INCLUDE "${CMAKE_SOURCE_DIR}/include")
+
+# --- THE EIGHT DEMOS ARE DEVICE TARGETS -- CORE_PLAN C5 step 1 --------------
+# Every one of them launches Kokkos kernels, so they belong on the side of the
+# split that gets the arch's compiler and the arch's Kokkos. Left ungated they
+# would be compiled by BOTH trees: once by the host tree's g++, where nothing
+# about them is being exercised that the device tree does not exercise better,
+# and once by the device tree's nvcc/hipcc, where they are the point. Building
+# them twice is the "silently built in both configurations" failure named above,
+# spelled with executables instead of tests.
+#
+# The demos are not ctest targets, so they do not appear in the tagged-test
+# assertion at the bottom of tests/CMakeLists.txt. This comment is where their
+# side is recorded.
+#
+# The install() list goes inside the same guard: naming a target that was never
+# added is a hard configure error, which is how KI-21 used to fire.
+#
+# CONSEQUENCE, WRITTEN DOWN RATHER THAN DISCOVERED LATER: third_party/include/
+# is exercised ONLY by these eight (tests/CMakeLists.txt's C4 block says so), so
+# a host-only tree does not compile the Kokkos compat wrappers at all. A build
+# with both options ON -- the default, the bare `cmake -B build`, and CI -- does.
+if(XPMATH_BUILD_DEVICE_TARGETS)
 
 add_executable(kokkos_ep_demo src/demo_real.cpp)
 target_include_directories(kokkos_ep_demo PRIVATE ${THIRD_PARTY_INCLUDE})
@@ -134,6 +199,12 @@ install(TARGETS kokkos_ep_demo
                 kokkos_ep_demo_tf
                 kokkos_ep_demo_tf_complex
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+else()
+  message(STATUS
+    "XPMATH_BUILD_DEVICE_TARGETS=OFF: the eight Kokkos demos are not built in "
+    "this tree, and with them third_party/include/ is not compiled here.")
+endif()  # XPMATH_BUILD_DEVICE_TARGETS
 
 else()
   message(STATUS

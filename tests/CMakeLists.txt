@@ -100,6 +100,74 @@
 # and now only the demos do.
 # ===========================================================================
 
+# ===========================================================================
+# SIDE TAGGING -- CORE_PLAN C5 step 1
+# ===========================================================================
+# Two options in the top-level CMakeLists.txt, XPMATH_BUILD_HOST_TARGETS and
+# XPMATH_BUILD_DEVICE_TARGETS, select which half of the suite this tree
+# contains. Every registered test declares its side through xpm_tag_test, and
+# the assertion at the BOTTOM of this file fails the configure when one does
+# not. The two facts that assertion establishes are the ones the split depends
+# on: nothing is registered without a side, and nothing is registered on both.
+#
+# WHY A TAG AND NOT JUST AN if(). An if() around a registration makes the
+# target disappear from the wrong tree, which is most of what is wanted -- but
+# it leaves no record that anyone decided. A test added later inside the wrong
+# if(), or outside both, is then indistinguishable from one that was classified.
+# The GLOBAL lists below are that record, and the count assertion is what makes
+# forgetting to write to them an error rather than a default.
+#
+# THE ASSERTION MUST PROVE IT LOOKED AT SOMETHING. Every check here is written
+# so an empty input FAILS: zero registered tests is a FATAL_ERROR, zero tagged
+# tests is a FATAL_ERROR, and the two counts must be EQUAL rather than merely
+# consistent. A tagging gate that passes because it found nothing to tag is the
+# same failure as `ctest --test-dir` on a directory that does not exist.
+#
+# WHICH SIDE IS WHICH, for the cases where it is not obvious from the name:
+#
+#   host    anything that touches the binary128 oracle or MPFR/MPC
+#           (sweep_accuracy and everything downstream of it, exp_reduction,
+#           trig_reduction, oracle_conv), anything that inspects THIS tree or
+#           the source tree with host tools (build_provenance, domains_fresh,
+#           device_tu_purity, consumer_package), and every *_test.cpp host half.
+#
+#   device  every *_test_device.cpp, the tests migrated whole onto
+#           tests/device_harness.hpp, and device_harness_test itself.
+#
+# THE STANDALONE SMOKES ARE HOST, AND THE C5 PLAN TEXT SAYS DEVICE. The plan is
+# wrong and this is a deliberate departure. Six of the eight -- dd, dd_complex,
+# ff, ff_complex, qf, tf -- stream an xp:: value into a std::ostringstream, and
+# operator<< for these types exists only inside
+# `#if !defined(XPMATH_ON_DEVICE)` in include/xp/config.hpp. Compiling them
+# with a device compiler recreates verbatim the five `no operator "<<"`
+# failures A100 job 1000938 hit. What they actually assert is that the core
+# headers compile and run against an include path containing ONLY include/ --
+# a host-toolchain question -- and scripts/check_standalone_no_kokkos.sh, which
+# is their sibling, drives the same sources through plain g++ for the same
+# reason.
+set_property(GLOBAL PROPERTY XPMATH_HOST_TESTS "")
+set_property(GLOBAL PROPERTY XPMATH_DEVICE_TESTS "")
+
+# xpm_tag_test(<host|device> <test-name>...)
+# Records the side of one or more ALREADY-REGISTERED ctest tests. Call it at
+# the registration site, not in a list somewhere else: the point is that a
+# reader adding a target sees the question being asked.
+function(xpm_tag_test side)
+  if(side STREQUAL "host")
+    set(_prop XPMATH_HOST_TESTS)
+  elseif(side STREQUAL "device")
+    set(_prop XPMATH_DEVICE_TESTS)
+  else()
+    message(FATAL_ERROR "xpm_tag_test: side must be host or device, got '${side}'")
+  endif()
+  if(NOT ARGN)
+    message(FATAL_ERROR "xpm_tag_test(${side}): no test names given")
+  endif()
+  foreach(_n IN LISTS ARGN)
+    set_property(GLOBAL APPEND PROPERTY ${_prop} ${_n})
+  endforeach()
+endfunction()
+
 # --- Helper: define + register one test that links NO Kokkos ---------------
 # Usage: xpm_add_host_test(<name>)  expects tests/<name>.cpp
 #
@@ -119,13 +187,21 @@
 # It takes no contraction flags: nothing registered through it is an EFT test.
 # If that ever changes, the target must go through an EFT helper instead, or the
 # contraction guard below will not know about it.
+#
+# C5 step 1: it returns without defining anything when this tree is not
+# building the host side, and tags what it does define. The early return is
+# what keeps the arch's device compiler away from a TU full of binary128.
 function(xpm_add_host_test name)
+  if(NOT XPMATH_BUILD_HOST_TARGETS)
+    return()
+  endif()
   add_executable(${name} ${name}.cpp)
   target_include_directories(${name} PRIVATE
                              ${CMAKE_SOURCE_DIR}/include
                              ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_features(${name} PRIVATE cxx_std_17)
   add_test(NAME ${name} COMMAND ${name})
+  xpm_tag_test(host ${name})
 endfunction()
 
 # --- Helper: define + register one DEVICE test that links NO Kokkos --------
@@ -146,13 +222,21 @@ endfunction()
 # flag, or a device-lane label. Collapsing them today would mean splitting them
 # again at C5, and in between there would be no way to ask CMake which targets
 # are the device ones.
+#
+# C5 step 1 gave it the mirror of xpm_add_host_test's early return, and this is
+# the function the comment above predicted would grow a per-arch property: the
+# side it tags is the side whose tree gets nvcc_wrapper or hipcc.
 function(xpm_add_device_test name)
+  if(NOT XPMATH_BUILD_DEVICE_TARGETS)
+    return()
+  endif()
   add_executable(${name} ${name}.cpp)
   target_include_directories(${name} PRIVATE
                              ${CMAKE_SOURCE_DIR}/include
                              ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_features(${name} PRIVATE cxx_std_17)
   add_test(NAME ${name} COMMAND ${name})
+  xpm_tag_test(device ${name})
 endfunction()
 
 # --- WHY EVERY EFT TEST BELOW IS BUILT WITH CONTRACTION OFF ----------------
@@ -199,8 +283,17 @@ endfunction()
 # They delegate the plain part to xpm_add_device_test / to an inline mirror of
 # it, exactly as the deleted Kokkos pair delegated to kokkos_ep_add_test, so a
 # change to the include paths happens in one place per posture rather than four.
+#
+# C5 step 1: EVERY ONE OF THESE FOUR NEEDS ITS OWN EARLY RETURN, not just the
+# base helper it delegates to. Without one the delegate would return having
+# defined nothing and the caller would go on to set COMPILE_OPTIONS on a target
+# that does not exist -- a hard configure error, in the tree where the side is
+# switched off.
 function(xpm_add_device_eft_test name)
-  xpm_add_device_test(${name})
+  if(NOT XPMATH_BUILD_DEVICE_TARGETS)
+    return()
+  endif()
+  xpm_add_device_test(${name})   # tags device
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off>)
   endif()
@@ -219,6 +312,9 @@ function(xpm_add_device_eft_test name)
 endfunction()
 
 function(xpm_add_device_eft_test_contract_on name)
+  if(NOT XPMATH_BUILD_DEVICE_TARGETS)
+    return()
+  endif()
   set(tgt ${name}_contract_on)
   add_executable(${tgt} ${name}.cpp)
   target_include_directories(${tgt} PRIVATE
@@ -226,6 +322,9 @@ function(xpm_add_device_eft_test_contract_on name)
                              ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_features(${tgt} PRIVATE cxx_std_17)
   add_test(NAME ${tgt} COMMAND ${tgt})
+  # Tagged here rather than by a delegate: this helper builds its own target,
+  # so no base helper ever sees ${tgt}.
+  xpm_tag_test(device ${tgt})
 
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(${tgt} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=fast>)
@@ -269,7 +368,10 @@ endfunction()
 # host half keeps reading the baseline it read before the split), same GLOBAL
 # manifest registration.
 function(xpm_add_host_eft_test name)
-  xpm_add_host_test(${name})
+  if(NOT XPMATH_BUILD_HOST_TARGETS)
+    return()
+  endif()
+  xpm_add_host_test(${name})   # tags host
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off>)
   endif()
@@ -281,6 +383,9 @@ function(xpm_add_host_eft_test name)
 endfunction()
 
 function(xpm_add_host_eft_test_contract_on name)
+  if(NOT XPMATH_BUILD_HOST_TARGETS)
+    return()
+  endif()
   set(tgt ${name}_contract_on)
   add_executable(${tgt} ${name}.cpp)
   target_include_directories(${tgt} PRIVATE
@@ -288,6 +393,7 @@ function(xpm_add_host_eft_test_contract_on name)
                              ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_features(${tgt} PRIVATE cxx_std_17)
   add_test(NAME ${tgt} COMMAND ${tgt})
+  xpm_tag_test(host ${tgt})
 
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(${tgt} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=fast>)
@@ -703,13 +809,24 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/contraction_manifest.txt" "${_xp_manifes
 # ci.yml's `expected=49` -- adding or removing a guarded target is a deliberate
 # act that updates a number here.
 #
-# THEY ARE NO LONGER PER-CONFIGURATION. The previous version of this comment
-# predicted the collapse: "when chunk D moves qf_fma_guard_test (and the ninth
-# mixed TU, qf_eft_test's host assertion) out of the Kokkos block, both branches
-# read the same numbers and the conditional is dead." Chunk D did that and the
-# if() is gone. The predicted figure was 10/6; the measured one is 11/6, because
-# the prediction counted qf_fma_guard_test moving but not qf_eft_test SPLITTING
-# -- the same arithmetic slip an earlier revision made about chunk C, in the same
+# THEY WERE BRIEFLY NOT PER-CONFIGURATION, AND ARE AGAIN -- ALONG A DIFFERENT
+# AXIS. The C4 version of this comment recorded the collapse of the old
+# Kokkos/no-Kokkos split ("Chunk D did that and the if() is gone"). C5 step 1
+# reintroduces a split, but on host-vs-device rather than Kokkos-vs-not, and the
+# manifest above is built from the targets that EXIST in this tree -- so in a
+# host-only or device-only tree it legitimately has fewer rows. A single 11/6
+# expectation would make the guard fail on a correct build.
+#
+# THE FIX IS TWO COMMITTED PAIRS PLUS ARITHMETIC, NOT A DERIVED NUMBER. The
+# per-side constants below are still hand-written, so deleting an EFT-helper
+# call still makes the guard red; what is computed is only the SUM over the
+# sides this tree builds. 3+8 = 11 and 1+5 = 6 reproduce C4's figures exactly
+# in the default both-ON configuration, which is the bare `cmake -B build` path
+# and what CI runs.
+#
+# The predicted figure at C4 was 10/6; the measured one was 11/6, because the
+# prediction counted qf_fma_guard_test moving but not qf_eft_test SPLITTING --
+# the same arithmetic slip an earlier revision made about chunk C, in the same
 # direction: splitting a guarded TU adds a guarded target, it does not conserve
 # the count.
 #
@@ -730,11 +847,46 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/contraction_manifest.txt" "${_xp_manifes
 # dd_fma_guard_test_contract_on, dd_fma_guard_test_device_contract_on,
 # ff_fma_guard_test_contract_on (chunk C) + qf_fma_guard_test_contract_on
 # (chunk D).
-set(XPMATH_EFT_OFF_EXPECTED 11)
-set(XPMATH_EFT_ON_EXPECTED  6)
+#
+# SPLIT BY SIDE FOR C5. The 3 host OFF are dd_eft_test, dd_fma_guard_test and
+# qf_eft_test; the 1 host ON is dd_fma_guard_test_contract_on. Everything else
+# in the two lists above is device: 8 OFF and 5 ON.
+set(XPMATH_EFT_OFF_HOST_EXPECTED    3)
+set(XPMATH_EFT_ON_HOST_EXPECTED     1)
+set(XPMATH_EFT_OFF_DEVICE_EXPECTED  8)
+set(XPMATH_EFT_ON_DEVICE_EXPECTED   5)
+set(XPMATH_EFT_OFF_EXPECTED 0)
+set(XPMATH_EFT_ON_EXPECTED  0)
+if(XPMATH_BUILD_HOST_TARGETS)
+  math(EXPR XPMATH_EFT_OFF_EXPECTED
+       "${XPMATH_EFT_OFF_EXPECTED} + ${XPMATH_EFT_OFF_HOST_EXPECTED}")
+  math(EXPR XPMATH_EFT_ON_EXPECTED
+       "${XPMATH_EFT_ON_EXPECTED} + ${XPMATH_EFT_ON_HOST_EXPECTED}")
+endif()
+if(XPMATH_BUILD_DEVICE_TARGETS)
+  math(EXPR XPMATH_EFT_OFF_EXPECTED
+       "${XPMATH_EFT_OFF_EXPECTED} + ${XPMATH_EFT_OFF_DEVICE_EXPECTED}")
+  math(EXPR XPMATH_EFT_ON_EXPECTED
+       "${XPMATH_EFT_ON_EXPECTED} + ${XPMATH_EFT_ON_DEVICE_EXPECTED}")
+endif()
 message(STATUS "contraction guard: ${_xp_n_off} OFF targets, ${_xp_n_on} ON targets "
                "(expected ${XPMATH_EFT_OFF_EXPECTED}/${XPMATH_EFT_ON_EXPECTED})")
 
+# THE PAIR IS TAGGED DEVICE, AND THE CHOICE IS NOT ARBITRARY -- IT IS A LOSS
+# TAKEN ON PURPOSE. Neither target compiles or links anything, so on substance
+# they belong to neither side; but the C5 arithmetic requires every registered
+# test to sit on exactly one, so one tree has to go without a contraction check.
+# Device is where the smaller gap lands: 8 of the 11 OFF targets and 5 of the 6
+# ON targets live there, and it is the tree whose compiler CHANGES per arch
+# (g++ for --arch host, nvcc_wrapper for a100, hipcc for mi250) -- which is
+# exactly when a contraction flag is most likely to be dropped or renamed. A
+# host-only tree runs g++ with the same flags it has always run.
+#
+# WHAT IS LOST: in a host-only tree the 3 host OFF and 1 host ON targets carry
+# their flags unverified. In the DEFAULT both-ON tree -- the bare
+# `cmake -B build`, and CI -- nothing is lost: the manifest holds all 11/6 and
+# the guard reads all of it.
+if(XPMATH_BUILD_DEVICE_TARGETS)
 add_test(NAME contraction_flags_guard
          COMMAND ${CMAKE_COMMAND}
                  -DMANIFEST=${CMAKE_CURRENT_BINARY_DIR}/contraction_manifest.txt
@@ -743,10 +895,14 @@ add_test(NAME contraction_flags_guard
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/check_contraction_flags.cmake)
 
 # ... and the poison test that proves the guard can fail, including a negative
-# control so a guard hard-wired to fail cannot satisfy it either.
+# control so a guard hard-wired to fail cannot satisfy it either. It derives its
+# own expectations from the manifest it finds, so it needs no per-side constant.
 add_test(NAME contraction_flags_selftest
          COMMAND ${CMAKE_SOURCE_DIR}/validation/contraction_flags_selftest.sh
                  ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
+
+xpm_tag_test(device contraction_flags_guard contraction_flags_selftest)
+endif()
 
 # ---------------------------------------------------------------------------
 # STANDALONE SMOKES -- the Kokkos-free core, as real ctest targets
@@ -762,12 +918,24 @@ add_test(NAME contraction_flags_selftest
 # successful compile only proves nothing is MISSING, not that nothing extra was
 # pulled in.
 #
+# ALL EIGHT ARE HOST -- C5 step 1, and a deliberate departure from the C5 plan
+# text, which classifies them device. The reasoning is in the SIDE TAGGING block
+# at the top of this file: six of the eight stream an xp:: value through
+# operator<<, which include/xp/config.hpp defines only under
+# `#if !defined(XPMATH_ON_DEVICE)`, so a device compiler reproduces the five
+# `no operator "<<"` errors of A100 job 1000938 exactly. What they assert -- that
+# the core compiles and runs against an include path containing only include/ --
+# is a host-toolchain question, and their sibling
+# scripts/check_standalone_no_kokkos.sh drives the same sources through g++.
+if(XPMATH_BUILD_HOST_TARGETS)
 foreach(_sm dd dd_complex ff ff_complex qf qf_complex tf tf_complex)
   add_executable(${_sm}_no_kokkos_smoke standalone/${_sm}_no_kokkos_smoke.cpp)
   target_include_directories(${_sm}_no_kokkos_smoke PRIVATE ${CMAKE_SOURCE_DIR}/include)
   target_compile_features(${_sm}_no_kokkos_smoke PRIVATE cxx_std_17)
   add_test(NAME ${_sm}_no_kokkos_smoke COMMAND ${_sm}_no_kokkos_smoke)
+  xpm_tag_test(host ${_sm}_no_kokkos_smoke)
 endforeach()
+endif()
 
 # ---------------------------------------------------------------------------
 # device_harness_test -- the self-test for tests/device_harness.hpp
@@ -789,12 +957,22 @@ endforeach()
 # equal an exact function of its index, so a kernel that never ran, or a
 # from_device() that copied nothing, is RED rather than quiet. See the file
 # header.
+#
+# C5 step 1 tags it DEVICE and registers it only in the device tree, which is
+# the one change that makes the paragraph above stop being a compromise: in a
+# device tree built with --arch a100 or --arch mi250 this compiles through
+# nvcc/hipcc and exercises the REAL backend rather than the serial fallback.
+# With both options ON -- the default -- it is still the g++ serial build
+# described above.
+if(XPMATH_BUILD_DEVICE_TARGETS)
 add_executable(device_harness_test device_harness_test.cpp)
 target_include_directories(device_harness_test PRIVATE
                            ${CMAKE_SOURCE_DIR}/include
                            ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(device_harness_test PRIVATE cxx_std_17)
 add_test(NAME device_harness_test COMMAND device_harness_test)
+xpm_tag_test(device device_harness_test)
+endif()
 
 # COMPLEX accuracy, all four backends. Until these landed, every target above
 # scored REAL arithmetic only — `grep -c complex tests/CMakeLists.txt` was 0 —
@@ -883,6 +1061,27 @@ add_test(NAME device_harness_test COMMAND device_harness_test)
 # complex ops fall back somewhere else is exactly the split this arc removed; a
 # second guard would make that half-state reachable by configuration.
 # One flag, one meaning: the oracle is whole-library or the build stops.
+#
+# THE REQUIREMENT IS NOW SCOPED TO THE HOST SIDE -- CORE_PLAN C5 step 1, and it
+# is a narrowing rather than a softening. Everything that needs MPFR/MPC is
+# host: sweep_accuracy and the four targets downstream of it, exp_reduction_test
+# and trig_reduction_test. A DEVICE-only tree contains none of them, and that
+# tree is the one configured on a compute node -- where demanding libmpfr-dev
+# would be a FATAL_ERROR over a library no target in it links. With
+# XPMATH_BUILD_HOST_TARGETS=ON, which is the default, the bare `cmake -B build`
+# path and every CI lane, the hard error below is exactly as hard as it was.
+#
+# ============================== HOST-SIDE REGION ==============================
+# Everything from here to the END OF THIS FILE is host, and is registered only
+# when XPMATH_BUILD_HOST_TARGETS is ON. The body is deliberately NOT re-indented:
+# reflowing ~260 lines, most of them the explanatory comments this file is built
+# out of, would bury a one-line change in whitespace. The region ends at the
+# matching `endif()  # ===== END OF THE HOST-SIDE REGION =====`, immediately
+# above the TAG COMPLETENESS ASSERTION that closes this file -- that assertion
+# runs in EVERY configuration and is deliberately outside the region.
+# ==============================================================================
+if(XPMATH_BUILD_HOST_TARGETS)
+
 find_path(MPFR_INCLUDE_DIR mpfr.h)
 find_library(MPFR_LIBRARY NAMES mpfr)
 find_library(GMP_LIBRARY NAMES gmp)
@@ -952,6 +1151,8 @@ add_test(NAME sweep_monotone_gate
          COMMAND sweep_accuracy
                  --baseline ${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline.csv.gz)
 
+xpm_tag_test(host sweep_absolute_gate sweep_monotone_gate)
+
 # ---------------------------------------------------------------------------
 # THE GATES' OWN SELF-TESTS
 # ---------------------------------------------------------------------------
@@ -970,6 +1171,8 @@ add_test(NAME sweep_monotone_gate_selftest
 add_test(NAME sweep_absolute_gate_selftest
          COMMAND ${CMAKE_SOURCE_DIR}/validation/gate_selftest.sh
                  $<TARGET_FILE:sweep_accuracy> absolute ${CMAKE_CURRENT_BINARY_DIR})
+
+xpm_tag_test(host sweep_monotone_gate_selftest sweep_absolute_gate_selftest)
 
 # ---------------------------------------------------------------------------
 # KI-42/43 STRUCTURAL TEST FOR exp()'s ARGUMENT REDUCTION
@@ -1008,6 +1211,10 @@ add_test(NAME sweep_absolute_gate_selftest
 add_executable(pow_domain_test pow_domain_test.cpp)
 target_include_directories(pow_domain_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
 add_test(NAME pow_domain_test COMMAND pow_domain_test)
+# HOST: a plain host executable that launches nothing. Asking the same contract
+# questions in a device functor would be worth having and is not this chunk's
+# to add -- it would be a new target, and the count must not move here.
+xpm_tag_test(host pow_domain_test)
 
 add_executable(exp_reduction_test exp_reduction_test.cpp)
 target_include_directories(exp_reduction_test PRIVATE ${CMAKE_SOURCE_DIR}/include)
@@ -1020,6 +1227,10 @@ add_test(NAME exp_reduction_test COMMAND exp_reduction_test)
 add_test(NAME exp_reduction_selftest
          COMMAND ${CMAKE_SOURCE_DIR}/validation/exp_reduction_selftest.sh
                  ${CMAKE_CURRENT_BINARY_DIR})
+
+# HOST, and not by convention: both link MPFR and carry their tail arithmetic in
+# __float128, which is the one thing a device TU may not contain.
+xpm_tag_test(host exp_reduction_test exp_reduction_selftest)
 
 # Payne-Hanek argument reduction: does the engine in include/xp/trig_reduction.hpp
 # return the exact quadrant and a fraction within one ulp at the inputs that
@@ -1042,6 +1253,9 @@ add_test(NAME trig_reduction_selftest
          COMMAND ${CMAKE_SOURCE_DIR}/validation/trig_reduction_selftest.sh
                  ${CMAKE_CURRENT_BINARY_DIR})
 
+# HOST: it computes 4000-bit ground truth with MPFR.
+xpm_tag_test(host trig_reduction_test trig_reduction_selftest)
+
 # The oracle's __float128 <-> mpfr conversions must be EXACT, not merely
 # round-trippable. The sweep has no oracle-error term, so a reference that is
 # wrong reads as a library that is wrong -- and the old conversion was wrong by
@@ -1052,6 +1266,9 @@ add_test(NAME oracle_conv_test COMMAND sweep_accuracy --oracle-selftest)
 add_test(NAME oracle_conv_selftest
          COMMAND ${CMAKE_SOURCE_DIR}/validation/oracle_conv_selftest.sh
                  ${CMAKE_CURRENT_BINARY_DIR})
+
+# HOST: the subject is the oracle's own __float128 <-> mpfr conversion.
+xpm_tag_test(host oracle_conv_test oracle_conv_selftest)
 
 # The generated domain document must be what the generator currently emits from
 # the committed baseline. Pure Python, well under a second, no build products.
@@ -1090,9 +1307,16 @@ add_test(NAME consumer_package
 set_tests_properties(consumer_package PROPERTIES
                      LABELS packaging
                      TIMEOUT 600)
+# HOST: the nested configure it drives is an ordinary host CMake build
+# (XPMATH_WITH_KOKKOS=OFF, XPMATH_BUILD_TESTS=OFF), and the package it checks is
+# the header-only export, which has no side.
+xpm_tag_test(host consumer_package)
 
 add_test(NAME domains_fresh
          COMMAND ${CMAKE_SOURCE_DIR}/validation/check_domains_fresh.sh)
+# HOST: docs/DOMAINS.md is generated from the HOST baseline. C9 adds the device
+# counterpart (device_domains_fresh) once there is a device baseline to read.
+xpm_tag_test(host domains_fresh)
 
 # ---------------------------------------------------------------------------
 # BUILD PROVENANCE
@@ -1112,6 +1336,12 @@ add_test(NAME build_provenance
          COMMAND ${CMAKE_COMMAND}
                  -DINFO=${CMAKE_BINARY_DIR}/build-info.txt
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/check_build_provenance.cmake)
+# HOST, and this one costs something worth naming: a DEVICE-only tree stamps a
+# build-info.txt that nothing then checks. That is C5 step 5's job -- it makes
+# the wrapper stamp both trees, adds a `tree: host|device` field and extends
+# check_build_provenance.cmake for it -- and this chunk touches neither the
+# wrapper nor the checker. With both options ON the stamp is checked as before.
+xpm_tag_test(host build_provenance)
 
 # ---------------------------------------------------------------------------
 # DEVICE-TU PURITY
@@ -1139,6 +1369,14 @@ add_test(NAME build_provenance
 # XPMATH_EFT_OFF_EXPECTED / XPMATH_EFT_ON_EXPECTED above are unchanged by it.
 add_test(NAME device_tu_purity
          COMMAND ${CMAKE_SOURCE_DIR}/scripts/check_device_tu_purity.sh)
+# HOST DESPITE THE NAME, and it is worth being explicit about why. What it
+# checks is device TUs; what it RUNS is `${CXX:-g++} -E` over source FILES from
+# a hand-maintained list, so it needs a host preprocessor and needs nothing to
+# have been built. Putting it in the device tree would hand it to nvcc/hipcc,
+# whose preprocessed output carries different line markers and different system
+# headers, for no gain -- and would lose the mirror half of the check (no host
+# TU may launch a kernel), whose subjects are the host targets.
+xpm_tag_test(host device_tu_purity)
 
 set_tests_properties(sweep_absolute_gate sweep_monotone_gate
                      PROPERTIES TIMEOUT 600)
@@ -1146,3 +1384,92 @@ set_tests_properties(sweep_absolute_gate_selftest sweep_monotone_gate_selftest
                      PROPERTIES TIMEOUT 1200)
 # Nine compiles of sweep_accuracy.cpp, four at a time.
 set_tests_properties(oracle_conv_selftest PROPERTIES TIMEOUT 600)
+
+endif()  # ===== END OF THE HOST-SIDE REGION =====
+
+# ===========================================================================
+# TAG COMPLETENESS ASSERTION -- CORE_PLAN C5 step 1
+# ===========================================================================
+# Every test registered in this directory must carry exactly one side tag, and
+# this fails the CONFIGURE when one does not. A target that reaches a tree it
+# does not belong to is the failure C5 exists to prevent -- the A100 job that
+# put sweep_accuracy through nvcc -- and the way that happens is not malice but
+# a new add_test() written without a thought about sides. Catching it here means
+# the author sees it, rather than a GPU queue seeing it a week later.
+#
+# IT CANNOT PASS ON SILENCE. Four separate failures, and two of them fire on
+# emptiness rather than on content:
+#   - zero registered tests            -> FATAL. An empty suite is what a
+#                                         misplaced if() produces, and `ctest`
+#                                         over it exits 0.
+#   - zero tagged tests                -> FATAL. This is the check checking
+#                                         itself: if the GLOBAL lists were never
+#                                         written to, "no untagged tests found"
+#                                         would otherwise be vacuously true.
+#   - registered but untagged          -> FATAL, naming them.
+#   - tagged but not registered, or
+#     tagged twice, or tagged on both
+#     sides                            -> FATAL, naming them.
+# The counts must be EQUAL, not merely compatible, which is what closes the last
+# case: a test tagged on both sides makes the tagged count exceed the registered
+# one even though every name appears in both lists.
+get_property(_xp_registered DIRECTORY PROPERTY TESTS)
+get_property(_xp_host_tests GLOBAL PROPERTY XPMATH_HOST_TESTS)
+get_property(_xp_dev_tests  GLOBAL PROPERTY XPMATH_DEVICE_TESTS)
+
+list(LENGTH _xp_registered _xp_n_registered)
+list(LENGTH _xp_host_tests _xp_n_host)
+list(LENGTH _xp_dev_tests  _xp_n_dev)
+math(EXPR _xp_n_tagged "${_xp_n_host} + ${_xp_n_dev}")
+
+if(_xp_n_registered EQUAL 0)
+  message(FATAL_ERROR
+          "C5 tag assertion: this configuration registered ZERO ctest targets. "
+          "`ctest` over it would exit 0 having measured nothing.")
+endif()
+if(_xp_n_tagged EQUAL 0)
+  message(FATAL_ERROR
+          "C5 tag assertion: ${_xp_n_registered} tests are registered and NONE "
+          "is tagged. The tagging mechanism itself is not running.")
+endif()
+
+set(_xp_untagged ${_xp_registered})
+if(_xp_host_tests)
+  list(REMOVE_ITEM _xp_untagged ${_xp_host_tests})
+endif()
+if(_xp_dev_tests)
+  list(REMOVE_ITEM _xp_untagged ${_xp_dev_tests})
+endif()
+if(_xp_untagged)
+  list(JOIN _xp_untagged ", " _xp_untagged_s)
+  message(FATAL_ERROR
+          "C5 tag assertion: these registered tests carry no side tag -- call "
+          "xpm_tag_test(host|device <name>) at their registration site, inside "
+          "the matching XPMATH_BUILD_*_TARGETS guard:\n  ${_xp_untagged_s}")
+endif()
+
+set(_xp_ghost ${_xp_host_tests} ${_xp_dev_tests})
+if(_xp_registered)
+  list(REMOVE_ITEM _xp_ghost ${_xp_registered})
+endif()
+if(_xp_ghost)
+  list(JOIN _xp_ghost ", " _xp_ghost_s)
+  message(FATAL_ERROR
+          "C5 tag assertion: these names are tagged but were never registered "
+          "with add_test():\n  ${_xp_ghost_s}")
+endif()
+
+if(NOT _xp_n_tagged EQUAL _xp_n_registered)
+  message(FATAL_ERROR
+          "C5 tag assertion: ${_xp_n_registered} tests registered but "
+          "${_xp_n_tagged} tags recorded (${_xp_n_host} host + ${_xp_n_dev} "
+          "device). Every name is accounted for in both directions, so the "
+          "difference is a DUPLICATE tag -- most likely one test tagged on both "
+          "sides, which would build it in both trees.")
+endif()
+
+message(STATUS
+        "C5 side tags: ${_xp_n_registered} tests registered = "
+        "${_xp_n_host} host + ${_xp_n_dev} device "
+        "(HOST_TARGETS=${XPMATH_BUILD_HOST_TARGETS}, "
+        "DEVICE_TARGETS=${XPMATH_BUILD_DEVICE_TARGETS})")
