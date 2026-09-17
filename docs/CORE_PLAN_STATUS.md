@@ -584,6 +584,31 @@ device-TU purity: PASS
 **NOT a gate this section can run.** Nothing above executes hipcc or nvcc. The
 two device lanes are the real gate for C3 and they run on the PR.
 
+### Step 1's open question, closed by CI
+
+The step-1 section above says the fallback's premise could not be tested
+locally because
+there is no hipcc on this login node, and that the `device-hip` lane is what
+checks it. It has now checked it. On PR #30 @ `b00b79c`, the lane's FIRST
+execution in `rocm/dev-ubuntu-24.04:latest` was green:
+
+```
+hipcc device compile                           PASS
+```
+
+That is three claims settled at once, and none of them was settled before:
+
+- The primary fix compiles under a real hipcc. The `std::memcpy` fallback is not
+  needed and was never applied.
+- The container works. The lane's advisory status existed because a first red
+  would have been indistinguishable from a broken image; the gating flip now
+  rests on a green run rather than on the argument for one.
+- The gfx90a codegen guard passes with the harness in the TU, so neither the
+  branch-reach mitigation nor the de-recursion regressed under the new code.
+
+`nvcc device compile (device_harness)` was green in the same run, so both vendor
+paths of the harness are compiled. Neither is EXECUTED: that is C7 and C8.
+
 ### Notes for later sections
 
 - **Counts of record are now 52 with Kokkos and 24 without**, asserted in
