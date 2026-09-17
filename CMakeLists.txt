@@ -350,12 +350,40 @@ endif()
 
 string(TIMESTAMP _xp_stamp_utc "%Y-%m-%dT%H:%M:%SZ" UTC)
 
+# WHICH SIDE OF THE C5 SPLIT THIS BUILD DIRECTORY IS -- CORE_PLAN C5 step 5.
+#
+# DERIVED FROM THE TWO OPTIONS, NOT PASSED IN AS A -D. scripts/xpm_build.sh
+# produces <dir>/host and <dir>/device and could have stamped the answer it
+# already knows, but then a bare `cmake -B build` -- which is what CI runs and
+# what anybody debugging runs -- would carry no tree field at all, or a wrong
+# one, and this file is the ONE thing every build goes through. Deriving it
+# also makes the field impossible to disagree with the build it describes.
+#
+# `both` is a real and correct value, not a fallback: it is the one-tree,
+# one-compiler configuration the bare cmake path produces, and an artifact from
+# it genuinely was not produced by either half alone. The both-OFF case cannot
+# reach here -- the option block near the top of this file makes it a
+# FATAL_ERROR, because it would register zero tests and `ctest` over zero tests
+# exits 0.
+#
+# THE PATH IS NOT THE ANSWER. Two stamps produced by one wrapper run must be
+# told apart by CONTENT: a log pasted into a STATUS block, or a build-info.txt
+# copied off a compute node, arrives without its directory.
+if(XPMATH_BUILD_HOST_TARGETS AND XPMATH_BUILD_DEVICE_TARGETS)
+  set(_xp_tree "both")
+elseif(XPMATH_BUILD_HOST_TARGETS)
+  set(_xp_tree "host")
+else()
+  set(_xp_tree "device")
+endif()
+
 # check_build_provenance.cmake parses `key: value`, so every field is one line
 # and no value may be empty.
 file(WRITE "${CMAKE_BINARY_DIR}/build-info.txt"
 "# xpmath build provenance -- written by CMakeLists.txt at configure time.
 # Regenerated on every configure. Do not edit; do not commit.
 arch: ${XPMATH_ARCH}
+tree: ${_xp_tree}
 git-head: ${_xp_git_head}
 compiler: ${CMAKE_CXX_COMPILER}
 compiler-id: ${CMAKE_CXX_COMPILER_ID}
@@ -372,7 +400,7 @@ timestamp-utc: ${_xp_stamp_utc}
 if(_xp_git_head MATCHES "-dirty$")
   message(STATUS "build provenance: tree is DIRTY -- build-info.txt records ${_xp_git_head}")
 endif()
-message(STATUS "build provenance: ${CMAKE_BINARY_DIR}/build-info.txt (arch=${XPMATH_ARCH})")
+message(STATUS "build provenance: ${CMAKE_BINARY_DIR}/build-info.txt (arch=${XPMATH_ARCH}, tree=${_xp_tree})")
 
 # ---- Tests (T0.1: backend-parameterized harness) ----------------------------
 # THIRD_PARTY_INCLUDE (set above) is NO LONGER consumed by tests/CMakeLists.txt.

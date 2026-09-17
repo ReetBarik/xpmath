@@ -128,11 +128,19 @@
 #   host    anything that touches the binary128 oracle or MPFR/MPC
 #           (sweep_accuracy and everything downstream of it, exp_reduction,
 #           trig_reduction, oracle_conv), anything that inspects THIS tree or
-#           the source tree with host tools (build_provenance, domains_fresh,
-#           device_tu_purity, consumer_package), and every *_test.cpp host half.
+#           the source tree with host tools (domains_fresh, device_tu_purity,
+#           consumer_package), and every *_test.cpp host half.
 #
 #   device  every *_test_device.cpp, the tests migrated whole onto
 #           tests/device_harness.hpp, and device_harness_test itself.
+#
+#   both    build_provenance ALONE, and it is the one test whose tag is
+#           computed rather than written. It judges the build DIRECTORY, and
+#           every tree has one -- including the `--only device` tree C7 and C8
+#           configure on a compute node, whose logs are the artifacts that most
+#           need to be traceable. It is registered once in every configuration
+#           and tagged host when the host side is present, device otherwise.
+#           See its block near the bottom of this file.
 #
 # THE STANDALONE SMOKES ARE HOST, AND THE C5 PLAN TEXT SAYS DEVICE. The plan is
 # wrong and this is a deliberate departure. Six of the eight -- dd, dd_complex,
@@ -1072,13 +1080,16 @@ endif()
 # path and every CI lane, the hard error below is exactly as hard as it was.
 #
 # ============================== HOST-SIDE REGION ==============================
-# Everything from here to the END OF THIS FILE is host, and is registered only
-# when XPMATH_BUILD_HOST_TARGETS is ON. The body is deliberately NOT re-indented:
-# reflowing ~260 lines, most of them the explanatory comments this file is built
-# out of, would bury a one-line change in whitespace. The region ends at the
-# matching `endif()  # ===== END OF THE HOST-SIDE REGION =====`, immediately
-# above the TAG COMPLETENESS ASSERTION that closes this file -- that assertion
-# runs in EVERY configuration and is deliberately outside the region.
+# Everything from here to the matching
+# `endif()  # ===== END OF THE HOST-SIDE REGION =====` is host, and is
+# registered only when XPMATH_BUILD_HOST_TARGETS is ON. The body is deliberately
+# NOT re-indented: reflowing ~260 lines, most of them the explanatory comments
+# this file is built out of, would bury a one-line change in whitespace.
+#
+# TWO THINGS SIT BELOW THE endif AND ARE DELIBERATELY OUTSIDE THE REGION, because
+# both run in EVERY configuration: the BUILD PROVENANCE target, which judges the
+# build directory and so belongs to whichever tree that directory is, and the TAG
+# COMPLETENESS ASSERTION that closes the file.
 # ==============================================================================
 if(XPMATH_BUILD_HOST_TARGETS)
 
@@ -1319,31 +1330,6 @@ add_test(NAME domains_fresh
 xpm_tag_test(host domains_fresh)
 
 # ---------------------------------------------------------------------------
-# BUILD PROVENANCE
-# ---------------------------------------------------------------------------
-# Every other target here judges the LIBRARY. This one judges the BUILD
-# DIRECTORY: it fails when ${CMAKE_BINARY_DIR}/build-info.txt is absent or
-# short a field, so a build whose artifacts could not be traced back to a tree
-# is caught by ctest rather than by the next person who needs the baseline.
-#
-# Registered OUTSIDE the XPMATH_WITH_KOKKOS guard -- provenance is a property
-# of the build, not of whether Kokkos is in it -- so it counts in both
-# configurations: 48 -> 49 with Kokkos, 20 -> 21 without.
-#
-# It takes NO contraction flags and adds no target, so
-# XPMATH_EFT_OFF_EXPECTED / XPMATH_EFT_ON_EXPECTED above are unchanged by it.
-add_test(NAME build_provenance
-         COMMAND ${CMAKE_COMMAND}
-                 -DINFO=${CMAKE_BINARY_DIR}/build-info.txt
-                 -P ${CMAKE_CURRENT_SOURCE_DIR}/check_build_provenance.cmake)
-# HOST, and this one costs something worth naming: a DEVICE-only tree stamps a
-# build-info.txt that nothing then checks. That is C5 step 5's job -- it makes
-# the wrapper stamp both trees, adds a `tree: host|device` field and extends
-# check_build_provenance.cmake for it -- and this chunk touches neither the
-# wrapper nor the checker. With both options ON the stamp is checked as before.
-xpm_tag_test(host build_provenance)
-
-# ---------------------------------------------------------------------------
 # DEVICE-TU PURITY
 # ---------------------------------------------------------------------------
 # tests/test_utils_device.hpp is the half of the test harness a device
@@ -1386,6 +1372,46 @@ set_tests_properties(sweep_absolute_gate_selftest sweep_monotone_gate_selftest
 set_tests_properties(oracle_conv_selftest PROPERTIES TIMEOUT 600)
 
 endif()  # ===== END OF THE HOST-SIDE REGION =====
+
+# ===========================================================================
+# BUILD PROVENANCE -- REGISTERED IN EVERY TREE, CORE_PLAN C5 step 5
+# ===========================================================================
+# Every other target in this file judges the LIBRARY. This one judges the BUILD
+# DIRECTORY: it fails when ${CMAKE_BINARY_DIR}/build-info.txt is absent, short a
+# field, or carries a `tree:` value outside host/device/both, so a build whose
+# artifacts could not be traced back to a tree is caught by ctest rather than by
+# the next person who needs the baseline.
+#
+# IT USED TO BE HOST-ONLY, AND THAT WAS A HOLE THIS SECTION HAD TO CLOSE.
+# C5 chunk A tagged it `host` and wrote down what that cost: a device-only tree
+# stamps a build-info.txt that nothing then checks. That is not a hypothetical
+# tree -- it is precisely what C7 and C8 configure on a compute node with
+# `--only device`, and their GPU logs are the artifacts whose provenance is
+# hardest to reconstruct and most expensive to re-measure. The one tree with no
+# provenance check would have been the one that needed it most.
+#
+# SO IT IS REGISTERED OUTSIDE BOTH REGIONS -- outside XPMATH_WITH_KOKKOS, as it
+# always was, and now outside XPMATH_BUILD_HOST_TARGETS as well. Provenance is a
+# property of the build directory, and every build directory has one.
+#
+# THE TAG FOLLOWS THE TREE rather than being a constant, because the tag
+# assertion below demands exactly one side per registered test and this test is
+# in every side. In a host-only tree it is host; in a device-only tree it is
+# device; in the default both-ON tree it is host, where it has always counted.
+# The name is registered once in every configuration, so no tree builds it twice
+# and the bare `cmake -B build` count is unchanged.
+#
+# It takes NO contraction flags and adds no target, so
+# XPMATH_EFT_OFF_EXPECTED / XPMATH_EFT_ON_EXPECTED above are unchanged by it.
+add_test(NAME build_provenance
+         COMMAND ${CMAKE_COMMAND}
+                 -DINFO=${CMAKE_BINARY_DIR}/build-info.txt
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/check_build_provenance.cmake)
+if(XPMATH_BUILD_HOST_TARGETS)
+  xpm_tag_test(host build_provenance)
+else()
+  xpm_tag_test(device build_provenance)
+endif()
 
 # ===========================================================================
 # TAG COMPLETENESS ASSERTION -- CORE_PLAN C5 step 1

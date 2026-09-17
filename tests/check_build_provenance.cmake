@@ -19,9 +19,24 @@
 # NON-EMPTY value for each. It deliberately does not check the values
 # themselves: "arch: mi250" cannot be validated from inside the build, and a
 # check that pretends otherwise would only be asserting that CMake can echo a
-# -D back. The one exception is `git-head`, where the -dirty suffix is
-# reported so a dirty build is visible in the ctest output rather than only in
-# a file nobody opens.
+# -D back. There are two exceptions, and both earn it:
+#
+#   git-head  the -dirty suffix is REPORTED (not failed on) so a dirty build is
+#             visible in the ctest output rather than only in a file nobody
+#             opens.
+#   tree      the value IS validated, against the closed set host/device/both.
+#             Unlike arch, this field is not echoed from a -D -- CMakeLists.txt
+#             DERIVES it from XPMATH_BUILD_HOST_TARGETS and
+#             XPMATH_BUILD_DEVICE_TARGETS, so there is a right answer and this
+#             file knows all three of them. A fourth value means the derivation
+#             was changed without this check being told, which is exactly the
+#             rot this target exists to catch.
+#
+# WHY `tree` IS REQUIRED AT ALL (CORE_PLAN C5 step 5). scripts/xpm_build.sh
+# produces TWO build directories from one command, and the artifacts that come
+# out of them -- logs, raw device results, assembly dumps -- are what later
+# sections commit. Told apart only by path, two stamps become one stamp the
+# moment either is copied off a compute node. `tree:` is what survives that.
 #
 # Invoked as:
 #   cmake -DINFO=<path to build-info.txt> -P this
@@ -41,6 +56,7 @@ endif()
 
 set(REQUIRED
     arch
+    tree
     git-head
     compiler
     compiler-id
@@ -55,6 +71,7 @@ set(REQUIRED
 file(STRINGS "${INFO}" lines)
 set(failures "")
 set(dirty FALSE)
+set(tree_value "")
 
 foreach(key IN LISTS REQUIRED)
   set(found FALSE)
@@ -71,6 +88,9 @@ foreach(key IN LISTS REQUIRED)
       if(key STREQUAL "git-head" AND value MATCHES "-dirty$")
         set(dirty TRUE)
       endif()
+      if(key STREQUAL "tree")
+        set(tree_value "${value}")
+      endif()
       break()
     endif()
   endforeach()
@@ -78,6 +98,17 @@ foreach(key IN LISTS REQUIRED)
     string(APPEND failures "  ${key}: MISSING from ${INFO}\n")
   endif()
 endforeach()
+
+# The one value check. Deliberately AFTER the presence loop, so a MISSING tree
+# field is reported as missing rather than as "not one of host/device/both",
+# which would send the reader looking for a typo in a line that is not there.
+if(NOT tree_value STREQUAL ""
+   AND NOT tree_value STREQUAL "host"
+   AND NOT tree_value STREQUAL "device"
+   AND NOT tree_value STREQUAL "both")
+  string(APPEND failures
+         "  tree: '${tree_value}' is not one of host, device, both\n")
+endif()
 
 if(NOT failures STREQUAL "")
   message("build provenance: FAIL")
