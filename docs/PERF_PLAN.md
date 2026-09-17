@@ -2,6 +2,8 @@
 
 **PARKED.** This arc is paused pending completion of `docs/UPSTREAM_PLAN.md`. The standalone library extraction will restructure the repository layout (namespace moves, header reorganization, build system changes), invalidating the assumptions in this plan. Phase 1 must not be started until the upstream arc completes and this plan is updated to reflect the new structure.
 
+The only cost benchmark (`kokkos_ep_bench_cost`, which timed each backend against `__float128` from libquadmath) was deleted in the CORE arc (section C1). Resuming this arc means writing a new cost benchmark.
+
 ---
 
 This document is the authoritative spec for the perf-measurement arc

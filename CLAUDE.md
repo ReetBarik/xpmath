@@ -53,12 +53,12 @@ requirement of `tests/CMakeLists.txt` — a missing `-dev` package is a configur
 `FATAL_ERROR`, not four silently unregistered targets. `--oracle=mpfr` survives
 as an accepted no-op (CI's monotone gate passes it to the parent binary, which
 may predate the switch); `--oracle=quadmath` is REFUSED with an explanation.
-`scripts/gen_corpus.cpp` still scores against libquadmath and its numbers are
-not comparable to the sweep's point for point.
+`scripts/attic/gen_corpus.cpp` still scores against libquadmath and its numbers
+are not comparable to the sweep's point for point.
 
 ## Executables
 
-Nine targets in CMakeLists.txt, all unconditional. (The four complex demos used
+Eight targets in CMakeLists.txt, all unconditional. (The four complex demos used
 to sit inside a `KOKKOS_HAS_COMPLEX_QUADMATH_WRAPPER` conditional; that probe and
 the patch header behind it are gone.)
 
@@ -70,7 +70,6 @@ the patch header behind it are gone.)
 - `kokkos_ep_demo_qf_complex` — QF complex (24 ops)
 - `kokkos_ep_demo_tf` — TF real (39 ops)
 - `kokkos_ep_demo_tf_complex` — TF complex (24 ops)
-- `kokkos_ep_bench_cost` — cost benchmark across backends
 
 **The demos are TIMING AND SMOKE ONLY.** They print per-op wall time (DD: the
 slowdown vs FP64) and nothing else. They used to print accuracy columns scored
@@ -81,11 +80,6 @@ point (`docs/CORRECTNESS.md`). Each demo still exercises every op it always did
 and still reads its results back host-side — that round trip is the smoke.
 
 **Never run the demos casually** — they are hours of kernel time.
-
-`kokkos_ep_bench_cost` is the one target under `src/` that still includes
-`<quadmath.h>`. There `__float128` is the incumbent being benchmarked, not an
-oracle, so it stays; it is also the only reason CI still builds its Kokkos with
-`Kokkos_ENABLE_LIBQUADMATH=ON`.
 
 ## Branch Structure
 
@@ -214,7 +208,7 @@ two ctest gates over `validation/sweep/` (`docs/CORRECTNESS.md`). Those were
 always the stronger measurement — the demo columns duplicated them at lower
 resolution.
 
-**Shared corpus — `scripts/gen_corpus.cpp`, on `main`, unused.** It emits one
+**Shared corpus — `scripts/attic/gen_corpus.cpp`, on `main`, unused.** It emits one
 shared set of inputs plus a `__float128` reference per (op, element), covering 39
 real + 24 complex ops, so backends could be scored on identical data instead of
 each demo generating its own. No `CMakeLists.txt` references it, nothing consumes
@@ -339,6 +333,8 @@ libquadmath, so the acceptance check that means something is the `nm -D
   one arc and lists what they do NOT cover. Read the closeout block first; it is
   the only place the not-covered list is written down. S8 remains **PARTIAL** —
   its own block says so, and S8b/S8c narrowed it without closing it.
+- **docs/CORE_PLAN_STATUS.md** — STATUS blocks for the CORE arc (C0/C1/C2), parallel to UPSTREAM_PLAN_STATUS.md
+- **docs/TOOLCHAIN_DEFECTS.md** — catalog of toolchain defects (gcc/nvcc/hipcc/libquadmath) with workarounds
 - **docs/TEST_SUITE_PLAN.md** — test suite architecture and conventions
 - **docs/PERF_PLAN.md** — performance measurement plan (PARKED pending the upstream restructure)
 
@@ -350,12 +346,11 @@ libquadmath, so the acceptance check that means something is the `nm -D
   file — only comments referring to a gate that was never written. What is
   actually x86-bound is now narrower than it was: `libquadmath` is gone from the
   sweep oracle (MPFR/MPC replaced it) and gone from the demos (they carry no
-  oracle), and the remaining users are `__float128` as a CARRIER in
+  oracle), and the remaining user is `__float128` as a CARRIER in
   `scripts/sweep_accuracy.cpp` — arithmetic from libgcc, elementary functions
-  from glibc `*f128`, neither of them libquadmath — plus `src/bench_cost.cpp`,
-  which does call `::expq`/`::powq`. The library, `include/xp/`, has no such
-  dependency and compiles anywhere. The enforcement that does exist is in CI:
-  the x86 lanes are where those targets are built.
+  from glibc `*f128`, neither of them libquadmath. The library, `include/xp/`,
+  has no such dependency and compiles anywhere. The enforcement that does exist
+  is in CI: the x86 lanes are where those targets are built.
 - **`std::vector<__float128>` will not compile under `nvcc`.** Kokkos exports
   `-arch=sm_XX` in its interface flags, so every consuming TU gets a device pass;
   nvcc then instantiates `std::initializer_list<__float128>` and rejects the

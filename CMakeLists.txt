@@ -65,10 +65,9 @@ find_package(Kokkos REQUIRED)
 # requirement — a Kokkos built WITHOUT libquadmath, such as the MI250
 # (hip/gfx90a) install, is a first-class supported target.
 #
-# src/bench_cost.cpp is the one file left under src/ that includes <quadmath.h>.
-# There libquadmath is the measurement SUBJECT — the incumbent that DD and QF are
-# timed against — not an oracle, so it stays, and it still resolves ::expq/::powq
-# through whatever supplies them (today, Kokkos's TPL when it is enabled).
+# No target here uses libquadmath. The last consumer was the cost benchmark
+# (src/bench_cost.cpp, which called ::expq/::powq from libquadmath as the
+# incumbent being timed against), and it is deleted.
 
 set(THIRD_PARTY_INCLUDE "${CMAKE_SOURCE_DIR}/third_party/include")
 
@@ -121,17 +120,6 @@ add_executable(kokkos_ep_demo_tf_complex src/demo_tf_complex.cpp)
 target_include_directories(kokkos_ep_demo_tf_complex PRIVATE ${THIRD_PARTY_INCLUDE})
 target_link_libraries(kokkos_ep_demo_tf_complex PRIVATE Kokkos::kokkos)
 
-# ---- Cost benchmark ----------------------------------------------------------
-# Times each backend against the incumbent at comparable precision (FF vs FP64,
-# DD/QF vs __float128) rather than against FP64 across the board. This is the ONE
-# target here that still wants libquadmath, and not as an oracle: __float128 is
-# the incumbent being benchmarked, so src/bench_cost.cpp includes <quadmath.h>
-# and calls ::expq/::powq directly. It resolves them through Kokkos::kokkos when
-# Kokkos carries the LIBQUADMATH TPL; against a Kokkos built without it, this one
-# target does not link. Every other target here is libquadmath-free.
-add_executable(kokkos_ep_bench_cost src/bench_cost.cpp)
-target_include_directories(kokkos_ep_bench_cost PRIVATE ${THIRD_PARTY_INCLUDE})
-target_link_libraries(kokkos_ep_bench_cost PRIVATE Kokkos::kokkos)
 
 # KI-21 is closed by deletion. The four complex demos used to be named through
 # XP_COMPLEX_DEMO_TARGETS because the probe could leave them unbuilt, and naming
@@ -145,7 +133,6 @@ install(TARGETS kokkos_ep_demo
                 kokkos_ep_demo_qf_complex
                 kokkos_ep_demo_tf
                 kokkos_ep_demo_tf_complex
-                kokkos_ep_bench_cost
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
 else()

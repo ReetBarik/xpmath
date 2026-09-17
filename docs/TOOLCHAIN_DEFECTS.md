@@ -55,7 +55,7 @@ left is submitting it, not composing it.
 | **File against** | GCC (libquadmath) |
 | **Found** | during the ulp-metric work |
 | **Symptom** | `sinq`/`cosq`/`tanq` argument reduction degrades with magnitude: clean at 1e40, **~1e34 ulps wrong at 1e60+**. Large-\|x\| trig rows were being scored against a broken reference. |
-| **Our mitigation** | the `--oracle=mpfr` arm — MPFR at 400 bits, with MPC for the complex half. libquadmath remains the default oracle; this is the alternate. |
+| **Our mitigation** | switched to MPFR/MPC at 400 bits as the ONLY oracle. libquadmath is gone: `--oracle=mpfr` is an accepted no-op and `--oracle=quadmath` is REFUSED (see `scripts/sweep_accuracy.cpp` around line 4342). |
 | **Note** | This one is a *reference* defect, not a codegen defect: it made our measurements wrong rather than our results wrong. Filing it needs the write-up TD-1 and TD-2 already have. |
 
 ---
