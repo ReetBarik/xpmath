@@ -939,3 +939,198 @@ decision 3 and they run on the PR.
 - The demos still link Kokkos and still include `third_party/include`. C4
   touched none of them, and they are now the ONLY thing keeping the compat
   wrapper layer compiled. C10 moves them.
+
+---
+
+## C5 — Two build trees from one source tree, because two compilers cannot share one
+
+**Branch:** `core/c5-two-toolchain-build`. **Base:** `main` @ `08b07b8` (the C4
+merge). Three commits, one per chunk: A `b80ce91`, B `efaa103`, C below.
+
+**Outcome.** Green in all three trees, with the counts that C4 established
+preserved exactly:
+
+| tree | how it is built | tests | result |
+|---|---|---|---|
+| `<dir>/host` | `g++`, `XPMATH_WITH_KOKKOS=OFF`, `-ffp-contract=off` | 38 | 38/38 PASS |
+| `<dir>/device` | the arch's compiler, Kokkos | 24 | 24/24 PASS |
+| bare `cmake -B build` | one tree, one compiler, both options `ON` | 61 | 61/61 PASS |
+
+38 + 24 = 62; the union is 61. The intersection is exactly one target,
+`build_provenance`, and that is deliberate: it judges the stamp of whatever tree
+it is in, so a `--only device` tree still gets its provenance checked. It is not
+an unassignable C4 leftover and it should not be "fixed".
+
+### Why two trees at all
+
+CMake supports exactly one `CXX` compiler per project and offers no per-target
+override. The host-side tools — `sweep_accuracy` above all, which carries
+`std::vector<__float128>` — cannot go through `nvcc`, and the device halves
+cannot go through anything else. A100 Cobalt job `1000938` is what this costs
+when it is not enforced: `nvcc_wrapper` set project-wide sent `sweep_accuracy`
+through nvcc, it failed on `std::vector<__float128>`, and it took both accuracy
+gates, both gate selftests and `oracle_conv_test` down with it — 5 of the 11 red
+results in that job were one misrouted translation unit.
+
+Two options select the halves, `XPMATH_BUILD_HOST_TARGETS` and
+`XPMATH_BUILD_DEVICE_TARGETS`, **both defaulting `ON`**. That default is the
+whole compatibility story: the bare `cmake -B build` path builds everything in
+one tree with one compiler, is what CI runs, and is still the correct and
+supported way to build on a host. Nothing about C5 asks a consumer to change
+anything.
+
+### The C++-standard field lied, and now it is measured
+
+The plan expected the split to make the device tree "genuinely C++17". It did
+not, and the field was **asserted rather than assumed** — the measurement came
+first and the documentation followed it, not the other way round.
+
+`build-info.txt` records `cxx-standard: 17`, which is `CMAKE_CXX_STANDARD`, a
+project setting. Kokkos exports `INTERFACE_COMPILE_FEATURES cxx_std_20`, which
+silently raises any target linking it. So the stamp is true of every test TU and
+false of the eight demos, in the device tree and in the bare tree alike.
+
+MEASURED from `compile_commands.json` by `build_provenance`, this run:
+
+```
+host tree     cxx-standard MEASURED: 27 TU(s) at c++17, 0 raised, 0 disagreeing, 0 with no -std=
+device tree   cxx-standard MEASURED: 21 TU(s) at c++17, 8 raised, 0 disagreeing, 0 with no -std=
+bare tree     cxx-standard MEASURED: 48 TU(s) at c++17, 8 raised, 0 disagreeing, 0 with no -std=
+```
+
+The eight raised are exactly `kokkos_ep_demo{,_complex,_ff,_ff_complex,_qf,_qf_complex,_tf,_tf_complex}`,
+and they are the eight targets that link Kokkos. The field was NOT edited to
+match a hope. Two things were added instead:
+
+- a second stamp field, `cxx-standard-raised`, naming the closed set of targets
+  allowed above the project standard, or `(none: no target in this tree links
+  Kokkos)` when there are none — which is what the host tree says;
+- a measurement in `tests/check_build_provenance.cmake` that reads every
+  `command` line of `compile_commands.json`, attributes it to a target, and
+  FAILS on any TU at a standard other than the stamped one that is not in that
+  closed set.
+
+**This is not a second scorer.** It judges build flags, not numerical results;
+`docs/CORRECTNESS.md` still has exactly one measurement and one verdict per
+point.
+
+Four decisions inside that measurement, none of them in the plan:
+
+- **It is not a new ctest target.** A standalone `cxx_standard` test would have
+  moved all three counts to 39/25/62 and broken the very numbers this section
+  has to preserve. It is folded into `build_provenance`, which already judges
+  that same file.
+- **`CMAKE_EXPORT_COMPILE_COMMANDS` is set as a normal variable, not a cache
+  entry.** `set(... CACHE BOOL ...)` without `FORCE` was a silent no-op: CMake
+  pre-declares that entry empty during compiler detection, so the cache showed
+  `CMAKE_EXPORT_COMPILE_COMMANDS:BOOL=` and no database was written. `FORCE` was
+  rejected because it would override an explicit `-D...=OFF`; the guard is
+  `if("$CACHE{...}" STREQUAL "")`.
+- **The raised-target list travels comma-separated.** Passed as a CMake list,
+  the generator split `-DRAISED_TARGETS=a;b;c` into separate arguments and the
+  check reported "1 raised, 7 disagreeing". It is joined with `,` at
+  registration and split back in the script.
+- **`IN_LIST` does not exist in `cmake -P` script mode** (no project, hence no
+  CMP0057), and hard-errors with "Unknown arguments specified". `list(FIND)` is
+  used instead. This only ever failed in the device tree, the only tree with a
+  non-empty raised list.
+
+**The gate has been seen to fail.** Per §0 — a gate whose pass condition is
+silence must prove it ran — a copy of `build-info.txt` was poisoned to
+`cxx-standard: 20` and the script re-run: exit 1, with every disagreeing target
+listed by name. And when the compile database is genuinely absent the check
+says `NOT MEASURED` out loud rather than passing quietly; that is how the
+cache-variable no-op above was caught.
+
+### CI
+
+`.github/workflows/ci.yml` needed **no repair** — CI never calls
+`scripts/xpm_build.sh`, it uses the bare one-tree path, both options default
+`ON`, and the count it asserts is still 61. The two-tree change broke nothing
+there.
+
+One step was ADDED, in the `no-kokkos-build` lane: **"Assert the host/device
+partition is exact"**. It configures a host-only and a device-only tree
+(configure only, no build — seconds), extracts both `ctest -N` name lists, and
+asserts 38 / 24 / 61, that the intersection is exactly `build_provenance`, and
+that the union `diff`s clean against the both-ON list. The gap it closes is that
+the union count of 61 stays 61 even if a target were double-tagged or dropped
+out of one tree, and the configure-side assertion in `tests/CMakeLists.txt`
+catches only an *untagged* test.
+
+The `device-hip` lane is untouched and is still GATING. The second
+`continue-on-error`, on the non-gating baseline report inside the monotone-gate
+lane, is also untouched.
+
+### Gate
+
+All three runs below are from this chunk, on this tree.
+
+**Gate 1/2** — `scripts/xpm_build.sh --arch host --build-dir /tmp/c5`, merged
+verdict:
+
+```
+   tree     tests  passed  failed  result           note
+   host        38      38       0  PASS             clean
+   device      24      24       0  PASS             clean
+-----------------------------------------------------------
+   TOTAL       62      62       0
+ RESULT: PASS -- every tree built and every registered test passed.
+```
+
+then both trees re-run explicitly:
+
+```
+38/38 Test #26: sweep_monotone_gate_selftest .....   Passed  675.41 sec
+100% tests passed, 0 tests failed out of 38
+Total Test time (real) = 675.42 sec
+
+24/24 Test  #1: dd_invariant_test ......................   Passed   76.95 sec
+100% tests passed, 0 tests failed out of 24
+Total Test time (real) =  76.96 sec
+```
+
+**Gate 3** — no device compiler reached the host tree:
+
+```
+device-compiler mentions in the HOST tree: 0
+```
+
+**Gate 4** — the bare path, unchanged and still 61:
+
+```
+cmake -B /tmp/c5_bare -DCMAKE_PREFIX_PATH=$HOME/kokkos-install-quadmath
+-- C5 side tags: 61 tests registered = 38 host + 23 device (HOST_TARGETS=ON, DEVICE_TARGETS=ON)
+
+61/61 Test #49: sweep_monotone_gate_selftest ...........   Passed  673.32 sec
+100% tests passed, 0 tests failed out of 61
+Total Test time (real) = 703.31 sec
+```
+
+(38 host + 23 device = 61 in the both-ON tree, because `build_provenance` is
+counted in the host bucket there; the device-only tree registers it separately
+and reaches 24. Same target, same reason as the 62-vs-61 arithmetic above.)
+
+### What C5 does NOT cover
+
+- **No device compiler has been run by this section.** There is no nvcc and no
+  hipcc on this login node. `--arch host` builds the device tree with `g++` and
+  the harness's serial backend; every device-tagged test above executed on a
+  CPU. The `--arch a100` and `--arch mi250` rows are DATA, exercised by C7 and
+  C8, and the A100 row is still expected to hit the S6 `__float128` device-TU
+  blocker for anything host-side that strays into it.
+- **No GPU executed anything.** Same statement as C4's: the device halves have
+  been compiled for both vendors and executed on neither.
+- **Nothing here changes a single accuracy number.** No scorer, bound, gate
+  threshold, baseline row or oracle was touched. `validation/sweep/` is
+  byte-identical.
+- **The C++-standard measurement reads the compile DATABASE, not the object
+  files.** It proves what flags CMake handed each TU, which is exactly the
+  question the stamp was lying about. It does not prove what the compiler then
+  did with them, and it is silent in a generator that exports no database —
+  loudly silent, but silent.
+- **The eight demos are still at C++20 and still link Kokkos.** C5 documents
+  that rather than fixing it. They remain the only Kokkos consumers and the only
+  thing compiling `third_party/include/`; C10 moves them.
+- **`--only device` on a real compute node is untested.** The flag works and is
+  documented, but every invocation so far has been `--arch host`.

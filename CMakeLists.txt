@@ -17,6 +17,41 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# ---------------------------------------------------------------------------
+# THE C++ STANDARD IS MEASURED, NOT ASSERTED BY THIS LINE -- CORE_PLAN C5 step 6
+# ---------------------------------------------------------------------------
+# `cxx-standard: 17` has been in build-info.txt since the stamp existed, and it
+# was NOT true of every translation unit: Kokkos 5.1.0 carries
+# INTERFACE_COMPILE_FEATURES cxx_std_20, which raises every target that links
+# it, and the stamp -- which only ever echoed CMAKE_CXX_STANDARD back -- said
+# 17 anyway. S8c noticed the discrepancy on gfx90a and nothing in the build
+# could confirm or deny it.
+#
+# compile_commands.json is the one artifact that records the flags each TU
+# ACTUALLY got, so this turns it on and `build_provenance` reads it back. Only
+# for the generators that can produce it; asking a generator that cannot would
+# make the check fail on a missing file that was never going to be written.
+# Not FORCEd -- a caller who turns it off gets a loud NOT MEASURED line from
+# the check rather than a failure.
+#
+# SET AS A NORMAL VARIABLE, AND ONLY WHEN THE CACHE ENTRY IS EMPTY. CMake
+# pre-declares CMAKE_EXPORT_COMPILE_COMMANDS as an empty cache entry during
+# compiler detection, so `set(... CACHE BOOL ...)` without FORCE is a no-op --
+# measured: the entry stayed empty, no database was written, and the check
+# correctly reported NOT MEASURED. FORCE would instead overrule a caller who
+# passed -DCMAKE_EXPORT_COMPILE_COMMANDS=OFF on purpose. The empty-cache test
+# distinguishes "nobody asked" from "somebody said no".
+if(CMAKE_GENERATOR MATCHES "Makefile|Ninja")
+  if("$CACHE{CMAKE_EXPORT_COMPILE_COMMANDS}" STREQUAL "")
+    set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+  endif()
+endif()
+
+# Filled in by the demo block below when Kokkos is linked, and passed to
+# check_build_provenance.cmake as the CLOSED SET of targets allowed to compile
+# above CMAKE_CXX_STANDARD. Empty here so a tree without those targets says so.
+set(XPMATH_KOKKOS_LINKED_TARGETS "")
+
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message(STATUS "Setting build type to 'Release' as none was specified.")
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
@@ -49,6 +84,49 @@ endif()
 option(XPMATH_WITH_KOKKOS
        "Build the Kokkos demos and the Kokkos-linked tests (needs a Kokkos install)" ON)
 
+# ---------------------------------------------------------------------------
+# WHICH SIDE OF THE BUILD TO PRODUCE -- CORE_PLAN C5 step 1
+# ---------------------------------------------------------------------------
+# CMake supports exactly ONE CXX compiler per project and has no per-target
+# override, so "host tools with g++, device tests with nvcc/hipcc" can only be
+# two build trees. These two options are what lets one source tree produce
+# either half. C5's remaining steps (the wrapper driving both trees) are a
+# separate change; this one only makes the halves addressable.
+#
+# BOTH DEFAULT ON, AND THAT IS LOAD-BEARING. With both ON the build is exactly
+# what it was before this option existed -- one tree, one compiler, all 61
+# ctest targets. That is the `cmake -B build` path documented in CLAUDE.md and
+# it is what CI runs; a default that changed the target set would be a silent
+# CI change wearing a refactor's clothes.
+#
+# THE FAILURE THIS PREVENTS is a host-only tool compiled by a device compiler.
+# On A100 (job 1000938) `xpm_build.sh --arch a100` set nvcc_wrapper
+# project-wide, so sweep_accuracy -- which links no Kokkos and no device code
+# at all -- went through nvcc and failed, taking both gates, oracle_conv_test
+# and both gate selftests down with it. Five of that job's eleven red results
+# were that one mistake.
+#
+# EVERY registered test is tagged host or device, and the assertion at the
+# bottom of tests/CMakeLists.txt fails the CONFIGURE if one is not. A target
+# that is silently built in both trees is the other half of the same defect:
+# it gets compiled twice, and the tree it does not belong to is the one that
+# will eventually break it.
+option(XPMATH_BUILD_HOST_TARGETS
+       "Build the host-side targets: the oracle-scored tools, the gates and the host test halves" ON)
+option(XPMATH_BUILD_DEVICE_TARGETS
+       "Build the device-side targets: the *_test_device halves, the harness self-test and the demos" ON)
+
+if(NOT XPMATH_BUILD_HOST_TARGETS AND NOT XPMATH_BUILD_DEVICE_TARGETS)
+  # Not a philosophical objection -- this configuration registers zero tests,
+  # and `ctest` over zero tests exits 0. That is the same trap as
+  # `ctest --test-dir` on a missing directory, and it would report a green run
+  # having measured nothing.
+  message(FATAL_ERROR
+          "XPMATH_BUILD_HOST_TARGETS and XPMATH_BUILD_DEVICE_TARGETS are both "
+          "OFF: this build would contain no targets and `ctest` over it would "
+          "exit 0 having measured nothing. Turn at least one back ON.")
+endif()
+
 if(XPMATH_WITH_KOKKOS)
 find_package(Kokkos REQUIRED)
 
@@ -78,6 +156,28 @@ set(THIRD_PARTY_INCLUDE "${CMAKE_SOURCE_DIR}/third_party/include")
 # needs it as well. Appended to the same variable (which tests/CMakeLists.txt
 # also consumes) so no individual target's include list has to change.
 list(APPEND THIRD_PARTY_INCLUDE "${CMAKE_SOURCE_DIR}/include")
+
+# --- THE EIGHT DEMOS ARE DEVICE TARGETS -- CORE_PLAN C5 step 1 --------------
+# Every one of them launches Kokkos kernels, so they belong on the side of the
+# split that gets the arch's compiler and the arch's Kokkos. Left ungated they
+# would be compiled by BOTH trees: once by the host tree's g++, where nothing
+# about them is being exercised that the device tree does not exercise better,
+# and once by the device tree's nvcc/hipcc, where they are the point. Building
+# them twice is the "silently built in both configurations" failure named above,
+# spelled with executables instead of tests.
+#
+# The demos are not ctest targets, so they do not appear in the tagged-test
+# assertion at the bottom of tests/CMakeLists.txt. This comment is where their
+# side is recorded.
+#
+# The install() list goes inside the same guard: naming a target that was never
+# added is a hard configure error, which is how KI-21 used to fire.
+#
+# CONSEQUENCE, WRITTEN DOWN RATHER THAN DISCOVERED LATER: third_party/include/
+# is exercised ONLY by these eight (tests/CMakeLists.txt's C4 block says so), so
+# a host-only tree does not compile the Kokkos compat wrappers at all. A build
+# with both options ON -- the default, the bare `cmake -B build`, and CI -- does.
+if(XPMATH_BUILD_DEVICE_TARGETS)
 
 add_executable(kokkos_ep_demo src/demo_real.cpp)
 target_include_directories(kokkos_ep_demo PRIVATE ${THIRD_PARTY_INCLUDE})
@@ -120,6 +220,22 @@ add_executable(kokkos_ep_demo_tf_complex src/demo_tf_complex.cpp)
 target_include_directories(kokkos_ep_demo_tf_complex PRIVATE ${THIRD_PARTY_INCLUDE})
 target_link_libraries(kokkos_ep_demo_tf_complex PRIVATE Kokkos::kokkos)
 
+# THE ONLY TARGETS IN THIS PROJECT THAT LINK KOKKOS, and therefore the only
+# ones Kokkos's INTERFACE_COMPILE_FEATURES cxx_std_20 raises off C++17
+# (CORE_PLAN C5 step 6). Written here, next to the eight target() calls, so
+# adding a ninth Kokkos consumer and forgetting this list is a failing
+# build_provenance rather than a silently wrong stamp. After CORE_PLAN C4 no
+# test links Kokkos, so this list is the whole of the exception.
+set(XPMATH_KOKKOS_LINKED_TARGETS
+    kokkos_ep_demo
+    kokkos_ep_demo_complex
+    kokkos_ep_demo_ff
+    kokkos_ep_demo_ff_complex
+    kokkos_ep_demo_qf
+    kokkos_ep_demo_qf_complex
+    kokkos_ep_demo_tf
+    kokkos_ep_demo_tf_complex)
+
 
 # KI-21 is closed by deletion. The four complex demos used to be named through
 # XP_COMPLEX_DEMO_TARGETS because the probe could leave them unbuilt, and naming
@@ -134,6 +250,12 @@ install(TARGETS kokkos_ep_demo
                 kokkos_ep_demo_tf
                 kokkos_ep_demo_tf_complex
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+else()
+  message(STATUS
+    "XPMATH_BUILD_DEVICE_TARGETS=OFF: the eight Kokkos demos are not built in "
+    "this tree, and with them third_party/include/ is not compiled here.")
+endif()  # XPMATH_BUILD_DEVICE_TARGETS
 
 else()
   message(STATUS
@@ -279,12 +401,57 @@ endif()
 
 string(TIMESTAMP _xp_stamp_utc "%Y-%m-%dT%H:%M:%SZ" UTC)
 
+# THE STANDARD THIS BUILD DOES NOT COMPILE EVERYTHING AT -- CORE_PLAN C5 step 6.
+#
+# `cxx-standard` above is what the project asks for. This field is what the
+# exceptions are, named rather than left for a future reader to rediscover the
+# way S8c did. It is derived from the Kokkos-linked target list, and
+# check_build_provenance.cmake MEASURES the same claim independently out of
+# compile_commands.json -- so a wrong value here is a failing test, not a
+# comment nobody checks.
+if(XPMATH_KOKKOS_LINKED_TARGETS)
+  list(LENGTH XPMATH_KOKKOS_LINKED_TARGETS _xp_n_raised)
+  string(REPLACE ";" " " _xp_raised_names "${XPMATH_KOKKOS_LINKED_TARGETS}")
+  set(_xp_raised
+      "c++20 on ${_xp_n_raised} Kokkos-linked target(s) (Kokkos INTERFACE_COMPILE_FEATURES cxx_std_20): ${_xp_raised_names}")
+else()
+  set(_xp_raised "(none: no target in this tree links Kokkos)")
+endif()
+
+# WHICH SIDE OF THE C5 SPLIT THIS BUILD DIRECTORY IS -- CORE_PLAN C5 step 5.
+#
+# DERIVED FROM THE TWO OPTIONS, NOT PASSED IN AS A -D. scripts/xpm_build.sh
+# produces <dir>/host and <dir>/device and could have stamped the answer it
+# already knows, but then a bare `cmake -B build` -- which is what CI runs and
+# what anybody debugging runs -- would carry no tree field at all, or a wrong
+# one, and this file is the ONE thing every build goes through. Deriving it
+# also makes the field impossible to disagree with the build it describes.
+#
+# `both` is a real and correct value, not a fallback: it is the one-tree,
+# one-compiler configuration the bare cmake path produces, and an artifact from
+# it genuinely was not produced by either half alone. The both-OFF case cannot
+# reach here -- the option block near the top of this file makes it a
+# FATAL_ERROR, because it would register zero tests and `ctest` over zero tests
+# exits 0.
+#
+# THE PATH IS NOT THE ANSWER. Two stamps produced by one wrapper run must be
+# told apart by CONTENT: a log pasted into a STATUS block, or a build-info.txt
+# copied off a compute node, arrives without its directory.
+if(XPMATH_BUILD_HOST_TARGETS AND XPMATH_BUILD_DEVICE_TARGETS)
+  set(_xp_tree "both")
+elseif(XPMATH_BUILD_HOST_TARGETS)
+  set(_xp_tree "host")
+else()
+  set(_xp_tree "device")
+endif()
+
 # check_build_provenance.cmake parses `key: value`, so every field is one line
 # and no value may be empty.
 file(WRITE "${CMAKE_BINARY_DIR}/build-info.txt"
 "# xpmath build provenance -- written by CMakeLists.txt at configure time.
 # Regenerated on every configure. Do not edit; do not commit.
 arch: ${XPMATH_ARCH}
+tree: ${_xp_tree}
 git-head: ${_xp_git_head}
 compiler: ${CMAKE_CXX_COMPILER}
 compiler-id: ${CMAKE_CXX_COMPILER_ID}
@@ -292,6 +459,7 @@ compiler-version: ${CMAKE_CXX_COMPILER_VERSION}
 kokkos: ${XPMATH_WITH_KOKKOS}
 kokkos-prefix: ${_xp_kokkos_prefix}
 cxx-standard: ${CMAKE_CXX_STANDARD}
+cxx-standard-raised: ${_xp_raised}
 build-type: ${CMAKE_BUILD_TYPE}
 opt-level: ${XPMATH_OPT}
 cxx-flags: ${_xp_all_flags}
@@ -301,7 +469,7 @@ timestamp-utc: ${_xp_stamp_utc}
 if(_xp_git_head MATCHES "-dirty$")
   message(STATUS "build provenance: tree is DIRTY -- build-info.txt records ${_xp_git_head}")
 endif()
-message(STATUS "build provenance: ${CMAKE_BINARY_DIR}/build-info.txt (arch=${XPMATH_ARCH})")
+message(STATUS "build provenance: ${CMAKE_BINARY_DIR}/build-info.txt (arch=${XPMATH_ARCH}, tree=${_xp_tree})")
 
 # ---- Tests (T0.1: backend-parameterized harness) ----------------------------
 # THIRD_PARTY_INCLUDE (set above) is NO LONGER consumed by tests/CMakeLists.txt.

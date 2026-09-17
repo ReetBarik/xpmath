@@ -244,10 +244,11 @@ from the data.
 
 ## 5. Running it
 
-`scripts/xpm_build.sh --arch host --build-dir <dir>` does the three lines below
-for you and additionally stamps `build-info.txt`, which the `build_provenance`
-target checks. The explicit form is kept because it is what CI runs and what
-this section's claims are about:
+### The bare path — one tree, one compiler, everything
+
+**This still works, it is what CI runs, and it is the right way to build on a
+host.** One `cmake`, one compiler, all 61 registered tests including both gates
+and both gate self-tests:
 
 ```bash
 module use /soft/modulefiles && module load gcc/13.3.0 cmake/3.28.3   # gcc FIRST
@@ -256,6 +257,52 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$HOME/kokkos-
 cmake --build build -j16
 ctest --test-dir build -j8 --timeout 1800
 ```
+
+`XPMATH_BUILD_HOST_TARGETS` and `XPMATH_BUILD_DEVICE_TARGETS` both default `ON`,
+which is exactly this: every target in one directory, compiled by whatever
+`CXX` is. Nothing below replaces it.
+
+### The wrapper — two trees, because two compilers cannot share one
+
+```bash
+scripts/xpm_build.sh --arch {host|a100|mi250} --build-dir <dir> [--only {host|device|both}]
+```
+
+CMake supports one `CXX` per project and has no per-target override, so "host
+tools with g++, device tests with nvcc/hipcc" is two configures. The wrapper
+runs both and returns one verdict:
+
+| tree | compiler | contains |
+|---|---|---|
+| `<dir>/host` | always `g++`, no Kokkos, identical on all three arches | `sweep_accuracy`, **both gates, both gate self-tests**, `oracle_conv_test`, `domains_fresh` — 38 tests |
+| `<dir>/device` | the arch's compiler and Kokkos | the `*_test_device` halves, the harness self-test, the demos — 24 tests |
+
+38 + 24 = 62 and the union is 61: `build_provenance` is registered in every
+tree, because a `--only device` tree configured on a compute node still has a
+build directory whose artifacts must be traceable. It is the one intentional
+overlap.
+
+**Everything this document judges is in the host tree.** The gates score host
+results against MPFR/MPC with a host `__float128` carrier, which is why they are
+compiled by `g++` on every arch and never shown to a device compiler. On A100
+(job `1000938`) they were: `sweep_accuracy` went through `nvcc_wrapper` and
+failed on `std::vector<__float128>`, and five of that job's eleven red results
+were that one mistake. So the gate recipes in this section are run against
+`<dir>/host`:
+
+```bash
+scripts/xpm_build.sh --arch host --build-dir /tmp/xpm
+ctest --test-dir /tmp/xpm/host   -j8 --timeout 1800     # the gates live here
+ctest --test-dir /tmp/xpm/device -j8 --timeout 1800
+```
+
+Both paths stamp `build-info.txt`, which the `build_provenance` target checks —
+including, since C5, **measuring** the C++ standard each translation unit was
+actually given out of `compile_commands.json` rather than echoing
+`CMAKE_CXX_STANDARD` back. Measured: every test TU is `-std=c++17`; the eight
+Kokkos-linked demos are `-std=c++20`, which is Kokkos's
+`INTERFACE_COMPILE_FEATURES cxx_std_20` and is named in the stamp's
+`cxx-standard-raised` field.
 
 The `LD_LIBRARY_PATH` export is still here for the rest of the suite, but it is
 **no longer load-bearing for `sweep_accuracy`**. It used to be: without it the
