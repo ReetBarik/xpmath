@@ -63,6 +63,21 @@ anything that issues a verdict; the whole point of the current arrangement is
 that nothing else competes with the sweep gates. This file is a map of what is
 registered, nothing more.
 
+## One target here is not a test: `sweep_device`
+
+`tests/CMakeLists.txt` builds `scripts/sweep_device.cpp` into
+`<build>/tests/sweep_device` in the **device tree only** (CORE_PLAN C6 step 1).
+It evaluates every backend × op × grid point through `tests/device_harness.hpp`
+and writes the raw result limbs as hex bit patterns; the host `sweep_accuracy`
+scores them. That is C6's shape — **one scorer, two producers** — and the
+producer issues no verdict, holds no oracle and computes no ulps, because
+`docs/CORRECTNESS.md` permits exactly one scorer.
+
+It registers **no `add_test()`**, so the 61 above is unchanged and the side-tag
+assertion does not apply to it (that assertion constrains registered tests, not
+targets). The device gates that will run it are C6 step 5. Do not "fix" the
+count on account of this target.
+
 ## The accuracy record
 
 | Target | What it asserts |

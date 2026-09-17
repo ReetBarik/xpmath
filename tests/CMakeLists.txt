@@ -602,6 +602,60 @@ xpm_add_device_eft_test(qf_eft_test_device)
 xpm_add_device_eft_test(qf_fma_guard_test)              # -> qf_fma_guard_test              (OFF, gates)
 xpm_add_device_eft_test_contract_on(qf_fma_guard_test)  # -> qf_fma_guard_test_contract_on  (ON, reports)
 
+# --- THE DEVICE PRODUCER FOR THE ACCURACY SWEEP (CORE_PLAN C6, chunk A) -----
+# scripts/sweep_device.cpp evaluates every backend x op x grid point through
+# tests/device_harness.hpp and writes the RAW RESULT LIMBS as hex bit patterns.
+# It is the second PRODUCER in C6's one-scorer/two-producer design; it issues no
+# verdict and contains no ulp arithmetic, because docs/CORRECTNESS.md permits
+# exactly one scorer and that is sweep_accuracy.
+#
+# IT IS REGISTERED BY HAND rather than through xpm_add_device_test, for two
+# reasons the helper cannot express:
+#   * the source is scripts/sweep_device.cpp, not tests/<name>.cpp -- the same
+#     arrangement sweep_accuracy has, and for the same reason it was given:
+#     a target built by the build system can never be the stale hand-compiled
+#     binary somebody left in the source tree. The binary lands at
+#     <build>/tests/sweep_device. (CORE_PLAN's C6 text says
+#     <build>/scripts/sweep_device; there is no scripts/ directory in the build
+#     tree, because `tests` is the only add_subdirectory() in the project.)
+#   * it needs ${CMAKE_SOURCE_DIR}/tests on the include path from a source that
+#     does not live there, to reach device_harness.hpp.
+#
+# NO add_test(). C6 step 5 is where the device GATES are specified, and that is
+# a later section's work; a placeholder test here would move the pinned suite
+# counts (device 24, union 61, in three places in .github/workflows/ci.yml)
+# once now and again then. The counts are therefore UNCHANGED by this chunk,
+# and the tag-completeness assertion at the bottom of this file is satisfied
+# trivially -- it constrains registered TESTS, and this registers none.
+#
+# The grid path is compiled in rather than defaulted in the source, so the
+# binary finds the committed manifest from any working directory and a reader
+# can see which file that is without grepping a #define.
+if(XPMATH_BUILD_DEVICE_TARGETS)
+  add_executable(sweep_device ${CMAKE_SOURCE_DIR}/scripts/sweep_device.cpp)
+  target_include_directories(sweep_device PRIVATE
+                             ${CMAKE_SOURCE_DIR}/include
+                             ${CMAKE_SOURCE_DIR}/tests)
+  target_compile_features(sweep_device PRIVATE cxx_std_17)
+  target_compile_definitions(sweep_device PRIVATE
+    XPMATH_SWEEP_GRID_DEFAULT="${CMAKE_SOURCE_DIR}/validation/sweep/sweep_grid.csv"
+    # The ~40 domain diagnostics in the numeric headers ("DDEXP: overflow") are
+    # compiled OUT here. This is not cosmetic. The sweep deliberately evaluates
+    # every op at overflow, at poles and outside its domain, so the diagnostics
+    # fire in bulk: MEASURED on this tree, a diagnostics-ON host run emitted
+    # ~269 KB of them to stdout. On a GPU that is a device-side printf per
+    # offending thread, which costs registers in every kernel, serialises on the
+    # host-side buffer and can be DROPPED under load -- a producer whose
+    # correctness story is "the limbs transfer losslessly" should not also be
+    # pushing hundreds of thousands of format strings through that path.
+    #
+    # It changes no result, and that is MEASURED rather than taken from
+    # include/xp/config.hpp's claim that every diagnostic site returns the same
+    # value either way: the two builds' 436,080-row outputs were compared with
+    # `cmp` and are BYTE-IDENTICAL.
+    XPMATH_ENABLE_DIAGNOSTICS=0)
+endif()
+
 # --- WHERE THE KOKKOS-LINKED TESTS WENT ------------------------------------
 # There is no if(XPMATH_WITH_KOKKOS) here any more. It used to wrap everything
 # that linked Kokkos::kokkos to exercise the compat wrappers in
