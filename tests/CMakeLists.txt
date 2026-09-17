@@ -1403,9 +1403,34 @@ endif()  # ===== END OF THE HOST-SIDE REGION =====
 #
 # It takes NO contraction flags and adds no target, so
 # XPMATH_EFT_OFF_EXPECTED / XPMATH_EFT_ON_EXPECTED above are unchanged by it.
+#
+# IT ALSO MEASURES THE C++ STANDARD -- CORE_PLAN C5 step 6, and the reason this
+# is one test rather than two. `cxx-standard: 17` was the one stamped field
+# known to be false (Kokkos raises its linked targets to c++20 and the stamp
+# echoed CMAKE_CXX_STANDARD regardless), so the check reads the -std= back off
+# compile_commands.json. RAISED_TARGETS is the closed set allowed to differ,
+# spelled out in the top-level CMakeLists.txt beside the add_executable calls.
+# A separate ctest target would have changed all three suite counts to assert a
+# property of the same file this one already judges.
+#
+# COMPILE_COMMANDS is passed only when the database will exist. Handing the
+# check a path to a file the generator was never going to write would fail on
+# the generator rather than on the build.
+#
+# COMMA-SEPARATED, NOT SEMICOLON. A `;` inside an add_test() argument is a list
+# separator to the generator, which splits it into one argument per target:
+# measured, the check then saw RAISED_TARGETS=kokkos_ep_demo alone and reported
+# the other seven demos as disagreeing. The script splits the commas back.
+set(_xp_prov_args -DINFO=${CMAKE_BINARY_DIR}/build-info.txt)
+if(CMAKE_EXPORT_COMPILE_COMMANDS)
+  string(REPLACE ";" "," _xp_raised_csv "${XPMATH_KOKKOS_LINKED_TARGETS}")
+  list(APPEND _xp_prov_args
+       -DCOMPILE_COMMANDS=${CMAKE_BINARY_DIR}/compile_commands.json
+       -DRAISED_TARGETS=${_xp_raised_csv})
+endif()
 add_test(NAME build_provenance
          COMMAND ${CMAKE_COMMAND}
-                 -DINFO=${CMAKE_BINARY_DIR}/build-info.txt
+                 ${_xp_prov_args}
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/check_build_provenance.cmake)
 if(XPMATH_BUILD_HOST_TARGETS)
   xpm_tag_test(host build_provenance)

@@ -19,6 +19,11 @@ cmake --build build -j
 cmake --install build
 ```
 
+One directory, one compiler, everything — and that is the supported way to
+build and install this project on a host. It is what CI runs. If you are
+consuming xpmath, this is the whole of what you need; the two-tree section
+below is about testing it on a GPU and does not change what gets installed.
+
 ### Building with Kokkos
 
 Kokkos ≥5.1 built at C++20, and nothing else. In particular **no
@@ -40,15 +45,46 @@ ctest --test-dir build
 ```
 
 That gets you the installable package, **both accuracy gates**, and every test
-that does not link Kokkos. What it skips is what genuinely needs Kokkos: the
-nine demos and the tests that exercise the compat wrappers in
-`third_party/include/`.
+— no test in this repository links Kokkos any more. What it skips is the eight
+demos, which are the only remaining Kokkos consumers and the only thing that
+exercises the compat wrappers in `third_party/include/`.
 
 This used to be impossible. `find_package(Kokkos REQUIRED)` sat at the top of
 the top-level `CMakeLists.txt` and gated everything below it — including the
 header-only export, its install rules, and the whole test suite — so the
 Kokkos-free core could not be built, installed or tested without Kokkos, and
 `sweep_accuracy`, which links no Kokkos at all, was unreachable without it.
+
+### Building the device side: two trees, one command
+
+CMake supports exactly one `CXX` compiler per project and offers no per-target
+override, so compiling the host-side tools with `g++` and the device-side tests
+with `nvcc`/`hipcc` means **two build trees**. Two CMake options select the
+halves, both defaulting `ON`:
+
+| option | default | selects |
+|---|---|---|
+| `XPMATH_BUILD_HOST_TARGETS` | `ON` | the oracle-scored tools, the accuracy gates, the host test halves |
+| `XPMATH_BUILD_DEVICE_TARGETS` | `ON` | the `*_test_device` halves, the device-harness self-test, the demos |
+
+**With both left alone you get the single-tree build above, unchanged.** That
+is the point of the defaults: a consumer, an installer and CI see no
+difference.
+
+The wrapper drives both halves for a named GPU and returns one merged verdict:
+
+```sh
+scripts/xpm_build.sh --arch {host|a100|mi250} --build-dir <dir>
+# <dir>/host    g++, no Kokkos, identical on every arch — 38 tests
+# <dir>/device  the arch's compiler and Kokkos       — 24 tests
+scripts/xpm_build.sh --arch a100 --build-dir <dir> --only device   # on a compute node
+```
+
+`--arch host` builds the device tree too, with the harness's serial backend, so
+the device-side tests run without a GPU. Building the host tools with a device
+compiler is the failure this exists to prevent: on A100 job `1000938`
+`sweep_accuracy` was handed to `nvcc_wrapper`, failed on
+`std::vector<__float128>`, and took both accuracy gates down with it.
 
 ## Use it from another project
 
@@ -78,8 +114,9 @@ never include a Kokkos header — every mention of Kokkos in them is a comment �
 so a consumer gets the numeric core with no third-party libraries at all, not
 even libquadmath.
 
-Kokkos is used by this repository's own demos and by its device test matrix
-(7 nvcc targets plus hipcc in CI), through a compat wrapper in
+Kokkos is used by this repository's own eight demos and by nothing else — its
+device tests run on a Kokkos-free CUDA/HIP harness (`tests/device_harness.hpp`).
+The demos reach Kokkos through a compat wrapper in
 `third_party/include/` that is deliberately **not** installed. If you want
 xpmath inside Kokkos kernels, bring your own Kokkos and use it alongside — the
 types are annotated `XPMATH_INLINE_FUNCTION` and run on device.

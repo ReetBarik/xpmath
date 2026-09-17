@@ -224,6 +224,72 @@ jobs:
             exit 1
           fi
 
+      # THE C5 PARTITION, ASSERTED RATHER THAN DESCRIBED.
+      #
+      # CORE_PLAN C5 split the build into a host tree (g++, the oracle-scored
+      # tools and both gates) and a device tree (nvcc/hipcc, the *_test_device
+      # halves), because CMake has one CXX per project and A100 job 1000938 lost
+      # five results to sweep_accuracy being handed to nvcc. The guarantee is
+      # that every registered test belongs to exactly one side and the two sides
+      # add back up to the whole suite.
+      #
+      # NOTHING ELSE IN CI CHECKS THAT. The step above counts the union; a target
+      # tagged BOTH sides, or a target that quietly stopped being registered in
+      # one, leaves the union at 61 and is invisible there. The configure-side
+      # assertion in tests/CMakeLists.txt catches an UNTAGGED test, not a
+      # double-tagged one. This step is the missing half, and it costs two
+      # configures and no build.
+      #
+      # 38 + 24 = 62, and the union is 61. The one deliberate overlap is
+      # build_provenance, which is registered in EVERY tree with a computed tag:
+      # a `--only device` tree is what C7 and C8 configure on a compute node, and
+      # that tree's logs are the artifacts whose provenance is hardest to
+      # reconstruct. The intersection is asserted to be exactly that one name, so
+      # a second target joining it is a failure and not a rounding error.
+      #
+      # Kokkos is OFF here, which is why this lives in this lane: the partition
+      # is a property of the two options, the runner has no Kokkos, and the
+      # counts are the same either way (the demos are not tests). Measured on the
+      # C5 gate run.
+      - name: Assert the host/device partition is exact
+        env:
+          CXX: g++-13
+        run: |
+          set -euo pipefail
+          cmake -S . -B build-hostonly -DCMAKE_BUILD_TYPE=Release \
+                -DXPMATH_WITH_KOKKOS=OFF \
+                -DXPMATH_BUILD_HOST_TARGETS=ON -DXPMATH_BUILD_DEVICE_TARGETS=OFF > /dev/null
+          cmake -S . -B build-deviceonly -DCMAKE_BUILD_TYPE=Release \
+                -DXPMATH_WITH_KOKKOS=OFF \
+                -DXPMATH_BUILD_HOST_TARGETS=OFF -DXPMATH_BUILD_DEVICE_TARGETS=ON > /dev/null
+          names() { ctest --test-dir "$1" -N | sed -n 's/^  Test *#[0-9]*: //p' | sort; }
+          names build-hostonly   > /tmp/host.names
+          names build-deviceonly > /tmp/device.names
+          names build-nokokkos   > /tmp/all.names
+          h=$(wc -l < /tmp/host.names); d=$(wc -l < /tmp/device.names); a=$(wc -l < /tmp/all.names)
+          echo "host ${h} + device ${d} = $((h + d)); union vs suite ${a}"
+          # Prove the lists are not empty before believing anything about them:
+          # three empty files agree with each other perfectly.
+          if [ "${h}" -eq 0 ] || [ "${d}" -eq 0 ] || [ "${a}" -eq 0 ]; then
+            echo "::error::a tree registered ZERO tests (host=${h} device=${d} suite=${a})"
+            exit 1
+          fi
+          if [ "${h}" != "38" ] || [ "${d}" != "24" ] || [ "${a}" != "61" ]; then
+            echo "::error::expected host 38 / device 24 / suite 61, got ${h} / ${d} / ${a}"
+            exit 1
+          fi
+          overlap=$(comm -12 /tmp/host.names /tmp/device.names)
+          if [ "${overlap}" != "build_provenance" ]; then
+            echo "::error::host and device must share exactly build_provenance; they share:"
+            echo "${overlap}"
+            exit 1
+          fi
+          if ! diff -u <(sort -u /tmp/host.names /tmp/device.names) /tmp/all.names; then
+            echo "::error::host union device is not the full suite -- a target is in neither tree."
+            exit 1
+          fi
+          echo "partition exact: 38 + 24 - 1 shared (build_provenance) = 61"
+
       - name: ctest
         run: ctest --test-dir build-nokokkos -j4 --timeout 1800 --output-on-failure
 

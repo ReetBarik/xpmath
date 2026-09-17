@@ -17,6 +17,41 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# ---------------------------------------------------------------------------
+# THE C++ STANDARD IS MEASURED, NOT ASSERTED BY THIS LINE -- CORE_PLAN C5 step 6
+# ---------------------------------------------------------------------------
+# `cxx-standard: 17` has been in build-info.txt since the stamp existed, and it
+# was NOT true of every translation unit: Kokkos 5.1.0 carries
+# INTERFACE_COMPILE_FEATURES cxx_std_20, which raises every target that links
+# it, and the stamp -- which only ever echoed CMAKE_CXX_STANDARD back -- said
+# 17 anyway. S8c noticed the discrepancy on gfx90a and nothing in the build
+# could confirm or deny it.
+#
+# compile_commands.json is the one artifact that records the flags each TU
+# ACTUALLY got, so this turns it on and `build_provenance` reads it back. Only
+# for the generators that can produce it; asking a generator that cannot would
+# make the check fail on a missing file that was never going to be written.
+# Not FORCEd -- a caller who turns it off gets a loud NOT MEASURED line from
+# the check rather than a failure.
+#
+# SET AS A NORMAL VARIABLE, AND ONLY WHEN THE CACHE ENTRY IS EMPTY. CMake
+# pre-declares CMAKE_EXPORT_COMPILE_COMMANDS as an empty cache entry during
+# compiler detection, so `set(... CACHE BOOL ...)` without FORCE is a no-op --
+# measured: the entry stayed empty, no database was written, and the check
+# correctly reported NOT MEASURED. FORCE would instead overrule a caller who
+# passed -DCMAKE_EXPORT_COMPILE_COMMANDS=OFF on purpose. The empty-cache test
+# distinguishes "nobody asked" from "somebody said no".
+if(CMAKE_GENERATOR MATCHES "Makefile|Ninja")
+  if("$CACHE{CMAKE_EXPORT_COMPILE_COMMANDS}" STREQUAL "")
+    set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+  endif()
+endif()
+
+# Filled in by the demo block below when Kokkos is linked, and passed to
+# check_build_provenance.cmake as the CLOSED SET of targets allowed to compile
+# above CMAKE_CXX_STANDARD. Empty here so a tree without those targets says so.
+set(XPMATH_KOKKOS_LINKED_TARGETS "")
+
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message(STATUS "Setting build type to 'Release' as none was specified.")
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
@@ -185,6 +220,22 @@ add_executable(kokkos_ep_demo_tf_complex src/demo_tf_complex.cpp)
 target_include_directories(kokkos_ep_demo_tf_complex PRIVATE ${THIRD_PARTY_INCLUDE})
 target_link_libraries(kokkos_ep_demo_tf_complex PRIVATE Kokkos::kokkos)
 
+# THE ONLY TARGETS IN THIS PROJECT THAT LINK KOKKOS, and therefore the only
+# ones Kokkos's INTERFACE_COMPILE_FEATURES cxx_std_20 raises off C++17
+# (CORE_PLAN C5 step 6). Written here, next to the eight target() calls, so
+# adding a ninth Kokkos consumer and forgetting this list is a failing
+# build_provenance rather than a silently wrong stamp. After CORE_PLAN C4 no
+# test links Kokkos, so this list is the whole of the exception.
+set(XPMATH_KOKKOS_LINKED_TARGETS
+    kokkos_ep_demo
+    kokkos_ep_demo_complex
+    kokkos_ep_demo_ff
+    kokkos_ep_demo_ff_complex
+    kokkos_ep_demo_qf
+    kokkos_ep_demo_qf_complex
+    kokkos_ep_demo_tf
+    kokkos_ep_demo_tf_complex)
+
 
 # KI-21 is closed by deletion. The four complex demos used to be named through
 # XP_COMPLEX_DEMO_TARGETS because the probe could leave them unbuilt, and naming
@@ -350,6 +401,23 @@ endif()
 
 string(TIMESTAMP _xp_stamp_utc "%Y-%m-%dT%H:%M:%SZ" UTC)
 
+# THE STANDARD THIS BUILD DOES NOT COMPILE EVERYTHING AT -- CORE_PLAN C5 step 6.
+#
+# `cxx-standard` above is what the project asks for. This field is what the
+# exceptions are, named rather than left for a future reader to rediscover the
+# way S8c did. It is derived from the Kokkos-linked target list, and
+# check_build_provenance.cmake MEASURES the same claim independently out of
+# compile_commands.json -- so a wrong value here is a failing test, not a
+# comment nobody checks.
+if(XPMATH_KOKKOS_LINKED_TARGETS)
+  list(LENGTH XPMATH_KOKKOS_LINKED_TARGETS _xp_n_raised)
+  string(REPLACE ";" " " _xp_raised_names "${XPMATH_KOKKOS_LINKED_TARGETS}")
+  set(_xp_raised
+      "c++20 on ${_xp_n_raised} Kokkos-linked target(s) (Kokkos INTERFACE_COMPILE_FEATURES cxx_std_20): ${_xp_raised_names}")
+else()
+  set(_xp_raised "(none: no target in this tree links Kokkos)")
+endif()
+
 # WHICH SIDE OF THE C5 SPLIT THIS BUILD DIRECTORY IS -- CORE_PLAN C5 step 5.
 #
 # DERIVED FROM THE TWO OPTIONS, NOT PASSED IN AS A -D. scripts/xpm_build.sh
@@ -391,6 +459,7 @@ compiler-version: ${CMAKE_CXX_COMPILER_VERSION}
 kokkos: ${XPMATH_WITH_KOKKOS}
 kokkos-prefix: ${_xp_kokkos_prefix}
 cxx-standard: ${CMAKE_CXX_STANDARD}
+cxx-standard-raised: ${_xp_raised}
 build-type: ${CMAKE_BUILD_TYPE}
 opt-level: ${XPMATH_OPT}
 cxx-flags: ${_xp_all_flags}
