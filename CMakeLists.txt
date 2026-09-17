@@ -304,7 +304,11 @@ endif()
 message(STATUS "build provenance: ${CMAKE_BINARY_DIR}/build-info.txt (arch=${XPMATH_ARCH})")
 
 # ---- Tests (T0.1: backend-parameterized harness) ----------------------------
-# THIRD_PARTY_INCLUDE (set above) is consumed by tests/CMakeLists.txt.
+# THIRD_PARTY_INCLUDE (set above) is NO LONGER consumed by tests/CMakeLists.txt.
+# CORE_PLAN C4 step 5 deleted the last two test-side users of it along with the
+# three kokkos_ep_add_* helpers. It stays set here because the eight demo
+# targets in src/ still include the Kokkos compat wrappers through it, and they
+# are what keeps that layer exercised until C10 moves them out.
 #
 # RENAMED BY CORE_PLAN C4: KOKKOS_EP_BUILD_TESTS -> XPMATH_BUILD_TESTS. The
 # project is xpmath, and after C4 the suite is not Kokkos-specific -- most of it
