@@ -126,7 +126,11 @@
 // one, so it is NOT registered in PORT_NOTES_QF §5 (see the T3.5 scope-out).
 // ============================================================================
 
-#include "test_utils.hpp"
+// The device half of the test harness names only the xp core, so the Kokkos
+// runtime this TU drives (View / parallel_for / initialize) is included here
+// rather than arriving transitively through the harness header.
+#include <Kokkos_Core.hpp>
+#include "test_utils_device.hpp"
 #include "corpus.hpp"
 #include <qf_math.hpp>
 

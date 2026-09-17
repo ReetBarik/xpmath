@@ -113,7 +113,7 @@
 // "The six test layers" layer 3.
 // ============================================================================
 
-#include "test_utils.hpp"
+#include "test_utils_host.hpp"
 #include "corpus.hpp"
 #include <qf_math.hpp>
 
@@ -136,7 +136,7 @@ namespace qf = Kokkos::Experimental;
 
 // ----------------------------------------------------------------------------
 // QF <-> oracle and QF precision constants.
-// test_utils.hpp has BackendTraits<DD>/<FF> but NOT <QF> (a TODO there). Rather
+// test_utils_device.hpp has BackendTraits<DD>/<FF> but NOT <QF> (a TODO there). Rather
 // than add a traits specialization (would touch shared harness state other tasks
 // own), this file defines the QF-local helpers directly — the same posture
 // qf_eft_test.cpp and qf_nonoverlap_test.cpp take. qf_to_q mirrors src/

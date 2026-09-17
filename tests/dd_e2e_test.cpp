@@ -68,7 +68,7 @@
 // kernels for DD" and "The six test layers" layer 6.
 // ============================================================================
 
-#include "test_utils.hpp"
+#include "test_utils_host.hpp"
 #include <dd_math.hpp>
 
 #include <algorithm>
@@ -82,11 +82,11 @@ using namespace kokkos_ep;
 
 // ----------------------------------------------------------------------------
 // Widen a DD value to the __float128 oracle type (bit-exact: |lo| ≤ ½ ulp(hi) and
-// __float128 has far more mantissa). Same as BackendTraits<DD>::to_quad; wrapped
+// __float128 has far more mantissa). Same as OracleTraits<DD>::to_quad; wrapped
 // here for terse call sites in the kernels below.
 // ----------------------------------------------------------------------------
 static inline float128 Q(const dd::DoubleDouble& d) {
-  return BackendTraits<DD>::to_quad(d);
+  return OracleTraits<DD>::to_quad(d);
 }
 
 // ----------------------------------------------------------------------------

@@ -19,7 +19,7 @@
 //     Pythagorean sin²+cos², sin/cos symmetry, tan·cos, double-angle, and the
 //     DEMOTED multiply-commutativity (see below). These carry a rounding
 //     tolerance and are reported in "digits of accuracy" via the __float128
-//     machinery in test_utils.hpp. Group B and Test C used to be #ifdef'd on
+//     machinery in test_utils_host.hpp. Group B and Test C used to be #ifdef'd on
 //     KOKKOS_EP_HAVE_QUADMATH and to SKIP (77) without it; they now run
 //     unconditionally, because __float128 needs no TPL.
 //
@@ -63,7 +63,7 @@
 // tests for DD" and "The six test layers" layer 3.
 // ============================================================================
 
-#include "test_utils.hpp"
+#include "test_utils_host.hpp"
 #include "corpus.hpp"
 #include <dd_math.hpp>
 
@@ -408,8 +408,8 @@ int main(int argc, char** argv) {
     gb.push_back(run_group_b_binary("B0_mul_comm", kRandomN, seed++,
       uniform(-1e6, 1e6), uniform(-1e6, 1e6),
       [](double a, double b, float128& c, float128& r) {
-        r = BackendTraits<DD>::to_quad(dd::multiply(dd::DoubleDouble(a), dd::DoubleDouble(b)));
-        c = BackendTraits<DD>::to_quad(dd::multiply(dd::DoubleDouble(b), dd::DoubleDouble(a)));
+        r = OracleTraits<DD>::to_quad(dd::multiply(dd::DoubleDouble(a), dd::DoubleDouble(b)));
+        c = OracleTraits<DD>::to_quad(dd::multiply(dd::DoubleDouble(b), dd::DoubleDouble(a)));
       }));
 
     // B1: sqrt(a)² ≈ a, a>0 in [1e-30,1e30]. Bound: 4u² (sqrt double-word +
@@ -417,14 +417,14 @@ int main(int argc, char** argv) {
     gb.push_back(run_group_b_unary("B1_sqrt_sq", kRandomN, seed++, loguniform(-30, 30),
       [](double x, float128& c, float128& r) {
         dd::DoubleDouble s = dd::sqrt(dd::DoubleDouble(x));
-        c = BackendTraits<DD>::to_quad(dd::multiply(s, s));
+        c = OracleTraits<DD>::to_quad(dd::multiply(s, s));
         r = (float128)x;
       }));
     // B2: exp(log(a)) ≈ a, a>0 in [1e-100,1e100]. Bound: 10u² (two transcendental
     // round-trips; observed scale, no tighter proven DDFUN bound available).
     gb.push_back(run_group_b_unary("B2_exp_log", kRandomN, seed++, loguniform(-100, 100),
       [](double x, float128& c, float128& r) {
-        c = BackendTraits<DD>::to_quad(dd::exp(dd::log(dd::DoubleDouble(x))));
+        c = OracleTraits<DD>::to_quad(dd::exp(dd::log(dd::DoubleDouble(x))));
         r = (float128)x;
       }));
     // B3: log(exp(a)) ≈ a, a in [-290,290]. DEVIATION from the task's [-700,700]:
@@ -432,7 +432,7 @@ int main(int argc, char** argv) {
     // range and the log clean. Bound: 10u² (as B2).
     gb.push_back(run_group_b_unary("B3_log_exp", kRandomN, seed++, uniform(-290.0, 290.0),
       [](double x, float128& c, float128& r) {
-        c = BackendTraits<DD>::to_quad(dd::log(dd::exp(dd::DoubleDouble(x))));
+        c = OracleTraits<DD>::to_quad(dd::log(dd::exp(dd::DoubleDouble(x))));
         r = (float128)x;
       }));
     // B4: sin²(a) + cos²(a) ≈ 1, a in [-100,100]. Bound: 10u². The min may dip
@@ -440,41 +440,41 @@ int main(int argc, char** argv) {
     gb.push_back(run_group_b_unary("B4_pythag", kRandomN, seed++, uniform(-100.0, 100.0),
       [](double x, float128& c, float128& r) {
         dd::DoubleDouble cc, ss; dd::sincos(dd::DoubleDouble(x), cc, ss);
-        c = BackendTraits<DD>::to_quad(dd::add(dd::multiply(ss, ss), dd::multiply(cc, cc)));
+        c = OracleTraits<DD>::to_quad(dd::add(dd::multiply(ss, ss), dd::multiply(cc, cc)));
         r = (float128)1.0;
       }));
     // B5: sin(-a) ≈ -sin(a), a in [-100,100]. Placed in Group B (not asserted
     // bit-exact) — see header. Bound: 2u² (one sign flip; expected near-exact).
     gb.push_back(run_group_b_unary("B5_sin_odd", kRandomN, seed++, uniform(-100.0, 100.0),
       [](double x, float128& c, float128& r) {
-        c = BackendTraits<DD>::to_quad(dd::sin(dd::negate(dd::DoubleDouble(x))));
-        r = BackendTraits<DD>::to_quad(dd::negate(dd::sin(dd::DoubleDouble(x))));
+        c = OracleTraits<DD>::to_quad(dd::sin(dd::negate(dd::DoubleDouble(x))));
+        r = OracleTraits<DD>::to_quad(dd::negate(dd::sin(dd::DoubleDouble(x))));
       }));
     // B6: cos(-a) ≈ cos(a). Bound: 2u².
     gb.push_back(run_group_b_unary("B6_cos_even", kRandomN, seed++, uniform(-100.0, 100.0),
       [](double x, float128& c, float128& r) {
-        c = BackendTraits<DD>::to_quad(dd::cos(dd::negate(dd::DoubleDouble(x))));
-        r = BackendTraits<DD>::to_quad(dd::cos(dd::DoubleDouble(x)));
+        c = OracleTraits<DD>::to_quad(dd::cos(dd::negate(dd::DoubleDouble(x))));
+        r = OracleTraits<DD>::to_quad(dd::cos(dd::DoubleDouble(x)));
       }));
     // B7: tan(a)·cos(a) ≈ sin(a), a in [-1.3,1.3] (avoids cos≈0 near ±π/2). Bound: 10u².
     gb.push_back(run_group_b_unary("B7_tan_cos", kRandomN, seed++, uniform(-1.3, 1.3),
       [](double x, float128& c, float128& r) {
         dd::DoubleDouble a(x);
-        c = BackendTraits<DD>::to_quad(dd::multiply(dd::tan(a), dd::cos(a)));
-        r = BackendTraits<DD>::to_quad(dd::sin(a));
+        c = OracleTraits<DD>::to_quad(dd::multiply(dd::tan(a), dd::cos(a)));
+        r = OracleTraits<DD>::to_quad(dd::sin(a));
       }));
     // B8: 2·sin(a)·cos(a) ≈ sin(2a), a in [-100,100], 10^5 samples. Bound: 10u².
     gb.push_back(run_group_b_unary("B8_double_angle", 100'000, seed++, uniform(-100.0, 100.0),
       [](double x, float128& c, float128& r) {
         dd::DoubleDouble a(x);
-        c = BackendTraits<DD>::to_quad(dd::multiply_scalar(dd::multiply(dd::sin(a), dd::cos(a)), 2.0));
-        r = BackendTraits<DD>::to_quad(dd::sin(dd::multiply_scalar(a, 2.0)));
+        c = OracleTraits<DD>::to_quad(dd::multiply_scalar(dd::multiply(dd::sin(a), dd::cos(a)), 2.0));
+        r = OracleTraits<DD>::to_quad(dd::sin(dd::multiply_scalar(a, 2.0)));
       }));
     // B9: exp(a)·exp(-a) ≈ 1, a in [-290,290]. Bound: 4u².
     gb.push_back(run_group_b_unary("B9_exp_prod", kRandomN, seed++, uniform(-290.0, 290.0),
       [](double x, float128& c, float128& r) {
         dd::DoubleDouble a(x);
-        c = BackendTraits<DD>::to_quad(dd::multiply(dd::exp(a), dd::exp(dd::negate(a))));
+        c = OracleTraits<DD>::to_quad(dd::multiply(dd::exp(a), dd::exp(dd::negate(a))));
         r = (float128)1.0;
       }));
     // B10: hypot(a,b)² ≈ a²+b², a,b in [-1e3,1e3]. Bound: 10u².
@@ -483,16 +483,16 @@ int main(int argc, char** argv) {
       [](double a, double b, float128& c, float128& r) {
         dd::DoubleDouble da(a), db(b);
         dd::DoubleDouble h = dd::hypot(da, db);
-        c = BackendTraits<DD>::to_quad(dd::multiply(h, h));
-        r = BackendTraits<DD>::to_quad(dd::add(dd::multiply(da, da), dd::multiply(db, db)));
+        c = OracleTraits<DD>::to_quad(dd::multiply(h, h));
+        r = OracleTraits<DD>::to_quad(dd::add(dd::multiply(da, da), dd::multiply(db, db)));
       }));
     // B11: pow(a,2) ≈ a·a, a>0 in [1e-15,1e15] (keeps 2·ln(a) well inside exp's
     // ±300 guard). Bound: 4u² (pow = exp(2·log a) vs one double-word square).
     gb.push_back(run_group_b_unary("B11_pow_two", kRandomN, seed++, loguniform(-15, 15),
       [](double x, float128& c, float128& r) {
         dd::DoubleDouble a(x);
-        c = BackendTraits<DD>::to_quad(dd::pow(a, dd::DoubleDouble(2.0)));
-        r = BackendTraits<DD>::to_quad(dd::multiply(a, a));
+        c = OracleTraits<DD>::to_quad(dd::pow(a, dd::DoubleDouble(2.0)));
+        r = OracleTraits<DD>::to_quad(dd::multiply(a, a));
       }));
     // B12: atanh(a) ≈ ½·(log(1+a) - log(1-a)), |a|<0.5. Reformulated as an
     // equivalence (not "difference ≈ 0") so the digit metric is well-defined.
@@ -500,10 +500,10 @@ int main(int argc, char** argv) {
     gb.push_back(run_group_b_unary("B12_atanh_log", kRandomN, seed++, uniform(-0.5, 0.5),
       [](double x, float128& c, float128& r) {
         dd::DoubleDouble a(x);
-        c = BackendTraits<DD>::to_quad(dd::atanh(a));
+        c = OracleTraits<DD>::to_quad(dd::atanh(a));
         dd::DoubleDouble lhs = dd::log(dd::add(dd::DoubleDouble(1.0), a));
         dd::DoubleDouble rhs = dd::log(dd::subtract(dd::DoubleDouble(1.0), a));
-        r = BackendTraits<DD>::to_quad(dd::multiply_scalar(dd::subtract(lhs, rhs), 0.5));
+        r = OracleTraits<DD>::to_quad(dd::multiply_scalar(dd::subtract(lhs, rhs), 0.5));
       }));
 
     // B4 min annotation (conditioning near ±π·k). lookup returns the sin
@@ -568,7 +568,7 @@ int main(int argc, char** argv) {
         x, hi, lo);
       std::vector<double> digs(kDeviceN);
       for (int i = 0; i < kDeviceN; ++i)
-        digs[i] = digits_of_accuracy<DD>(BackendTraits<DD>::to_quad(dd::DoubleDouble(hi[i], lo[i])),
+        digs[i] = digits_of_accuracy<DD>(OracleTraits<DD>::to_quad(dd::DoubleDouble(hi[i], lo[i])),
                                          (float128)x[i]);
       AccStats s = compute_stats(digs.data(), kDeviceN);
       double tol = threshold_digits(kDeviceN); bool pass = s.mean >= tol;
@@ -586,7 +586,7 @@ int main(int argc, char** argv) {
         }, x, hi, lo);
       std::vector<double> digs(kDeviceN);
       for (int i = 0; i < kDeviceN; ++i)
-        digs[i] = digits_of_accuracy<DD>(BackendTraits<DD>::to_quad(dd::DoubleDouble(hi[i], lo[i])),
+        digs[i] = digits_of_accuracy<DD>(OracleTraits<DD>::to_quad(dd::DoubleDouble(hi[i], lo[i])),
                                          (float128)1.0);
       AccStats s = compute_stats(digs.data(), kDeviceN);
       double tol = threshold_digits(kDeviceN); bool pass = s.mean >= tol;
@@ -616,7 +616,7 @@ int main(int argc, char** argv) {
     {
       ++c_total;
       dd::DoubleDouble sp = dd::sin(dd::DoubleDouble_pi());
-      float128 v = BackendTraits<DD>::to_quad(sp);
+      float128 v = OracleTraits<DD>::to_quad(sp);
       double zero_digits = (v == (float128)0.0) ? kMaxDig
                            : -(double)q_log10(q_abs(v));
       const auto* ann = lookup_expected_min_drop("sin");
@@ -628,18 +628,18 @@ int main(int argc, char** argv) {
     }
     // C2: log(e) ≈ 1.
     case_digits("C2_log_e",
-                BackendTraits<DD>::to_quad(dd::log(dd::DoubleDouble_e())), (float128)1.0);
+                OracleTraits<DD>::to_quad(dd::log(dd::DoubleDouble_e())), (float128)1.0);
     // C3: exp(log2) ≈ 2.
     case_digits("C3_exp_log2",
-                BackendTraits<DD>::to_quad(dd::exp(dd::DoubleDouble_log2())), (float128)2.0);
+                OracleTraits<DD>::to_quad(dd::exp(dd::DoubleDouble_log2())), (float128)2.0);
     // C4: √2 · √2 ≈ 2.
     case_digits("C4_sqrt2_sq",
-                BackendTraits<DD>::to_quad(dd::multiply(dd::DoubleDouble_sqrt2(),
+                OracleTraits<DD>::to_quad(dd::multiply(dd::DoubleDouble_sqrt2(),
                                                         dd::DoubleDouble_sqrt2())), (float128)2.0);
     // C5: log(10) ≈ the DoubleDouble_log10() constant (which stores ln(10)).
     case_digits("C5_log_ten",
-                BackendTraits<DD>::to_quad(dd::log(dd::DoubleDouble(10.0))),
-                BackendTraits<DD>::to_quad(dd::DoubleDouble_log10()));
+                OracleTraits<DD>::to_quad(dd::log(dd::DoubleDouble(10.0))),
+                OracleTraits<DD>::to_quad(dd::DoubleDouble_log10()));
     // C6: euler_gamma / digamma — SKIPPED: no digamma in dd_math.hpp, and the
     // stored euler_gamma constant has no independent DD op to check it against
     // (would be a tautology). Documented, not silently dropped.

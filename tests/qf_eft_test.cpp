@@ -124,7 +124,7 @@
 //   Test E — device parity (run the SAME primitives in a Kokkos parallel_for)
 // ============================================================================
 
-#include "test_utils.hpp"
+#include "test_utils_host.hpp"
 #include "corpus.hpp"
 #include <qf_math.hpp>
 

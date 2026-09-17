@@ -29,7 +29,7 @@
 //       rather than "corpus item 47".
 //
 // RETURN SHAPE: std::vector<T> (unary) / std::vector<std::pair<T,T>> (binary),
-//   NOT the InputDist generator-functor shape test_utils.hpp uses for random
+//   NOT the InputDist generator-functor shape test_utils_host.hpp uses for random
 //   sampling. Rationale: corpus entries are DETERMINISTIC CONSTANTS (a specific
 //   subnormal, a specific ±inf, the literal 88.72 that broke FF exp), so a
 //   materialized vector the caller iterates is the natural representation — one

@@ -67,7 +67,7 @@
 // scope. See the "Scope-out" list in the T1.5 task.
 // ============================================================================
 
-#include "test_utils.hpp"
+#include "test_utils_host.hpp"
 #include "corpus.hpp"
 #include <dd_math.hpp>
 

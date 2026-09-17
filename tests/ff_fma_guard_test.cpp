@@ -102,7 +102,11 @@
 // are out of scope, as are complex ops. See the "Scope-out" list in the T2.5 task.
 // ============================================================================
 
-#include "test_utils.hpp"
+// The device half of the test harness names only the xp core, so the Kokkos
+// runtime this TU drives (View / parallel_for / initialize) is included here
+// rather than arriving transitively through the harness header.
+#include <Kokkos_Core.hpp>
+#include "test_utils_device.hpp"
 #include "corpus.hpp"
 #include <ff_math.hpp>
 

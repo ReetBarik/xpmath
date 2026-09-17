@@ -25,7 +25,7 @@
 //   GROUP B — approximate identities.  Round-trips (sqrt/square, exp/log),
 //     Pythagorean sin^2+cos^2, sin/cos symmetry, tan*cos, double-angle, and the
 //     DEMOTED multiply-commutativity (B0). Reported in "digits of accuracy" via the
-//     __float128 machinery in test_utils.hpp. Group B and Test C used to be
+//     __float128 machinery in test_utils_host.hpp. Group B and Test C used to be
 //     #ifdef'd on KOKKOS_EP_HAVE_QUADMATH and to SKIP (77) without it; they now
 //     run unconditionally, because __float128 needs no TPL.
 //
@@ -89,7 +89,7 @@
 // tests for FF" and "The six test layers" layer 3.
 // ============================================================================
 
-#include "test_utils.hpp"
+#include "test_utils_host.hpp"
 #include "corpus.hpp"
 #include <ff_math.hpp>
 
@@ -603,8 +603,8 @@ int main(int argc, char** argv) {
     gb.push_back(run_group_b_binary("B0_mul_comm", kRandomN, seed++,
       uniform(-1e6, 1e6), uniform(-1e6, 1e6),
       [](double a, double b, float128& c, float128& r) {
-        r = BackendTraits<FF>::to_quad(ff::multiply(ff::FloatFloat(a), ff::FloatFloat(b)));
-        c = BackendTraits<FF>::to_quad(ff::multiply(ff::FloatFloat(b), ff::FloatFloat(a)));
+        r = OracleTraits<FF>::to_quad(ff::multiply(ff::FloatFloat(a), ff::FloatFloat(b)));
+        c = OracleTraits<FF>::to_quad(ff::multiply(ff::FloatFloat(b), ff::FloatFloat(a)));
       }));
 
     // B1: sqrt(a)^2 ~= a, a>0 in [1e-30,1e30]. Bound: 4u^2 (sqrt double-word + one
@@ -612,7 +612,7 @@ int main(int argc, char** argv) {
     gb.push_back(run_group_b_unary("B1_sqrt_sq", kRandomN, seed++, loguniform(-30, 30),
       [](double x, float128& c, float128& r) {
         ff::FloatFloat s = ff::sqrt(ff::FloatFloat(x));
-        c = BackendTraits<FF>::to_quad(ff::multiply(s, s));
+        c = OracleTraits<FF>::to_quad(ff::multiply(s, s));
         r = (float128)x;
       }));
     // B2: exp(log(a)) ~= a, a>0 in [1e-30,1e30]. DEVIATION from DD's [1e-100,1e100]:
@@ -620,7 +620,7 @@ int main(int argc, char** argv) {
     // [1e-30,1e30] keeps ln(a) in +/-69, well inside. Bound: 10u^2.
     gb.push_back(run_group_b_unary("B2_exp_log", kRandomN, seed++, loguniform(-30, 30),
       [](double x, float128& c, float128& r) {
-        c = BackendTraits<FF>::to_quad(ff::exp(ff::log(ff::FloatFloat(x))));
+        c = OracleTraits<FF>::to_quad(ff::exp(ff::log(ff::FloatFloat(x))));
         r = (float128)x;
       }));
     // B3: log(exp(a)) ~= a. Bound: 10u^2.
@@ -634,7 +634,7 @@ int main(int argc, char** argv) {
     // divide() B8 comment + docs/TEST_SUITE_PLAN.md §B4/§B8.
     gb.push_back(run_group_b_unary("B3_log_exp", kRandomN, seed++, uniform(-79.0, 79.0),
       [](double x, float128& c, float128& r) {
-        c = BackendTraits<FF>::to_quad(ff::log(ff::exp(ff::FloatFloat(x))));
+        c = OracleTraits<FF>::to_quad(ff::log(ff::exp(ff::FloatFloat(x))));
         r = (float128)x;
       }));
     // B4: sin^2(a) + cos^2(a) ~= 1, a in [-100,100]. Bound: 10u^2. Robust to arg-
@@ -643,29 +643,29 @@ int main(int argc, char** argv) {
     gb.push_back(run_group_b_unary("B4_pythag", kRandomN, seed++, uniform(-100.0, 100.0),
       [](double x, float128& c, float128& r) {
         ff::FloatFloat cc, ss; ff::sincos(ff::FloatFloat(x), cc, ss);
-        c = BackendTraits<FF>::to_quad(ff::add(ff::multiply(ss, ss), ff::multiply(cc, cc)));
+        c = OracleTraits<FF>::to_quad(ff::add(ff::multiply(ss, ss), ff::multiply(cc, cc)));
         r = (float128)1.0;
       }));
     // B5: sin(-a) ~= -sin(a), a in [-100,100]. Placed in Group B (not asserted
     // bit-exact) — see header. Bound: 2u^2 (one sign flip; expected near-exact).
     gb.push_back(run_group_b_unary("B5_sin_odd", kRandomN, seed++, uniform(-100.0, 100.0),
       [](double x, float128& c, float128& r) {
-        c = BackendTraits<FF>::to_quad(ff::sin(ff::negate(ff::FloatFloat(x))));
-        r = BackendTraits<FF>::to_quad(ff::negate(ff::sin(ff::FloatFloat(x))));
+        c = OracleTraits<FF>::to_quad(ff::sin(ff::negate(ff::FloatFloat(x))));
+        r = OracleTraits<FF>::to_quad(ff::negate(ff::sin(ff::FloatFloat(x))));
       }));
     // B6: cos(-a) ~= cos(a). Bound: 2u^2.
     gb.push_back(run_group_b_unary("B6_cos_even", kRandomN, seed++, uniform(-100.0, 100.0),
       [](double x, float128& c, float128& r) {
-        c = BackendTraits<FF>::to_quad(ff::cos(ff::negate(ff::FloatFloat(x))));
-        r = BackendTraits<FF>::to_quad(ff::cos(ff::FloatFloat(x)));
+        c = OracleTraits<FF>::to_quad(ff::cos(ff::negate(ff::FloatFloat(x))));
+        r = OracleTraits<FF>::to_quad(ff::cos(ff::FloatFloat(x)));
       }));
     // B7: tan(a)*cos(a) ~= sin(a), a in [-1.3,1.3] (avoids cos~=0 near +/-pi/2).
     // Bound: 10u^2.
     gb.push_back(run_group_b_unary("B7_tan_cos", kRandomN, seed++, uniform(-1.3, 1.3),
       [](double x, float128& c, float128& r) {
         ff::FloatFloat a(x);
-        c = BackendTraits<FF>::to_quad(ff::multiply(ff::tan(a), ff::cos(a)));
-        r = BackendTraits<FF>::to_quad(ff::sin(a));
+        c = OracleTraits<FF>::to_quad(ff::multiply(ff::tan(a), ff::cos(a)));
+        r = OracleTraits<FF>::to_quad(ff::sin(a));
       }));
     // B8: 2*sin(a)*cos(a) ~= sin(2a), a in [-3,3], 10^5 samples. DEVIATION from DD's
     // [-100,100]: sin(2a) and 2*sin*cos reduce DIFFERENT arguments, and FF's double-
@@ -674,8 +674,8 @@ int main(int argc, char** argv) {
     gb.push_back(run_group_b_unary("B8_double_angle", 100'000, seed++, uniform(-3.0, 3.0),
       [](double x, float128& c, float128& r) {
         ff::FloatFloat a(x);
-        c = BackendTraits<FF>::to_quad(ff::multiply_scalar(ff::multiply(ff::sin(a), ff::cos(a)), 2.0f));
-        r = BackendTraits<FF>::to_quad(ff::sin(ff::multiply_scalar(a, 2.0f)));
+        c = OracleTraits<FF>::to_quad(ff::multiply_scalar(ff::multiply(ff::sin(a), ff::cos(a)), 2.0f));
+        r = OracleTraits<FF>::to_quad(ff::sin(ff::multiply_scalar(a, 2.0f)));
       }));
     // B9: exp(a)*exp(-a) ~= 1. Bound: 4u^2.
     // Domain [-79, 79], RESTORED from the temporary [-69, 69] narrowing once B8
@@ -687,7 +687,7 @@ int main(int argc, char** argv) {
     gb.push_back(run_group_b_unary("B9_exp_prod", kRandomN, seed++, uniform(-79.0, 79.0),
       [](double x, float128& c, float128& r) {
         ff::FloatFloat a(x);
-        c = BackendTraits<FF>::to_quad(ff::multiply(ff::exp(a), ff::exp(ff::negate(a))));
+        c = OracleTraits<FF>::to_quad(ff::multiply(ff::exp(a), ff::exp(ff::negate(a))));
         r = (float128)1.0;
       }));
     // B10: hypot(a,b)^2 ~= a^2+b^2, a,b in [-1e3,1e3]. Bound: 10u^2.
@@ -696,8 +696,8 @@ int main(int argc, char** argv) {
       [](double a, double b, float128& c, float128& r) {
         ff::FloatFloat da(a), db(b);
         ff::FloatFloat h = ff::hypot(da, db);
-        c = BackendTraits<FF>::to_quad(ff::multiply(h, h));
-        r = BackendTraits<FF>::to_quad(ff::add(ff::multiply(da, da), ff::multiply(db, db)));
+        c = OracleTraits<FF>::to_quad(ff::multiply(h, h));
+        r = OracleTraits<FF>::to_quad(ff::add(ff::multiply(da, da), ff::multiply(db, db)));
       }));
     // B11: pow(a,2) ~= a*a, a>0 in [1e-15,1e15] (keeps 2*ln(a) inside exp's 88
     // guard: 2*ln(1e15)~=69). Bound: 4u^2 (pow = exp(2*log a) vs one double-word
@@ -705,8 +705,8 @@ int main(int argc, char** argv) {
     gb.push_back(run_group_b_unary("B11_pow_two", kRandomN, seed++, loguniform(-15, 15),
       [](double x, float128& c, float128& r) {
         ff::FloatFloat a(x);
-        c = BackendTraits<FF>::to_quad(ff::pow(a, ff::FloatFloat(2.0)));
-        r = BackendTraits<FF>::to_quad(ff::multiply(a, a));
+        c = OracleTraits<FF>::to_quad(ff::pow(a, ff::FloatFloat(2.0)));
+        r = OracleTraits<FF>::to_quad(ff::multiply(a, a));
       }));
     // B12: atanh(a) ~= 0.5*(log(1+a) - log(1-a)), |a|<0.5. Reformulated as an
     // equivalence (not "difference ~= 0") so the digit metric is well-defined.
@@ -714,10 +714,10 @@ int main(int argc, char** argv) {
     gb.push_back(run_group_b_unary("B12_atanh_log", kRandomN, seed++, uniform(-0.5, 0.5),
       [](double x, float128& c, float128& r) {
         ff::FloatFloat a(x);
-        c = BackendTraits<FF>::to_quad(ff::atanh(a));
+        c = OracleTraits<FF>::to_quad(ff::atanh(a));
         ff::FloatFloat lhs = ff::log(ff::add(ff::FloatFloat(1.0), a));
         ff::FloatFloat rhs = ff::log(ff::subtract(ff::FloatFloat(1.0), a));
-        r = BackendTraits<FF>::to_quad(ff::multiply_scalar(ff::subtract(lhs, rhs), 0.5f));
+        r = OracleTraits<FF>::to_quad(ff::multiply_scalar(ff::subtract(lhs, rhs), 0.5f));
       }));
 
     // B4 min annotation (conditioning near +/-pi*k). The identity is well-behaved
@@ -789,7 +789,7 @@ int main(int argc, char** argv) {
         x, hi, lo);
       std::vector<double> digs(kDeviceN);
       for (int i = 0; i < kDeviceN; ++i)
-        digs[i] = digits_of_accuracy<FF>(BackendTraits<FF>::to_quad(ff::FloatFloat(hi[i], lo[i])),
+        digs[i] = digits_of_accuracy<FF>(OracleTraits<FF>::to_quad(ff::FloatFloat(hi[i], lo[i])),
                                          (float128)x[i]);
       AccStats s = compute_stats(digs.data(), kDeviceN);
       double tol = threshold_digits(kDeviceN); bool pass = s.mean >= tol;
@@ -808,7 +808,7 @@ int main(int argc, char** argv) {
         }, x, hi, lo);
       std::vector<double> digs(kDeviceN);
       for (int i = 0; i < kDeviceN; ++i)
-        digs[i] = digits_of_accuracy<FF>(BackendTraits<FF>::to_quad(ff::FloatFloat(hi[i], lo[i])),
+        digs[i] = digits_of_accuracy<FF>(OracleTraits<FF>::to_quad(ff::FloatFloat(hi[i], lo[i])),
                                          (float128)1.0);
       AccStats s = compute_stats(digs.data(), kDeviceN);
       double tol = threshold_digits(kDeviceN); bool pass = s.mean >= tol;
@@ -843,7 +843,7 @@ int main(int argc, char** argv) {
     {
       ++c_total;
       ff::FloatFloat sp = ff::sin(ff::FloatFloat_pi());
-      float128 v = BackendTraits<FF>::to_quad(sp);
+      float128 v = OracleTraits<FF>::to_quad(sp);
       double zero_digits = (v == (float128)0.0) ? kMaxDig
                            : -(double)q_log10(q_abs(v));
       const auto* ann = lookup_expected_min_drop("sin");
@@ -856,18 +856,18 @@ int main(int argc, char** argv) {
     }
     // C2: log(e) ~= 1.
     case_digits("C2_log_e",
-                BackendTraits<FF>::to_quad(ff::log(ff::FloatFloat_e())), (float128)1.0);
+                OracleTraits<FF>::to_quad(ff::log(ff::FloatFloat_e())), (float128)1.0);
     // C3: exp(log2) ~= 2.
     case_digits("C3_exp_log2",
-                BackendTraits<FF>::to_quad(ff::exp(ff::FloatFloat_log2())), (float128)2.0);
+                OracleTraits<FF>::to_quad(ff::exp(ff::FloatFloat_log2())), (float128)2.0);
     // C4: sqrt2 * sqrt2 ~= 2.
     case_digits("C4_sqrt2_sq",
-                BackendTraits<FF>::to_quad(ff::multiply(ff::FloatFloat_sqrt2(),
+                OracleTraits<FF>::to_quad(ff::multiply(ff::FloatFloat_sqrt2(),
                                                         ff::FloatFloat_sqrt2())), (float128)2.0);
     // C5: log(10) ~= the FloatFloat_log10() constant (which stores ln(10)).
     case_digits("C5_log_ten",
-                BackendTraits<FF>::to_quad(ff::log(ff::FloatFloat(10.0))),
-                BackendTraits<FF>::to_quad(ff::FloatFloat_log10()));
+                OracleTraits<FF>::to_quad(ff::log(ff::FloatFloat(10.0))),
+                OracleTraits<FF>::to_quad(ff::FloatFloat_log10()));
     // C6: euler_gamma / digamma — SKIPPED: no digamma in ff_math.hpp, and the stored
     // euler_gamma constant has no independent FF op to check it against (would be a
     // tautology). Documented, not silently dropped.

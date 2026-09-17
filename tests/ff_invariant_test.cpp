@@ -103,7 +103,7 @@
 // test layers" layer 2.
 // ============================================================================
 
-#include "test_utils.hpp"
+#include "test_utils_host.hpp"
 #include "corpus.hpp"
 #include <ff_math.hpp>
 
@@ -119,7 +119,7 @@
 
 using namespace kokkos_ep;
 
-// dd:: alias comes from test_utils.hpp (namespace dd = Kokkos::Experimental).
+// dd:: alias comes from test_utils_device.hpp (namespace dd = Kokkos::Experimental).
 // FF types live in the SAME namespace; introduce an ff:: alias for readability.
 namespace ff = Kokkos::Experimental;
 
@@ -330,7 +330,7 @@ static InvSummary run_binary(const BinaryOp& op, uint64_t seed) {
 
 // ----------------------------------------------------------------------------
 // Device tripwire (Test B). Same invariant, computed on device for 5 ops.
-// A custom runner is required: test_utils.hpp's run_unary_op/run_binary_op return
+// A custom runner is required: test_utils_host.hpp's run_unary_op/run_binary_op return
 // digits-of-accuracy AccStats (and are scored against __float128), not the raw FF outputs
 // this test needs — so we mirror their host->device->host View plumbing but ship
 // hi/lo back and check non-overlap on host. Mirrors T1.2's device_unary/binary.

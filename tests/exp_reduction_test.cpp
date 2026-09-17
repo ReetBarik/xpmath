@@ -67,7 +67,7 @@
 // because the reverse would be easy to imply: logq happened to be correctly
 // rounded at 2, it is not in general, and the test had no way to know which it
 // was getting. (Its sibling sqrtq is the counterexample -- wrong by one ulp on
-// 25% of inputs; see the q_sqrt note in tests/test_utils.hpp.)
+// 25% of inputs; see the q_sqrt note in tests/test_utils_host.hpp.)
 //
 // That is the same taxonomy scripts/sweep_accuracy.cpp applies (see its "WHAT
 // <quadmath.h> USED TO SUPPLY" section): bit-exact and IEEE-mandated operations

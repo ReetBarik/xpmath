@@ -1,16 +1,25 @@
 # `tests/` — the ctest suite
 
-49 registered targets with Kokkos, **21 without it**. The count is asserted in
-CI (`.github/workflows/ci.yml`, `expected=49`), not assumed. That is how this
+50 registered targets with Kokkos, **22 without it**. The count is asserted in
+CI (`.github/workflows/ci.yml`, `expected=50`), not assumed. That is how this
 lane once ran 34 targets while reporting 31. Four targets used to sit behind
 `if(XPMATH_MPFR_FOUND)`, so a runner missing a `-dev` package lost coverage and
 stayed green; that guard is gone — MPFR/MPC are the sweep oracle now, and a
 missing package is a configure `FATAL_ERROR`.
 
 `-DXPMATH_WITH_KOKKOS=OFF` drops the 28 targets that link Kokkos and keeps the
-other 21 — both gates, both gate self-tests, the oracle-conversion and reduction
-pairs, `domains_fresh`, `build_provenance`, the consumer package test and the
-seven standalone smokes. Measured: 21/21 in 169 s with no Kokkos installed.
+other 22 — both gates, both gate self-tests, the oracle-conversion and reduction
+pairs, `domains_fresh`, `build_provenance`, `device_tu_purity`, the consumer
+package test and the seven standalone smokes. Measured: 21/21 in 169 s with no
+Kokkos installed, before `device_tu_purity` made it 22.
+
+`device_tu_purity` is in the Kokkos-free set by design rather than by accident.
+It preprocesses `tests/test_utils_device.hpp` — the half of the harness a
+device translation unit may include — and fails if `__float128` reaches it from
+any file in this repository. That header names the xp core rather than the
+`third_party/include` Kokkos wrappers, so the gate needs no Kokkos install, and
+the lane most likely to introduce a device-purity regression is the one where
+nobody builds with Kokkos at all.
 
 **What judges correctness is `docs/CORRECTNESS.md`.** Read it before adding
 anything that issues a verdict; the whole point of the current arrangement is

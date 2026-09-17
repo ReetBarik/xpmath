@@ -32,7 +32,7 @@
 // oracle is __float128 arithmetic, which comes from libgcc and is available on
 // every x86_64 build. (It used to come through Kokkos's quadmath overloads in
 // impl/Kokkos_QuadPrecisionMath.hpp, so this test SKIPped when Kokkos was built
-// without LIBQUADMATH; that gate is gone -- see test_utils.hpp.)
+// without LIBQUADMATH; that gate is gone -- see test_utils_device.hpp.)
 //
 // WHY -ffp-contract=off IS REQUIRED (DEKKER SPLITTER CORRECTNESS)
 // --------------------------------------------------------------
@@ -58,7 +58,7 @@
 //   Test D — device parity (run the SAME helpers in a Kokkos parallel_for)
 // ============================================================================
 
-#include "test_utils.hpp"
+#include "test_utils_host.hpp"
 #include "corpus.hpp"
 #include <dd_math.hpp>
 
