@@ -124,15 +124,42 @@
 // (rule 4). Higher-level ops (sqrt/exp/sin/...) and complex ops are out of scope.
 // FMA-contraction posture is a COMPILER characterization, not an input-conditioning
 // one, so it is NOT registered in PORT_NOTES_QF §5 (see the T3.5 scope-out).
+//
+// C4 CHUNK D: MIGRATED WHOLE, NOT SPLIT — AND THAT IS A DELIBERATE DEVIATION
+// --------------------------------------------------------------------------
+// CORE_PLAN section C4 lists this file among eight MIXED translation units, to be
+// split into a host half carrying the oracle and a device half carrying the
+// launch. That list was measured BEFORE C2 split tests/test_utils.hpp, and the
+// classification no longer holds here for exactly the reason chunk C recorded in
+// tests/ff_fma_guard_test.cpp: this TU's oracle is an exact FP64 product, not a
+// binary128 one (see "WHY GROUND TRUTH IS PLAIN FP64" above, which predates C4
+// and gives the algebra), and after C2 it includes test_utils_device.hpp rather
+// than the host header. It is not mixed. MEASURED on this tree before it joined
+// the purity gate: the only mentions of the 128-bit type's name in this file were
+// prose, which the preprocessor strips — plus ONE STRING LITERAL, which it does
+// not, and which was reworded rather than left to fail the gate.
+//
+// Splitting a TU that is already pure would duplicate ~260 lines of input
+// construction, classification and oracle across two files, turn two targets into
+// four, and contradict the "A SINGLE SOURCE, TWO TARGETS" rationale above — all to
+// separate a host oracle from a device launch that can legitimately share a
+// compilation. Chunk C reached the same conclusion for the FF twin, and a split
+// suite with two conventions for the same situation is worse than one.
+//
+// What DID change here: the Kokkos View/parallel_for/initialize surface became
+// xpt::buffer/parallel_for_n, the launch is checked for a vendor error code,
+// <qf_math.hpp> became <xp/qf_math.hpp>, and rc became reachable from
+// ep_exit_code() under BOTH postures (see the rc note in main). The test body,
+// the inputs, the oracle, both postures and the committed baseline are untouched.
 // ============================================================================
 
-// The device half of the test harness names only the xp core, so the Kokkos
-// runtime this TU drives (View / parallel_for / initialize) is included here
-// rather than arriving transitively through the harness header.
-#include <Kokkos_Core.hpp>
+// C4 chunk D: the launch goes through tests/device_harness.hpp (C3) rather than
+// Kokkos. This TU names only the xp core, so it links no Kokkos at all and is
+// registered in the Kokkos-free set.
+#include "device_harness.hpp"
 #include "test_utils_device.hpp"
 #include "corpus.hpp"
-#include <qf_math.hpp>
+#include <xp/qf_math.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -146,7 +173,12 @@
 #include <vector>
 
 using namespace kokkos_ep;
-namespace qf = Kokkos::Experimental;
+
+// qf:: alias over the standalone core. This used to read
+// `namespace qf = Kokkos::Experimental;`; third_party/include/qf_math.hpp is a
+// true alias of the same type, so the C4 migration changed the spelling and not
+// the code under test — these are still the SHIPPED primitives.
+namespace qf = xp;
 
 // Which contraction posture were we compiled under? Set by the CMake helpers
 // (kokkos_ep_add_eft_test -> 0, kokkos_ep_add_eft_test_contract_on -> 1). Default
@@ -396,59 +428,74 @@ static GuardStat host_sqr_pass(const std::vector<float>& in, int& samples_left) 
 }
 
 // ----------------------------------------------------------------------------
-// Device passes: recompute the SHIPPED primitives inside a Kokkos parallel_for on
-// the default execution space (governed by the CUDA --fmad flag on a CUDA build;
-// reduces to host on a Serial build). Mirrors ff_fma_guard_test's device pass and
-// qf_eft_test's Test E.
+// Device passes: recompute the SHIPPED primitives through the C3 harness. On a
+// CUDA/HIP build this is a real kernel governed by the device compiler's --fmad
+// flag; on a host build the harness runs the same functor in a serial loop, still
+// through two genuinely separate allocations and a memcpy each way. Mirrors
+// ff_fma_guard_test's device pass and qf_eft_test's Test E.
+//
+// Each functor is a trivially-copyable STRUCT holding raw device pointers, not a
+// lambda: device_harness.hpp passes it by value into a __global__ and
+// deliberately does not require nvcc --extended-lambda of its callers.
 // ----------------------------------------------------------------------------
+struct ProdKernel {
+    const float* a;
+    const float* b;
+    float* p_hi;
+    float* p_lo;
+
+    XPMATH_INLINE_FUNCTION void operator()(std::size_t i) const {
+        float e; float p = qf::qf_two_prod(a[i], b[i], e);
+        p_hi[i] = p; p_lo[i] = e;
+    }
+};
+struct SqrKernel {
+    const float* a;
+    float* q_hi;
+    float* q_lo;
+
+    XPMATH_INLINE_FUNCTION void operator()(std::size_t i) const {
+        float e; float q = qf::qf_two_sqr(a[i], e);
+        q_hi[i] = q; q_lo[i] = e;
+    }
+};
+
 static GuardStat device_prod_pass(const std::vector<std::pair<float,float>>& in, int& samples_left) {
-    using exec_space = Kokkos::DefaultExecutionSpace;
-    const int n = (int)in.size();
-    Kokkos::View<float*, exec_space> va("va", n), vb("vb", n), p_hi("p_hi", n), p_lo("p_lo", n);
-    auto hva = Kokkos::create_mirror_view(va);
-    auto hvb = Kokkos::create_mirror_view(vb);
-    for (int i = 0; i < n; ++i) { hva(i) = in[i].first; hvb(i) = in[i].second; }
-    Kokkos::deep_copy(va, hva); Kokkos::deep_copy(vb, hvb);
+    const std::size_t n = in.size();
+    xpt::buffer<float> va(n), vb(n), p_hi(n), p_lo(n);
+    for (std::size_t i = 0; i < n; ++i) { va.host()[i] = in[i].first; vb.host()[i] = in[i].second; }
+    va.to_device();
+    vb.to_device();
 
-    Kokkos::parallel_for("qf_fma_guard_prod_device", Kokkos::RangePolicy<exec_space>(0, n),
-        KOKKOS_LAMBDA(int i) {
-            float e; float p = qf::qf_two_prod(va(i), vb(i), e);
-            p_hi(i) = p; p_lo(i) = e;
-        });
-    Kokkos::fence();
+    // parallel_for_n records the launch error and fences before it returns, so
+    // from_device() below cannot race a live kernel.
+    xpt::parallel_for_n(n, ProdKernel{va.device(), vb.device(),
+                                      p_hi.device(), p_lo.device()});
 
-    auto hphi = Kokkos::create_mirror_view(p_hi);
-    auto hplo = Kokkos::create_mirror_view(p_lo);
-    Kokkos::deep_copy(hphi, p_hi); Kokkos::deep_copy(hplo, p_lo);
+    p_hi.from_device();
+    p_lo.from_device();
 
     GuardStat c;
-    for (int i = 0; i < n; ++i)
-        classify(c, hphi(i), hplo(i), (double)in[i].first * (double)in[i].second,
+    for (std::size_t i = 0; i < n; ++i)
+        classify(c, p_hi.host()[i], p_lo.host()[i],
+                 (double)in[i].first * (double)in[i].second,
                  "twoProd", "device", in[i].first, in[i].second, samples_left);
     return c;
 }
 static GuardStat device_sqr_pass(const std::vector<float>& in, int& samples_left) {
-    using exec_space = Kokkos::DefaultExecutionSpace;
-    const int n = (int)in.size();
-    Kokkos::View<float*, exec_space> va("va", n), q_hi("q_hi", n), q_lo("q_lo", n);
-    auto hva = Kokkos::create_mirror_view(va);
-    for (int i = 0; i < n; ++i) hva(i) = in[i];
-    Kokkos::deep_copy(va, hva);
+    const std::size_t n = in.size();
+    xpt::buffer<float> va(n), q_hi(n), q_lo(n);
+    for (std::size_t i = 0; i < n; ++i) va.host()[i] = in[i];
+    va.to_device();
 
-    Kokkos::parallel_for("qf_fma_guard_sqr_device", Kokkos::RangePolicy<exec_space>(0, n),
-        KOKKOS_LAMBDA(int i) {
-            float e; float q = qf::qf_two_sqr(va(i), e);
-            q_hi(i) = q; q_lo(i) = e;
-        });
-    Kokkos::fence();
+    xpt::parallel_for_n(n, SqrKernel{va.device(), q_hi.device(), q_lo.device()});
 
-    auto hqhi = Kokkos::create_mirror_view(q_hi);
-    auto hqlo = Kokkos::create_mirror_view(q_lo);
-    Kokkos::deep_copy(hqhi, q_hi); Kokkos::deep_copy(hqlo, q_lo);
+    q_hi.from_device();
+    q_lo.from_device();
 
     GuardStat c;
-    for (int i = 0; i < n; ++i)
-        classify(c, hqhi(i), hqlo(i), (double)in[i] * (double)in[i],
+    for (std::size_t i = 0; i < n; ++i)
+        classify(c, q_hi.host()[i], q_lo.host()[i], (double)in[i] * (double)in[i],
                  "twoSqr", "device", in[i], in[i], samples_left);
     return c;
 }
@@ -610,15 +657,18 @@ static void report_op(const char* op, const GuardStat& c) {
 }
 
 // ============================================================================
-int main(int argc, char** argv) {
-    Kokkos::initialize(argc, argv);
+int main(int, char**) {
     int rc = 0;
     {
         std::printf("=== qf_fma_guard_test (T3.5): FMA-contraction guard for QF Dekker "
                     "qf_two_prod + qf_two_sqr ===\n");
         std::printf("contraction posture: %s\n", kPostureName);
-        std::printf("execution space: %s\n", Kokkos::DefaultExecutionSpace::name());
-        std::printf("Oracle: FP64 exact product (contraction-immune; 48 <= 53 bits, no __float128)\n");
+        std::printf("execution space: %s\n", xpt::where_name());
+        // Deliberately does NOT spell the 128-bit type's name here. A string
+        // literal survives preprocessing, so it would fail
+        // scripts/check_device_tu_purity.sh, which carries this file.
+        std::printf("Oracle: FP64 exact product (contraction-immune; 48 <= 53 bits, "
+                    "needs no type wider than a machine word)\n");
         std::printf("Primitives called DIRECTLY from qf_math.hpp (no mirror-and-comment; "
                     "cf. T3.1 qf_eft_test)\n\n");
 
@@ -676,6 +726,8 @@ int main(int argc, char** argv) {
                          "a QF Dekker error term collapsed under contraction-off — "
                          "the -ffp-contract=off posture is not taking effect");
         KOKKOS_EP_ASSERT(N.failed == 0, "a named QF Dekker corner case failed under contraction-off");
+        KOKKOS_EP_ASSERT(xpt::last_error() == 0,
+                         "device harness reported a nonzero vendor error code");
         rc = ep_exit_code();
         std::printf("=== qf_fma_guard_test [OFF]: %s ===\n",
                     rc == 0 ? "ALL EXACT (posture holds)" : "FAILURES PRESENT");
@@ -708,11 +760,25 @@ int main(int argc, char** argv) {
         check_baseline(F);
 #  endif
         // Reporter: PASS unless a genuinely-broken (nonzero-wrong) term appeared.
-        rc = (wrong == 0 && N.failed == 0) ? 0 : 1;
+        //
+        // C4 chunk D — THE APPARATUS TERM IS NOT OPTIONAL. This line used to read
+        // `rc = (wrong == 0 && N.failed == 0) ? 0 : 1;`, which never consults
+        // ep_exit_code(). That was survivable while every KOKKOS_EP_ASSERT in this
+        // file sat inside the OFF branch. The migration adds one to the path BOTH
+        // postures take (the harness error check below), and a reporter that
+        // printed ASSERT FAILED and still exited 0 would be worse than no check at
+        // all — chunk B had to fix exactly that shape in tf_fma_guard_test. So the
+        // assert count joins the verdict here rather than the assertion being kept
+        // OFF-only: the reporter still exits 0 on the MEASUREMENT (ERR_ZERO under
+        // ON is informative, not a fault), and nonzero on the APPARATUS. A launch
+        // that failed did not report anything, so F and wrong would be noise.
+        KOKKOS_EP_ASSERT(xpt::last_error() == 0,
+                         "device harness reported a nonzero vendor error code");
+        const int apparatus_rc = ep_exit_code();
+        rc = (wrong == 0 && N.failed == 0 && apparatus_rc == 0) ? 0 : 1;
         std::printf("=== qf_fma_guard_test [ON]: REPORTED (F=%ld, ERR_NONZERO_WRONG=%ld, exit %d) ===\n",
                     F, wrong, rc);
 #endif
     }
-    Kokkos::finalize();
     return rc;
 }

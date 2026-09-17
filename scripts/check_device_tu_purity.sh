@@ -77,12 +77,14 @@ FILES=(
   # cannot make (nvcc rejects std::vector<__float128> in a TU it gives a device
   # pass).
   #
-  # tests/qf_eft_test.cpp is DELIBERATELY ABSENT. It links no Kokkos and runs its
-  # device parity through the same harness, but its Test C carries a binary128
-  # wide-spread truncation check (test_renorm_4_wide), so it is a MIXED TU like the
-  # eight the plan already names -- a ninth. Splitting it is not this step's job;
-  # adding it here would fail, and weakening this gate to accommodate it is not an
-  # option.
+  #
+  # tests/qf_eft_test.cpp used to be DELIBERATELY ABSENT here: it linked no Kokkos
+  # and ran its device parity through the same harness, but its Test C carried a
+  # binary128 wide-spread truncation check (test_renorm_4_wide), making it a MIXED
+  # TU -- a ninth beyond the eight the plan names. C4 step 2 (chunk D) split it.
+  # The host half keeps the target name and Test C; the device half is
+  # tests/qf_eft_test_device.cpp, listed below. The absence is resolved, not
+  # carried forward, and the gate was never weakened to accommodate it.
   "tests/dd_invariant_test.cpp"
   "tests/ff_invariant_test.cpp"
   "tests/ff_eft_test.cpp"
@@ -107,6 +109,19 @@ FILES=(
   # would not be stripped -- one of its printf lines was reworded for exactly
   # that reason.
   "tests/ff_fma_guard_test.cpp"
+  # CORE_PLAN C4 step 2 (chunk D): the DEVICE HALVES of the split QF mixed TUs,
+  # same shape as chunk C's DD/FF entries above. qf_eft_test_device.cpp is the one
+  # that resolves the deliberate absence noted at the top of this array.
+  "tests/qf_eft_test_device.cpp"
+  "tests/qf_nonoverlap_test_device.cpp"
+  "tests/qf_property_test_device.cpp"
+  # qf_fma_guard_test.cpp is here WITHOUT a _device sibling, for the same reason
+  # ff_fma_guard_test.cpp is: chunk D migrated it WHOLE rather than splitting it.
+  # Its oracle is an exact FP64 product (48 bits in a 53-bit mantissa), not a
+  # 128-bit one, and post-C2 it includes test_utils_device.hpp only. MEASURED on
+  # this tree before adding it: one of its printf STRING LITERALS named the wide
+  # type, which the preprocessor does NOT strip, and was reworded.
+  "tests/qf_fma_guard_test.cpp"
 )
 
 INCS=(-I"${REPO_ROOT}/include" -I"${REPO_ROOT}/tests" -I"${REPO_ROOT}/third_party/include")

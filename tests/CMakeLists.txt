@@ -396,6 +396,25 @@ xpm_add_host_eft_test(dd_eft_test)
 xpm_add_host_eft_test(dd_fma_guard_test)              # -> dd_fma_guard_test              (OFF, gates)
 xpm_add_host_eft_test_contract_on(dd_fma_guard_test)  # -> dd_fma_guard_test_contract_on  (ON, reports)
 
+# --- HOST HALVES OF THE C4 STEP-2 SPLITS (QF) ------------------------------
+# CORE_PLAN C4 step 2, chunk D. Same shape as chunk C above: each kept its
+# target name, its tests/test_utils_host.hpp include and its oracle scoring, and
+# lost only the kernel launch to a sibling *_test_device.cpp in the device block.
+#
+# qf_property_test uses the plain helper (algebraic identities are contraction
+# agnostic) and qf_nonoverlap_test likewise -- a per-word add/compare has nothing
+# to contract, which is what its pre-split kokkos_ep_add_test registration said.
+xpm_add_host_test(qf_property_test)
+xpm_add_host_test(qf_nonoverlap_test)
+# qf_eft_test is the NINTH mixed TU -- the one C4's eight-file list does not name
+# and chunk B could only half-migrate, because Test C's wide-spread renorm_4
+# truncation check is a genuine binary128 host assertion. It is split now: this
+# half keeps Tests A-D including that check, and moves from
+# xpm_add_device_eft_test to the HOST EFT helper. The contraction-OFF posture
+# travels with it -- Tests A/B call the Dekker sequence `a1*b1 - c11` directly on
+# the host, so the flag is as load-bearing here as before the split.
+xpm_add_host_eft_test(qf_eft_test)
+
 # --- DEVICE TESTS THAT LINK NO KOKKOS --------------------------------------
 # CORE_PLAN C4 step 3. These six sources were already device-only in substance
 # -- every one of them launches a kernel and checks the result on host, and none
@@ -419,9 +438,9 @@ xpm_add_host_eft_test_contract_on(dd_fma_guard_test)  # -> dd_fma_guard_test_con
 # xpt::last_error() == 0, which the Kokkos versions had no analogue for -- a
 # launch that never ran used to be indistinguishable from one that ran clean.
 #
-# FIVE OF THE SIX ARE ALSO IN scripts/check_device_tu_purity.sh's FILES list.
-# qf_eft_test is not, and that is not an oversight -- see the comment on its
-# registration below.
+# ALL OF THEM ARE IN scripts/check_device_tu_purity.sh's FILES list. Five were
+# when chunk B wrote this; qf_eft_test was the exception, and chunk D removed the
+# exception by splitting it -- see its registration below.
 xpm_add_device_test(dd_invariant_test)
 xpm_add_device_test(ff_invariant_test)
 # ff/qf/tf EFT + the TF guard keep the contraction posture they had; see the
@@ -429,17 +448,12 @@ xpm_add_device_test(ff_invariant_test)
 # _contract_on companions, which are the only two ON-posture targets outside the
 # Kokkos block.
 xpm_add_device_eft_test(ff_eft_test)
-# qf_eft_test STILL INCLUDES test_utils_host.hpp, ON PURPOSE. Its Test C third
-# case, test_renorm_4_wide, builds a ~113-bit binary128 value, decomposes it into
-# five ordered FP32 words and gates renorm_4's truncation at 2^-88. That is a
-# genuine __float128 host assertion in a TU whose device half is clean, which
-# makes qf_eft_test a NINTH mixed TU -- the C4 step-2 list names eight and does
-# not include it. Splitting it is chunk C/D work, not this chunk's, so the
-# launch mechanism is migrated here (which is what step 3 asks for) and the file
-# is deliberately LEFT OUT of the purity gate's FILES list until the split
-# happens. Adding it would fail the gate; weakening the gate is forbidden; and
-# deleting a real coverage point to make a list tidy is worse than either.
-xpm_add_device_eft_test(qf_eft_test)
+# qf_eft_test WAS registered here, still including test_utils_host.hpp on
+# purpose, because Test C's test_renorm_4_wide is a genuine binary128 host
+# assertion -- making it a NINTH mixed TU that the C4 step-2 list does not name.
+# Chunk D split it: the host half moved to xpm_add_host_eft_test above with Test
+# C intact, and the device half is qf_eft_test_device, registered below and in
+# the purity gate's FILES list.
 xpm_add_device_eft_test(tf_eft_test)                    # -> tf_eft_test              (OFF, gates)
 xpm_add_device_eft_test_contract_on(tf_eft_test)        # -> tf_eft_test_contract_on  (ON, reports)
 xpm_add_device_eft_test(tf_fma_guard_test)              # -> tf_fma_guard_test              (OFF, gates)
@@ -476,13 +490,47 @@ xpm_add_device_eft_test_contract_on(dd_fma_guard_test_device)  # -> ..._contract
 xpm_add_device_eft_test(ff_fma_guard_test)              # -> ff_fma_guard_test              (OFF, gates)
 xpm_add_device_eft_test_contract_on(ff_fma_guard_test)  # -> ff_fma_guard_test_contract_on  (ON, reports)
 
+# --- DEVICE HALVES OF THE C4 STEP-2 SPLITS (QF) ----------------------------
+# CORE_PLAN C4 step 2, chunk D. Three new TUs plus one whole migration, mirroring
+# chunk C's block above. All four are in scripts/check_device_tu_purity.sh's
+# FILES list.
+#
+# The property and non-overlap halves use the plain device helper -- neither the
+# bit-exact identities nor a per-word add/compare has anything to contract, which
+# is what their pre-split plain registrations said. qf_eft_test_device uses the
+# contraction-OFF helper: it calls qf_two_prod's Dekker sequence in a kernel, so
+# the flag is exactly as load-bearing on this half as on the host one.
+xpm_add_device_test(qf_property_test_device)
+xpm_add_device_test(qf_nonoverlap_test_device)
+xpm_add_device_eft_test(qf_eft_test_device)
+# qf_fma_guard_test is here WHOLE, not split -- the same deliberate deviation
+# from C4 step 2's eight-TU list that chunk C made for ff_fma_guard_test, and for
+# the same reason: that list predates C2, and post-C2 this file includes
+# test_utils_device.hpp only and scores against an exact FP64 product (48 <= 53
+# bits), not a 128-bit one. Splitting it would duplicate ~260 lines of apparatus
+# and make four targets where two suffice. MEASURED before it joined the purity
+# gate: its prose mentions of the wide type are stripped by the preprocessor, but
+# one printf STRING LITERAL was not, and was reworded. What changed here is the
+# launch surface (Kokkos -> tests/device_harness.hpp) and one more thing: the ON
+# reporter's exit code now folds in ep_exit_code(), because the migration puts a
+# KOKKOS_EP_ASSERT on the path BOTH postures take and the old expression would
+# have printed ASSERT FAILED and still exited 0.
+xpm_add_device_eft_test(qf_fma_guard_test)              # -> qf_fma_guard_test              (OFF, gates)
+xpm_add_device_eft_test_contract_on(qf_fma_guard_test)  # -> qf_fma_guard_test_contract_on  (ON, reports)
+
 # --- Registered tests -----------------------------------------------------
-# Everything from here to the "END KOKKOS-LINKED TESTS" marker links
-# Kokkos::kokkos, because it exercises the compat wrappers in
-# third_party/include/. The Kokkos-free tests -- both gates, pow_domain,
-# exp_reduction, trig_reduction, the standalone smokes, the consumer package,
-# the contraction-flag pair, the seven host tests and the eight device targets
-# above -- are registered outside it and build with XPMATH_WITH_KOKKOS=OFF.
+# THIS BLOCK IS NOW EMPTY OF REGISTRATIONS, as of C4 step 2 chunk D. It used to
+# hold everything that linked Kokkos::kokkos to exercise the compat wrappers in
+# third_party/include/; steps 1 and 3 and chunks C and D moved the last of it
+# out, and what remains between here and the "END KOKKOS-LINKED TESTS" marker is
+# the per-test commentary, kept where a reader looking for a QF or TF target will
+# find the note saying where it went.
+#
+# That emptiness is the point of C4: with no test conditional on
+# XPMATH_WITH_KOKKOS, the with-Kokkos and no-Kokkos ctest counts are EQUAL, and a
+# GPU can be asked "does the standalone core run here" without a working Kokkos
+# install on it. Removing the now-unused kokkos_ep_add_* helpers and this shell
+# is chunk E's job, not this one's.
 if(XPMATH_WITH_KOKKOS)
 # T1.2 dd_invariant_test and T2.2 ff_invariant_test moved to the Kokkos-free
 # device block above in C4 step 3. Both were oracle-independent already; their
@@ -546,10 +594,11 @@ if(XPMATH_WITH_KOKKOS)
 # unlike ff_eft_test, QF exposes its primitives as free functions). Same
 # contraction-OFF posture as ff_eft_test (Dekker twoProduct is the contraction
 # hazard). Contraction-ON reporter mirror is T3.5.
-# (qf_eft_test moved to the Kokkos-free device block above in C4 step 3. It is
-# the one migrated TU that still includes test_utils_host.hpp -- for the
-# wide-spread renorm_4 check -- and therefore the one kept out of the purity
-# gate's FILES list; the reason is written at its registration.)
+# (qf_eft_test moved to the Kokkos-free device block above in C4 step 3, and was
+# SPLIT there in C4 step 2 chunk D: host half via xpm_add_host_eft_test with the
+# wide-spread renorm_4 check intact, device half as qf_eft_test_device. Both
+# postures of the split are Kokkos-free; the purity-gate exception it used to
+# carry is gone.)
 
 # T3.2 non-overlap invariant checks for QF: the Priest length-4 invariant
 # |f_{i+1}| <= 1/2 ulp(f_i) (i=0,1,2) on the OUTPUT of every QF op that returns a
@@ -560,7 +609,12 @@ if(XPMATH_WITH_KOKKOS)
 # helper (NOT the EFT helper): a per-word add/compare has nothing to contract,
 # so no -ffp-contract=off posture is required. QF analogue of
 # ff_invariant_test (T2.2); shares half_ulp / nonoverlap_holds with qf_eft_test.
-kokkos_ep_add_test(qf_nonoverlap_test)
+# (SPLIT in C4 step 2, chunk D. Test B, the device tripwire, is now
+# qf_nonoverlap_test_device; Tests A and C stayed with the host half, which keeps
+# the target name. Both are registered in the Kokkos-free blocks above. The
+# device half's inputs are enriched through a DoubleDouble carrier rather than
+# binary128 -- same construction, a type the device pass can actually compile;
+# the reason is written in that file's header.)
 
 # T3.3 property/identity tests for QF: Group A bit-exact identities (additive
 # inverse/zero, multiply by 0/+-1, negation, abs sign branches, add commutativity
@@ -574,7 +628,10 @@ kokkos_ep_add_test(qf_nonoverlap_test)
 # unconditionally; Group B / Test C score against the __float128 oracle. Plain
 # helper (NOT the EFT helper): algebraic identities are FMA-contraction agnostic.
 # QF analogue of ff_property_test (T2.3).
-kokkos_ep_add_test(qf_property_test)
+# (SPLIT in C4 step 2, chunk D, exactly as its DD/FF analogues were in chunk C:
+# host half keeps the target name and the Group B / Test C oracle scoring, device
+# pass is qf_property_test_device. The device half GREW -- it runs all twelve
+# Group A identities, where the old device block ran three.)
 
 # T3.4 differential accuracy for QF: per-op digits-of-accuracy against the
 # __float128 oracle. QF analogue of the retired per-backend accuracy tests
@@ -595,9 +652,11 @@ kokkos_ep_add_test(qf_property_test)
 # characterizes GCC's contraction of the shipped source itself (cf. T3.1 qf_eft_test,
 # which established the same direct-call posture under contraction-OFF). Also guards
 # qf_two_sqr (a second Dekker sequence, no FF analogue). FP64 oracle (exact, no
-# type wider than a machine word), so it runs on any target, not x86_64 only.
-kokkos_ep_add_eft_test(qf_fma_guard_test)              # -> qf_fma_guard_test              (OFF, gates)
-kokkos_ep_add_eft_test_contract_on(qf_fma_guard_test)  # -> qf_fma_guard_test_contract_on  (ON, reports)
+# type wider than a machine word), so it runs on any target, not x86_64 only --
+# and that is also why C4 chunk D migrated it WHOLE onto the C3 harness instead
+# of splitting it, exactly as chunk C did with the FF guard. Both postures are
+# registered in the Kokkos-free device block above; the reasoning is written
+# there and in the file's own header.
 
 # T3.6 end-to-end cancellation kernels for QF: __float128-oracle-scored, host-side.
 # QF analogue of dd_e2e_test (T1.6) / ff_cancellation_test (T2.6). Plain helper —
@@ -676,46 +735,35 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/contraction_manifest.txt" "${_xp_manifes
 # ci.yml's `expected=49` -- adding or removing a guarded target is a deliberate
 # act that updates a number here.
 #
-# THEY ARE PER-CONFIGURATION, AND THAT IS STILL TRANSITIONAL. After C4 step 3
-# the Kokkos-free branch was 4/2; chunk C's DD/FF splits take it to 9/5, and the
-# single remaining difference between the branches is qf_fma_guard_test and its
-# _contract_on companion.
+# THEY ARE NO LONGER PER-CONFIGURATION. The previous version of this comment
+# predicted the collapse: "when chunk D moves qf_fma_guard_test (and the ninth
+# mixed TU, qf_eft_test's host assertion) out of the Kokkos block, both branches
+# read the same numbers and the conditional is dead." Chunk D did that and the
+# if() is gone. The predicted figure was 10/6; the measured one is 11/6, because
+# the prediction counted qf_fma_guard_test moving but not qf_eft_test SPLITTING
+# -- the same arithmetic slip an earlier revision made about chunk C, in the same
+# direction: splitting a guarded TU adds a guarded target, it does not conserve
+# the count.
 #
-# THE TOTALS GREW, from 8/5 to 10/6, and that is not a target quietly acquiring a
-# flag. It is chunk C splitting two guarded TUs in half. dd_eft_test became
-# dd_eft_test + dd_eft_test_device, and dd_fma_guard_test became four targets
-# (host and device x OFF and ON) where it was two. Both halves of each are still
-# EFT tests -- the host half still calls `a1*b1 - c11` directly -- so both are
-# still guarded, and a split that guarded only one half would be the exact
-# silent failure this gate exists to catch. ff_fma_guard_test was NOT split (it
-# migrated whole; see its registration) so it still contributes 1 OFF + 1 ON,
-# just from the Kokkos-free branch now.
+# THE TOTALS GREW, from 10/6 to 11/6, and no target quietly acquired a flag. The
+# one new OFF entry is qf_eft_test_device, the device half of the ninth mixed TU.
+# Both halves call qf_two_prod's Dekker sequence -- the host one on the host, the
+# device one in a kernel -- so both are still EFT tests and both must stay
+# guarded; a split that guarded only one half would be exactly the silent failure
+# this gate exists to catch. qf_fma_guard_test was NOT split (it migrated whole;
+# see its registration) so it still contributes 1 OFF + 1 ON, from the
+# Kokkos-free branch now.
 #
-# Counting the 10 OFF with Kokkos: ff_eft, qf_eft, tf_eft, tf_fma_guard (step 3)
-# + dd_eft_test, dd_eft_test_device, dd_fma_guard_test, dd_fma_guard_test_device,
-# ff_fma_guard_test (chunk C) + qf_fma_guard_test (still Kokkos-linked, chunk D).
+# The 11 OFF: ff_eft, tf_eft, tf_fma_guard (step 3) + dd_eft_test,
+# dd_eft_test_device, dd_fma_guard_test, dd_fma_guard_test_device,
+# ff_fma_guard_test (chunk C) + qf_eft_test, qf_eft_test_device,
+# qf_fma_guard_test (chunk D).
 # The 6 ON: tf_eft_test_contract_on, tf_fma_guard_test_contract_on,
 # dd_fma_guard_test_contract_on, dd_fma_guard_test_device_contract_on,
-# ff_fma_guard_test_contract_on, qf_fma_guard_test_contract_on.
-#
-# WHEN DOES THIS if() COLLAPSE. When chunk D moves qf_fma_guard_test (and the
-# ninth mixed TU, qf_eft_test's host assertion) out of the Kokkos block: both
-# branches then read 10/6 and the conditional is dead. An earlier version of this
-# comment predicted "both branches become 8/5"; that arithmetic assumed splitting
-# a guarded TU leaves the guarded-target count unchanged, which it does not.
-if(XPMATH_WITH_KOKKOS)
-  set(XPMATH_EFT_OFF_EXPECTED 10)  # the 9 below + qf_fma_guard_test (Kokkos-linked)
-  set(XPMATH_EFT_ON_EXPECTED  6)   # the 5 below + qf_fma_guard_test_contract_on
-else()
-  # ff_eft, qf_eft, tf_eft, tf_fma_guard (step 3) + dd_eft_test,
-  # dd_eft_test_device, dd_fma_guard_test, dd_fma_guard_test_device,
-  # ff_fma_guard_test (chunk C)
-  set(XPMATH_EFT_OFF_EXPECTED 9)
-  # tf_eft_test_contract_on, tf_fma_guard_test_contract_on (step 3) +
-  # dd_fma_guard_test_contract_on, dd_fma_guard_test_device_contract_on,
-  # ff_fma_guard_test_contract_on (chunk C)
-  set(XPMATH_EFT_ON_EXPECTED  5)
-endif()
+# ff_fma_guard_test_contract_on (chunk C) + qf_fma_guard_test_contract_on
+# (chunk D).
+set(XPMATH_EFT_OFF_EXPECTED 11)
+set(XPMATH_EFT_ON_EXPECTED  6)
 message(STATUS "contraction guard: ${_xp_n_off} OFF targets, ${_xp_n_on} ON targets "
                "(expected ${XPMATH_EFT_OFF_EXPECTED}/${XPMATH_EFT_ON_EXPECTED})")
 

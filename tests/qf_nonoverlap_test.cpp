@@ -122,10 +122,7 @@
 //            and integer pow_int run in dedicated loops after the registries
 //            (mul_pwr2 is tested ONLY with b = +-2^k — it does componentwise
 //            multiply with NO renorm, exact only for powers of two).
-//   Test B — device tripwire: 5 representative ops (add, multiply, sqrt, exp,
-//            sin) run the SAME invariant inside a Kokkos::parallel_for, results
-//            copied back and checked on host.  Catches a Serial->device
-//            regression the host pass cannot see.
+//   Test B — device tripwire: MOVED OUT in C4, see the split note below.
 //   Test C — corner cases as named asserts: zero, +-ulp, subnormals, +-inf, NaN.
 //
 // SCOPE: real QF ops only (qf_complex.hpp is out of scope — that is T3.x complex
@@ -137,11 +134,34 @@
 // invariant checks for QF"; the T3.1 DONE block (source of half_ulp /
 // nonoverlap_holds / ordered-decomposition) and the T2.2 DONE block (structural
 // template); "The six test layers" layer 2.
+//
+// ----------------------------------------------------------------------------
+// THIS IS THE HOST HALF. CORE_PLAN section C4 step 2 split the TU.
+// ----------------------------------------------------------------------------
+// Test B — the five-op device tripwire (add, multiply, sqrt, exp, sin on 10^5
+// enriched inputs each) — used to run here inside a Kokkos::parallel_for. It
+// could not survive contact with a GPU compiler, and for an irritating reason:
+// the invariant this file checks is ORACLE-INDEPENDENT, so nothing about the
+// MEASUREMENT needed a 128-bit type. The type entered through one door,
+// make_wide_input(), which enriches a nominal double into a full-width 4-word
+// operand. That one input-construction helper made the whole TU — device
+// tripwire included — unbuildable under nvcc (S6).
+//
+// Test B now lives in tests/qf_nonoverlap_test_device.cpp, which launches
+// through tests/device_harness.hpp and carries the same enrichment in an
+// xp::DoubleDouble (106-bit) carrier instead. Same five ops, same seeds, same
+// 10^5 inputs, same gate and the same classify_nonoverlap() verdict — nothing
+// about the check changed, only the carrier the INPUTS are built in.
+//
+// Test A and Test C stay here. They keep the binary128 make_wide_input below,
+// which costs them nothing: they never ran on a device.
+//
+// NOTHING BELOW LAUNCHES A KERNEL. This file links no Kokkos.
 // ============================================================================
 
 #include "test_utils_host.hpp"
 #include "corpus.hpp"
-#include <qf_math.hpp>
+#include <xp/qf_math.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -155,9 +175,11 @@
 
 using namespace kokkos_ep;
 
-// QF types live in Kokkos::Experimental; introduce a qf:: alias for readability
-// (matches qf_eft_test.cpp).
-namespace qf = Kokkos::Experimental;
+// qf:: alias over the standalone core (matches qf_eft_test.cpp). This used to
+// read `namespace qf = Kokkos::Experimental;`; the C4 split unlinked Kokkos from
+// this target, and third_party/include/qf_math.hpp is a true alias of the same
+// type, so the spelling changed and the type did not.
+namespace qf = xp;
 
 // ----------------------------------------------------------------------------
 // The Priest length-4 non-overlap invariant and its domain.
@@ -509,136 +531,20 @@ static InvSummary run_binary(const BinaryOp& op, uint64_t seed) {
   return InvSummary{op.name, c.tested, c.skipped, c.failures, c.weak, c.worst_ratio, c.worst_idx};
 }
 
-// ----------------------------------------------------------------------------
-// Device tripwire (Test B). Same invariant, computed on device for 5 ops. Input
-// words are built on host (make_wide_input) and shipped as four Views; output
-// words copied back and checked on host. Mirrors qf_eft_test.cpp's device block.
-// ----------------------------------------------------------------------------
-template <typename DeviceOp>
-static InvSummary device_unary(const char* name, int n, uint64_t seed,
-                               const InputDist& gen, const Dom1& in_domain,
-                               DeviceOp op) {
-  using exec_space = Kokkos::DefaultExecutionSpace;
-
-  std::vector<double> hx(n);
-  Kokkos::View<float*, exec_space> a0("a0", n), a1("a1", n), a2("a2", n), a3("a3", n);
-  auto ha0 = Kokkos::create_mirror_view(a0);
-  auto ha1 = Kokkos::create_mirror_view(a1);
-  auto ha2 = Kokkos::create_mirror_view(a2);
-  auto ha3 = Kokkos::create_mirror_view(a3);
-  {
-    std::mt19937_64 g(seed);
-    for (int i = 0; i < n; ++i) {
-      hx[i] = gen(g);
-      qf::QuadFloat q = make_wide_input(hx[i], g);
-      ha0(i) = q.f0; ha1(i) = q.f1; ha2(i) = q.f2; ha3(i) = q.f3;
-    }
-  }
-  Kokkos::deep_copy(a0, ha0); Kokkos::deep_copy(a1, ha1);
-  Kokkos::deep_copy(a2, ha2); Kokkos::deep_copy(a3, ha3);
-
-  Kokkos::View<float*, exec_space> o0("o0", n), o1("o1", n), o2("o2", n), o3("o3", n);
-  Kokkos::parallel_for("qf_nonoverlap_dev_unary", Kokkos::RangePolicy<exec_space>(0, n),
-    KOKKOS_LAMBDA(int i) {
-      qf::QuadFloat d = op(qf::QuadFloat(a0(i), a1(i), a2(i), a3(i)));
-      o0(i) = d.f0; o1(i) = d.f1; o2(i) = d.f2; o3(i) = d.f3;
-    });
-  Kokkos::fence();
-
-  auto ho0 = Kokkos::create_mirror_view(o0);
-  auto ho1 = Kokkos::create_mirror_view(o1);
-  auto ho2 = Kokkos::create_mirror_view(o2);
-  auto ho3 = Kokkos::create_mirror_view(o3);
-  Kokkos::deep_copy(ho0, o0); Kokkos::deep_copy(ho1, o1);
-  Kokkos::deep_copy(ho2, o2); Kokkos::deep_copy(ho3, o3);
-
-  InvCount c; int samples_left = 3;
-  for (int i = 0; i < n; ++i) {
-    if (!in_domain(hx[i])) { ++c.skipped; continue; }
-    qf::QuadFloat d(ho0(i), ho1(i), ho2(i), ho3(i));
-    if (!result_checkable(d)) { ++c.skipped; continue; }
-    ++c.tested;
-    double ratio = 0.0; int idx = -1;
-    NovlClass cl = grade(d, c, &ratio, &idx);
-    if (cl == NOVL_FAIL && samples_left > 0) { print_fail_unary(name, hx[i], d); --samples_left; }
-    else if (cl == NOVL_WEAK && samples_left > 0) { print_weak(name, hx[i], d, ratio, idx); --samples_left; }
-  }
-  std::printf("  [device] %-12s tested=%-8ld skipped=%-8ld failures=%ld weak=%ld worst=%.4f\n",
-              name, c.tested, c.skipped, c.failures, c.weak, c.worst_ratio);
-  return InvSummary{std::string("device:") + name, c.tested, c.skipped, c.failures,
-                    c.weak, c.worst_ratio, c.worst_idx};
-}
-
-template <typename DeviceOp>
-static InvSummary device_binary(const char* name, int n, uint64_t seed,
-                                const InputDist& gen_a, const InputDist& gen_b,
-                                const Dom2& in_domain, DeviceOp op) {
-  using exec_space = Kokkos::DefaultExecutionSpace;
-
-  std::vector<double> ha(n), hb(n);
-  Kokkos::View<float*, exec_space> a0("a0", n), a1("a1", n), a2("a2", n), a3("a3", n);
-  Kokkos::View<float*, exec_space> b0("b0", n), b1("b1", n), b2("b2", n), b3("b3", n);
-  auto ma0 = Kokkos::create_mirror_view(a0); auto ma1 = Kokkos::create_mirror_view(a1);
-  auto ma2 = Kokkos::create_mirror_view(a2); auto ma3 = Kokkos::create_mirror_view(a3);
-  auto mb0 = Kokkos::create_mirror_view(b0); auto mb1 = Kokkos::create_mirror_view(b1);
-  auto mb2 = Kokkos::create_mirror_view(b2); auto mb3 = Kokkos::create_mirror_view(b3);
-  {
-    std::mt19937_64 g(seed);
-    for (int i = 0; i < n; ++i) {
-      ha[i] = gen_a(g); qf::QuadFloat qa = make_wide_input(ha[i], g);
-      hb[i] = gen_b(g); qf::QuadFloat qb = make_wide_input(hb[i], g);
-      ma0(i) = qa.f0; ma1(i) = qa.f1; ma2(i) = qa.f2; ma3(i) = qa.f3;
-      mb0(i) = qb.f0; mb1(i) = qb.f1; mb2(i) = qb.f2; mb3(i) = qb.f3;
-    }
-  }
-  Kokkos::deep_copy(a0, ma0); Kokkos::deep_copy(a1, ma1);
-  Kokkos::deep_copy(a2, ma2); Kokkos::deep_copy(a3, ma3);
-  Kokkos::deep_copy(b0, mb0); Kokkos::deep_copy(b1, mb1);
-  Kokkos::deep_copy(b2, mb2); Kokkos::deep_copy(b3, mb3);
-
-  Kokkos::View<float*, exec_space> o0("o0", n), o1("o1", n), o2("o2", n), o3("o3", n);
-  Kokkos::parallel_for("qf_nonoverlap_dev_binary", Kokkos::RangePolicy<exec_space>(0, n),
-    KOKKOS_LAMBDA(int i) {
-      qf::QuadFloat d = op(qf::QuadFloat(a0(i), a1(i), a2(i), a3(i)),
-                           qf::QuadFloat(b0(i), b1(i), b2(i), b3(i)));
-      o0(i) = d.f0; o1(i) = d.f1; o2(i) = d.f2; o3(i) = d.f3;
-    });
-  Kokkos::fence();
-
-  auto ho0 = Kokkos::create_mirror_view(o0);
-  auto ho1 = Kokkos::create_mirror_view(o1);
-  auto ho2 = Kokkos::create_mirror_view(o2);
-  auto ho3 = Kokkos::create_mirror_view(o3);
-  Kokkos::deep_copy(ho0, o0); Kokkos::deep_copy(ho1, o1);
-  Kokkos::deep_copy(ho2, o2); Kokkos::deep_copy(ho3, o3);
-
-  InvCount c; int samples_left = 3;
-  for (int i = 0; i < n; ++i) {
-    if (!in_domain(ha[i], hb[i])) { ++c.skipped; continue; }
-    qf::QuadFloat d(ho0(i), ho1(i), ho2(i), ho3(i));
-    if (!result_checkable(d)) { ++c.skipped; continue; }
-    ++c.tested;
-    double ratio = 0.0; int idx = -1;
-    NovlClass cl = grade(d, c, &ratio, &idx);
-    if (cl == NOVL_FAIL && samples_left > 0) { print_fail_binary(name, ha[i], hb[i], d); --samples_left; }
-    else if (cl == NOVL_WEAK && samples_left > 0) { print_weak(name, ha[i], d, ratio, idx); --samples_left; }
-  }
-  std::printf("  [device] %-12s tested=%-8ld skipped=%-8ld failures=%ld weak=%ld worst=%.4f\n",
-              name, c.tested, c.skipped, c.failures, c.weak, c.worst_ratio);
-  return InvSummary{std::string("device:") + name, c.tested, c.skipped, c.failures,
-                    c.weak, c.worst_ratio, c.worst_idx};
-}
+// The two Kokkos device runners that used to sit here (device_unary /
+// device_binary, Test B) moved to tests/qf_nonoverlap_test_device.cpp in C4 and
+// are now written against tests/device_harness.hpp. See this file's header block.
 
 // ============================================================================
-int main(int argc, char** argv) {
-  Kokkos::initialize(argc, argv);
+int main(int, char**) {
   int rc = 0;
   {
-    std::printf("=== qf_nonoverlap_test (T3.2): Priest length-4 non-overlap "
-                "|f_{i+1}| <= 1/2 ulp(f_i) for every QF op ===\n");
-    std::printf("Oracle-independent (mathematical 1/2-ulp check). Execution space: %s\n",
-                Kokkos::DefaultExecutionSpace::name());
-    std::printf("Inputs enriched to ~96-bit width via __float128 ordered decomposition.\n\n");
+    std::printf("=== qf_nonoverlap_test (T3.2, C4 host half): Priest length-4 "
+                "non-overlap |f_{i+1}| <= 1/2 ulp(f_i) for every QF op ===\n");
+    std::printf("Oracle-independent (mathematical 1/2-ulp check). Execution space: "
+                "host (Test B's device tripwire moved to qf_nonoverlap_test_device "
+                "in C4)\n");
+    std::printf("Inputs enriched to ~96-bit width via binary128 ordered decomposition.\n\n");
 
     std::vector<InvSummary> summary;
 
@@ -899,25 +805,11 @@ int main(int argc, char** argv) {
       summary.push_back(InvSummary{"pow_int", c.tested, c.skipped, c.failures, c.weak, c.worst_ratio, c.worst_idx});
     }
 
-    // -- Test B: device tripwire (5 representative ops) ----------------------
-    std::printf("\n[Test B] device tripwire (5 ops, 10^5 random on %s)\n",
-                Kokkos::DefaultExecutionSpace::name());
-    const int nd = 100'000;
-    summary.push_back(device_binary("add", nd, 55501ULL,
-        uniform(-1e8, 1e8), uniform(-1e8, 1e8), dom2_any,
-        KOKKOS_LAMBDA(qf::QuadFloat a, qf::QuadFloat b){ return qf::add(a, b); }));
-    summary.push_back(device_binary("multiply", nd, 55502ULL,
-        uniform(-1e6, 1e6), uniform(-1e6, 1e6), dom2_any,
-        KOKKOS_LAMBDA(qf::QuadFloat a, qf::QuadFloat b){ return qf::multiply(a, b); }));
-    summary.push_back(device_unary("sqrt", nd, 55503ULL,
-        uniform(0.0, 1e8), dom_nonneg,
-        KOKKOS_LAMBDA(qf::QuadFloat x){ return qf::sqrt(x); }));
-    summary.push_back(device_unary("exp", nd, 55504ULL,
-        uniform(-88.0, 87.5), [](double x){ return std::isfinite(x) && x < 88.0; },
-        KOKKOS_LAMBDA(qf::QuadFloat x){ return qf::exp(x); }));
-    summary.push_back(device_unary("sin", nd, 55505ULL,
-        uniform(-1000.0, 1000.0), dom_trig,
-        KOKKOS_LAMBDA(qf::QuadFloat x){ return qf::sin(x); }));
+    // -- Test B: device tripwire ---------------------------------------------
+    // The five-op tripwire (add, multiply, sqrt, exp, sin at 10^5 each, seeds
+    // 55501..55505) moved to tests/qf_nonoverlap_test_device.cpp in C4 — same
+    // ops, same seeds, same gate, a DoubleDouble carrier for the enriched
+    // inputs instead of binary128. See this file's header block.
 
     // -- Test C: corner cases as named asserts -------------------------------
     // zero, +-ulp, subnormals, +-inf, NaN — the invariant's boundary inputs.
@@ -1017,6 +909,5 @@ int main(int argc, char** argv) {
     std::printf("\n=== qf_nonoverlap_test: %s ===\n",
                 rc == 0 ? "ALL PASSED" : "FAILURES PRESENT");
   }
-  Kokkos::finalize();
   return rc;
 }

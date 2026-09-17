@@ -121,23 +121,31 @@
 //            value-preservation (ordered 53-bit-source input) + binary128
 //            wide-spread (~113-bit-source) truncation check
 //   Test D — named hard cases (zero, +/-ulp, cancellation, subnormals, inf/nan)
-//   Test E — device parity (run the SAME primitives through the device harness)
+//   Test E — device parity: MOVED OUT in C4, see the split note below.
 // ============================================================================
 
-// LAUNCH MECHANISM: tests/device_harness.hpp, not Kokkos (CORE_PLAN C4 step 3).
-// Test E runs the same three shipped primitives on the same seeds against the
-// same FP64 oracle; only the launch changed. The type spelling moved with it:
-// the third_party wrapper <qf_math.hpp> is a true alias whose only material
-// content beyond the alias is #include <Kokkos_Core.hpp>, so naming the core
-// directly changes what is compiled, not what is measured.
+// THIS IS THE HOST HALF. CORE_PLAN section C4 step 2 split the TU.
+// ---------------------------------------------------------------
+// C4 step 3 (chunk B) migrated Test E's launch off Kokkos onto tests/
+// device_harness.hpp but deliberately left this file OUT of the FILES array in
+// scripts/check_device_tu_purity.sh, because Test C's `test_renorm_4_wide`
+// carries a binary128 (~113-bit-source) truncation check that needs __float128 —
+// making this a MIXED TU, a ninth beyond the eight C4 already names, and not one
+// nvcc's device pass can accept (the S6 blocker).
 //
-// THIS TU IS NOT DEVICE-PURE, and is deliberately absent from the FILES array in
-// scripts/check_device_tu_purity.sh. Test C's `test_renorm_4_wide` carries a
-// binary128 (~113-bit-source) truncation check that needs __float128, so this is
-// a MIXED TU: host oracle block + device parity block in one file. It links no
-// Kokkos, which is what this step is about, but splitting the host half out is a
-// separate job -- see the report. test_utils_host.hpp is kept for that block.
-#include "device_harness.hpp"
+// Chunk D split it like the other three. This file keeps the target name, keeps
+// tests/test_utils_host.hpp, and keeps Tests A–D INCLUDING the wide-spread check
+// that made it mixed: that check is host-side by nature, not by accident. Test E
+// moved to tests/qf_eft_test_device.cpp, which is pure and is now IN the FILES
+// array — so the deliberate absence recorded here and there is resolved rather
+// than carried forward.
+//
+// The header-free helpers Test E needed (the domain predicates, the failure
+// printers, the non-overlap machinery, draw_ordered_double) are COPIED into the
+// device half rather than shared. Both halves keep their own copies; that is the
+// convention this QF test family already uses.
+//
+// NOTHING BELOW LAUNCHES A KERNEL.
 #include "test_utils_host.hpp"
 #include "corpus.hpp"
 #include <xp/qf_math.hpp>
@@ -690,121 +698,12 @@ static NamedResult run_named_cases() {
 }
 
 // ----------------------------------------------------------------------------
-// Test E — device parity. Run the SAME shipped primitives inside
-// xpt::parallel_for_n, copy results back, and compare bit-exactly against the
-// host FP64 oracle. With the harness's host backend this reduces to a host loop
-// over two real allocations (still valid); under hipcc/nvcc it is a real kernel
-// and catches device-side FP differences (subnormal flush,
-// contraction) the host pass cannot see. Inputs drawn from the splitter- and
-// underflow-safe range [-1e18,1e18] so BOTH sum stays finite AND product stays in
-// FP32's normal range (using twoSum's wider 1e30 would domain-skip nearly every
-// product — the vacuous-coverage trap FP32's narrow exponent range sets).
+// Test E — device parity: MOVED to tests/qf_eft_test_device.cpp in C4 chunk D.
+// EftKernel and run_device_parity went with it unchanged — same seeds (99999 /
+// 88888), same nd = 200'000, same [-1e18,1e18] draw range, same FP64 oracle. The
+// header-free helpers they use are copied there; the copies here still serve
+// Tests A-D.
 // ----------------------------------------------------------------------------
-// Trivially-copyable kernel struct, not a lambda: the harness passes F by value
-// into a __global__ and does not require nvcc --extended-lambda of its callers.
-struct EftKernel {
-    const float* a;
-    const float* b;
-    float* s_hi; float* s_lo;
-    float* p_hi; float* p_lo;
-    const float* c0; const float* c1; const float* c2; const float* c3; const float* c4;
-    float* rb0; float* rb1; float* rb2; float* rb3;
-
-    XPMATH_INLINE_FUNCTION void operator()(std::size_t i) const {
-        float es, ep;
-        s_hi[i] = qf::qf_two_sum(a[i], b[i], es);  s_lo[i] = es;
-        p_hi[i] = qf::qf_two_prod(a[i], b[i], ep); p_lo[i] = ep;
-        float b0 = c0[i], b1 = c1[i], b2 = c2[i], b3 = c3[i], b4 = c4[i];
-        qf::renorm_4(b0, b1, b2, b3, b4);
-        rb0[i] = b0; rb1[i] = b1; rb2[i] = b2; rb3[i] = b3;
-    }
-};
-
-static NamedResult run_device_parity() {
-    NamedResult R;
-    const int nd = 200'000;
-
-    std::vector<float> ha(nd), hb(nd);
-    // renorm_4 inputs: ORDERED 5-word decompositions of a 53-bit double, so device
-    // value-preservation is checked bit-exactly against that double (see host Test C).
-    std::vector<float> c0(nd), c1(nd), c2(nd), c3(nd), c4(nd);
-    std::vector<double> cx(nd);   // the exact double each ordered expansion represents
-    {
-        std::mt19937_64 gen(99999ULL);
-        std::uniform_real_distribution<float> d(-1e18f, 1e18f);
-        for (int i = 0; i < nd; ++i) { ha[i] = d(gen); hb[i] = d(gen); }
-        std::mt19937_64 gr(88888ULL);
-        for (int i = 0; i < nd; ++i) {
-            float e[5]; cx[i] = draw_ordered_double(gr, e);
-            c0[i]=e[0]; c1[i]=e[1]; c2[i]=e[2]; c3[i]=e[3]; c4[i]=e[4];
-        }
-    }
-
-    xpt::buffer<float> va(nd), vb(nd);
-    xpt::buffer<float> s_hi(nd), s_lo(nd), p_hi(nd), p_lo(nd);
-    xpt::buffer<float> rc0(nd), rc1(nd), rc2(nd), rc3(nd), rc4(nd);
-    xpt::buffer<float> rb0(nd), rb1(nd), rb2(nd), rb3(nd);
-    for (int i = 0; i < nd; ++i) {
-        va.host()[i] = ha[i]; vb.host()[i] = hb[i];
-        rc0.host()[i] = c0[i]; rc1.host()[i] = c1[i]; rc2.host()[i] = c2[i];
-        rc3.host()[i] = c3[i]; rc4.host()[i] = c4[i];
-    }
-    va.to_device();  vb.to_device();
-    rc0.to_device(); rc1.to_device(); rc2.to_device();
-    rc3.to_device(); rc4.to_device();
-
-    xpt::parallel_for_n(static_cast<std::size_t>(nd),
-        EftKernel{va.device(), vb.device(),
-                  s_hi.device(), s_lo.device(), p_hi.device(), p_lo.device(),
-                  rc0.device(), rc1.device(), rc2.device(), rc3.device(), rc4.device(),
-                  rb0.device(), rb1.device(), rb2.device(), rb3.device()});
-
-    s_hi.from_device(); s_lo.from_device();
-    p_hi.from_device(); p_lo.from_device();
-    rb0.from_device(); rb1.from_device(); rb2.from_device(); rb3.from_device();
-
-    const float* hshi = s_hi.host();
-    const float* hslo = s_lo.host();
-    const float* hphi = p_hi.host();
-    const float* hplo = p_lo.host();
-    const float* hb0 = rb0.host();
-    const float* hb1 = rb1.host();
-    const float* hb2 = rb2.host();
-    const float* hb3 = rb3.host();
-
-    long sum_fail = 0, prod_fail = 0, ren_fail = 0, sum_skip = 0, prod_skip = 0, ren_over = 0;
-    int samples_left = 5;
-    for (int i = 0; i < nd; ++i) {
-        float a = ha[i], b = hb[i];
-        if (sum_in_domain(a, b)) {
-            if ((double)hshi[i] + (double)hslo[i] != (double)a + (double)b) {
-                ++sum_fail; if (samples_left > 0) { print_fail_sum("twoSum", a, b); --samples_left; }
-            }
-        } else ++sum_skip;
-        if (prod_in_domain(a, b)) {
-            if ((double)hphi[i] + (double)hplo[i] != (double)a * (double)b) {
-                ++prod_fail; if (samples_left > 0) { print_fail_prod("twoProd", a, b); --samples_left; }
-            }
-        } else ++prod_skip;
-        // renorm_4 parity: exact FP64 value-preservation (out sum == x) + non-overlap.
-        double out_sum = (double)hb0[i] + hb1[i] + hb2[i] + hb3[i];
-        int dummy = 0;
-        bool value_ok   = (out_sum == cx[i]);
-        bool overlap_ok = nonoverlap_holds(hb0[i], hb1[i], hb2[i], hb3[i], &dummy);
-        if (!(value_ok && overlap_ok)) { ++ren_fail; if (!overlap_ok) ++ren_over; }
-    }
-    std::printf("    device qf_two_sum : %ld tested (%ld skipped), %ld failures\n",
-                (long)nd - sum_skip, sum_skip, sum_fail);
-    std::printf("    device qf_two_prod: %ld tested (%ld skipped), %ld failures\n",
-                (long)nd - prod_skip, prod_skip, prod_fail);
-    std::printf("    device renorm_4   : %ld tested, %ld failures (%ld non-overlap)\n",
-                (long)nd, ren_fail, ren_over);
-    R.total   = 3 * nd;
-    R.skipped = (int)(sum_skip + prod_skip);
-    R.failed  = (int)(sum_fail + prod_fail + ren_fail);
-    R.passed  = R.total - R.skipped - R.failed;
-    return R;
-}
 
 // ============================================================================
 int main(int, char**) {
@@ -862,18 +761,10 @@ int main(int, char**) {
                     D.passed, D.skipped, D.failed, D.total);
         KOKKOS_EP_ASSERT(D.failed == 0, "a named EFT case failed");
 
-        // -- Test E: device parity ------------------------------------------
-        std::printf("[Test E] device parity (%s)\n", xpt::where_name());
-        NamedResult E = run_device_parity();
-        std::printf("  Test E device parity: %d passed, %d skipped, %d failed (of %d)\n\n",
-                    E.passed, E.skipped, E.failed, E.total);
-        KOKKOS_EP_ASSERT(E.failed == 0, "device EFT parity mismatch vs host FP64 oracle");
-        // A nonzero vendor code is a TEST FAILURE, not a warning: a launch that
-        // never ran leaves the output buffers at whatever the allocator returned,
-        // and the comparison loop cannot tell that from a clean pass. Sticky
-        // since process start, so a later good call cannot erase it.
-        KOKKOS_EP_ASSERT(xpt::last_error() == 0,
-                         "device harness reported a nonzero vendor error code");
+        // -- Test E: device parity — now its own target, qf_eft_test_device.
+        // It runs the same primitives on the same seeds against the same FP64
+        // oracle, and asserts xpt::last_error() == 0 there. Nothing here launches.
+        std::printf("[Test E] device parity: see qf_eft_test_device (separate ctest target)\n\n");
 
         rc = ep_exit_code();
         std::printf("=== qf_eft_test: %s ===\n", rc == 0 ? "ALL PASSED" : "FAILURES PRESENT");
