@@ -56,7 +56,7 @@
 // EFT silently breaks — the test would then validate a transform the shipped
 // binary does not actually perform. This translation unit is therefore compiled
 // with -ffp-contract=off on host (and --fmad=false on CUDA), applied by the
-// kokkos_ep_add_eft_test() helper in tests/CMakeLists.txt. (T2.5 later builds the
+// xpm_add_device_eft_test() helper in tests/CMakeLists.txt. (T2.5 later builds the
 // contraction-on reporter mirror; T2.1 only needs the posture here.)
 //
 // SPLITTER CONSTANT NOTE (deviation from the T2.1 prompt — see report)
@@ -81,16 +81,20 @@
 //   Test B — Dekker twoProd bit-exactness (same corpus shape; splitter-overflow
 //            and under/overflow regimes skipped — see Dekker's precondition note)
 //   Test C — named hard cases (regression corpus + hand-picked)
-//   Test D — device parity (run the SAME helpers in a Kokkos parallel_for)
+//   Test D — device parity (run the SAME helpers through the device harness)
 // ============================================================================
 
-// The device half of the test harness names only the xp core, so the Kokkos
-// runtime this TU drives (View / parallel_for / initialize) is included here
-// rather than arriving transitively through the harness header.
-#include <Kokkos_Core.hpp>
+// LAUNCH MECHANISM: tests/device_harness.hpp, not Kokkos (CORE_PLAN C4 step 3).
+// Test D runs the same two mirrored primitives on the same seed against the same
+// FP64 oracle; only the launch changed. The type spelling moved with it: the
+// third_party wrapper <ff_math.hpp> is a true alias (`using FloatFloat =
+// xp::FloatFloat`) whose only material content beyond that is #include
+// <Kokkos_Core.hpp>, so naming the core directly changes what is compiled, not
+// what is measured.
+#include "device_harness.hpp"
 #include "test_utils_device.hpp"
 #include "corpus.hpp"
-#include <ff_math.hpp>
+#include <xp/ff_math.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -117,24 +121,24 @@ using namespace kokkos_ep;
 
 struct TwoOut { float hi; float lo; };
 
-// Mirrors the twoSum embedded in Kokkos::Experimental::add, with
+// Mirrors the twoSum embedded in xp::add, with
 // a.lo == b.lo == 0. Knuth's twoSum: unconditionally exact for all finite
 // FP32 a, b when a + b does not overflow (subnormals included — addition has no
 // underflow hazard).
-KOKKOS_INLINE_FUNCTION TwoOut two_sum(float a, float b) {
+XPMATH_INLINE_FUNCTION TwoOut two_sum(float a, float b) {
     float s   = a + b;
     float e   = s - a;
     float err = (b - e) + (a - (s - e));   // == the a.lo/b.lo-free t2 term in `add`
     return TwoOut{ s, err };               // hi = s = fl(a+b), lo = err = exact error
 }
 
-// Mirrors the Dekker twoProduct embedded in Kokkos::Experimental::multiply,
+// Mirrors the Dekker twoProduct embedded in xp::multiply,
 // equivalently the standalone `two_prod`, with
 // a.lo == b.lo == 0. Splitter 8193.0f = 2^13 + 1. Exact provided no overflow
 // occurs in the splitter (a*split), in a1*b1, or in the product, and no underflow
 // occurs (Dekker 1971; Muller et al., "Handbook of Floating-Point Arithmetic",
 // §4.4 — Veltkamp/Dekker require operands and result in the normal range).
-KOKKOS_INLINE_FUNCTION TwoOut two_prod_dekker(float a, float b) {
+XPMATH_INLINE_FUNCTION TwoOut two_prod_dekker(float a, float b) {
     const float split = 8193.0f;             // 2^13 + 1  (matches `multiply`'s split)
     float cona = a * split, conb = b * split;
     float a1 = cona - (cona - a), b1 = conb - (conb - b);
@@ -434,10 +438,11 @@ static NamedResult run_named_cases() {
 }
 
 // ----------------------------------------------------------------------------
-// Test D — device parity. Run the SAME helpers inside a Kokkos parallel_for,
-// copy results back, and compare bit-exactly against the host FP64 oracle. On a
-// Serial-only Kokkos this reduces to host execution (still a valid run); on
-// CUDA/HIP/SYCL it catches device-side FP differences (subnormal flush,
+// Test D — device parity. Run the SAME helpers inside xpt::parallel_for_n,
+// copy results back, and compare bit-exactly against the host FP64 oracle. With
+// the harness's host backend this reduces to a host loop over two real
+// allocations (still a valid run); under hipcc/nvcc it is a real kernel and
+// catches device-side FP differences (subnormal flush,
 // contraction) the host pass cannot see. Inputs are drawn from the splitter- and
 // underflow-safe range so essentially no element is skipped. Both transforms run
 // on the SAME input arrays, so the range must keep BOTH the sum finite AND the
@@ -446,9 +451,24 @@ static NamedResult run_named_cases() {
 // (Using twoSum's wider 1e30 range here would domain-skip nearly every twoProduct
 // pair — the vacuous-coverage trap FP32's narrow exponent range sets; see report.)
 // ----------------------------------------------------------------------------
+// Trivially-copyable kernel struct, not a lambda: the harness passes F by value
+// into a __global__ and does not require nvcc --extended-lambda of its callers.
+struct EftKernel {
+    const float* a;
+    const float* b;
+    float* s_hi; float* s_lo;
+    float* p_hi; float* p_lo;
+
+    XPMATH_INLINE_FUNCTION void operator()(std::size_t i) const {
+        TwoOut s = two_sum(a[i], b[i]);
+        TwoOut p = two_prod_dekker(a[i], b[i]);
+        s_hi[i] = s.hi; s_lo[i] = s.lo;
+        p_hi[i] = p.hi; p_lo[i] = p.lo;
+    }
+};
+
 static NamedResult run_device_parity() {
     NamedResult R;
-    using exec_space = Kokkos::DefaultExecutionSpace;
     const int nd = 200'000;
 
     std::vector<float> ha(nd), hb(nd);
@@ -458,32 +478,23 @@ static NamedResult run_device_parity() {
         for (int i = 0; i < nd; ++i) { ha[i] = d(gen); hb[i] = d(gen); }
     }
 
-    Kokkos::View<float*, exec_space> va("va", nd), vb("vb", nd);
-    Kokkos::View<float*, exec_space> s_hi("s_hi", nd), s_lo("s_lo", nd);
-    Kokkos::View<float*, exec_space> p_hi("p_hi", nd), p_lo("p_lo", nd);
-    auto hva = Kokkos::create_mirror_view(va);
-    auto hvb = Kokkos::create_mirror_view(vb);
-    for (int i = 0; i < nd; ++i) { hva(i) = ha[i]; hvb(i) = hb[i]; }
-    Kokkos::deep_copy(va, hva);
-    Kokkos::deep_copy(vb, hvb);
+    xpt::buffer<float> va(nd), vb(nd);
+    xpt::buffer<float> s_hi(nd), s_lo(nd), p_hi(nd), p_lo(nd);
+    for (int i = 0; i < nd; ++i) { va.host()[i] = ha[i]; vb.host()[i] = hb[i]; }
+    va.to_device();
+    vb.to_device();
 
-    Kokkos::parallel_for("ff_eft_device", Kokkos::RangePolicy<exec_space>(0, nd),
-        KOKKOS_LAMBDA(int i) {
-            TwoOut s = two_sum(va(i), vb(i));
-            TwoOut p = two_prod_dekker(va(i), vb(i));
-            s_hi(i) = s.hi; s_lo(i) = s.lo;
-            p_hi(i) = p.hi; p_lo(i) = p.lo;
-        });
-    Kokkos::fence();
+    xpt::parallel_for_n(static_cast<std::size_t>(nd),
+        EftKernel{va.device(), vb.device(),
+                  s_hi.device(), s_lo.device(), p_hi.device(), p_lo.device()});
 
-    auto hshi = Kokkos::create_mirror_view(s_hi);
-    auto hslo = Kokkos::create_mirror_view(s_lo);
-    auto hphi = Kokkos::create_mirror_view(p_hi);
-    auto hplo = Kokkos::create_mirror_view(p_lo);
-    Kokkos::deep_copy(hshi, s_hi);
-    Kokkos::deep_copy(hslo, s_lo);
-    Kokkos::deep_copy(hphi, p_hi);
-    Kokkos::deep_copy(hplo, p_lo);
+    s_hi.from_device(); s_lo.from_device();
+    p_hi.from_device(); p_lo.from_device();
+
+    const float* hshi = s_hi.host();
+    const float* hslo = s_lo.host();
+    const float* hphi = p_hi.host();
+    const float* hplo = p_lo.host();
 
     long sum_fail = 0, prod_fail = 0, sum_skip = 0, prod_skip = 0;
     int samples_left = 5;
@@ -491,7 +502,7 @@ static NamedResult run_device_parity() {
         float a = ha[i], b = hb[i];
         // twoSum parity (skip only genuinely out-of-domain pairs).
         if (sum_in_domain(a, b)) {
-            double s_lhs = (double)hshi(i) + (double)hslo(i);
+            double s_lhs = (double)hshi[i] + (double)hslo[i];
             double s_rhs = (double)a + (double)b;
             if (s_lhs != s_rhs) {
                 ++sum_fail;
@@ -500,7 +511,7 @@ static NamedResult run_device_parity() {
         } else { ++sum_skip; }
         // twoProd parity.
         if (prod_in_domain(a, b)) {
-            double p_lhs = (double)hphi(i) + (double)hplo(i);
+            double p_lhs = (double)hphi[i] + (double)hplo[i];
             double p_rhs = (double)a * (double)b;
             if (p_lhs != p_rhs) {
                 ++prod_fail;
@@ -520,8 +531,7 @@ static NamedResult run_device_parity() {
 }
 
 // ============================================================================
-int main(int argc, char** argv) {
-    Kokkos::initialize(argc, argv);
+int main(int, char**) {
     int rc = 0;
     {
         std::printf("=== ff_eft_test (T2.1): EFT bit-exactness for FF twoSum + Dekker twoProd ===\n");
@@ -550,16 +560,20 @@ int main(int argc, char** argv) {
         KOKKOS_EP_ASSERT(C.failed == 0, "a named EFT case failed");
 
         // -- Test D: device parity ------------------------------------------
-        std::printf("[Test D] device parity (%s)\n",
-                    Kokkos::DefaultExecutionSpace::name());
+        std::printf("[Test D] device parity (%s)\n", xpt::where_name());
         NamedResult D = run_device_parity();
         std::printf("  Test D device parity: %d passed, %d skipped, %d failed (of %d)\n\n",
                     D.passed, D.skipped, D.failed, D.total);
         KOKKOS_EP_ASSERT(D.failed == 0, "device EFT parity mismatch vs host FP64 oracle");
+        // A nonzero vendor code is a TEST FAILURE, not a warning: a launch that
+        // never ran leaves the output buffers at whatever the allocator returned,
+        // and the comparison loop cannot tell that from a clean pass. Sticky
+        // since process start, so a later good call cannot erase it.
+        KOKKOS_EP_ASSERT(xpt::last_error() == 0,
+                         "device harness reported a nonzero vendor error code");
 
         rc = ep_exit_code();
         std::printf("=== ff_eft_test: %s ===\n", rc == 0 ? "ALL PASSED" : "FAILURES PRESENT");
     }
-    Kokkos::finalize();
     return rc;
 }

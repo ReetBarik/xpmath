@@ -71,9 +71,26 @@
 // checks for DD" and "The six test layers" layer 2.
 // ============================================================================
 
-#include "test_utils_host.hpp"
+// LAUNCH MECHANISM: tests/device_harness.hpp, not Kokkos (CORE_PLAN C4 step 3).
+// Test B runs the same five ops on the same seeds against the same
+// oracle-independent predicate; only the launch changed. The type spelling moved
+// with it: the third_party wrapper <dd_math.hpp> is a true alias (`using
+// DoubleDouble = xp::DoubleDouble`) whose only material content beyond the alias
+// is #include <Kokkos_Core.hpp>, so naming the core directly changes what is
+// compiled, not what is measured.
+//
+// test_utils_host.hpp is NOT included: this TU is now device-pure (listed in the
+// FILES array of scripts/check_device_tu_purity.sh) and that header carries the
+// __float128 oracle. The only two things this file ever used from it -- InputDist
+// and uniform() -- are seven lines, reproduced verbatim below rather than
+// dragging a binary128 typedef into a device translation unit. The invariant
+// under test never needed an oracle: it is fl(hi+lo) == hi, checked in raw FP64.
+#include "device_harness.hpp"
+#include "test_utils_device.hpp"
 #include "corpus.hpp"
-#include <dd_math.hpp>
+#include <xp/dd_math.hpp>
+
+#include <functional>
 
 #include <cmath>
 #include <cstdint>
@@ -85,6 +102,20 @@
 #include <vector>
 
 using namespace kokkos_ep;
+
+// ----------------------------------------------------------------------------
+// RNG-seeded input generators. Verbatim from test_utils_host.hpp, which this TU
+// no longer includes (see the include block above). Host-side only -- they seed
+// the std::vector that is then copied to the device.
+// ----------------------------------------------------------------------------
+using InputDist = std::function<double(std::mt19937_64&)>;
+
+inline InputDist uniform(double lo, double hi) {
+  return [lo, hi](std::mt19937_64& g) {
+    std::uniform_real_distribution<double> d(lo, hi);
+    return d(g);
+  };
+}
 
 // ----------------------------------------------------------------------------
 // The invariant and its domain, on a raw DD value.
@@ -297,41 +328,71 @@ static InvSummary run_binary(const BinaryOp& op, uint64_t seed) {
 
 // ----------------------------------------------------------------------------
 // Device tripwire (Test B). Same invariant, computed on device for 5 ops.
-// A custom runner is required: test_utils_host.hpp's run_unary_op/run_binary_op return
-// digits-of-accuracy AccStats (and are scored against __float128), not the raw DD outputs
-// this test needs — so we mirror their host->device->host View plumbing but ship
-// hi/lo back and check non-overlap on host.
+// A custom runner is required: test_utils_host.hpp's run_unary_op/run_binary_op
+// return digits-of-accuracy AccStats scored against a binary128 oracle, not the
+// raw DD outputs this test needs — and that header is now out of reach anyway,
+// since this TU is device-pure. So we do the host->device->host plumbing here
+// with xpt::buffer and check non-overlap on host.
 // ----------------------------------------------------------------------------
+// Trivially-copyable kernel structs, not lambdas: the harness passes F by value
+// into a __global__ and does not require nvcc --extended-lambda of its callers.
+// Op is likewise a small empty struct (below) rather than a KOKKOS_LAMBDA.
+template <class Op>
+struct UnaryKernel {
+  const double* x;
+  double* hi;
+  double* lo;
+  Op op;
+  XPMATH_INLINE_FUNCTION void operator()(std::size_t i) const {
+    dd::DoubleDouble d = op(dd::DoubleDouble(x[i]));
+    hi[i] = d.hi; lo[i] = d.lo;
+  }
+};
+
+template <class Op>
+struct BinaryKernel {
+  const double* a;
+  const double* b;
+  double* hi;
+  double* lo;
+  Op op;
+  XPMATH_INLINE_FUNCTION void operator()(std::size_t i) const {
+    dd::DoubleDouble d = op(dd::DoubleDouble(a[i]), dd::DoubleDouble(b[i]));
+    hi[i] = d.hi; lo[i] = d.lo;
+  }
+};
+
+// The five device ops, as named functors. Each forwards to the shipped xp:: entry
+// point, so the device pass exercises the same code the host pass does.
+struct OpAdd      { XPMATH_INLINE_FUNCTION dd::DoubleDouble operator()(dd::DoubleDouble a, dd::DoubleDouble b) const { return dd::add(a, b); } };
+struct OpMultiply { XPMATH_INLINE_FUNCTION dd::DoubleDouble operator()(dd::DoubleDouble a, dd::DoubleDouble b) const { return dd::multiply(a, b); } };
+struct OpSqrt     { XPMATH_INLINE_FUNCTION dd::DoubleDouble operator()(dd::DoubleDouble x) const { return dd::sqrt(x); } };
+struct OpExp      { XPMATH_INLINE_FUNCTION dd::DoubleDouble operator()(dd::DoubleDouble x) const { return dd::exp(x); } };
+struct OpSin      { XPMATH_INLINE_FUNCTION dd::DoubleDouble operator()(dd::DoubleDouble x) const { return dd::sin(x); } };
+
 template <typename DeviceOp>
 static InvSummary device_unary(const char* name, int n, uint64_t seed,
                                const InputDist& gen, const Dom1& in_domain,
                                DeviceOp op) {
-  using exec_space = Kokkos::DefaultExecutionSpace;
-
   std::vector<double> hx(n);
   { std::mt19937_64 g(seed); for (int i = 0; i < n; ++i) hx[i] = gen(g); }
 
-  Kokkos::View<double*, exec_space> dx("dx", n), dhi("dhi", n), dlo("dlo", n);
-  auto hmx = Kokkos::create_mirror_view(dx);
-  for (int i = 0; i < n; ++i) hmx(i) = hx[i];
-  Kokkos::deep_copy(dx, hmx);
+  xpt::buffer<double> dx(n), dhi(n), dlo(n);
+  for (int i = 0; i < n; ++i) dx.host()[i] = hx[i];
+  dx.to_device();
 
-  Kokkos::parallel_for("dd_inv_dev_unary", Kokkos::RangePolicy<exec_space>(0, n),
-    KOKKOS_LAMBDA(int i) {
-      dd::DoubleDouble d = op(dd::DoubleDouble(dx(i)));
-      dhi(i) = d.hi; dlo(i) = d.lo;
-    });
-  Kokkos::fence();
+  xpt::parallel_for_n(static_cast<std::size_t>(n),
+      UnaryKernel<DeviceOp>{dx.device(), dhi.device(), dlo.device(), op});
 
-  auto hhi = Kokkos::create_mirror_view(dhi);
-  auto hlo = Kokkos::create_mirror_view(dlo);
-  Kokkos::deep_copy(hhi, dhi);
-  Kokkos::deep_copy(hlo, dlo);
+  dhi.from_device();
+  dlo.from_device();
+  const double* hhi = dhi.host();
+  const double* hlo = dlo.host();
 
   InvCount c; int samples_left = 3;
   for (int i = 0; i < n; ++i) {
     if (!in_domain(hx[i])) { ++c.skipped; continue; }
-    dd::DoubleDouble d(hhi(i), hlo(i));
+    dd::DoubleDouble d(hhi[i], hlo[i]);
     if (!result_checkable(d)) { ++c.skipped; continue; }
     ++c.tested;
     if (!invariant_holds(d)) {
@@ -348,35 +409,27 @@ template <typename DeviceOp>
 static InvSummary device_binary(const char* name, int n, uint64_t seed,
                                 const InputDist& gen_a, const InputDist& gen_b,
                                 const Dom2& in_domain, DeviceOp op) {
-  using exec_space = Kokkos::DefaultExecutionSpace;
-
   std::vector<double> ha(n), hb(n);
   { std::mt19937_64 g(seed);
     for (int i = 0; i < n; ++i) { ha[i] = gen_a(g); hb[i] = gen_b(g); } }
 
-  Kokkos::View<double*, exec_space> da("da", n), db("db", n), dhi("dhi", n), dlo("dlo", n);
-  auto hma = Kokkos::create_mirror_view(da);
-  auto hmb = Kokkos::create_mirror_view(db);
-  for (int i = 0; i < n; ++i) { hma(i) = ha[i]; hmb(i) = hb[i]; }
-  Kokkos::deep_copy(da, hma);
-  Kokkos::deep_copy(db, hmb);
+  xpt::buffer<double> da(n), db(n), dhi(n), dlo(n);
+  for (int i = 0; i < n; ++i) { da.host()[i] = ha[i]; db.host()[i] = hb[i]; }
+  da.to_device();
+  db.to_device();
 
-  Kokkos::parallel_for("dd_inv_dev_binary", Kokkos::RangePolicy<exec_space>(0, n),
-    KOKKOS_LAMBDA(int i) {
-      dd::DoubleDouble d = op(dd::DoubleDouble(da(i)), dd::DoubleDouble(db(i)));
-      dhi(i) = d.hi; dlo(i) = d.lo;
-    });
-  Kokkos::fence();
+  xpt::parallel_for_n(static_cast<std::size_t>(n),
+      BinaryKernel<DeviceOp>{da.device(), db.device(), dhi.device(), dlo.device(), op});
 
-  auto hhi = Kokkos::create_mirror_view(dhi);
-  auto hlo = Kokkos::create_mirror_view(dlo);
-  Kokkos::deep_copy(hhi, dhi);
-  Kokkos::deep_copy(hlo, dlo);
+  dhi.from_device();
+  dlo.from_device();
+  const double* hhi = dhi.host();
+  const double* hlo = dlo.host();
 
   InvCount c; int samples_left = 3;
   for (int i = 0; i < n; ++i) {
     if (!in_domain(ha[i], hb[i])) { ++c.skipped; continue; }
-    dd::DoubleDouble d(hhi(i), hlo(i));
+    dd::DoubleDouble d(hhi[i], hlo[i]);
     if (!result_checkable(d)) { ++c.skipped; continue; }
     ++c.tested;
     if (!invariant_holds(d)) {
@@ -390,14 +443,13 @@ static InvSummary device_binary(const char* name, int n, uint64_t seed,
 }
 
 // ============================================================================
-int main(int argc, char** argv) {
-  Kokkos::initialize(argc, argv);
+int main(int, char**) {
   int rc = 0;
   {
     std::printf("=== dd_invariant_test (T1.2): non-overlap invariant fl(hi+lo)==hi "
                 "for every DD op ===\n");
     std::printf("Oracle-independent (raw FP64 check). Execution space: %s\n\n",
-                Kokkos::DefaultExecutionSpace::name());
+                xpt::where_name());
 
     std::vector<InvSummary> summary;
 
@@ -642,23 +694,23 @@ int main(int argc, char** argv) {
 
     // -- Test B: device tripwire (5 representative ops) ----------------------
     std::printf("\n[Test B] device tripwire (5 ops, 10^5 random on %s)\n",
-                Kokkos::DefaultExecutionSpace::name());
+                xpt::where_name());
     const int nd = 100'000;
     summary.push_back(device_binary("add", nd, 55501ULL,
         uniform(-1e8, 1e8), uniform(-1e8, 1e8), dom2_any,
-        KOKKOS_LAMBDA(dd::DoubleDouble a, dd::DoubleDouble b){ return dd::add(a, b); }));
+        OpAdd{}));
     summary.push_back(device_binary("multiply", nd, 55502ULL,
         uniform(-1e6, 1e6), uniform(-1e6, 1e6), dom2_any,
-        KOKKOS_LAMBDA(dd::DoubleDouble a, dd::DoubleDouble b){ return dd::multiply(a, b); }));
+        OpMultiply{}));
     summary.push_back(device_unary("sqrt", nd, 55503ULL,
         uniform(0.0, 1e8), dom_nonneg,
-        KOKKOS_LAMBDA(dd::DoubleDouble x){ return dd::sqrt(x); }));
+        OpSqrt{}));
     summary.push_back(device_unary("exp", nd, 55504ULL,
         uniform(-300.0, 299.0), [](double x){ return std::isfinite(x) && x < 300.0; },
-        KOKKOS_LAMBDA(dd::DoubleDouble x){ return dd::exp(x); }));
+        OpExp{}));
     summary.push_back(device_unary("sin", nd, 55505ULL,
         uniform(-1000.0, 1000.0), [](double x){ return std::isfinite(x) && std::fabs(x) < 1e6; },
-        KOKKOS_LAMBDA(dd::DoubleDouble x){ return dd::sin(x); }));
+        OpSin{}));
 
     // -- Test C: explicit PORT_NOTES §4 regressions --------------------------
     // These document that DD has NO equivalent of the FF bugs recorded in
@@ -738,11 +790,16 @@ int main(int argc, char** argv) {
     KOKKOS_EP_ASSERT(total_failures == 0,
                      "one or more DD ops produced an overlapping (hi, lo) result");
     KOKKOS_EP_ASSERT(c_pass == c_total, "a PORT_NOTES §4 named regression case failed");
+    // A nonzero vendor code is a TEST FAILURE, not a warning: a launch that never
+    // ran leaves the output buffers at whatever the allocator returned, and the
+    // non-overlap predicate cannot tell that from a clean pass. Sticky since
+    // process start, so a later good call cannot erase it.
+    KOKKOS_EP_ASSERT(xpt::last_error() == 0,
+                     "device harness reported a nonzero vendor error code");
 
     rc = ep_exit_code();
     std::printf("\n=== dd_invariant_test: %s ===\n",
                 rc == 0 ? "ALL PASSED" : "FAILURES PRESENT");
   }
-  Kokkos::finalize();
   return rc;
 }

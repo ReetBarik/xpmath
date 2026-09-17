@@ -70,6 +70,24 @@ CXX="${CXX:-g++}"
 FILES=(
   "tests/test_utils_device.hpp"
   "tests/device_harness.hpp"
+  # CORE_PLAN C4 step 3: the tests that were already device-only and have now been
+  # moved off Kokkos onto the harness above. Each is a whole translation unit, not
+  # a header -- being listed here is the standing claim that no binary128 can reach
+  # a device compile of it, which is exactly the claim S6 showed the mixed TUs
+  # cannot make (nvcc rejects std::vector<__float128> in a TU it gives a device
+  # pass).
+  #
+  # tests/qf_eft_test.cpp is DELIBERATELY ABSENT. It links no Kokkos and runs its
+  # device parity through the same harness, but its Test C carries a binary128
+  # wide-spread truncation check (test_renorm_4_wide), so it is a MIXED TU like the
+  # eight the plan already names -- a ninth. Splitting it is not this step's job;
+  # adding it here would fail, and weakening this gate to accommodate it is not an
+  # option.
+  "tests/dd_invariant_test.cpp"
+  "tests/ff_invariant_test.cpp"
+  "tests/ff_eft_test.cpp"
+  "tests/tf_eft_test.cpp"
+  "tests/tf_fma_guard_test.cpp"
 )
 
 INCS=(-I"${REPO_ROOT}/include" -I"${REPO_ROOT}/tests" -I"${REPO_ROOT}/third_party/include")
