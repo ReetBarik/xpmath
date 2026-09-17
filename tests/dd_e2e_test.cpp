@@ -47,20 +47,25 @@
 // __float128, which is a compiler type, so there was never anything to gate on;
 // it runs unconditionally now.
 //
-// NAMESPACE PATH.  Uses the explicit Kokkos::Experimental path via the
-// `namespace dd = Kokkos::Experimental` alias (dd::add / dd::sqrt / dd::atan / …),
-// NOT the bottom-of-header `Kokkos::` re-exposure forwards. Reason: every other DD
-// test in this suite (dd_property_test, dd_invariant_test, dd_eft_test) uses the
-// `dd::` alias, so this file stays consistent with the suite's convention and the
-// call sites read the same. The two paths are one-line-forward equivalent (see
-// the bottom-of-header `namespace Kokkos` forwarding block in dd_math.hpp), so
-// the choice is stylistic, not behavioral.
+// NAMESPACE PATH.  Uses the `dd::` alias (dd::add / dd::sqrt / dd::atan / …),
+// which tests/test_utils_device.hpp defines as `namespace dd = xp` -- the
+// STANDALONE core, not the Kokkos compat wrapper. Every other DD test in this
+// suite (dd_property_test, dd_invariant_test, dd_eft_test) uses the same alias,
+// so the call sites read identically.
+//
+// It used to resolve through third_party/include/dd_math.hpp, which is a true
+// alias header (`using DoubleDouble = xp::DoubleDouble`) rather than a distinct
+// wrapper type -- so this file names exactly the types it named before, and the
+// only thing the repoint drops is the #include <Kokkos_Core.hpp> that header
+// pulls in. CORE_PLAN C4. The wrapper layer is still exercised: the demos and
+// the Kokkos-linked tests include it.
 //
 // SCOPE (per plan): real DD kernels only — no complex (dd_complex.hpp), no FF/QF
 // (T2.6/T3.6), no per-op differential accuracy (T1.4, the sibling task). Host-side
 // execution is sufficient: all four kernels are inherently serial and the precision
-// claim does not depend on where the ops run, so Kokkos is initialized/finalized
-// (to satisfy KOKKOS_INLINE_FUNCTION symbol linkage) but no parallel_for is spawned.
+// claim does not depend on where the ops run. There is no Kokkos here at all
+// any more: the initialize/finalize pair this file used to carry started nothing
+// it ever launched into, and no parallel_for was ever spawned.
 // dd_math.hpp is NOT modified (rule 4): the one place a kernel exposes a numeric
 // surprise (K1 naive), it is REPORTED and explained, never patched.
 //
@@ -69,7 +74,7 @@
 // ============================================================================
 
 #include "test_utils_host.hpp"
-#include <dd_math.hpp>
+#include <xp/dd_math.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -114,12 +119,10 @@ static AccStats stats_of(const std::vector<double>& d) {
 
 
 // ============================================================================
-int main(int argc, char** argv) {
-  Kokkos::initialize(argc, argv);
+int main() {
   int rc = 0;
   {
     std::printf("=== dd_e2e_test (T1.6): end-to-end cancellation kernels for DD ===\n");
-    std::printf("Execution space: %s\n", Kokkos::DefaultExecutionSpace::name());
     std::printf("Host-side kernels (inherently serial); gate = mean_digits >= %.2f.\n\n",
                 kTol);
 
@@ -362,7 +365,6 @@ int main(int argc, char** argv) {
     std::printf("\n=== dd_e2e_test: %s ===\n",
                 rc == 0 ? "ALL PASSED" : "FAILURES PRESENT");
   }
-  Kokkos::finalize();
 
   return rc;
 }

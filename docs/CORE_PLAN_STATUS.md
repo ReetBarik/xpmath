@@ -628,3 +628,314 @@ paths of the harness are compiled. Neither is EXECUTED: that is C7 and C8.
 - `-Wall -Wextra` on the standalone smokes surfaces two pre-existing
   set-but-unused warnings in `include/xp/tf_math.hpp` (`k_log2`) and
   `include/xp/tf_complex.hpp` (`y2`). Neither is C3's and neither was touched.
+---
+
+## C4 — Every test TU is host-only or device-only, and no test links Kokkos
+
+**Branch:** `core/c4-tu-split`. **Base:** `main` @ `bd0fa8e` (the C3 merge).
+Five commits, one per chunk: A `0df9f5a`, B `bb314a4`, C `c445086`, D `5cd68e7`,
+E below.
+
+**Outcome.** Green, and the section's real assertion holds:
+
+> **61 registered ctest targets with Kokkos, and the same 61 without it.**
+
+Not merely equal counts — the two `ctest -N` NAME LISTS are IDENTICAL as sets,
+`diff` clean over all 61. `tests/CMakeLists.txt` has no `if(XPMATH_WITH_KOKKOS)`
+block left for a target to move across, because no test TU links Kokkos any more.
+
+52 → 61 is not nine new tests. It is nine mixed translation units split into a
+host half and a device half, each half registering separately, minus the
+arithmetic of the `_contract_on` companions that moved with them.
+
+### The count was 52/24 and the gap was the point of the section
+
+Before C4, 28 of 52 targets existed only when Kokkos did, so the `no-kokkos`
+lane ran a strict subset and "green without Kokkos" was a materially weaker
+statement than "green" — the two lanes could not contradict each other because
+one could not see most of what the other ran. That is now closed. `expected=61`
+is asserted in BOTH lanes of `.github/workflows/ci.yml`, and the comment at each
+site says that a future divergence means a Kokkos-conditional target came back
+and should be fixed rather than forked into two constants.
+
+### Chunk E step 1 — the MIRROR check, and the defect it found on first run
+
+`scripts/check_device_tu_purity.sh` now runs two checks pointing in opposite
+directions. C2 wrote the forward one; C4 added the mirror:
+
+```
+FORWARD (part 1)   no DEVICE TU may carry __float128
+MIRROR  (part 2)   no HOST TU may carry a kernel launch
+```
+
+Neither implies the other, and the mirror was not decoration. **On its first
+run it went red on `tests/hello_test.cpp`, and it was right.** Chunk A had taken
+that file off Kokkos and re-pointed its launch at `tests/device_harness.hpp`; it
+built clean, ran green, and passed the forward check trivially because it is not
+in `FILES`, so the forward check never looked at it. What it actually was is a
+TU that includes `tests/test_utils_host.hpp` (binary128) AND launches a kernel —
+the exact shape nvcc rejects under S6 and the exact shape this section exists to
+eliminate. It was a NINTH mixed TU and the plan does not name it, because the
+plan has it on the "links Kokkos and barely uses it" list instead, where lifting
+the launch onto the harness looks like the whole job.
+
+It was SPLIT, not exempted. `tests/hello_test.cpp` keeps the target name, the
+oracle and the 10^6-input `DD(x) → binary128 == x` identity;
+`tests/hello_test_device.cpp` carries the launch.
+
+**Nothing was lost in that split, and the reasoning is the one that generalises.**
+The old device pass asserted `digits_of_accuracy(device output, (float128)x) >=
+max_digits`. The new one asserts the returned limbs are BIT-IDENTICAL to the
+limbs that went in — which is strictly stronger, and needs no reference value,
+so it fits in a device-pure TU. Both halves draw the same 10^6 inputs from the
+same engine and seed, with the distribution constructed per draw to match
+`test_utils_host.hpp`'s `uniform()` exactly rather than approximately.
+
+Three design points in the mirror worth not re-deriving:
+
+- **The host set is DERIVED, not maintained.** It is every top-level
+  `tests/*.cpp` that `FILES` does not claim. One list partitions the tree, so a
+  new test TU is host by default and gets the mirror for free; giving it a
+  launch turns the mirror red until it is added to `FILES`; adding it to `FILES`
+  subjects it to the forward check. There is no third state and no way to be in
+  neither. A second, separately-maintained host list would have drifted.
+- **It preprocesses; it does not grep source.** A raw
+  `grep -E 'parallel_for|KOKKOS_LAMBDA' tests/*.cpp` returns hits in NINE host
+  TUs on this tree, EIGHT of which are prose comments explaining where that
+  file's launch went. The preprocessor strips comments, and attribution by
+  `# <line> "<file>"` provenance is the same methodology part 1 already used.
+  The limit is recorded at the call site: a STRING LITERAL naming a token is not
+  stripped and WILL fail. Chunks C and D each hit this and reworded one `printf`.
+- **Both halves refuse to pass on an empty input set** (§0). Part 1 fails if
+  `FILES` is empty; part 1b fails if the `tests/*_test_device.cpp` glob matches
+  zero files, and also fails if any match is missing from `FILES`; part 2 fails
+  if `tests/*.cpp` is empty or if the derived host set is.
+
+**Part 1b is new and is what makes `FILES` self-checking.** Before it, forgetting
+to list a device half was silent. It is also why `tests/device_harness_test.cpp`
+is now in `FILES` — C3's own harness self-test, the most device-shaped TU in the
+tree, had simply never been added.
+
+### The mirror has been seen red (§0)
+
+`tests/pow_domain_test.cpp` was poisoned with a real launch — a
+`device_harness.hpp` include, an `XpPoisonOp` functor and a live
+`xpt::parallel_for_n(4, ...)` — then restored. MEASURED against the shipping
+script, not an earlier draft:
+
+```
+poisoned:
+  host-TU mirror: 33 tests/*.cpp total, 17 classified host
+  FAIL: tests/pow_domain_test.cpp -- a kernel launch reaches this TU from files in this repo:
+            1 .../tests/pow_domain_test.cpp
+            1 .../tests/device_harness.hpp
+  device-TU purity: FAIL                                               exit=1
+
+restored:
+  device-TU purity: PASS                                               exit=0
+```
+
+`sha256` before poison and after restore both
+`da1b9bc3acc8f80767e278b69db9910edd18eced3e8610e61bb7aef8130526f9`, and
+`git diff --name-only` on the file returns nothing. Note the diagnostic names
+BOTH the TU and the header the token arrived through, which is what makes it
+actionable rather than merely red.
+
+### Chunk E step 2 — the three `kokkos_ep_add_*` helpers are gone
+
+`kokkos_ep_add_test`, `kokkos_ep_add_eft_test` and
+`kokkos_ep_add_eft_test_contract_on` are deleted, along with the
+`THIRD_PARTY_INCLUDE` plumbing under `tests/`. A comment block stands where they
+were, saying what still exercises the Kokkos wrapper layer: the eight
+`src/demo_*.cpp` targets, until C10 moves them to the `xpmath-kokkos` repo.
+`THIRD_PARTY_INCLUDE` remains SET by the top-level `CMakeLists.txt` for those
+demos; the comment there that claimed `tests/` consumed it was corrected in the
+same commit rather than left to rot.
+
+### EVERY assertion that lost device coverage, with the reason
+
+The plan's rule is that an assertion which cannot be expressed in a device
+functor without the oracle is a host assertion, and that each one be named here.
+Four, in two groups. **None was replaced by a substitute, deliberately.**
+
+**1. `B1_sqrt_sq` and `B4_pythag`, on DD (chunk C), FF (chunk C) and QF (chunk
+D)** — six instances of two checks. They scored `digits_of_accuracy` against the
+binary128 oracle on the device side. They are gone from the device and the host
+half runs both (DD/FF at 10^6 inputs, 10× the old device pass's 10^5; QF at
+2×10^5). Two reasons they cannot come across, and the second is the one that
+matters:
+
+- They are not structural. "sqrt(a)² recovers a to N digits" is a claim about a
+  REFERENCE VALUE and the only reference is the oracle. Unlike `two_sum`, which
+  has an independent exact transform to cross-check against, `sqrt` has no
+  second exact algorithm at these widths.
+- **Host/device bit-parity is NOT a substitute and shipping it would be worse
+  than shipping nothing.** A real GPU's `sqrt` and `sincos` may legitimately
+  differ from the host libm in the last bits, so a parity check would go red on
+  correct hardware — and the only way to make it green again is a tolerance,
+  which is a SECOND SCORER. `docs/CORRECTNESS.md` allows one measurement and one
+  verdict per point.
+
+What is genuinely gone is the ability to notice a GPU whose `sqrt` or `sincos`
+is accurate on the host and inaccurate on the device. The apparatus that covers
+that end to end is `validation/sweep/`, and it is host-measured for the same
+reason: the oracle cannot share a translation unit with device code (S6).
+
+**2. FF Group S (chunk C) stays host-only, and that is a SCOPE decision rather
+than a limitation.** It is a table of IEEE special-value requirements for divide
+(`x / ±inf = ±0`, NaN propagation, `FLT_MAX` divisors). Non-finite behaviour is
+precisely what a device backend's fast-math posture may legitimately change, so
+asserting it on the device would assert something no platform promises.
+
+**Three splits lost nothing at all** and are recorded so nobody re-audits them:
+`qf_eft_test` Tests A–D are host batch/named-case work with no kernel (Test C's
+binary128 truncation check is the single thing that made the TU mixed); Test E
+runs once before and once after, same inputs, same order, same oracle. The
+device halves of `dd_property_test`, `ff_property_test` and `qf_property_test`
+all GREW: the old device passes ran three Group A identities each and now run
+all seven / all seven / all twelve, each additionally sweeping the corner-case
+corpus the host runners always swept and the device passes never did.
+
+### Decisions taken where the plan was ambiguous or wrong
+
+1. **`hello_test` is a ninth mixed TU.** The plan names eight and puts this one
+   on a different list. Split rather than exempted — see above. The alternative
+   was to leave it out of the mirror's host set, which is weakening the check to
+   make something pass, and the plan forbids that in as many words.
+2. **`ff_fma_guard_test` and `qf_fma_guard_test` were migrated WHOLE, not
+   split.** Post-C2 each includes `test_utils_device.hpp` only, and each one's
+   oracle is an exact FP64 product (a 48-bit result in a 53-bit mantissa), not a
+   128-bit one. They are in `FILES` without a `_device` sibling. MEASURED before
+   adding each: the wide type's name appeared only in prose except for one
+   `printf` string literal per file, which the preprocessor does not strip;
+   both were reworded.
+3. **The eight `tests/*_test_device.cpp` TUs are now compiled by BOTH device CI
+   lanes**, as one extra job each (`devtests` matrix row on `device-nvcc`, a new
+   step on `device-hip`). The plan does not ask for this. The argument is C3's
+   own, one section later: C4's entire claim is that these TUs can be given a
+   device pass, and the in-tree gate for that claim preprocesses with **g++** and
+   checks **one token**. That is necessary and not sufficient — it is a proxy
+   checked by a compiler that is not the one whose rejection (S6) started this.
+   Without the lanes the claim ships verified by nothing but its own proxy, and
+   C5 builds a device tree on top of it. Both steps assert the glob is non-empty
+   and matches the expected 8 before compiling, because `for f in <no matches>`
+   compiles nothing and exits 0. `-x cu` / `-x hip` are required: the files are
+   `.cpp` because the host g++ suite builds them too, and without the flag the
+   vendor driver hands them to the host compiler and gives them no device pass —
+   the one thing the step exists to do. The HIP step is kept SEPARATE from the
+   existing `--save-temps` compile rather than folded into it, because that TU is
+   the gfx90a codegen guard's subject and adding eight unrelated objects would
+   change what tiers 1–4 are judging.
+4. **`CLAUDE.md`'s counts were corrected here**, breaking C3's precedent of
+   deferring them to a docs pass. C3 left 49/21 standing because it was already
+   two cycles stale and folding that in would have hidden a drift inside its own
+   diff. The situation changed: after C4 the sentence is not merely numerically
+   stale but STRUCTURALLY false — it asserts a with-Kokkos/without-Kokkos subset
+   relationship that no longer exists. One paragraph was rewritten; nothing else
+   in that file was touched.
+5. **Stale `kokkos_ep_add_*` references in `docs/TEST_SUITE_PLAN.md` and
+   `docs/PORT_NOTES_TF.md` were left alone.** They are historical records of
+   completed T-tasks and correctly name the helpers as they were at the time.
+   They want the same docs pass C2 and C3 both asked for.
+6. **The grammar of the gate's own success line was fixed** (`scan()` takes a
+   singular and a plural subject). Trivial, but the mirror prints one line per
+   file across 17 files and "0 in-repo a kernel launch" is the sort of thing that
+   makes a reader doubt the gate rather than the sentence.
+
+### Gate
+
+Fresh `rm -rf` build of each configuration, then the FULL suite with nothing
+excluded. Both directories were confirmed to EXIST and both counts asserted
+BEFORE the suite was allowed to run, because `ctest --test-dir` on a missing
+directory exits 0 and a suite that never ran is indistinguishable from one that
+passed.
+
+```
+/tmp/c4_host exists, registered=61
+/tmp/c4_nok  exists, registered=61
+diff of the two `ctest -N` name lists: EMPTY (identical, not merely equal)
+```
+
+**Gate 1** — `scripts/xpm_build.sh --arch host --build-dir /tmp/c4_host`, then
+`ctest --test-dir /tmp/c4_host -j8 --timeout 1800`:
+
+```
+host: registered 61 (expected 61)
+
+61/61 Test #49: sweep_monotone_gate_selftest ...........   Passed  674.71 sec
+
+100% tests passed, 0 tests failed out of 61
+
+Label Time Summary:
+packaging    =   3.97 sec*proc (1 test)
+
+Total Test time (real) = 704.10 sec
+```
+
+**Gate 2** — `scripts/xpm_build.sh --arch host --no-kokkos --build-dir /tmp/c4_nok`,
+then `ctest --test-dir /tmp/c4_nok -j8 --timeout 1800`:
+
+```
+nok: registered 61 (expected 61)
+
+61/61 Test #49: sweep_monotone_gate_selftest ...........   Passed  672.58 sec
+
+100% tests passed, 0 tests failed out of 61
+
+Label Time Summary:
+packaging    =   4.89 sec*proc (1 test)
+
+Total Test time (real) = 702.00 sec
+```
+
+**Gate 3** — `scripts/check_device_tu_purity.sh`, now 18 files forward, 8 in the
+`FILES` completeness check, 17 host in the mirror:
+
+```
+=== part 1: device TUs carry no __float128 ===
+device-TU purity: g++ 13.3.0, 18 file(s)
+  ok   tests/test_utils_device.hpp  (56339 preprocessed lines, 0 in-repo __float128)
+  ... 18 files, all ok ...
+=== part 1b: every tests/*_test_device.cpp is listed in FILES ===
+  8 file(s) match tests/*_test_device.cpp
+  ... 8 files, all in FILES ...
+=== part 2 (mirror): host TUs contain no kernel launch ===
+host-TU mirror: 33 tests/*.cpp total, 17 classified host
+                (launch tokens: Kokkos::parallel_for|parallel_for_n|KOKKOS_LAMBDA)
+  ... 17 files, all ok ...
+device-TU purity: PASS
+```
+
+33 = 17 host + 16 device `.cpp` (`FILES` holds 18 entries, two of which are
+headers). The partition is exhaustive by construction.
+
+The contraction guard is unchanged by all of this and says so:
+`contraction guard: 11 OFF targets, 6 ON targets (expected 11/6)`.
+
+**NOT a gate this section can run.** Nothing above executes nvcc or hipcc —
+there is neither on this login node. The two device lanes are the real gate for
+decision 3 and they run on the PR.
+
+### Notes for later sections
+
+- **Counts of record are 61 and 61**, asserted in both lanes of
+  `.github/workflows/ci.yml` and stated in `tests/README.md` and `CLAUDE.md`.
+  The `expected=8` device-TU count now appears in THREE places — part 1b of the
+  purity script, and the two new CI steps. They must move together; each CI step
+  says so in its error message.
+- **The host/device partition is now mechanically enforced in both directions.**
+  Adding a test TU requires no bookkeeping unless it launches a kernel, in which
+  case the mirror tells you exactly what to do. Do not add a second host list.
+- **The device halves have been COMPILED for both vendors and EXECUTED on
+  neither** — still. ctest runs the harness's serial fallback; the CUDA and HIP
+  paths are compile-only. C5 gives them a device build tree, C7 (A100) and C8
+  (MI250X) are first execution on hardware. What C4 adds over C3 is that the
+  real test TUs, not a synthetic instantiation, are now what the lanes compile.
+- **Six device-side accuracy assertions are gone and are not coming back**
+  (`B1_sqrt_sq` / `B4_pythag` × DD, FF, QF). If a future section wants
+  device-side accuracy, the answer is not a tolerance in a test — it is running
+  the sweep on the device, which needs the oracle out of the TU, which is the
+  same S6 problem. Do not re-litigate it with a parity check.
+- The demos still link Kokkos and still include `third_party/include`. C4
+  touched none of them, and they are now the ONLY thing keeping the compat
+  wrapper layer compiled. C10 moves them.

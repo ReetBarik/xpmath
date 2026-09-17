@@ -32,7 +32,7 @@
 //     twoProduct into the test file because ff_math.hpp embeds them inside the
 //     longer add()/multiply() sequences — there was no standalone primitive to
 //     call. qf_math.hpp is different: it EXPOSES the shipped primitives as free
-//     functions in namespace Kokkos::Experimental —
+//     functions in namespace xp (aliased `qf` here) —
 //        qf_two_sum, qf_quick_two_sum, qf_two_prod, qf_two_sqr
 //        and  renorm / renorm_4.
 //     So this test calls the ACTUAL shipped code, not a mirror of it. That is a
@@ -121,12 +121,34 @@
 //            value-preservation (ordered 53-bit-source input) + binary128
 //            wide-spread (~113-bit-source) truncation check
 //   Test D — named hard cases (zero, +/-ulp, cancellation, subnormals, inf/nan)
-//   Test E — device parity (run the SAME primitives in a Kokkos parallel_for)
+//   Test E — device parity: MOVED OUT in C4, see the split note below.
 // ============================================================================
 
+// THIS IS THE HOST HALF. CORE_PLAN section C4 step 2 split the TU.
+// ---------------------------------------------------------------
+// C4 step 3 (chunk B) migrated Test E's launch off Kokkos onto tests/
+// device_harness.hpp but deliberately left this file OUT of the FILES array in
+// scripts/check_device_tu_purity.sh, because Test C's `test_renorm_4_wide`
+// carries a binary128 (~113-bit-source) truncation check that needs __float128 —
+// making this a MIXED TU, a ninth beyond the eight C4 already names, and not one
+// nvcc's device pass can accept (the S6 blocker).
+//
+// Chunk D split it like the other three. This file keeps the target name, keeps
+// tests/test_utils_host.hpp, and keeps Tests A–D INCLUDING the wide-spread check
+// that made it mixed: that check is host-side by nature, not by accident. Test E
+// moved to tests/qf_eft_test_device.cpp, which is pure and is now IN the FILES
+// array — so the deliberate absence recorded here and there is resolved rather
+// than carried forward.
+//
+// The header-free helpers Test E needed (the domain predicates, the failure
+// printers, the non-overlap machinery, draw_ordered_double) are COPIED into the
+// device half rather than shared. Both halves keep their own copies; that is the
+// convention this QF test family already uses.
+//
+// NOTHING BELOW LAUNCHES A KERNEL.
 #include "test_utils_host.hpp"
 #include "corpus.hpp"
-#include <qf_math.hpp>
+#include <xp/qf_math.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -137,7 +159,7 @@
 #include <vector>
 
 using namespace kokkos_ep;
-namespace qf = Kokkos::Experimental;
+namespace qf = xp;
 
 // ----------------------------------------------------------------------------
 // Oracle comparisons for the additive/multiplicative EFTs (host). Ground truth
@@ -676,119 +698,15 @@ static NamedResult run_named_cases() {
 }
 
 // ----------------------------------------------------------------------------
-// Test E — device parity. Run the SAME shipped primitives inside a Kokkos
-// parallel_for, copy results back, and compare bit-exactly against the host FP64
-// oracle. On Serial-only Kokkos this reduces to host execution (still valid); on
-// CUDA/HIP/SYCL it catches device-side FP differences (subnormal flush,
-// contraction) the host pass cannot see. Inputs drawn from the splitter- and
-// underflow-safe range [-1e18,1e18] so BOTH sum stays finite AND product stays in
-// FP32's normal range (using twoSum's wider 1e30 would domain-skip nearly every
-// product — the vacuous-coverage trap FP32's narrow exponent range sets).
+// Test E — device parity: MOVED to tests/qf_eft_test_device.cpp in C4 chunk D.
+// EftKernel and run_device_parity went with it unchanged — same seeds (99999 /
+// 88888), same nd = 200'000, same [-1e18,1e18] draw range, same FP64 oracle. The
+// header-free helpers they use are copied there; the copies here still serve
+// Tests A-D.
 // ----------------------------------------------------------------------------
-static NamedResult run_device_parity() {
-    NamedResult R;
-    using exec_space = Kokkos::DefaultExecutionSpace;
-    const int nd = 200'000;
-
-    std::vector<float> ha(nd), hb(nd);
-    // renorm_4 inputs: ORDERED 5-word decompositions of a 53-bit double, so device
-    // value-preservation is checked bit-exactly against that double (see host Test C).
-    std::vector<float> c0(nd), c1(nd), c2(nd), c3(nd), c4(nd);
-    std::vector<double> cx(nd);   // the exact double each ordered expansion represents
-    {
-        std::mt19937_64 gen(99999ULL);
-        std::uniform_real_distribution<float> d(-1e18f, 1e18f);
-        for (int i = 0; i < nd; ++i) { ha[i] = d(gen); hb[i] = d(gen); }
-        std::mt19937_64 gr(88888ULL);
-        for (int i = 0; i < nd; ++i) {
-            float e[5]; cx[i] = draw_ordered_double(gr, e);
-            c0[i]=e[0]; c1[i]=e[1]; c2[i]=e[2]; c3[i]=e[3]; c4[i]=e[4];
-        }
-    }
-
-    Kokkos::View<float*, exec_space> va("va", nd), vb("vb", nd);
-    Kokkos::View<float*, exec_space> s_hi("s_hi", nd), s_lo("s_lo", nd);
-    Kokkos::View<float*, exec_space> p_hi("p_hi", nd), p_lo("p_lo", nd);
-    Kokkos::View<float*, exec_space> rc0("rc0", nd), rc1("rc1", nd), rc2("rc2", nd),
-                                     rc3("rc3", nd), rc4("rc4", nd);
-    Kokkos::View<float*, exec_space> rb0("rb0", nd), rb1("rb1", nd), rb2("rb2", nd), rb3("rb3", nd);
-
-    auto hva = Kokkos::create_mirror_view(va);
-    auto hvb = Kokkos::create_mirror_view(vb);
-    auto hc0 = Kokkos::create_mirror_view(rc0);
-    auto hc1 = Kokkos::create_mirror_view(rc1);
-    auto hc2 = Kokkos::create_mirror_view(rc2);
-    auto hc3 = Kokkos::create_mirror_view(rc3);
-    auto hc4 = Kokkos::create_mirror_view(rc4);
-    for (int i = 0; i < nd; ++i) {
-        hva(i) = ha[i]; hvb(i) = hb[i];
-        hc0(i) = c0[i]; hc1(i) = c1[i]; hc2(i) = c2[i]; hc3(i) = c3[i]; hc4(i) = c4[i];
-    }
-    Kokkos::deep_copy(va, hva);  Kokkos::deep_copy(vb, hvb);
-    Kokkos::deep_copy(rc0, hc0); Kokkos::deep_copy(rc1, hc1); Kokkos::deep_copy(rc2, hc2);
-    Kokkos::deep_copy(rc3, hc3); Kokkos::deep_copy(rc4, hc4);
-
-    Kokkos::parallel_for("qf_eft_device", Kokkos::RangePolicy<exec_space>(0, nd),
-        KOKKOS_LAMBDA(int i) {
-            float es, ep;
-            s_hi(i) = qf::qf_two_sum(va(i), vb(i), es);  s_lo(i) = es;
-            p_hi(i) = qf::qf_two_prod(va(i), vb(i), ep); p_lo(i) = ep;
-            float b0 = rc0(i), b1 = rc1(i), b2 = rc2(i), b3 = rc3(i), b4 = rc4(i);
-            qf::renorm_4(b0, b1, b2, b3, b4);
-            rb0(i) = b0; rb1(i) = b1; rb2(i) = b2; rb3(i) = b3;
-        });
-    Kokkos::fence();
-
-    auto hshi = Kokkos::create_mirror_view(s_hi);
-    auto hslo = Kokkos::create_mirror_view(s_lo);
-    auto hphi = Kokkos::create_mirror_view(p_hi);
-    auto hplo = Kokkos::create_mirror_view(p_lo);
-    auto hb0 = Kokkos::create_mirror_view(rb0);
-    auto hb1 = Kokkos::create_mirror_view(rb1);
-    auto hb2 = Kokkos::create_mirror_view(rb2);
-    auto hb3 = Kokkos::create_mirror_view(rb3);
-    Kokkos::deep_copy(hshi, s_hi); Kokkos::deep_copy(hslo, s_lo);
-    Kokkos::deep_copy(hphi, p_hi); Kokkos::deep_copy(hplo, p_lo);
-    Kokkos::deep_copy(hb0, rb0); Kokkos::deep_copy(hb1, rb1);
-    Kokkos::deep_copy(hb2, rb2); Kokkos::deep_copy(hb3, rb3);
-
-    long sum_fail = 0, prod_fail = 0, ren_fail = 0, sum_skip = 0, prod_skip = 0, ren_over = 0;
-    int samples_left = 5;
-    for (int i = 0; i < nd; ++i) {
-        float a = ha[i], b = hb[i];
-        if (sum_in_domain(a, b)) {
-            if ((double)hshi(i) + (double)hslo(i) != (double)a + (double)b) {
-                ++sum_fail; if (samples_left > 0) { print_fail_sum("twoSum", a, b); --samples_left; }
-            }
-        } else ++sum_skip;
-        if (prod_in_domain(a, b)) {
-            if ((double)hphi(i) + (double)hplo(i) != (double)a * (double)b) {
-                ++prod_fail; if (samples_left > 0) { print_fail_prod("twoProd", a, b); --samples_left; }
-            }
-        } else ++prod_skip;
-        // renorm_4 parity: exact FP64 value-preservation (out sum == x) + non-overlap.
-        double out_sum = (double)hb0(i) + hb1(i) + hb2(i) + hb3(i);
-        int dummy = 0;
-        bool value_ok   = (out_sum == cx[i]);
-        bool overlap_ok = nonoverlap_holds(hb0(i), hb1(i), hb2(i), hb3(i), &dummy);
-        if (!(value_ok && overlap_ok)) { ++ren_fail; if (!overlap_ok) ++ren_over; }
-    }
-    std::printf("    device qf_two_sum : %ld tested (%ld skipped), %ld failures\n",
-                (long)nd - sum_skip, sum_skip, sum_fail);
-    std::printf("    device qf_two_prod: %ld tested (%ld skipped), %ld failures\n",
-                (long)nd - prod_skip, prod_skip, prod_fail);
-    std::printf("    device renorm_4   : %ld tested, %ld failures (%ld non-overlap)\n",
-                (long)nd, ren_fail, ren_over);
-    R.total   = 3 * nd;
-    R.skipped = (int)(sum_skip + prod_skip);
-    R.failed  = (int)(sum_fail + prod_fail + ren_fail);
-    R.passed  = R.total - R.skipped - R.failed;
-    return R;
-}
 
 // ============================================================================
-int main(int argc, char** argv) {
-    Kokkos::initialize(argc, argv);
+int main(int, char**) {
     int rc = 0;
     {
         std::printf("=== qf_eft_test (T3.1): EFT bit-exactness for QF twoSum / twoProd / twoSqr / renorm ===\n");
@@ -843,16 +761,13 @@ int main(int argc, char** argv) {
                     D.passed, D.skipped, D.failed, D.total);
         KOKKOS_EP_ASSERT(D.failed == 0, "a named EFT case failed");
 
-        // -- Test E: device parity ------------------------------------------
-        std::printf("[Test E] device parity (%s)\n", Kokkos::DefaultExecutionSpace::name());
-        NamedResult E = run_device_parity();
-        std::printf("  Test E device parity: %d passed, %d skipped, %d failed (of %d)\n\n",
-                    E.passed, E.skipped, E.failed, E.total);
-        KOKKOS_EP_ASSERT(E.failed == 0, "device EFT parity mismatch vs host FP64 oracle");
+        // -- Test E: device parity — now its own target, qf_eft_test_device.
+        // It runs the same primitives on the same seeds against the same FP64
+        // oracle, and asserts xpt::last_error() == 0 there. Nothing here launches.
+        std::printf("[Test E] device parity: see qf_eft_test_device (separate ctest target)\n\n");
 
         rc = ep_exit_code();
         std::printf("=== qf_eft_test: %s ===\n", rc == 0 ? "ALL PASSED" : "FAILURES PRESENT");
     }
-    Kokkos::finalize();
     return rc;
 }

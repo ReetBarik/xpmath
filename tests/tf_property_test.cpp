@@ -389,8 +389,10 @@ static void run_test_c(double& sum_dig, int& count) {
 
 
 // ============================================================================
-int main(int argc, char** argv) {
-  Kokkos::initialize(argc, argv);
+// No Kokkos. Every identity below is evaluated on host; the
+// Kokkos::initialize/finalize pair that used to bracket them started nothing
+// this test ever launched into. CORE_PLAN C4 unlinked it.
+int main() {
   int rc = 0;
   {
     std::printf("=== tf_property_test: TF algebraic identities (Group A/B/C) ===\n");
@@ -463,6 +465,5 @@ int main(int argc, char** argv) {
 
     std::printf("\n=== tf_property_test: %s ===\n", rc == 0 ? "ALL PASSED" : "FAILURES PRESENT");
   }
-  Kokkos::finalize();
   return rc;
 }

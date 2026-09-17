@@ -36,11 +36,18 @@ bound derived from the format and the condition number, and **two** ctest gates
 over that number (`sweep_absolute_gate`, `sweep_monotone_gate`), each with a
 self-test target (`*_selftest`) that poisons its input and requires it to fail.
 Read **docs/CORRECTNESS.md** before adding anything that judges correctness; the
-whole point is that nothing else issues a competing verdict. 49 ctest targets
-with Kokkos and **21 without** (`-DXPMATH_WITH_KOKKOS=OFF`), all passing on
-`main` — asserted by CI, not assumed. The Kokkos-free 21 include both gates:
-`sweep_accuracy` links no Kokkos and never needed it, but until
-`XPMATH_WITH_KOKKOS` existed the build required it anyway.
+whole point is that nothing else issues a competing verdict. **61 ctest targets
+with Kokkos and the same 61 without it** (`-DXPMATH_WITH_KOKKOS=OFF`) — asserted
+by CI in both lanes as a COUNT, not assumed; the two `ctest -N` name lists were
+additionally MEASURED identical as sets on the C4 chunk-E gate run. With no
+`if(XPMATH_WITH_KOKKOS)` block left there is no mechanism to register a
+different target per configuration, so the count is the tripwire and the
+structure is the guarantee. The two used to differ (49/21, then 52/24): a
+majority of the suite existed only inside an `if(XPMATH_WITH_KOKKOS)` block,
+so "green without Kokkos" was a strict-subset claim. CORE_PLAN C4 removed the
+block — no test TU links Kokkos, and the device-side tests launch through
+`tests/device_harness.hpp`. The wrapper layer in `third_party/include/` is still
+exercised, by the eight demos, until C10 moves them out.
 
 **The sweep oracle was libquadmath and is not any more.** `sweep_accuracy` links
 `-lmpc -lmpfr -lgmp` and **no `-lquadmath`**, and that is asserted rather than

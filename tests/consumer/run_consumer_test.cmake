@@ -61,7 +61,7 @@ set(work_dir   "${XPMATH_SCRATCH}/work")
 file(REMOVE_RECURSE "${XPMATH_SCRATCH}")
 file(MAKE_DIRECTORY "${XPMATH_SCRATCH}")
 
-# KOKKOS_EP_BUILD_TESTS=OFF is what keeps this from recursing: with tests on,
+# XPMATH_BUILD_TESTS=OFF is what keeps this from recursing: with tests on,
 # the nested configure would register consumer_package again inside itself.
 # It also means the nested build compiles only what install() ships, which is
 # the point -- if the package needs a test target to be installable, that is a
@@ -73,7 +73,11 @@ execute_process(
           -G "${XPMATH_GENERATOR}"
           -DCMAKE_CXX_COMPILER=${XPMATH_CXX_COMPILER}
           -DCMAKE_BUILD_TYPE=Release
-          -DKOKKOS_EP_BUILD_TESTS=OFF
+          # Spelled the NEW way on purpose (CORE_PLAN C4 renamed it). The
+          # deprecated KOKKOS_EP_BUILD_TESTS alias still works, but using it
+          # here would make every consumer_package run emit a deprecation
+          # warning about this repository's own tooling.
+          -DXPMATH_BUILD_TESTS=OFF
           # The package under test is header-only and Kokkos-free, so install
           # it that way. This makes the nested build prove a second thing for
           # free: that xpmath configures and installs with no Kokkos present.

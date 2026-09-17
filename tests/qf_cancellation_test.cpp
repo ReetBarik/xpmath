@@ -61,18 +61,23 @@
 // __float128, which is a compiler type, so there was never anything to gate on;
 // it runs unconditionally now.
 //
-// NAMESPACE PATH.  Uses the `namespace qf = Kokkos::Experimental` alias
-// (qf::add / qf::sqrt / qf::atan / …), matching every other QF test in this suite
-// (qf_eft_test, qf_nonoverlap_test, qf_property_test,
-// qf_fma_guard_test).
+// NAMESPACE PATH.  Uses the `qf::` alias (qf::add / qf::sqrt / qf::atan / …),
+// matching every other QF test in this suite (qf_eft_test, qf_nonoverlap_test,
+// qf_property_test, qf_fma_guard_test). It aliases `xp` -- the STANDALONE core --
+// rather than Kokkos::Experimental, as of CORE_PLAN C4.
+// third_party/include/qf_math.hpp is a true alias header
+// (`using QuadFloat = xp::QuadFloat`), so this names exactly the types it named
+// before; what the repoint drops is that header's #include <Kokkos_Core.hpp>.
+// The wrapper layer is still exercised by the demos and the Kokkos-linked tests.
 //
 // SCOPE (per plan): real QF kernels only — no complex (qf_complex.hpp is NOT
 // included, T3.6 is real-only like T1.6/T2.6), no DD/FF backends, no per-op
 // differential accuracy (T3.4, the sibling task). Host-side execution is
 // sufficient: all four kernels are inherently serial reductions/recurrences and the
-// precision claim does not depend on where the ops run, so Kokkos is
-// initialized/finalized (to satisfy KOKKOS_INLINE_FUNCTION symbol linkage) but no
-// parallel_for is spawned. qf_math.hpp is NOT modified (rule 4): the one place a
+// precision claim does not depend on where the ops run. There is no Kokkos here
+// at all any more: the initialize/finalize pair this file used to carry started
+// nothing it ever launched into, and no parallel_for was ever spawned.
+// qf_math.hpp is NOT modified (rule 4): the one place a
 // kernel exposes a numeric surprise (K1 naive), it is REPORTED and explained, never
 // patched; any genuine library defect would be report-and-stop (rule 4), logged as a
 // B-task stub in the DONE block, not fixed here.
@@ -84,7 +89,7 @@
 // ============================================================================
 
 #include "test_utils_host.hpp"
-#include <qf_math.hpp>
+#include <xp/qf_math.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -94,8 +99,8 @@
 
 using namespace kokkos_ep;
 
-// QF types live in Kokkos::Experimental; qf:: alias (matches the other qf tests).
-namespace qf = Kokkos::Experimental;
+// QF types live in xp; qf:: alias (matches the other qf tests).
+namespace qf = xp;
 
 
 // ----------------------------------------------------------------------------
@@ -157,13 +162,11 @@ static AccStats stats_of(const std::vector<double>& d) {
 
 
 // ============================================================================
-int main(int argc, char** argv) {
-  Kokkos::initialize(argc, argv);
+int main() {
   int rc = 0;
   {
     std::printf("=== qf_cancellation_test (T3.6): end-to-end cancellation kernels "
                 "for QF ===\n");
-    std::printf("Execution space: %s\n", Kokkos::DefaultExecutionSpace::name());
     std::printf("Host-side kernels (inherently serial); gate = mean_digits >= %.2f "
                 "(= kMaxDig 29 - 3 headroom).\n\n",
                 kTol);
@@ -444,7 +447,6 @@ int main(int argc, char** argv) {
     std::printf("\n=== qf_cancellation_test: %s ===\n",
                 rc == 0 ? "ALL PASSED" : "FAILURES PRESENT");
   }
-  Kokkos::finalize();
 
   return rc;
 }

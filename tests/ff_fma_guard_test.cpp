@@ -46,8 +46,8 @@
 // A SINGLE SOURCE, TWO TARGETS
 // ----------------------------
 // This one file is compiled TWICE by tests/CMakeLists.txt into two executables:
-//   ff_fma_guard_test              (kokkos_ep_add_eft_test          -> OFF)
-//   ff_fma_guard_test_contract_on  (kokkos_ep_add_eft_test_contract_on -> ON)
+//   ff_fma_guard_test              (xpm_add_device_eft_test             -> OFF)
+//   ff_fma_guard_test_contract_on  (xpm_add_device_eft_test_contract_on -> ON)
 // Single-source (not two-sources-with-shared-header) is deliberate: the whole
 // point is to run the IDENTICAL test body over the IDENTICAL inputs under
 // different compile flags. Compiling the same bytes twice makes "identical" a
@@ -100,15 +100,41 @@
 // included below purely as a labeled CONTROL (it must stay exact under both
 // postures). ff_math.hpp is NOT modified (rule 4). Higher-level ops (log/sin/…)
 // are out of scope, as are complex ops. See the "Scope-out" list in the T2.5 task.
+//
+// C4 CHUNK C: MIGRATED WHOLE, NOT SPLIT — AND THAT IS A DELIBERATE DEVIATION
+// --------------------------------------------------------------------------
+// CORE_PLAN section C4 lists this file among eight MIXED translation units, to be
+// split into a host half carrying the oracle and a device half carrying the
+// launch. That list was measured BEFORE C2 split tests/test_utils.hpp, and the
+// classification no longer holds: this TU's oracle is FP64, not binary128 (see
+// the block above, which predates C4 and gives the algebra), and after C2 it
+// includes test_utils_device.hpp rather than the host header. It is not mixed.
+// MEASURED on this tree: the only two occurrences of the 128-bit type's name in
+// this file are in prose, and the preprocessor strips both.
+//
+// Splitting a TU that is already pure would duplicate ~250 lines of input
+// construction and oracle across two files, turn two targets into four, and
+// contradict the "single source, two targets" rationale three blocks up — all to
+// separate a host oracle from a device launch that can legitimately share a
+// compilation. So this file follows its own sibling instead: chunk B left
+// tests/ff_eft_test.cpp, whose oracle is the same FP64 argument, as ONE whole TU
+// on the C3 harness and added it to the purity gate's FILES list. This file is
+// now in that list too, which is what turns "it is pure" from a claim into a
+// checked property.
+//
+// What DID change here: the Kokkos View/parallel_for/initialize surface became
+// xpt::buffer/parallel_for_n, the launch is checked for a vendor error code, and
+// <ff_math.hpp> became <xp/ff_math.hpp>. The test body, the inputs, the oracle,
+// both postures and the committed baseline are untouched.
 // ============================================================================
 
-// The device half of the test harness names only the xp core, so the Kokkos
-// runtime this TU drives (View / parallel_for / initialize) is included here
-// rather than arriving transitively through the harness header.
-#include <Kokkos_Core.hpp>
+// C4 chunk C: the launch goes through tests/device_harness.hpp (C3) rather than
+// Kokkos. This TU names only the xp core, so it links no Kokkos at all and is
+// registered in the Kokkos-free set.
+#include "device_harness.hpp"
 #include "test_utils_device.hpp"
 #include "corpus.hpp"
-#include <ff_math.hpp>
+#include <xp/ff_math.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -123,7 +149,7 @@
 using namespace kokkos_ep;
 
 // Which contraction posture were we compiled under? Set by the CMake helpers
-// (kokkos_ep_add_eft_test -> 0, kokkos_ep_add_eft_test_contract_on -> 1). Default
+// (xpm_add_device_eft_test -> 0, xpm_add_device_eft_test_contract_on -> 1). Default
 // to OFF/gate if somehow unset so a flagless build fails loud rather than silently
 // skipping the gate.
 #ifndef KOKKOS_EP_CONTRACTION_MODE
@@ -150,7 +176,7 @@ struct TwoOut { float hi; float lo; };
 // twoSum (Knuth) — mirrors the transform embedded in `add`,
 // with a.lo == b.lo == 0. CONTROL: all +/-, no mul-then-± adjacency, so no
 // compiler can contract it; it must stay exact under both postures.
-KOKKOS_INLINE_FUNCTION TwoOut two_sum(float a, float b) {
+XPMATH_INLINE_FUNCTION TwoOut two_sum(float a, float b) {
     float s   = a + b;
     float e   = s - a;
     float err = (b - e) + (a - (s - e));
@@ -161,7 +187,7 @@ KOKKOS_INLINE_FUNCTION TwoOut two_sum(float a, float b) {
 // with a.lo == b.lo == 0. Splitter 8193.0f = 2^13 + 1.
 // THE PRIMITIVE UNDER TEST: `a1*b1 - p` (and the a1*b2 / a2*b1 / a2*b2 terms) are
 // the mul-then-± pairs a compiler may fuse into an FMA, which would break the EFT.
-KOKKOS_INLINE_FUNCTION TwoOut two_prod_dekker(float a, float b) {
+XPMATH_INLINE_FUNCTION TwoOut two_prod_dekker(float a, float b) {
     const float split = 8193.0f;             // 2^13 + 1
     float cona = a * split, conb = b * split;
     float a1 = cona - (cona - a), b1 = conb - (conb - b);
@@ -329,42 +355,53 @@ static GuardCount run_host_pass(const std::vector<std::pair<float,float>>& in,
     return c;
 }
 
-// Device pass: recompute two_prod_dekker inside a parallel_for on the default
-// execution space (governed by the CUDA --fmad flag on a CUDA build; reduces to
-// host on a Serial build). Mirrors ff_eft_test's Test D.
+// Device pass: recompute two_prod_dekker through the C3 harness. On a CUDA/HIP
+// build this is a real kernel governed by the device compiler's --fmad flag; on a
+// host build the harness runs the same functor in a serial loop, still through
+// two genuinely separate allocations and a memcpy each way. Mirrors ff_eft_test's
+// device parity pass.
+//
+// The functor is a trivially-copyable STRUCT holding raw device pointers, not a
+// lambda: device_harness.hpp passes it by value into a __global__ and
+// deliberately does not require nvcc --extended-lambda of its callers.
+struct GuardKernel {
+    const float* a;
+    const float* b;
+    float* p_hi;
+    float* p_lo;
+
+    XPMATH_INLINE_FUNCTION void operator()(std::size_t i) const {
+        TwoOut p = two_prod_dekker(a[i], b[i]);
+        p_hi[i] = p.hi;
+        p_lo[i] = p.lo;
+    }
+};
+
 static GuardCount run_device_pass(const std::vector<std::pair<float,float>>& in,
                                   const std::vector<TwoOut>& ref, int& samples_left) {
-    using exec_space = Kokkos::DefaultExecutionSpace;
-    const int n = (int)in.size();
+    const std::size_t n = in.size();
 
-    Kokkos::View<float*, exec_space> va("va", n), vb("vb", n);
-    Kokkos::View<float*, exec_space> p_hi("p_hi", n), p_lo("p_lo", n);
-    auto hva = Kokkos::create_mirror_view(va);
-    auto hvb = Kokkos::create_mirror_view(vb);
-    for (int i = 0; i < n; ++i) { hva(i) = in[i].first; hvb(i) = in[i].second; }
-    Kokkos::deep_copy(va, hva);
-    Kokkos::deep_copy(vb, hvb);
+    xpt::buffer<float> va(n), vb(n), p_hi(n), p_lo(n);
+    for (std::size_t i = 0; i < n; ++i) { va.host()[i] = in[i].first; vb.host()[i] = in[i].second; }
+    va.to_device();
+    vb.to_device();
 
-    Kokkos::parallel_for("ff_fma_guard_device", Kokkos::RangePolicy<exec_space>(0, n),
-        KOKKOS_LAMBDA(int i) {
-            TwoOut p = two_prod_dekker(va(i), vb(i));
-            p_hi(i) = p.hi; p_lo(i) = p.lo;
-        });
-    Kokkos::fence();
+    // parallel_for_n records the launch error and fences before it returns, so
+    // from_device() below cannot race a live kernel.
+    xpt::parallel_for_n(n, GuardKernel{va.device(), vb.device(),
+                                       p_hi.device(), p_lo.device()});
 
-    auto hphi = Kokkos::create_mirror_view(p_hi);
-    auto hplo = Kokkos::create_mirror_view(p_lo);
-    Kokkos::deep_copy(hphi, p_hi);
-    Kokkos::deep_copy(hplo, p_lo);
+    p_hi.from_device();
+    p_lo.from_device();
 
     GuardCount c;
-    for (int i = 0; i < n; ++i) {
+    for (std::size_t i = 0; i < n; ++i) {
         ++c.tested;
-        if (hphi(i) != ref[i].hi || hplo(i) != ref[i].lo) {
+        if (p_hi.host()[i] != ref[i].hi || p_lo.host()[i] != ref[i].lo) {
             ++c.mismatches;
             if (samples_left > 0) {
                 print_mismatch("twoProd", "device", in[i].first, in[i].second,
-                               TwoOut{hphi(i), hplo(i)}, ref[i]);
+                               TwoOut{p_hi.host()[i], p_lo.host()[i]}, ref[i]);
                 --samples_left;
             }
         }
@@ -441,14 +478,17 @@ static void check_baseline(long observed) {
 #endif
 
 // ============================================================================
-int main(int argc, char** argv) {
-    Kokkos::initialize(argc, argv);
+int main(int, char**) {
     int rc = 0;
     {
         std::printf("=== ff_fma_guard_test (T2.5): FMA-contraction guard for FF Dekker twoProduct ===\n");
         std::printf("contraction posture: %s\n", kPostureName);
-        std::printf("execution space: %s\n", Kokkos::DefaultExecutionSpace::name());
-        std::printf("Oracle: FP64 exact product (contraction-immune; 48 <= 53 bits, no __float128)\n\n");
+        std::printf("execution space: %s\n", xpt::where_name());
+        // Deliberately does NOT spell the 128-bit type's name here. A string
+        // literal survives preprocessing, so it would fail
+        // scripts/check_device_tu_purity.sh, which carries this file.
+        std::printf("Oracle: FP64 exact product (contraction-immune; 48 <= 53 bits, "
+                    "needs no type wider than a machine word)\n\n");
 
         // Build inputs + contraction-immune reference once.
         std::vector<std::pair<float,float>> inputs = build_inputs();
@@ -484,6 +524,12 @@ int main(int argc, char** argv) {
         KOKKOS_EP_ASSERT(F == 0,
                          "Dekker twoProduct not exact under contraction-off — "
                          "the -ffp-contract=off posture is not taking effect");
+        // A nonzero vendor code is a TEST FAILURE, not a warning: a launch that
+        // never ran leaves p_hi/p_lo at whatever the allocator returned, and the
+        // comparison loop cannot tell that from a clean pass. Sticky since
+        // process start, so a later good call cannot erase it.
+        KOKKOS_EP_ASSERT(xpt::last_error() == 0,
+                         "device harness reported a nonzero vendor error code");
         rc = ep_exit_code();
         std::printf("=== ff_fma_guard_test [OFF]: %s ===\n",
                     rc == 0 ? "ALL EXACT (posture holds)" : "FAILURES PRESENT");
@@ -509,10 +555,14 @@ int main(int argc, char** argv) {
 #  ifdef KOKKOS_EP_BASELINE_PATH
         check_baseline(F);
 #  endif
-        rc = 0;  // reporter: always success
-        std::printf("=== ff_fma_guard_test [ON]: REPORTED (mismatches=%ld, exit 0) ===\n", F);
+        // The reporter exits 0 on the MEASUREMENT and nonzero on the APPARATUS.
+        // A launch that failed did not report anything, so F would be noise.
+        KOKKOS_EP_ASSERT(xpt::last_error() == 0,
+                         "device harness reported a nonzero vendor error code");
+        rc = ep_exit_code();
+        std::printf("=== ff_fma_guard_test [ON]: REPORTED (mismatches=%ld, exit %d) ===\n",
+                    F, rc);
 #endif
     }
-    Kokkos::finalize();
     return rc;
 }

@@ -28,13 +28,27 @@
 
 // Kokkos, and the compat wrappers, live on THIS side of the split. The device
 // header deliberately names only the xp core so it stays preprocessable without
-// a Kokkos install; the runners below use Kokkos::View / parallel_for, and the
-// host TUs that include this header expect the Kokkos:: math spellings the
-// unsplit tests/test_utils.hpp used to hand them. Supplying both here keeps
-// every host TU seeing exactly what it saw before the split.
+// a Kokkos install; the runners at the bottom of this file use Kokkos::View /
+// parallel_for, and the Kokkos-linked host TUs expect the Kokkos:: math
+// spellings the unsplit tests/test_utils.hpp used to hand them.
+//
+// BUT HOST-ORACLE IS NOT THE SAME THING AS KOKKOS-LINKED, and until CORE_PLAN
+// C4 this header conflated them. `corpus_test` references zero Kokkos APIs and
+// still could not compile without a Kokkos install, purely because it needed
+// float128 and ulp_error. So the Kokkos surface is now opt-in:
+// XPMATH_TEST_HAVE_KOKKOS is defined by the kokkos_ep_add_test* helpers in
+// tests/CMakeLists.txt and by nothing else. Without it this header is the
+// oracle and the statistics, and needs no Kokkos on the include path.
+//
+// It is a POSITIVE define on the linked targets rather than a negative one on
+// the unlinked targets on purpose: a new test that forgets the define fails to
+// compile the moment it names Kokkos, whereas a forgotten
+// XPMATH_TEST_NO_KOKKOS would silently pull the runtime back in.
+#if defined(XPMATH_TEST_HAVE_KOKKOS)
 #include <Kokkos_Core.hpp>
 #include <dd_math.hpp>
 #include <ff_math.hpp>
+#endif
 
 // Corner-case corpus (T0.2). Included at file scope (outside namespace
 // kokkos_ep) because corpus.hpp declares its own namespace kokkos_ep::corpus;
@@ -315,6 +329,11 @@ inline void print_stats(const char* label, const AccStats& s) {
 //
 // device_op MUST be a device-callable functor (KOKKOS_LAMBDA / KOKKOS_FUNCTION)
 // so it can be captured by value into the kernel. host_oracle runs on host only.
+//
+// Compiled only for the Kokkos-linked targets (see the XPMATH_TEST_HAVE_KOKKOS
+// note at the top). CORE_PLAN C4 migrates the remaining callers onto
+// tests/device_harness.hpp, after which this block goes away entirely.
+#if defined(XPMATH_TEST_HAVE_KOKKOS)
 
 template <typename Backend, typename DeviceOp>
 AccStats run_unary_op(int n, uint64_t seed,
@@ -409,6 +428,8 @@ AccStats run_binary_op(int n, uint64_t seed,
   // 6. stats
   return compute_stats(digs.data(), ulps.data(), n);
 }
+
+#endif  // XPMATH_TEST_HAVE_KOKKOS
 
 // --- Corpus-pass runners ---------------------------------------------------
 // Same host->device->host->oracle pipeline as run_unary_op/run_binary_op, but

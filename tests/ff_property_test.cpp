@@ -87,11 +87,39 @@
 //
 // Cross-reference: docs/TEST_SUITE_PLAN.md, Phase 2, "T2.3: Property/identity
 // tests for FF" and "The six test layers" layer 3.
+//
+// ----------------------------------------------------------------------------
+// THIS IS THE HOST HALF. CORE_PLAN section C4 step 2 split the TU.
+// ----------------------------------------------------------------------------
+// Same split, same reason, same cost as dd_property_test — read that file's
+// corresponding block for the full argument. In short: this file used to end its
+// Group B block with a Kokkos device pass (A1, A3, A5 bit-exact + B1_sqrt_sq and
+// B4_pythag scored against binary128) that nvcc could never compile, because
+// Groups B/C put std::vector<__float128> in the same TU (S6).
+//
+// The device pass now lives in tests/ff_property_test_device.cpp, launched
+// through tests/device_harness.hpp, naming no 128-bit type, and running ALL
+// SEVEN Group A identities plus the corner-case corpus rather than three
+// identities on random inputs alone.
+//
+// B1_sqrt_sq and B4_pythag did NOT move and are NOT replaced on the device side:
+// they score against the oracle, the oracle cannot enter a device TU, and a
+// host/device bit-parity substitute would need a tolerance to stay green on
+// hardware whose sqrt/sincos legitimately differ — a second scorer, forbidden by
+// docs/CORRECTNESS.md. Both still run here over 10^6 inputs.
+//
+// GROUP S stays here in full, and not for oracle reasons: it is a table of IEEE
+// special-value REQUIREMENTS (x / +/-inf, nan operands, FLT_MAX divisors), and
+// non-finite behaviour is exactly what a device backend's fast-math posture is
+// entitled to change. Asserting it on the device would be asserting something
+// the platform does not promise.
+//
+// NOTHING BELOW LAUNCHES A KERNEL. This file links no Kokkos.
 // ============================================================================
 
 #include "test_utils_host.hpp"
 #include "corpus.hpp"
-#include <ff_math.hpp>
+#include <xp/ff_math.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -105,7 +133,7 @@
 #include <vector>
 
 using namespace kokkos_ep;
-namespace ff = Kokkos::Experimental;
+namespace ff = xp;   // C4: the standalone core directly, not the Kokkos alias
 
 // ----------------------------------------------------------------------------
 // Bit-pattern helpers (ff_eft_test.cpp / ff_invariant_test.cpp hex format).
@@ -184,8 +212,8 @@ static corpus::CorpusFlags corpus_flags() {
 }
 
 static constexpr int    kRandomN = 1'000'000;  // 10^6 random inputs per identity
-static constexpr int    kDeviceN = 100'000;    // 10^5 for the device pass
 static constexpr double kMaxDig  = (double)BackendTraits<FF>::max_digits;  // 14
+// kDeviceN moved to ff_property_test_device.cpp along with the device pass (C4).
 
 // ============================================================================
 // GROUP A — bit-exact identities (no oracle, no tolerance)
@@ -435,53 +463,20 @@ static InputDist loguniform(double explo, double exphi) {
   };
 }
 
-// ============================================================================
-// Device pass. 3 Group A (A1, A3, A5) + 2 Group B (B1, B4) on 10^5 inputs. A
-// generic runner ships one FF result per input back to host; the caller does the
-// (bit-exact for A / oracle for B) comparison. Catches a Serial->CUDA regression
-// the host pass cannot see. The op receives the raw double input and constructs
-// its own FF operand, so A/B can pick single-float vs Route-A as needed.
-// ============================================================================
-template <typename DeviceOp>
-static void device_run(int n, uint64_t seed, const InputDist& gen, DeviceOp op,
-                       std::vector<double>& x_out,
-                       std::vector<float>& hi_out, std::vector<float>& lo_out) {
-  using exec_space = Kokkos::DefaultExecutionSpace;
-  std::vector<double> hx(n);
-  { std::mt19937_64 g(seed); for (int i = 0; i < n; ++i) hx[i] = gen(g); }
-
-  Kokkos::View<double*, exec_space> dx("dx", n);
-  Kokkos::View<float*,  exec_space> dhi("dhi", n), dlo("dlo", n);
-  auto hmx = Kokkos::create_mirror_view(dx);
-  for (int i = 0; i < n; ++i) hmx(i) = hx[i];
-  Kokkos::deep_copy(dx, hmx);
-
-  Kokkos::parallel_for("ff_prop_dev", Kokkos::RangePolicy<exec_space>(0, n),
-    KOKKOS_LAMBDA(int i) {
-      ff::FloatFloat d = op(dx(i));
-      dhi(i) = d.hi; dlo(i) = d.lo;
-    });
-  Kokkos::fence();
-
-  auto hhi = Kokkos::create_mirror_view(dhi);
-  auto hlo = Kokkos::create_mirror_view(dlo);
-  Kokkos::deep_copy(hhi, dhi);
-  Kokkos::deep_copy(hlo, dlo);
-
-  x_out.assign(hx.begin(), hx.end());
-  hi_out.resize(n); lo_out.resize(n);
-  for (int i = 0; i < n; ++i) { hi_out[i] = hhi(i); lo_out[i] = hlo(i); }
-}
+// The generic Kokkos device runner that used to sit here (device_run) moved to
+// tests/ff_property_test_device.cpp in C4 and is now written against
+// tests/device_harness.hpp. See this file's header block.
 
 // ============================================================================
-int main(int argc, char** argv) {
-  Kokkos::initialize(argc, argv);
+int main(int, char**) {
   int rc = 0;
   {
-    std::printf("=== ff_property_test (T2.3): algebraic identities for FF ===\n");
-    std::printf("Execution space: %s\n", Kokkos::DefaultExecutionSpace::name());
+    std::printf("=== ff_property_test (T2.3, C4 host half): algebraic identities "
+                "for FF ===\n");
+    std::printf("Execution space: host (the device pass moved to "
+                "ff_property_test_device in C4)\n");
     std::printf("Group A = bit-exact (no oracle); Group B / Test C = tolerance "
-                "(needs __float128 oracle).\n\n");
+                "(needs the 128-bit oracle).\n\n");
 
     long groupA_failures = 0;
 
@@ -731,91 +726,11 @@ int main(int argc, char** argv) {
                   ann ? ann->reason : "sin near +/-pi; PORT_NOTES §5");
     }
 
-    // ------------------------------------------------------------------------
-    // Device pass: 3 Group A (bit-exact) + 2 Group B (tolerance) on 10^5 inputs.
-    // ------------------------------------------------------------------------
-    std::printf("\n[Device] 3 Group A (bit-exact) + 2 Group B on %d inputs (%s)\n",
-                kDeviceN, Kokkos::DefaultExecutionSpace::name());
-    long device_failures = 0;
-
-    // Device A1: a + (-a) == 0.  (Route-A operands; result is exactly 0 regardless
-    // of lo.)
-    {
-      std::vector<double> x; std::vector<float> hi, lo;
-      device_run(kDeviceN, 700001ULL, uniform(-1e8, 1e8),
-        KOKKOS_LAMBDA(double xv){ ff::FloatFloat a(xv); return ff::add(a, ff::negate(a)); },
-        x, hi, lo);
-      long f = 0; for (int i = 0; i < kDeviceN; ++i) if (!(hi[i] == 0.0f && lo[i] == 0.0f)) ++f;
-      device_failures += f;
-      std::printf("  [device] %-14s n=%d failures=%ld status=%s\n",
-                  "A1_add_neg", kDeviceN, f, f == 0 ? "PASS" : "FAIL");
-    }
-    // Device A3: a * 1 == a (compare to the Route-A split of the input on host).
-    {
-      std::vector<double> x; std::vector<float> hi, lo;
-      device_run(kDeviceN, 700002ULL, uniform(-1e8, 1e8),
-        KOKKOS_LAMBDA(double xv){ ff::FloatFloat a(xv); return ff::multiply(a, ff::FloatFloat(1.0f)); },
-        x, hi, lo);
-      long f = 0;
-      for (int i = 0; i < kDeviceN; ++i) {
-        ff::FloatFloat a(x[i]);
-        if (!(hi[i] == a.hi && lo[i] == a.lo)) ++f;
-      }
-      device_failures += f;
-      std::printf("  [device] %-14s n=%d failures=%ld status=%s\n",
-                  "A3_mul_one", kDeviceN, f, f == 0 ? "PASS" : "FAIL");
-    }
-    // Device A5: |a| == (a.hi>=0 ? a : -a).
-    {
-      std::vector<double> x; std::vector<float> hi, lo;
-      device_run(kDeviceN, 700003ULL, uniform(-1e8, 1e8),
-        KOKKOS_LAMBDA(double xv){ ff::FloatFloat a(xv); return ff::abs(a); }, x, hi, lo);
-      long f = 0;
-      for (int i = 0; i < kDeviceN; ++i) {
-        ff::FloatFloat a(x[i]);
-        ff::FloatFloat w = (a.hi >= 0.0f) ? a : ff::FloatFloat(-a.hi, -a.lo);
-        if (!(hi[i] == w.hi && lo[i] == w.lo)) ++f;
-      }
-      device_failures += f;
-      std::printf("  [device] %-14s n=%d failures=%ld status=%s\n",
-                  "A5_abs_branch", kDeviceN, f, f == 0 ? "PASS" : "FAIL");
-    }
-
-    // Device B1: sqrt(a)^2 ~= a.
-    {
-      std::vector<double> x; std::vector<float> hi, lo;
-      device_run(kDeviceN, 700004ULL, loguniform(-30, 30),
-        KOKKOS_LAMBDA(double xv){ ff::FloatFloat a(xv); ff::FloatFloat s = ff::sqrt(a); return ff::multiply(s, s); },
-        x, hi, lo);
-      std::vector<double> digs(kDeviceN);
-      for (int i = 0; i < kDeviceN; ++i)
-        digs[i] = digits_of_accuracy<FF>(OracleTraits<FF>::to_quad(ff::FloatFloat(hi[i], lo[i])),
-                                         (float128)x[i]);
-      AccStats s = compute_stats(digs.data(), kDeviceN);
-      double tol = threshold_digits(kDeviceN); bool pass = s.mean >= tol;
-      if (!pass) ++device_failures;
-      std::printf("  [device] %-14s n=%d min=%.2f mean=%.2f tol=%.2f status=%s\n",
-                  "B1_sqrt_sq", kDeviceN, s.min, s.mean, tol, pass ? "PASS" : "FAIL");
-    }
-    // Device B4: sin^2+cos^2 ~= 1.
-    {
-      std::vector<double> x; std::vector<float> hi, lo;
-      device_run(kDeviceN, 700005ULL, uniform(-100.0, 100.0),
-        KOKKOS_LAMBDA(double xv){
-          ff::FloatFloat a(xv);
-          ff::FloatFloat cc, ss; ff::sincos(a, cc, ss);
-          return ff::add(ff::multiply(ss, ss), ff::multiply(cc, cc));
-        }, x, hi, lo);
-      std::vector<double> digs(kDeviceN);
-      for (int i = 0; i < kDeviceN; ++i)
-        digs[i] = digits_of_accuracy<FF>(OracleTraits<FF>::to_quad(ff::FloatFloat(hi[i], lo[i])),
-                                         (float128)1.0);
-      AccStats s = compute_stats(digs.data(), kDeviceN);
-      double tol = threshold_digits(kDeviceN); bool pass = s.mean >= tol;
-      if (!pass) ++device_failures;
-      std::printf("  [device] %-14s n=%d min=%.2f mean=%.2f tol=%.2f status=%s\n",
-                  "B4_pythag", kDeviceN, s.min, s.mean, tol, pass ? "PASS" : "FAIL");
-    }
+    // The device pass that used to sit here — 3 Group A (A1, A3, A5) + 2 Group B
+    // (B1_sqrt_sq, B4_pythag) on 10^5 inputs — moved to
+    // tests/ff_property_test_device.cpp in C4. Group A grew to all seven
+    // identities there; the two Group B checks are host-only now and are NOT
+    // replaced, because they need the oracle. See this file's header block.
 
     // ------------------------------------------------------------------------
     // TEST C — named-constant regressions.
@@ -916,14 +831,12 @@ int main(int argc, char** argv) {
                      "a Group B identity's MEAN digits fell below the -log10(N*u^2) tolerance");
     KOKKOS_EP_ASSERT(c_pass == c_total, "a Test C named-constant regression fell below its floor");
 
-    std::printf("  Device: total failures=%ld\n", device_failures);
-    KOKKOS_EP_ASSERT(device_failures == 0, "a device identity check failed");
+    std::printf("  Device: see ff_property_test_device (separate ctest target)\n");
 
     rc = ep_exit_code();
     std::printf("\n=== ff_property_test: %s ===\n",
                 rc == 0 ? "ALL PASSED" : "FAILURES PRESENT");
   }
-  Kokkos::finalize();
 
   return rc;
 }

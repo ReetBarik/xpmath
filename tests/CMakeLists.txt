@@ -2,7 +2,8 @@
 # tests/CMakeLists.txt — extended-precision test suite (T0.1 harness)
 # ============================================================================
 # Registered from the top-level CMakeLists.txt via add_subdirectory(tests),
-# guarded by option KOKKOS_EP_BUILD_TESTS (default ON) and enable_testing().
+# guarded by option XPMATH_BUILD_TESTS (default ON) and enable_testing().
+# (KOKKOS_EP_BUILD_TESTS is still accepted as a deprecated alias -- CORE_PLAN C4.)
 
 # --- Oracle availability: THERE IS NOTHING LEFT TO GATE ---------------------
 # This file used to open with a LIBQUADMATH probe. The __float128 oracle reached
@@ -62,23 +63,99 @@
 #    every one. The src/ demos still carry `*q` undefineds -- that is B3's
 #    scope, not this commit's.
 
-# --- Helper: define + register one test -----------------------------------
-# Usage: kokkos_ep_add_test(<name>)  expects tests/<name>.cpp
+# ===========================================================================
+# WHERE THE THREE kokkos_ep_add_* HELPERS WENT -- CORE_PLAN C4 step 5
+# ===========================================================================
+# kokkos_ep_add_test, kokkos_ep_add_eft_test and
+# kokkos_ep_add_eft_test_contract_on stood here. They linked Kokkos::kokkos,
+# added ${THIRD_PARTY_INCLUDE} (the compat-wrapper directory), and defined
+# XPMATH_TEST_HAVE_KOKKOS=1 to open the Kokkos half of test_utils_host.hpp.
+# Steps 1, 2 and 3 of this section moved every one of their 26 call sites onto
+# the six xpm_add_{host,device}[_eft]_test[_contract_on] helpers below, leaving
+# all three defined and called zero times. They are deleted rather than kept
+# "in case": an unused helper that still links Kokkos is an invitation to
+# reintroduce the dependency this section exists to remove, and a reader would
+# have no way to tell it was dead.
 #
-# Creates target <name> from tests/<name>.cpp, links Kokkos::kokkos and the
-# third-party include dir (dd_math.hpp etc.), and registers it with CTest.
+# ${THIRD_PARTY_INCLUDE} goes with them. It is still SET by the top-level
+# CMakeLists.txt, which is where the demos consume it; nothing under tests/
+# references it any more.
 #
-# To add a new test:  create tests/foo_test.cpp, then add
-#   kokkos_ep_add_test(foo_test)
-# below. That's the whole recipe (see tests/README.md).
-function(kokkos_ep_add_test name)
+# THE WRAPPER LAYER IS STILL EXERCISED, AND THAT IS WHY THIS IS SAFE.
+# third_party/include/ is what lets existing Kokkos code compile unchanged, so
+# losing coverage of it would be a real loss rather than a bookkeeping one. It
+# is covered by the eight src/demo_*.cpp targets, every one of which includes
+# the wrappers and links Kokkos, and every one of which still builds in the
+# --arch host configuration. C10 moves those demos to the xpmath-kokkos
+# repository, and from then on the wrapper layer is that repository's to test --
+# which is the right home for it, because that is where the Kokkos dependency
+# will live.
+#
+# What IS gone as of C4, and is written down here rather than inferred: the
+# wrappers no longer get incidental coverage from the test suite. Before this
+# section, 26 test targets compiled third_party/include/*_math.hpp as a side
+# effect of linking Kokkos. None do now. The wrappers are true aliases
+# (`using DoubleDouble = xp::DoubleDouble`), so what that coverage actually
+# proved was that the alias header parses -- but it proved it on every build,
+# and now only the demos do.
+# ===========================================================================
+
+# --- Helper: define + register one test that links NO Kokkos ---------------
+# Usage: xpm_add_host_test(<name>)  expects tests/<name>.cpp
+#
+# CORE_PLAN C4 step 1. Same shape as the deleted kokkos_ep_add_test, minus the
+# two lines that made a target Kokkos's: no Kokkos::kokkos link, no
+# THIRD_PARTY_INCLUDE, and no XPMATH_TEST_HAVE_KOKKOS. The include path is the
+# xp CORE plus this directory, which is what a host-oracle test that names
+# xp:: types and tests/test_utils_host.hpp actually needs.
+#
+# THE SEVEN TARGETS THIS EXISTS FOR were linking Kokkos to call
+# Kokkos::initialize/finalize around code that never launched a kernel --
+# corpus_test referenced ZERO Kokkos APIs and still could not build without an
+# install. That is not a small tidy-up: it is why a Kokkos build failure and a
+# library defect were indistinguishable from outside, and why the Kokkos-free
+# suite was 24 targets when 33 of them need nothing from Kokkos.
+#
+# It takes no contraction flags: nothing registered through it is an EFT test.
+# If that ever changes, the target must go through an EFT helper instead, or the
+# contraction guard below will not know about it.
+function(xpm_add_host_test name)
   add_executable(${name} ${name}.cpp)
-  target_include_directories(${name} PRIVATE ${THIRD_PARTY_INCLUDE})
-  target_link_libraries(${name} PRIVATE Kokkos::kokkos)
+  target_include_directories(${name} PRIVATE
+                             ${CMAKE_SOURCE_DIR}/include
+                             ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_features(${name} PRIVATE cxx_std_17)
   add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
-# --- Helper: EFT test with FMA contraction disabled -----------------------
+# --- Helper: define + register one DEVICE test that links NO Kokkos --------
+# Usage: xpm_add_device_test(<name>)  expects tests/<name>.cpp
+#
+# CORE_PLAN C4 step 3. Structurally identical to xpm_add_host_test above --
+# there is no third include path and no extra link -- because
+# tests/device_harness.hpp needs exactly two things: the xp core (it includes
+# <xp/config.hpp>, and the tests it serves include <xp/*_math.hpp>) and this
+# directory (the harness header and test_utils_device.hpp live here). The
+# vendor runtime arrives with the compiler: nvcc force-includes cuda_runtime.h,
+# and the harness includes <hip/hip_runtime.h> itself under __HIPCC__.
+#
+# IT IS A SEPARATE FUNCTION FROM xpm_add_host_test ANYWAY, and deliberately so.
+# The two say different things about their targets -- "host oracle, never
+# launches" versus "launches a kernel through the C3 harness" -- and the second
+# is the one that will grow a CUDA/HIP source-language property, a per-arch
+# flag, or a device-lane label. Collapsing them today would mean splitting them
+# again at C5, and in between there would be no way to ask CMake which targets
+# are the device ones.
+function(xpm_add_device_test name)
+  add_executable(${name} ${name}.cpp)
+  target_include_directories(${name} PRIVATE
+                             ${CMAKE_SOURCE_DIR}/include
+                             ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_features(${name} PRIVATE cxx_std_17)
+  add_test(NAME ${name} COMMAND ${name})
+endfunction()
+
+# --- WHY EVERY EFT TEST BELOW IS BUILT WITH CONTRACTION OFF ----------------
 # Error-free-transform tests (Layer 1: T1.1 DD, T2.1 FF, T3.1 QF) validate that
 # twoSum/twoProd produce an EXACT (result, error) pair. The Dekker twoProduct in
 # dd_math.hpp's multiply relies on `a1*b1 - c11` being two distinct rounded
@@ -91,78 +168,78 @@ endfunction()
 # only the EFT tests need it; the demos and other test layers should build with
 # the project's normal flags. Per-target keeps the requirement local and explicit.
 #
-# Compiler coverage below matches what this project actually builds under (GCC
-# host today; nvcc when Kokkos is CUDA-backed). IntelLLVM/Intel and Clang lines
-# are included because they are one-liners and cost nothing, but are not the
-# tested path — extend as needed for other toolchains.
-function(kokkos_ep_add_eft_test name)
-  kokkos_ep_add_test(${name})
-  # Host C++ (GNU/Clang): -ffp-contract=off. GCC's default at -O2 is already
-  # -ffp-contract=off for standard C++, but we set it explicitly so the guarantee
-  # does not depend on the default or on -Ofast/-ffast-math leaking in.
+# Compiler coverage in the four helpers below matches what this project actually
+# builds under (GCC host today; nvcc/hipcc once C5 gives the device targets their
+# own tree). IntelLLVM/Intel and Clang lines are included because they are
+# one-liners and cost nothing, but are not the tested path.
+#
+# The ON-posture companions build the SAME source into a SEPARATE executable
+# (<name>_contract_on) with contraction forced on, so the Dekker sequence is
+# exercised under the posture the OFF helper protects against. Whether that
+# produces the same (compiler didn't contract) or different (it did) results, the
+# outcome is RECORDED rather than gated — the ON test is a reporter. See the
+# dd_fma_guard_test.cpp header.
+#
+# CORE_PLAN C4 step 5: the Kokkos-linked pair that used to stand here
+# (kokkos_ep_add_eft_test / kokkos_ep_add_eft_test_contract_on) is deleted with
+# the rest of the kokkos_ep_add_* family — see the block at the top of this file.
+# The four Kokkos-free helpers below carry the whole discipline unchanged: same
+# flags, same KOKKOS_EP_CONTRACTION_MODE, same <base>_baseline.txt derivation,
+# same GLOBAL manifest registration that the contraction guard reads.
+
+# --- Helpers: the two contraction postures, DEVICE lane --------------------
+# CORE_PLAN C4 step 3. THE CONTRACTION DISCIPLINE DOES NOT CHANGE WHEN THE
+# LAUNCH MECHANISM DOES. An EFT test migrated onto the C3 harness is still a
+# test of whether `a1*b1 - c11` stayed two rounded operations, so it is still
+# built with contraction OFF, still sets KOKKOS_EP_CONTRACTION_MODE, still gets
+# its _contract_on companion where it had one, and is still registered in the
+# two GLOBAL manifests the contraction guard reads. The only thing these drop
+# relative to the deleted kokkos_ep_add_eft_test is Kokkos.
+#
+# They delegate the plain part to xpm_add_device_test / to an inline mirror of
+# it, exactly as the deleted Kokkos pair delegated to kokkos_ep_add_test, so a
+# change to the include paths happens in one place per posture rather than four.
+function(xpm_add_device_eft_test name)
+  xpm_add_device_test(${name})
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off>)
   endif()
-  # Intel compilers: -fp-model=precise disables contraction/reassociation.
   if(CMAKE_CXX_COMPILER_ID MATCHES "IntelLLVM|Intel")
     target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fp-model=precise>)
   endif()
-  # When Kokkos is CUDA-backed, source compiles as CUDA (nvcc). --fmad=false stops
-  # nvcc fusing the Dekker sequence. Guarded on COMPILE_LANGUAGE:CUDA so it is a
-  # no-op for the Serial/host build; harmless when CUDA is not enabled.
-  if(Kokkos_ENABLE_CUDA)
+  # Keyed on CMAKE_CUDA_COMPILER rather than Kokkos_ENABLE_CUDA: these targets
+  # do not link Kokkos, so whether Kokkos was built with CUDA says nothing about
+  # how they compile. A no-op today (no source here is CUDA-language yet) and
+  # the line C5 needs when one is.
+  if(CMAKE_CUDA_COMPILER)
     target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--fmad=false>)
   endif()
-  # Tell the test source it is the contraction-OFF variant (gate on mismatches).
-  # dd_fma_guard_test.cpp keys its gate-vs-report behavior on this; other EFT
-  # tests ignore it. Harmless where unused.
   target_compile_definitions(${name} PRIVATE KOKKOS_EP_CONTRACTION_MODE=0)
-  # For the contraction guard at the bottom of this file.
   set_property(GLOBAL APPEND PROPERTY XPMATH_EFT_OFF_TARGETS ${name})
 endfunction()
 
-# --- Helper: companion EFT test with FMA contraction forced ON ------------
-# T1.5's positive counterpart to kokkos_ep_add_eft_test. It builds the SAME test
-# source into a SEPARATE executable (<name>_contract_on) compiled with contraction
-# forced ON, so the Dekker twoProduct is exercised under the posture the OFF helper
-# protects against. Whether that produces the same (compiler didn't contract) or
-# different (compiler did contract) results, the outcome is recorded rather than
-# gated — the ON test is a REPORTER (see dd_fma_guard_test.cpp header). Both
-# variants coexist because the target name gets the _contract_on suffix.
-#
-# We do not call kokkos_ep_add_test here (it would collide on the base target name
-# and apply no contraction flags); instead we build the suffixed target directly,
-# mirroring kokkos_ep_add_test's body plus the ON flags/definitions.
-function(kokkos_ep_add_eft_test_contract_on name)
+function(xpm_add_device_eft_test_contract_on name)
   set(tgt ${name}_contract_on)
   add_executable(${tgt} ${name}.cpp)
-  target_include_directories(${tgt} PRIVATE ${THIRD_PARTY_INCLUDE})
-  target_link_libraries(${tgt} PRIVATE Kokkos::kokkos)
+  target_include_directories(${tgt} PRIVATE
+                             ${CMAKE_SOURCE_DIR}/include
+                             ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_features(${tgt} PRIVATE cxx_std_17)
   add_test(NAME ${tgt} COMMAND ${tgt})
 
-  # Force contraction ON (the mirror image of kokkos_ep_add_eft_test).
-  # GCC/Clang: -ffp-contract=fast is the portable spelling both accept (GCC also
-  # accepts =on, but =fast is the one clang honors identically, so we use =fast for
-  # both). This permits — does not force — the compiler to fuse mul-then-add; on a
-  # non-FMA ISA target GCC still emits mul+sub, which is exactly the "belt+
-  # suspenders" outcome the ON reporter records.
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(${tgt} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=fast>)
   endif()
-  # Intel: -fp-model=fast enables contraction/reassociation.
   if(CMAKE_CXX_COMPILER_ID MATCHES "IntelLLVM|Intel")
     target_compile_options(${tgt} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fp-model=fast>)
   endif()
-  # CUDA: --fmad=true is nvcc's DEFAULT; stated explicitly for clarity/symmetry.
-  if(Kokkos_ENABLE_CUDA)
+  if(CMAKE_CUDA_COMPILER)
     target_compile_options(${tgt} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--fmad=true>)
   endif()
 
-  # Contraction-ON mode (report, don't gate) + baseline path for drift detection.
-  # Baseline file is per-test: <base>_baseline.txt where <base> = name with the
-  # trailing "_test" stripped (dd_fma_guard_test -> dd_fma_guard_baseline.txt,
-  # ff_fma_guard_test -> ff_fma_guard_baseline.txt). Generalized from the original
-  # hardcoded dd_ path so T2.5's FF guard reuses this helper unchanged.
+  # Same baseline-path derivation as the Kokkos helper, so a migrated test keeps
+  # reading the same <base>_baseline.txt it read before and drift detection is
+  # continuous across the migration rather than restarting from "no file".
   string(REGEX REPLACE "_test$" "" _base "${name}")
   target_compile_definitions(${tgt} PRIVATE
     KOKKOS_EP_CONTRACTION_MODE=1
@@ -170,40 +247,284 @@ function(kokkos_ep_add_eft_test_contract_on name)
   set_property(GLOBAL APPEND PROPERTY XPMATH_EFT_ON_TARGETS ${tgt})
 endfunction()
 
-# --- Registered tests -----------------------------------------------------
-# Everything from here to the "END KOKKOS-LINKED TESTS" marker links
-# Kokkos::kokkos, because it exercises the compat wrappers in
-# third_party/include/. The Kokkos-free tests -- both gates, pow_domain,
-# exp_reduction, trig_reduction, the standalone smokes, the consumer package --
-# are registered after that marker and build with XPMATH_WITH_KOKKOS=OFF.
-if(XPMATH_WITH_KOKKOS)
-kokkos_ep_add_test(hello_test)
-kokkos_ep_add_test(corpus_test)
-# T1.2 non-overlap invariant: oracle-independent, no contraction flags needed.
-kokkos_ep_add_test(dd_invariant_test)
-# T2.2 non-overlap invariant for FF: FP32-typed fl(hi+lo)==hi over every FF op.
-# Oracle-independent (no __float128 at all). No contraction flags — the
-# invariant holds regardless of FMA contraction (not an EFT test).
-kokkos_ep_add_test(ff_invariant_test)
+# --- Helpers: the two contraction postures for a HOST-ONLY EFT test --------
+# CORE_PLAN C4 step 2. When a mixed TU splits, its HOST half keeps the oracle
+# and stops launching -- but it does NOT stop being an EFT test. dd_eft_test's
+# host half still calls the Dekker sequence `a1*b1 - c11` directly, and a
+# compiler that contracts it there collapses the error term exactly as it would
+# in a kernel. So the host half needs contraction OFF just as much as the device
+# half does, and its _contract_on companion has to survive the split too.
+#
+# Neither alternative fits: the Kokkos EFT pair linked Kokkos (the whole point
+# of the split is that these halves do not, and C4 step 5 has since deleted it),
+# and xpm_add_device_eft_test
+# is the device-lane function that C5 will grow a source-language property on.
+# xpm_add_host_test cannot be widened either -- it documents, correctly, that it
+# takes no contraction flags, which is what lets the contraction guard below
+# trust that nothing registered through it is an EFT test.
+#
+# These two therefore delegate to xpm_add_host_test / mirror it, and are
+# otherwise byte-for-byte the device pair's logic: same flags, same
+# KOKKOS_EP_CONTRACTION_MODE, same <base>_baseline.txt derivation (so a split
+# host half keeps reading the baseline it read before the split), same GLOBAL
+# manifest registration.
+function(xpm_add_host_eft_test name)
+  xpm_add_host_test(${name})
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=off>)
+  endif()
+  if(CMAKE_CXX_COMPILER_ID MATCHES "IntelLLVM|Intel")
+    target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fp-model=precise>)
+  endif()
+  target_compile_definitions(${name} PRIVATE KOKKOS_EP_CONTRACTION_MODE=0)
+  set_property(GLOBAL APPEND PROPERTY XPMATH_EFT_OFF_TARGETS ${name})
+endfunction()
+
+function(xpm_add_host_eft_test_contract_on name)
+  set(tgt ${name}_contract_on)
+  add_executable(${tgt} ${name}.cpp)
+  target_include_directories(${tgt} PRIVATE
+                             ${CMAKE_SOURCE_DIR}/include
+                             ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_features(${tgt} PRIVATE cxx_std_17)
+  add_test(NAME ${tgt} COMMAND ${tgt})
+
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(${tgt} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=fast>)
+  endif()
+  if(CMAKE_CXX_COMPILER_ID MATCHES "IntelLLVM|Intel")
+    target_compile_options(${tgt} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fp-model=fast>)
+  endif()
+
+  string(REGEX REPLACE "_test$" "" _base "${name}")
+  target_compile_definitions(${tgt} PRIVATE
+    KOKKOS_EP_CONTRACTION_MODE=1
+    KOKKOS_EP_BASELINE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/${_base}_baseline.txt")
+  set_property(GLOBAL APPEND PROPERTY XPMATH_EFT_ON_TARGETS ${tgt})
+endfunction()
+
+# --- HOST-ORACLE TESTS THAT LINK NO KOKKOS ---------------------------------
+# CORE_PLAN C4 step 1. These seven were registered inside the Kokkos block
+# below until C4, and every one of them was there for the same non-reason: a
+# Kokkos::initialize/finalize pair bracketing host-side code that launches
+# nothing. corpus_test did not even have that -- it referenced zero Kokkos APIs
+# and linked the library anyway.
+#
+# Three of them (dd_e2e, ff_cancellation, qf_cancellation) additionally reached
+# their types through third_party/include/<x>_math.hpp, whose only material
+# content beyond `using T = xp::T` is #include <Kokkos_Core.hpp>. They now
+# include <xp/..._math.hpp> directly and alias `xp` instead of
+# Kokkos::Experimental. The types are IDENTICAL -- the wrappers are true
+# aliases, not distinct wrapper types -- so this changes what is compiled, not
+# what is measured.
+#
+# WHAT THIS COSTS: the wrapper layer loses these seven as incidental coverage.
+# It is still exercised, by the demos and by the Kokkos-linked tests below, and
+# after C10 by the xpmath-kokkos repository.
+xpm_add_host_test(hello_test)
+xpm_add_host_test(corpus_test)
+# hello_test WAS the whole of the T0.1 smoke and is now only its host half.
+# Chunk A took it off Kokkos but left it MIXED -- binary128 via
+# test_utils_host.hpp plus a live xpt::parallel_for_n -- and nothing noticed
+# until chunk E's mirror check in scripts/check_device_tu_purity.sh went red on
+# it. Its device half is registered in the device block below. See step 4 and
+# the two files' headers.
+xpm_add_host_test(dd_e2e_test)
+xpm_add_host_test(ff_cancellation_test)
+xpm_add_host_test(qf_cancellation_test)
+xpm_add_host_test(tf_cancellation_test)
+xpm_add_host_test(tf_property_test)
+
+# --- HOST HALVES OF THE C4 STEP-2 SPLITS (DD and FF) -----------------------
+# CORE_PLAN C4 step 2, chunk C. Each of these four kept its target name, its
+# tests/test_utils_host.hpp include and its oracle scoring; what it lost is the
+# kernel launch, which moved to a sibling *_test_device.cpp registered in the
+# device block below. They link no Kokkos for the same reason the seven above
+# do not: with the launch gone, there is nothing left in them that Kokkos was
+# providing.
+#
+# dd_property_test and ff_property_test use the plain host helper -- algebraic
+# identities are FMA-contraction agnostic, exactly as their pre-split
+# registrations said.
+xpm_add_host_test(dd_property_test)
+xpm_add_host_test(ff_property_test)
+# dd_eft_test and dd_fma_guard_test use the EFT pair: both call the Dekker
+# sequence `a1*b1 - c11` directly on the host, so contraction OFF is as load-
+# bearing here as it was before the split. dd_fma_guard_test keeps its
+# _contract_on companion and, via the <base>_baseline.txt derivation, keeps
+# reading tests/dd_fma_guard_baseline.txt -- drift detection is continuous
+# across the split rather than restarting from "no file".
+xpm_add_host_eft_test(dd_eft_test)
+xpm_add_host_eft_test(dd_fma_guard_test)              # -> dd_fma_guard_test              (OFF, gates)
+xpm_add_host_eft_test_contract_on(dd_fma_guard_test)  # -> dd_fma_guard_test_contract_on  (ON, reports)
+
+# --- HOST HALVES OF THE C4 STEP-2 SPLITS (QF) ------------------------------
+# CORE_PLAN C4 step 2, chunk D. Same shape as chunk C above: each kept its
+# target name, its tests/test_utils_host.hpp include and its oracle scoring, and
+# lost only the kernel launch to a sibling *_test_device.cpp in the device block.
+#
+# qf_property_test uses the plain helper (algebraic identities are contraction
+# agnostic) and qf_nonoverlap_test likewise -- a per-word add/compare has nothing
+# to contract, which is what its pre-split plain-helper registration said.
+xpm_add_host_test(qf_property_test)
+xpm_add_host_test(qf_nonoverlap_test)
+# qf_eft_test is the NINTH mixed TU -- the one C4's eight-file list does not name
+# and chunk B could only half-migrate, because Test C's wide-spread renorm_4
+# truncation check is a genuine binary128 host assertion. It is split now: this
+# half keeps Tests A-D including that check, and moves from
+# xpm_add_device_eft_test to the HOST EFT helper. The contraction-OFF posture
+# travels with it -- Tests A/B call the Dekker sequence `a1*b1 - c11` directly on
+# the host, so the flag is as load-bearing here as before the split.
+xpm_add_host_eft_test(qf_eft_test)
+
+# --- DEVICE TESTS THAT LINK NO KOKKOS --------------------------------------
+# CORE_PLAN C4 step 3. These six sources were already device-only in substance
+# -- every one of them launches a kernel and checks the result on host, and none
+# of them scores anything against the oracle. What made them Kokkos's was the
+# LAUNCH: Kokkos::initialize, a View pair per array, a KOKKOS_LAMBDA and a
+# fence. All of that is now tests/device_harness.hpp (C3), which does the same
+# job in ~40 lines of vendor API and works identically on CUDA, HIP and a serial
+# host loop.
+#
+# WHAT THIS BUYS. Until now a GPU could not be asked "does the standalone core
+# run here" without a working Kokkos install on it, so a Kokkos build failure
+# and an xp defect were the same observation from outside. S8c is the measured
+# form of that: on MI250X, 39 of 49 targets did not build and not one of the 8
+# that ran compiled a line of gfx90a code. These eight targets are the first
+# device evidence that does not route through Kokkos.
+#
+# WHAT IT DOES NOT COST. The functors are the same expressions on the same
+# inputs with the same seeds, and the harness's serial backend keeps two real
+# allocations with a memcpy between them, so a forgotten to_device() fails on
+# the host build too. Each migrated main() additionally asserts
+# xpt::last_error() == 0, which the Kokkos versions had no analogue for -- a
+# launch that never ran used to be indistinguishable from one that ran clean.
+#
+# ALL OF THEM ARE IN scripts/check_device_tu_purity.sh's FILES list. Five were
+# when chunk B wrote this; qf_eft_test was the exception, and chunk D removed the
+# exception by splitting it -- see its registration below.
+xpm_add_device_test(dd_invariant_test)
+xpm_add_device_test(ff_invariant_test)
+# CORE_PLAN C4 step 4 (chunk E): the device half of hello_test, the NINTH mixed
+# TU and the one the plan's list does not name -- because it was on the "links
+# Kokkos and barely uses it" list instead, and lifting the launch onto the C3
+# harness (chunk A) left it mixed rather than making it host. The mirror check
+# found it. Plain device helper: the op is the identity, which has nothing to
+# contract. It asserts BIT-EQUALITY of output to input, which is strictly
+# stronger than the digits-vs-oracle assertion it replaces, and needs no oracle.
+xpm_add_device_test(hello_test_device)
+# ff/qf/tf EFT + the TF guard keep the contraction posture they had; see the
+# xpm_add_device_eft_test comment. tf_eft_test and tf_fma_guard_test keep their
+# _contract_on companions, which are the only two ON-posture targets outside the
+# Kokkos block.
+xpm_add_device_eft_test(ff_eft_test)
+# qf_eft_test WAS registered here, still including test_utils_host.hpp on
+# purpose, because Test C's test_renorm_4_wide is a genuine binary128 host
+# assertion -- making it a NINTH mixed TU that the C4 step-2 list does not name.
+# Chunk D split it: the host half moved to xpm_add_host_eft_test above with Test
+# C intact, and the device half is qf_eft_test_device, registered below and in
+# the purity gate's FILES list.
+xpm_add_device_eft_test(tf_eft_test)                    # -> tf_eft_test              (OFF, gates)
+xpm_add_device_eft_test_contract_on(tf_eft_test)        # -> tf_eft_test_contract_on  (ON, reports)
+xpm_add_device_eft_test(tf_fma_guard_test)              # -> tf_fma_guard_test              (OFF, gates)
+xpm_add_device_eft_test_contract_on(tf_fma_guard_test)  # -> tf_fma_guard_test_contract_on  (ON, reports)
+
+# --- DEVICE HALVES OF THE C4 STEP-2 SPLITS (DD and FF) ---------------------
+# CORE_PLAN C4 step 2, chunk C. Four new TUs, each the device pass of a mixed
+# test whose host half stayed behind with the oracle (registered in the host
+# block above). Every one of them is in scripts/check_device_tu_purity.sh's
+# FILES list -- that is the gate that keeps "no 128-bit type in a device TU"
+# true rather than merely intended.
+#
+# The property pair uses the plain device helper (identities are contraction
+# agnostic). The EFT pair uses the contraction-OFF helper, and
+# dd_fma_guard_test_device additionally gets its _contract_on companion: the
+# question that test asks -- "did the compiler fuse the Dekker sequence" -- is
+# meaningless without both postures, and it is a per-compilation question, so
+# the device half needs its own pair rather than inheriting the host half's.
+xpm_add_device_test(dd_property_test_device)
+xpm_add_device_test(ff_property_test_device)
+xpm_add_device_eft_test(dd_eft_test_device)
+xpm_add_device_eft_test(dd_fma_guard_test_device)              # -> ...                    (OFF, gates)
+xpm_add_device_eft_test_contract_on(dd_fma_guard_test_device)  # -> ..._contract_on        (ON, reports)
+# ff_fma_guard_test is here WHOLE, not split, and that is a deliberate deviation
+# from C4 step 2's eight-TU list -- which was drawn up before C2 split
+# test_utils.hpp. Post-C2 this file includes test_utils_device.hpp only, and its
+# oracle is an exact FP64 product (48 <= 53 bits), not a 128-bit one: the only
+# occurrences of the wide type's name in it are prose, which the preprocessor
+# strips, so it passes the purity gate as it stands. Splitting it would duplicate
+# ~250 lines of apparatus and make four targets where two suffice, to separate a
+# host oracle that is not the kind of oracle the split exists to isolate. Chunk
+# B left its sibling ff_eft_test whole for the same reason. What changed here is
+# only the launch surface: Kokkos -> tests/device_harness.hpp.
+xpm_add_device_eft_test(ff_fma_guard_test)              # -> ff_fma_guard_test              (OFF, gates)
+xpm_add_device_eft_test_contract_on(ff_fma_guard_test)  # -> ff_fma_guard_test_contract_on  (ON, reports)
+
+# --- DEVICE HALVES OF THE C4 STEP-2 SPLITS (QF) ----------------------------
+# CORE_PLAN C4 step 2, chunk D. Three new TUs plus one whole migration, mirroring
+# chunk C's block above. All four are in scripts/check_device_tu_purity.sh's
+# FILES list.
+#
+# The property and non-overlap halves use the plain device helper -- neither the
+# bit-exact identities nor a per-word add/compare has anything to contract, which
+# is what their pre-split plain registrations said. qf_eft_test_device uses the
+# contraction-OFF helper: it calls qf_two_prod's Dekker sequence in a kernel, so
+# the flag is exactly as load-bearing on this half as on the host one.
+xpm_add_device_test(qf_property_test_device)
+xpm_add_device_test(qf_nonoverlap_test_device)
+xpm_add_device_eft_test(qf_eft_test_device)
+# qf_fma_guard_test is here WHOLE, not split -- the same deliberate deviation
+# from C4 step 2's eight-TU list that chunk C made for ff_fma_guard_test, and for
+# the same reason: that list predates C2, and post-C2 this file includes
+# test_utils_device.hpp only and scores against an exact FP64 product (48 <= 53
+# bits), not a 128-bit one. Splitting it would duplicate ~260 lines of apparatus
+# and make four targets where two suffice. MEASURED before it joined the purity
+# gate: its prose mentions of the wide type are stripped by the preprocessor, but
+# one printf STRING LITERAL was not, and was reworded. What changed here is the
+# launch surface (Kokkos -> tests/device_harness.hpp) and one more thing: the ON
+# reporter's exit code now folds in ep_exit_code(), because the migration puts a
+# KOKKOS_EP_ASSERT on the path BOTH postures take and the old expression would
+# have printed ASSERT FAILED and still exited 0.
+xpm_add_device_eft_test(qf_fma_guard_test)              # -> qf_fma_guard_test              (OFF, gates)
+xpm_add_device_eft_test_contract_on(qf_fma_guard_test)  # -> qf_fma_guard_test_contract_on  (ON, reports)
+
+# --- WHERE THE KOKKOS-LINKED TESTS WENT ------------------------------------
+# There is no if(XPMATH_WITH_KOKKOS) here any more. It used to wrap everything
+# that linked Kokkos::kokkos to exercise the compat wrappers in
+# third_party/include/; C4 steps 1, 2 and 3 moved the last of it out, chunk D
+# left the shell standing over an empty body, and step 5 (chunk E) removed the
+# shell. What follows is the per-test commentary ONLY -- no registrations --
+# kept where a reader looking for a QF or TF target will find the note saying
+# where it went.
+#
+# That emptiness is the point of C4: with no test conditional on
+# XPMATH_WITH_KOKKOS, the with-Kokkos and no-Kokkos ctest counts are EQUAL, and a
+# GPU can be asked "does the standalone core run here" without a working Kokkos
+# install on it.
+# T1.2 dd_invariant_test and T2.2 ff_invariant_test moved to the Kokkos-free
+# device block above in C4 step 3. Both were oracle-independent already; their
+# device tripwires now launch through tests/device_harness.hpp.
 # T1.3 property/identity tests: Group A bit-exact (no oracle), Group B/Test C use
-# the __float128 oracle. Plain helper — NOT an EFT test, so no contraction flags.
-kokkos_ep_add_test(dd_property_test)
+# the __float128 oracle.
+# (dd_property_test split in C4 step 2: the host half is registered in the
+# Kokkos-free host block above, its device pass is dd_property_test_device.)
 # T1.4 differential accuracy: per-op digits-of-accuracy against the __float128
 # oracle. Plain helper — NOT an EFT test, so no contraction flags.
-# T1.6 end-to-end cancellation kernels: __float128-oracle-scored, host-side. Plain
-# helper — NOT an EFT test, so no contraction flags (kernels are not EFT atoms).
-kokkos_ep_add_test(dd_e2e_test)
-kokkos_ep_add_eft_test(dd_eft_test)
+# T1.6 end-to-end cancellation kernels (dd_e2e_test) moved to the Kokkos-free
+# block above in C4.
+# (dd_eft_test split in C4 step 2 as well: host half above via
+# xpm_add_host_eft_test, device half as dd_eft_test_device. The contraction-OFF
+# posture travelled with BOTH halves.)
 # T2.1 EFT unit tests for FF: twoSum + Dekker twoProduct, FP64 oracle (exact —
 # 25-bit sum / 48-bit product fit in FP64's 53-bit mantissa, so it needs no type
 # wider than a machine word). Same contraction-OFF posture as dd_eft_test (Dekker
 # twoProduct is the contraction hazard). Contraction-ON reporter mirror is T2.5.
-kokkos_ep_add_eft_test(ff_eft_test)
+# (ff_eft_test moved to the Kokkos-free device block above in C4 step 3; the
+# contraction-OFF posture travelled with it, via xpm_add_device_eft_test.)
 # T2.3 property/identity tests for FF: Group A bit-exact (no oracle), Group B/Test C
-# use the __float128 oracle. FF analogue of dd_property_test. Plain helper —
-# NOT an EFT test, so no contraction flags
-# (identities are FMA-contraction agnostic).
-kokkos_ep_add_test(ff_property_test)
+# use the __float128 oracle. FF analogue of dd_property_test.
+# (ff_property_test split in C4 step 2, exactly as its DD analogue: host half in
+# the Kokkos-free host block above, device pass as ff_property_test_device.)
 # T2.4 differential accuracy for FF: per-op digits-of-accuracy against the
 # __float128 oracle. FF analogue of
 # Plain helper — NOT an EFT test, so no contraction flags.
@@ -218,18 +539,21 @@ kokkos_ep_add_test(ff_property_test)
 # subtractive-cancellation adjacency to contract. So this test mirrors
 # dd_e2e_test's registration exactly (no EFT helper) — the contraction hazard the
 # EFT helper guards (Dekker twoProduct's a1*b1-c11) is not on any gated path here.
-kokkos_ep_add_test(ff_cancellation_test)
+# (ff_cancellation_test itself moved to the Kokkos-free block above in C4; the
+# contraction reasoning is unchanged and xpm_add_host_test applies no flags
+# either.)
 # T1.5 FMA-contraction guard: same source, two postures (see dd_fma_guard_test.cpp).
-kokkos_ep_add_eft_test(dd_fma_guard_test)              # -> dd_fma_guard_test              (OFF, gates)
-kokkos_ep_add_eft_test_contract_on(dd_fma_guard_test)  # -> dd_fma_guard_test_contract_on  (ON, reports)
+# (dd_fma_guard_test split in C4 step 2. BOTH postures exist on BOTH halves now:
+# the host pair is registered above through xpm_add_host_eft_test[_contract_on],
+# the device pair is dd_fma_guard_test_device[_contract_on]. Four targets where
+# there were two, because "did the compiler fuse this" is a question about one
+# compilation and the two halves are compiled separately.)
 # T2.5 FMA-contraction guard for FF: FF analogue of T1.5, same source/two-postures
-# dual-registration pattern (see ff_fma_guard_test.cpp). Reuses the SAME helpers as
-# dd_fma_guard_test — the only per-variant knobs are the compile definitions the
-# helpers set; the ON helper derives ff_fma_guard_baseline.txt from the target name.
-# Unlike the DD guard, the FF source uses an FP64 oracle (exact, no type wider
-# than a machine word), so it runs on any target rather than x86_64 only.
-kokkos_ep_add_eft_test(ff_fma_guard_test)              # -> ff_fma_guard_test              (OFF, gates)
-kokkos_ep_add_eft_test_contract_on(ff_fma_guard_test)  # -> ff_fma_guard_test_contract_on  (ON, reports)
+# dual-registration pattern (see ff_fma_guard_test.cpp). Unlike the DD guard, the
+# FF source uses an FP64 oracle (exact, no type wider than a machine word), so it
+# runs on any target rather than x86_64 only — and that is also why C4 migrated it
+# WHOLE onto the C3 harness instead of splitting it. Both postures are registered
+# in the Kokkos-free device block above; the reasoning is written there.
 # T3.1 EFT unit tests for QF: qf_two_sum / qf_quick_two_sum / qf_two_prod / qf_two_sqr
 # (FP64 oracle, exact — 25-bit sum / 48-bit product fit in FP64's 53-bit mantissa)
 # PLUS renorm_4 (len 5->4) + renorm (len 4->4), the QF-unique renormalization
@@ -239,7 +563,11 @@ kokkos_ep_add_eft_test_contract_on(ff_fma_guard_test)  # -> ff_fma_guard_test_co
 # unlike ff_eft_test, QF exposes its primitives as free functions). Same
 # contraction-OFF posture as ff_eft_test (Dekker twoProduct is the contraction
 # hazard). Contraction-ON reporter mirror is T3.5.
-kokkos_ep_add_eft_test(qf_eft_test)
+# (qf_eft_test moved to the Kokkos-free device block above in C4 step 3, and was
+# SPLIT there in C4 step 2 chunk D: host half via xpm_add_host_eft_test with the
+# wide-spread renorm_4 check intact, device half as qf_eft_test_device. Both
+# postures of the split are Kokkos-free; the purity-gate exception it used to
+# carry is gone.)
 
 # T3.2 non-overlap invariant checks for QF: the Priest length-4 invariant
 # |f_{i+1}| <= 1/2 ulp(f_i) (i=0,1,2) on the OUTPUT of every QF op that returns a
@@ -250,7 +578,12 @@ kokkos_ep_add_eft_test(qf_eft_test)
 # helper (NOT the EFT helper): a per-word add/compare has nothing to contract,
 # so no -ffp-contract=off posture is required. QF analogue of
 # ff_invariant_test (T2.2); shares half_ulp / nonoverlap_holds with qf_eft_test.
-kokkos_ep_add_test(qf_nonoverlap_test)
+# (SPLIT in C4 step 2, chunk D. Test B, the device tripwire, is now
+# qf_nonoverlap_test_device; Tests A and C stayed with the host half, which keeps
+# the target name. Both are registered in the Kokkos-free blocks above. The
+# device half's inputs are enriched through a DoubleDouble carrier rather than
+# binary128 -- same construction, a type the device pass can actually compile;
+# the reason is written in that file's header.)
 
 # T3.3 property/identity tests for QF: Group A bit-exact identities (additive
 # inverse/zero, multiply by 0/+-1, negation, abs sign branches, add commutativity
@@ -264,7 +597,10 @@ kokkos_ep_add_test(qf_nonoverlap_test)
 # unconditionally; Group B / Test C score against the __float128 oracle. Plain
 # helper (NOT the EFT helper): algebraic identities are FMA-contraction agnostic.
 # QF analogue of ff_property_test (T2.3).
-kokkos_ep_add_test(qf_property_test)
+# (SPLIT in C4 step 2, chunk D, exactly as its DD/FF analogues were in chunk C:
+# host half keeps the target name and the Group B / Test C oracle scoring, device
+# pass is qf_property_test_device. The device half GREW -- it runs all twelve
+# Group A identities, where the old device block ran three.)
 
 # T3.4 differential accuracy for QF: per-op digits-of-accuracy against the
 # __float128 oracle. QF analogue of the retired per-backend accuracy tests
@@ -285,9 +621,11 @@ kokkos_ep_add_test(qf_property_test)
 # characterizes GCC's contraction of the shipped source itself (cf. T3.1 qf_eft_test,
 # which established the same direct-call posture under contraction-OFF). Also guards
 # qf_two_sqr (a second Dekker sequence, no FF analogue). FP64 oracle (exact, no
-# type wider than a machine word), so it runs on any target, not x86_64 only.
-kokkos_ep_add_eft_test(qf_fma_guard_test)              # -> qf_fma_guard_test              (OFF, gates)
-kokkos_ep_add_eft_test_contract_on(qf_fma_guard_test)  # -> qf_fma_guard_test_contract_on  (ON, reports)
+# type wider than a machine word), so it runs on any target, not x86_64 only --
+# and that is also why C4 chunk D migrated it WHOLE onto the C3 harness instead
+# of splitting it, exactly as chunk C did with the FF guard. Both postures are
+# registered in the Kokkos-free device block above; the reasoning is written
+# there and in the file's own header.
 
 # T3.6 end-to-end cancellation kernels for QF: __float128-oracle-scored, host-side.
 # QF analogue of dd_e2e_test (T1.6) / ff_cancellation_test (T2.6). Plain helper —
@@ -299,23 +637,29 @@ kokkos_ep_add_eft_test_contract_on(qf_fma_guard_test)  # -> qf_fma_guard_test_co
 # pass/fail. The Dekker-twoProduct contraction hazard the EFT helper guards is on no
 # gated path here (it is covered by qf_fma_guard_test, T3.5). So this test mirrors
 # dd_e2e_test / ff_cancellation_test registration exactly (no EFT helper).
-kokkos_ep_add_test(qf_cancellation_test)
+# (qf_cancellation_test itself moved to the Kokkos-free block above in C4.)
 
 # S10 Phase 2: TF (TripleFloat, 3×FP32) test suite. TF analogue of T3.1-T3.6 (QF),
 # T2.1-T2.6 (FF), T1.1-T1.6 (DD). Same registration pattern as QF: EFT test with
 # contraction-OFF + contraction-ON dual; property/accuracy/cancellation use plain
 # helper (no contraction flags).
-kokkos_ep_add_eft_test(tf_eft_test)                    # -> tf_eft_test              (OFF, gates)
-kokkos_ep_add_eft_test_contract_on(tf_eft_test)        # -> tf_eft_test_contract_on  (ON, reports)
-kokkos_ep_add_test(tf_property_test)                   # algebraic identities (Group A/B/C)
-kokkos_ep_add_test(tf_cancellation_test)               # e2e cancellation kernels (K1-K4)
-
-kokkos_ep_add_eft_test(tf_fma_guard_test)              # -> tf_fma_guard_test              (OFF, gates)
-kokkos_ep_add_eft_test_contract_on(tf_fma_guard_test)  # -> tf_fma_guard_test_contract_on  (ON, reports)
+# tf_eft_test + tf_eft_test_contract_on and tf_fma_guard_test +
+# tf_fma_guard_test_contract_on moved to the Kokkos-free device block above in
+# C4 step 3, both postures intact. tf_property_test (algebraic identities,
+# Group A/B/C) and tf_cancellation_test (e2e cancellation kernels K1-K4) moved
+# to the Kokkos-free host block above in C4 step 1.
+# With that, TF has no Kokkos-linked target left at all.
+# =================== END OF THE FORMER KOKKOS-LINKED BLOCK ==================
 
 # ---------------------------------------------------------------------------
 # THE CONTRACTION FLAG GUARD
 # ---------------------------------------------------------------------------
+# OUTSIDE the XPMATH_WITH_KOKKOS guard as of CORE_PLAN C4 step 6. Both targets
+# are script-driven -- one runs a .cmake checker, the other a shell script --
+# and neither compiles or links anything, so being Kokkos-CONDITIONAL was never
+# a property of what they check. It was, however, the reason the two suite sizes
+# differed by 28 while only 26 targets actually linked Kokkos.
+#
 # -ffp-contract=off on the EFT targets is what keeps the Dekker twoProduct an
 # error-free transform. Drop it and nothing fails -- the error term collapses
 # to zero and the EFT tests go on passing while validating a transform the
@@ -353,13 +697,41 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/contraction_manifest.txt" "${_xp_manifes
 
 # THE EXPECTED COUNTS ARE COMMITTED CONSTANTS, NOT ${_xp_n_off}/${_xp_n_on}.
 # Deriving them from the same list that builds the manifest would make the
-# check circular: delete a kokkos_ep_add_eft_test call and both the manifest
+# check circular: delete an EFT-helper call and both the manifest
 # and the expectation shrink together, so the guard passes while a target has
 # silently lost its contraction flag by ceasing to exist. Same contract as
 # ci.yml's `expected=49` -- adding or removing a guarded target is a deliberate
 # act that updates a number here.
-set(XPMATH_EFT_OFF_EXPECTED 8)   # dd/ff/qf/tf _eft_test + dd/ff/qf/tf _fma_guard_test
-set(XPMATH_EFT_ON_EXPECTED  5)   # the four *_fma_guard_test_contract_on + tf_eft_test_contract_on
+#
+# THEY ARE NO LONGER PER-CONFIGURATION. The previous version of this comment
+# predicted the collapse: "when chunk D moves qf_fma_guard_test (and the ninth
+# mixed TU, qf_eft_test's host assertion) out of the Kokkos block, both branches
+# read the same numbers and the conditional is dead." Chunk D did that and the
+# if() is gone. The predicted figure was 10/6; the measured one is 11/6, because
+# the prediction counted qf_fma_guard_test moving but not qf_eft_test SPLITTING
+# -- the same arithmetic slip an earlier revision made about chunk C, in the same
+# direction: splitting a guarded TU adds a guarded target, it does not conserve
+# the count.
+#
+# THE TOTALS GREW, from 10/6 to 11/6, and no target quietly acquired a flag. The
+# one new OFF entry is qf_eft_test_device, the device half of the ninth mixed TU.
+# Both halves call qf_two_prod's Dekker sequence -- the host one on the host, the
+# device one in a kernel -- so both are still EFT tests and both must stay
+# guarded; a split that guarded only one half would be exactly the silent failure
+# this gate exists to catch. qf_fma_guard_test was NOT split (it migrated whole;
+# see its registration) so it still contributes 1 OFF + 1 ON, from the
+# Kokkos-free branch now.
+#
+# The 11 OFF: ff_eft, tf_eft, tf_fma_guard (step 3) + dd_eft_test,
+# dd_eft_test_device, dd_fma_guard_test, dd_fma_guard_test_device,
+# ff_fma_guard_test (chunk C) + qf_eft_test, qf_eft_test_device,
+# qf_fma_guard_test (chunk D).
+# The 6 ON: tf_eft_test_contract_on, tf_fma_guard_test_contract_on,
+# dd_fma_guard_test_contract_on, dd_fma_guard_test_device_contract_on,
+# ff_fma_guard_test_contract_on (chunk C) + qf_fma_guard_test_contract_on
+# (chunk D).
+set(XPMATH_EFT_OFF_EXPECTED 11)
+set(XPMATH_EFT_ON_EXPECTED  6)
 message(STATUS "contraction guard: ${_xp_n_off} OFF targets, ${_xp_n_on} ON targets "
                "(expected ${XPMATH_EFT_OFF_EXPECTED}/${XPMATH_EFT_ON_EXPECTED})")
 
@@ -375,8 +747,6 @@ add_test(NAME contraction_flags_guard
 add_test(NAME contraction_flags_selftest
          COMMAND ${CMAKE_SOURCE_DIR}/validation/contraction_flags_selftest.sh
                  ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
-
-endif()  # ===================== END KOKKOS-LINKED TESTS =====================
 
 # ---------------------------------------------------------------------------
 # STANDALONE SMOKES -- the Kokkos-free core, as real ctest targets
@@ -433,7 +803,8 @@ add_test(NAME device_harness_test COMMAND device_harness_test)
 # the wrong branch for Re(z) < 0, in ALL FOUR backends) survived from the
 # original DD port through FF, QF and TF. See docs/history/KNOWN_ISSUES.md.
 #
-# Standalone helper, NOT kokkos_ep_add_test: these read precomputed binary128
+# Standalone registration, NOT one of the test helpers: these read precomputed
+# binary128
 # references from a precomputed binary corpus and therefore ran on
 # toolchains with no libquadmath, back when the oracle-scored tests above skipped
 # there. Those tests no longer skip anywhere; this one still needs no oracle.
@@ -736,7 +1107,7 @@ add_test(NAME domains_fresh
 # configurations: 48 -> 49 with Kokkos, 20 -> 21 without.
 #
 # It takes NO contraction flags and adds no target, so
-# XPMATH_EFT_OFF_EXPECTED / XPMATH_EFT_ON_EXPECTED above stay at 8 / 5.
+# XPMATH_EFT_OFF_EXPECTED / XPMATH_EFT_ON_EXPECTED above are unchanged by it.
 add_test(NAME build_provenance
          COMMAND ${CMAKE_COMMAND}
                  -DINFO=${CMAKE_BINARY_DIR}/build-info.txt
@@ -765,7 +1136,7 @@ add_test(NAME build_provenance
 # line markers and fails only on hits from inside this repository.
 #
 # It takes no contraction flags and adds no target, so
-# XPMATH_EFT_OFF_EXPECTED / XPMATH_EFT_ON_EXPECTED above stay at 8 / 5.
+# XPMATH_EFT_OFF_EXPECTED / XPMATH_EFT_ON_EXPECTED above are unchanged by it.
 add_test(NAME device_tu_purity
          COMMAND ${CMAKE_SOURCE_DIR}/scripts/check_device_tu_purity.sh)
 

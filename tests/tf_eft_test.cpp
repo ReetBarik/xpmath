@@ -10,8 +10,11 @@
 //
 // ORACLE: FP64 (provable for twoSum/twoProd/twoSqr: 25-bit sum / 48-bit product fit
 // in FP64's 53-bit mantissa). renorm value-preservation uses ordered decomposition
-// of 53-bit doubles so output sum == input exactly in FP64, plus a __float128 wide-
-// spread check (formerly gated on KOKKOS_EP_HAVE_QUADMATH; that gate is gone).
+// of 53-bit doubles so output sum == input exactly in FP64. There is NO wide-spread
+// __float128 case here -- this line used to claim one, and never had it; QF's
+// qf_eft_test is the backend that carries that check (test_renorm_4_wide). The
+// absence is what lets this TU be a device TU at all (C4; the file is in
+// scripts/check_device_tu_purity.sh's FILES list).
 //
 // TEST STRUCTURE
 //   Test A — tf_two_sum + tf_quick_two_sum bit-exactness (FP64 oracle)
@@ -22,10 +25,10 @@
 //   Test E — device parity (same primitives in parallel_for)
 // ============================================================================
 
-// The device half of the test harness names only the xp core, so the Kokkos
-// runtime this TU drives (View / parallel_for / initialize) is included here
-// rather than arriving transitively through the harness header.
-#include <Kokkos_Core.hpp>
+// LAUNCH MECHANISM: tests/device_harness.hpp, not Kokkos (CORE_PLAN C4 step 3).
+// Test E runs the same primitives on the same seeds and checks them against the
+// same FP64 oracle; only the way the kernel is launched changed.
+#include "device_harness.hpp"
 #include "test_utils_device.hpp"
 #include "corpus.hpp"
 #include <xp/tf_math.hpp>
@@ -401,9 +404,28 @@ static NamedResult run_named_cases() {
 // ----------------------------------------------------------------------------
 // Test E — device parity
 // ----------------------------------------------------------------------------
+// Trivially-copyable kernel struct, not a lambda: the harness passes F by value
+// into a __global__ and does not require nvcc --extended-lambda of its callers.
+struct EftKernel {
+    const float* a;
+    const float* b;
+    float* s_hi; float* s_lo;
+    float* p_hi; float* p_lo;
+    const float* c0; const float* c1; const float* c2; const float* c3;
+    float* rb0; float* rb1; float* rb2;
+
+    XPMATH_INLINE_FUNCTION void operator()(std::size_t i) const {
+        float es, ep;
+        s_hi[i] = xp::tf_two_sum(a[i], b[i], es);  s_lo[i] = es;
+        p_hi[i] = xp::tf_two_prod(a[i], b[i], ep); p_lo[i] = ep;
+        float b0 = c0[i], b1 = c1[i], b2 = c2[i], b3 = c3[i];
+        xp::renorm_3(b0, b1, b2, b3);
+        rb0[i] = b0; rb1[i] = b1; rb2[i] = b2;
+    }
+};
+
 static NamedResult run_device_parity() {
     NamedResult R;
-    using exec_space = Kokkos::DefaultExecutionSpace;
     const int nd = 200'000;
     std::vector<float> ha(nd), hb(nd);
     std::vector<float> c0(nd), c1(nd), c2(nd), c3(nd);
@@ -418,66 +440,55 @@ static NamedResult run_device_parity() {
             c0[i]=e[0]; c1[i]=e[1]; c2[i]=e[2]; c3[i]=e[3];
         }
     }
-    Kokkos::View<float*, exec_space> va("va", nd), vb("vb", nd);
-    Kokkos::View<float*, exec_space> s_hi("s_hi", nd), s_lo("s_lo", nd);
-    Kokkos::View<float*, exec_space> p_hi("p_hi", nd), p_lo("p_lo", nd);
-    Kokkos::View<float*, exec_space> rc0("rc0", nd), rc1("rc1", nd), rc2("rc2", nd), rc3("rc3", nd);
-    Kokkos::View<float*, exec_space> rb0("rb0", nd), rb1("rb1", nd), rb2("rb2", nd);
+    xpt::buffer<float> va(nd), vb(nd);
+    xpt::buffer<float> s_hi(nd), s_lo(nd), p_hi(nd), p_lo(nd);
+    xpt::buffer<float> rc0(nd), rc1(nd), rc2(nd), rc3(nd);
+    xpt::buffer<float> rb0(nd), rb1(nd), rb2(nd);
 
-    auto hva = Kokkos::create_mirror_view(va);
-    auto hvb = Kokkos::create_mirror_view(vb);
-    auto hc0 = Kokkos::create_mirror_view(rc0);
-    auto hc1 = Kokkos::create_mirror_view(rc1);
-    auto hc2 = Kokkos::create_mirror_view(rc2);
-    auto hc3 = Kokkos::create_mirror_view(rc3);
     for (int i = 0; i < nd; ++i) {
-        hva(i) = ha[i]; hvb(i) = hb[i];
-        hc0(i) = c0[i]; hc1(i) = c1[i]; hc2(i) = c2[i]; hc3(i) = c3[i];
+        va.host()[i] = ha[i]; vb.host()[i] = hb[i];
+        rc0.host()[i] = c0[i]; rc1.host()[i] = c1[i];
+        rc2.host()[i] = c2[i]; rc3.host()[i] = c3[i];
     }
-    Kokkos::deep_copy(va, hva);  Kokkos::deep_copy(vb, hvb);
-    Kokkos::deep_copy(rc0, hc0); Kokkos::deep_copy(rc1, hc1);
-    Kokkos::deep_copy(rc2, hc2); Kokkos::deep_copy(rc3, hc3);
+    va.to_device();  vb.to_device();
+    rc0.to_device(); rc1.to_device(); rc2.to_device(); rc3.to_device();
 
-    Kokkos::parallel_for("tf_eft_device", Kokkos::RangePolicy<exec_space>(0, nd),
-        KOKKOS_LAMBDA(int i) {
-            float es, ep;
-            s_hi(i) = xp::tf_two_sum(va(i), vb(i), es);  s_lo(i) = es;
-            p_hi(i) = xp::tf_two_prod(va(i), vb(i), ep); p_lo(i) = ep;
-            float b0 = rc0(i), b1 = rc1(i), b2 = rc2(i), b3 = rc3(i);
-            xp::renorm_3(b0, b1, b2, b3);
-            rb0(i) = b0; rb1(i) = b1; rb2(i) = b2;
-        });
-    Kokkos::fence();
+    xpt::parallel_for_n(static_cast<std::size_t>(nd),
+        EftKernel{va.device(), vb.device(),
+                  s_hi.device(), s_lo.device(), p_hi.device(), p_lo.device(),
+                  rc0.device(), rc1.device(), rc2.device(), rc3.device(),
+                  rb0.device(), rb1.device(), rb2.device()});
 
-    auto hshi = Kokkos::create_mirror_view(s_hi);
-    auto hslo = Kokkos::create_mirror_view(s_lo);
-    auto hphi = Kokkos::create_mirror_view(p_hi);
-    auto hplo = Kokkos::create_mirror_view(p_lo);
-    auto hb0 = Kokkos::create_mirror_view(rb0);
-    auto hb1 = Kokkos::create_mirror_view(rb1);
-    auto hb2 = Kokkos::create_mirror_view(rb2);
-    Kokkos::deep_copy(hshi, s_hi); Kokkos::deep_copy(hslo, s_lo);
-    Kokkos::deep_copy(hphi, p_hi); Kokkos::deep_copy(hplo, p_lo);
-    Kokkos::deep_copy(hb0, rb0); Kokkos::deep_copy(hb1, rb1); Kokkos::deep_copy(hb2, rb2);
+    s_hi.from_device(); s_lo.from_device();
+    p_hi.from_device(); p_lo.from_device();
+    rb0.from_device(); rb1.from_device(); rb2.from_device();
+
+    const float* hshi = s_hi.host();
+    const float* hslo = s_lo.host();
+    const float* hphi = p_hi.host();
+    const float* hplo = p_lo.host();
+    const float* hb0 = rb0.host();
+    const float* hb1 = rb1.host();
+    const float* hb2 = rb2.host();
 
     long sum_fail = 0, prod_fail = 0, ren_fail = 0, sum_skip = 0, prod_skip = 0, ren_over = 0;
     int samples_left = 5;
     for (int i = 0; i < nd; ++i) {
         float a = ha[i], b = hb[i];
         if (sum_in_domain(a, b)) {
-            if ((double)hshi(i) + (double)hslo(i) != (double)a + (double)b) {
+            if ((double)hshi[i] + (double)hslo[i] != (double)a + (double)b) {
                 ++sum_fail; if (samples_left > 0) { print_fail_sum("twoSum", a, b); --samples_left; }
             }
         } else ++sum_skip;
         if (prod_in_domain(a, b)) {
-            if ((double)hphi(i) + (double)hplo(i) != (double)a * (double)b) {
+            if ((double)hphi[i] + (double)hplo[i] != (double)a * (double)b) {
                 ++prod_fail; if (samples_left > 0) { print_fail_prod("twoProd", a, b); --samples_left; }
             }
         } else ++prod_skip;
-        double out_sum = (double)hb0(i) + hb1(i) + hb2(i);
+        double out_sum = (double)hb0[i] + hb1[i] + hb2[i];
         int dummy = 0;
         bool value_ok   = (out_sum == cx[i]);
-        bool overlap_ok = nonoverlap_holds(hb0(i), hb1(i), hb2(i), &dummy);
+        bool overlap_ok = nonoverlap_holds(hb0[i], hb1[i], hb2[i], &dummy);
         if (!(value_ok && overlap_ok)) { ++ren_fail; if (!overlap_ok) ++ren_over; }
     }
     std::printf("    device tf_two_sum : %ld tested (%ld skipped), %ld failures\n",
@@ -494,8 +505,7 @@ static NamedResult run_device_parity() {
 }
 
 // ============================================================================
-int main(int argc, char** argv) {
-    Kokkos::initialize(argc, argv);
+int main(int, char**) {
     int rc = 0;
     {
         std::printf("=== tf_eft_test: EFT bit-exactness for TF twoSum / twoProd / twoSqr / renorm ===\n");
@@ -539,15 +549,20 @@ int main(int argc, char** argv) {
                     D.passed, D.skipped, D.failed, D.total);
         KOKKOS_EP_ASSERT(D.failed == 0, "a named EFT case failed");
 
-        std::printf("[Test E] device parity (%s)\n", Kokkos::DefaultExecutionSpace::name());
+        std::printf("[Test E] device parity (%s)\n", xpt::where_name());
         NamedResult E = run_device_parity();
         std::printf("  Test E device parity: %d passed, %d skipped, %d failed (of %d)\n\n",
                     E.passed, E.skipped, E.failed, E.total);
         KOKKOS_EP_ASSERT(E.failed == 0, "device EFT parity mismatch");
+        // A nonzero vendor code is a TEST FAILURE, not a warning. Without this a
+        // launch that never ran would leave the output buffers untouched and the
+        // comparison loop would happily report parity against whatever the
+        // allocator handed back. Sticky since process start.
+        KOKKOS_EP_ASSERT(xpt::last_error() == 0,
+                         "device harness reported a nonzero vendor error code");
 
         rc = ep_exit_code();
         std::printf("=== tf_eft_test: %s ===\n", rc == 0 ? "ALL PASSED" : "FAILURES PRESENT");
     }
-    Kokkos::finalize();
     return rc;
 }
