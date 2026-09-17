@@ -64,6 +64,28 @@
 #define XPMATH_ON_DEVICE_CUDA_OR_HIP
 #endif
 
+// hipcc does NOT auto-include its runtime header; nvcc DOES. That asymmetry is
+// the whole of S8c cause 2. XPMATH_ON_DEVICE_CUDA_OR_HIP selects the
+// global-namespace intrinsic spelling -- __double_as_longlong / __float_as_int
+// in xp/trig_reduction.hpp -- and under nvcc those declarations arrive for
+// free, because nvcc force-includes cuda_runtime.h into every TU it compiles.
+// hipcc has no equivalent behaviour, so the same two names were simply
+// undeclared there and nine gfx90a targets failed to build on them.
+//
+// Guarded on __HIPCC__, not __HIP_DEVICE_COMPILE__: __HIPCC__ is defined in
+// BOTH passes, and both passes must see the same declarations or they disagree
+// on the symbol. hip/hip_runtime.h is written to be included in both.
+//
+// Deliberately NOT paired with a cuda_runtime.h include. nvcc already supplies
+// it, so the include would buy nothing there while adding a failure mode for
+// clang-CUDA, whose header search layout differs. This is also the reason the
+// include is here and not in trig_reduction.hpp: config.hpp is the one header
+// every other xp/ header already includes, so a second intrinsic user later
+// costs nothing.
+#if defined(__HIPCC__)
+#include <hip/hip_runtime.h>
+#endif
+
 // ============================================================
 // 2. XPMATH_INLINE_FUNCTION
 // ============================================================
