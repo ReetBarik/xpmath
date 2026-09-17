@@ -68,19 +68,25 @@ and exits without running the sweep, so the `grep` matches nothing and the
 pipeline is silent. An empty result there is a broken instrument, not a red
 gate, and must not be read as one.
 
-The fingerprint is emitted only by `write_baseline`, as a `# oracle-fingerprint:`
-header line on the baseline it writes (`scripts/sweep_accuracy.cpp:3356`). The
-command that actually measures a build's fingerprint is a full sweep written to
-a throwaway path:
+The fingerprint used to be emitted only by `write_baseline`, as a
+`# oracle-fingerprint:` header line on the baseline it writes. That forced a
+full sweep written to a throwaway path just to ask the question. **C6 added
+`--print-fingerprint`**: it computes the same value, prints it on one line, and
+exits 0 — no sweep, no output file. Use that:
+
+```bash
+/tmp/c0_host/tests/sweep_accuracy --print-fingerprint
+# -> 44f18a4a959f6c29
+```
+
+The old form still works and still must never target the committed baseline path:
 
 ```bash
 /tmp/c0_host/tests/sweep_accuracy --out /tmp/c0_fp_baseline.csv --quiet
 grep -i oracle-fingerprint /tmp/c0_fp_baseline.csv
 ```
 
-Note the explicit `--out` to a `/tmp` path — never the committed baseline path.
-Later sections needing the fingerprint should use this form; the sweep takes
-roughly three minutes on a login node.
+Later sections needing the fingerprint should prefer `--print-fingerprint`.
 
 **Notes for later sections.**
 
@@ -1134,3 +1140,111 @@ and reaches 24. Same target, same reason as the 62-vs-61 arithmetic above.)
   thing compiling `third_party/include/`; C10 moves them.
 - **`--only device` on a real compute node is untested.** The flag works and is
   documented, but every invocation so far has been `--arch host`.
+
+---
+
+## C6 — The device sweep: one scorer, two producers
+
+**Branch:** `core/c6-device-sweep`. **Base:** `main` @ `1056341` (the C5 merge).
+Two commits: A `db39e36` (device producer), B below (scorer, re-baseline, gates).
+
+**Outcome.** One scorer, two producers, proven identical on the serial device
+backend. Counts unchanged:
+
+| tree | tests | result |
+|---|---|---|
+| `<dir>/host` | 38 | 38/38 PASS (incl. both gates + both selftests) |
+| `<dir>/device` | 24 | 24/24 PASS (producer built; no gate registered) |
+| bare both-ON | 61 | (counts asserted; not re-run this chunk) |
+
+### The design that landed
+
+`docs/CORRECTNESS.md` permits exactly one verdict per point. The device does
+not score. Chunk A wrote `scripts/sweep_device.cpp` (plus shared
+`sweep_inputs.hpp` / `sweep_ops.hpp`): it evaluates every backend × op × grid
+point through `tests/device_harness.hpp` and writes raw IEEE-754 limb bit
+patterns as hex. Eight limb columns, not four — real in `limb0..3`, imaginary
+in `limb4..7`. Binary at `<build>/tests/sweep_device` (not
+`<build>/scripts/...`; there is no `scripts/` directory in the build tree).
+
+Chunk B extended `scripts/sweep_accuracy.cpp`:
+
+- `--print-fingerprint` — prints `44f18a4a959f6c29`, exits 0. C0's STATUS
+  recipe updated to prefer this over a throwaway full sweep.
+- `--score-results <file> --where <name>` — load device limbs, reconstruct
+  `__float128` via the same `to_q` path the host producer uses, score with the
+  **unmodified** oracle and bound derivation. `where` defaults to `host`.
+- Baseline format gained a leading `where` column. `compare_baseline` and
+  `gen_domains.py` auto-detect it; `gate_selftest.sh` column indices shifted
+  (`digits=6, ulps=7, bound=8, state=9`).
+
+### Gate
+
+**Gate 1 — scoring content unchanged before re-baseline.** Fresh host sweep
+without `--where` against the pre-C6 committed baseline:
+
+```
+diff <(zcat validation/sweep/sweep_baseline.csv.gz) /tmp/c6b_host.csv \
+  | grep -v '^[<>] #' | wc -l
+# -> 0
+```
+
+Zero data-row differences. Header comments may differ; they were filtered.
+
+**Gate 2 — IDENTICAL on the serial device backend.**
+
+```
+/tmp/c6b/device/tests/sweep_device --out /tmp/c6b_dev.csv
+/tmp/c6b/host/tests/sweep_accuracy --ulp --score-results /tmp/c6b_dev.csv \
+    --where host --out /tmp/c6b_scored.csv
+/tmp/c6b/host/tests/sweep_accuracy --ulp --where host --out /tmp/c6b_host_where.csv
+diff /tmp/c6b_scored.csv /tmp/c6b_host_where.csv && echo IDENTICAL
+# -> IDENTICAL (byte-identical, all 436,080 rows + headers)
+```
+
+Same code, same rounding, no device. A mismatch here would have been a
+serialisation or harness defect, never an accuracy finding.
+
+**Gate 3 — re-baseline.** `validation/sweep/sweep_baseline.csv.gz` rewritten
+with `where=host` (plain `fopen`, then `gzip -9 -c`). Fingerprint still
+`44f18a4a959f6c29`. `docs/DOMAINS.md` regenerated; content byte-identical to
+the pre-C6 document (the `where` column is skipped by `gen_domains.py`), so
+`domains_fresh` stayed green without a content change.
+
+**Gate 4 — host ctest after re-baseline:**
+
+```
+38/38 Test #26: sweep_monotone_gate_selftest .....   Passed  682.84 sec
+100% tests passed, 0 tests failed out of 38
+Total Test time (real) = 684.48 sec
+```
+
+Both `sweep_absolute_gate`, `sweep_monotone_gate` and their selftests passed
+against the new `where`-aware baseline.
+
+### Device gates: registered zero times, deliberately
+
+`tests/CMakeLists.txt` carries a `foreach(a100 mi250)` that registers
+`sweep_device_gate_<arch>` **only when**
+`validation/sweep/sweep_baseline_<arch>.csv.gz` exists. On this machine that
+glob is empty, so **zero tests register** and the 38/24/61 tripwires do not
+move. If an arch baseline is committed without wiring the `add_test()` body,
+configure `FATAL_ERROR`s — that is C7/C8's to fill in, not a silent hole.
+
+`sweep_device_gate_selftest` (CORE_PLAN C6 step 6) is likewise deferred: a
+self-test for a gate that does not register yet would move the count for
+nothing. It lands with the first arch baseline.
+
+### What C6 does NOT cover
+
+- **No GPU executed anything.** The agreement proof is on the serial device
+  backend under `--arch host`. C7 (A100) and C8 (MI250) are the hardware
+  measurements.
+- **No per-arch baseline is committed.** `sweep_baseline_a100.csv.gz` /
+  `sweep_baseline_mi250.csv.gz` do not exist; the device gates therefore do
+  not run.
+- **No device-gate self-test is registered.** Same reason: nothing to poison
+  until an arch baseline exists.
+- **The scoring numbers did not move.** The re-baseline added a column; it
+  did not change a digit, ulp, bound or state. Gate 1 measured that before
+  the format change.

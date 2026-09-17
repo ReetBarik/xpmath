@@ -101,10 +101,14 @@ run() {
 # and the column header are passed through untouched, so the poisoned file is
 # structurally valid and parses -- the point is that a gate must notice a file
 # it can read perfectly well and that is nonetheless a lie.
+# Column layout as of C6 (leading `where`):
+#   where,backend,kind,op,point,digits,ulps,bound,state
+#   $1    $2      $3  $4 $5   $6    $7  $8   $9
+# Header lines match /^(where|backend),/ so both the old and new layouts parse.
 poison_col() {  # poison_col <field> <value> <outfile>
   gzip -dc "$base" \
     | awk -F, -v OFS=, -v c="$1" -v v="$2" \
-        '/^#/ {print; next} /^backend,/ {print; next} {$c = v; print}' \
+        '/^#/ {print; next} /^(where|backend),/ {print; next} {$c = v; print}' \
     | gzip > "$3"
 }
 
@@ -146,20 +150,21 @@ monotone)
 
   # The measurement of record, zeroed. A baseline claiming every point was
   # exact must make the real sweep look catastrophically worse.
-  poison_col 6 0 "$work/ulps.csv.gz"
+  # Field indices are 1-based against where,backend,kind,op,point,digits,ulps,bound,state.
+  poison_col 7 0 "$work/ulps.csv.gz"
   run ulps-zeroed 1 --baseline "$work/ulps.csv.gz"
 
   # THE ORIGINAL BLIND SPOT: the last numeric column is `bound`, not `ulps`.
-  poison_col 7 0 "$work/bound.csv.gz"
+  poison_col 8 0 "$work/bound.csv.gz"
   run bound-zeroed 3 --baseline "$work/bound.csv.gz"
 
   # The other discarded column.
-  poison_col 5 0 "$work/digits.csv.gz"
+  poison_col 6 0 "$work/digits.csv.gz"
   run digits-zeroed 3 --baseline "$work/digits.csv.gz"
 
   # A verdict column flipped from scored to unresolved: every point loses its
   # verdict, which is a regression even though no ulp count moved.
-  poison_col 8 U "$work/state.csv.gz"
+  poison_col 9 U "$work/state.csv.gz"
   run state-flipped 3 --baseline "$work/state.csv.gz"
 
   # Truncation. A short baseline must not be read as agreement on the rows it
@@ -208,8 +213,8 @@ monotone)
   # and tells them.
   # ---------------------------------------------------------------------
   gzip -dc "$base" \
-    | awk -F, -v OFS=, '/^#/ {print; next} /^backend,/ {print; next}
-                        {$5 = $5 + 5.0; print}' \
+    | awk -F, -v OFS=, '/^#/ {print; next} /^(where|backend),/ {print; next}
+                        {$6 = $6 + 5.0; print}' \
     | gzip > "$work/digits_up.csv.gz"
   run digits-inflated 3 --baseline "$work/digits_up.csv.gz"
 
@@ -220,8 +225,8 @@ monotone)
   # This pins the exemption to rows where BOTH moved consistently, rather than
   # letting a shrinking error excuse an arbitrary record.
   gzip -dc "$base" \
-    | awk -F, -v OFS=, '/^#/ {print; next} /^backend,/ {print; next}
-                        {$6 = $6 * 1000.0 + 1.0; print}' \
+    | awk -F, -v OFS=, '/^#/ {print; next} /^(where|backend),/ {print; next}
+                        {$7 = $7 * 1000.0 + 1.0; print}' \
     | gzip > "$work/ulps_inflated.csv.gz"
   # POLARITY FLIPPED BY #9, DELIBERATELY. This case used to assert `pass`, and
   # that assertion WAS the bug: a baseline claiming every row is 1000x worse
@@ -248,8 +253,8 @@ monotone)
   # a poison nobody has seen fail is not a poison.
   # ---------------------------------------------------------------------
   zcat "$base" | awk -F, -v OFS=, '
-      /^#/{print;next} /^backend,/{print;next}
-      !done && $8=="S" && $6+0>0 { $6=1e6; $5="14.00"; done=1; print; next }
+      /^#/{print;next} /^(where|backend),/{print;next}
+      !done && $9=="S" && $7+0>0 { $7=1e6; $6="14.00"; done=1; print; next }
       {print}' | gzip > "$work/fake_one.csv.gz"
   stamp "$work/fake_one.csv.gz" "$work/fake_one_fp.csv.gz"
   run fake-improvement-1row 5 --baseline "$work/fake_one_fp.csv.gz"
@@ -276,8 +281,8 @@ monotone)
   # stronger control than the old one, which could only ever make a statement
   # about the committed baseline.
   "$bin" --quiet --out "$work/self.csv" >/dev/null 2>&1
-  awk -F, -v OFS=, '/^#/{print;next} /^backend,/{print;next}
-                    {$6 = $6*1.05; print}' "$work/self.csv" \
+  awk -F, -v OFS=, '/^#/{print;next} /^(where|backend),/{print;next}
+                    {$7 = $7*1.05; print}' "$work/self.csv" \
       | gzip > "$work/subnoise.csv.gz"
   run improvement-subnoise pass --baseline "$work/subnoise.csv.gz"
 
@@ -315,8 +320,8 @@ monotone)
   zcat "$base" \
     | sed 's/^# oracle-fingerprint: .*/# oracle-fingerprint: deadbeefdeadbeef/' \
     | awk -F, -v OFS=, '
-        /^#/{print;next} /^backend,/{print;next}
-        !done && $8=="S" && $6+0>0 { $6=1e6; $5="14.00"; done=1; print; next }
+        /^#/{print;next} /^(where|backend),/{print;next}
+        !done && $9=="S" && $7+0>0 { $7=1e6; $6="14.00"; done=1; print; next }
         {print}' | gzip > "$work/fp_mismatch_improved.csv.gz"
   run fingerprint-mismatch-improved pass --baseline "$work/fp_mismatch_improved.csv.gz"
 
@@ -343,8 +348,8 @@ monotone)
   # x 4 backends = 156 rows and touches no complex row.
   awk -F, -v OFS=, '
       /^# grid:/ {print "# grid: real=1699 complex=1780  seed=12345"; next}
-      /^#/{print;next} /^backend,/{print;next}
-      ($2=="r" && $4==1699){next}
+      /^#/{print;next} /^(where|backend),/{print;next}
+      ($3=="r" && $5==1699){next}
       {print}' "$work/self.csv" | gzip > "$work/coverage_grew.csv.gz"
   run coverage-grew 6 --baseline "$work/coverage_grew.csv.gz"
 

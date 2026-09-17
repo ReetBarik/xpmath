@@ -1240,6 +1240,34 @@ add_test(NAME sweep_absolute_gate_selftest
 xpm_tag_test(host sweep_monotone_gate_selftest sweep_absolute_gate_selftest)
 
 # ---------------------------------------------------------------------------
+# C6 DEVICE GATES -- registered ONLY when a per-arch baseline exists
+# ---------------------------------------------------------------------------
+# CORE_PLAN C6 step 5. sweep_device_gate_<arch> runs the monotone comparison
+# against validation/sweep/sweep_baseline_<arch>.csv.gz. They are not in CI --
+# GitHub has no GPU -- and that is stated here rather than left implied.
+#
+# ON THIS MACHINE NO SUCH FILE EXISTS (ls validation/sweep/sweep_baseline_*.csv.gz
+# is empty), so this loop registers ZERO tests. C7 (a100) and C8 (mi250) commit
+# the arch baselines and wire the add_test() bodies; the gates appear then.
+# Count tripwires (host 38, device 24, union 61) are therefore UNCHANGED by
+# this block -- that is the point of the EXISTS guard.
+#
+# The FATAL_ERROR below is deliberate: an arch baseline landed without the
+# gate command being filled in is a C7/C8 bug, not a silent "zero tests" hole.
+foreach(_xp_arch IN ITEMS a100 mi250)
+  set(_xp_dev_base
+      "${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline_${_xp_arch}.csv.gz")
+  if(EXISTS "${_xp_dev_base}")
+    message(FATAL_ERROR
+      "C6: ${_xp_dev_base} exists, but sweep_device_gate_${_xp_arch} is not "
+      "wired yet. C7/C8 own the add_test() body (produce via sweep_device, "
+      "score via sweep_accuracy --score-results --where ${_xp_arch}, monotone "
+      "compare against the arch baseline). Fill that in before committing "
+      "the baseline.")
+  endif()
+endforeach()
+
+# ---------------------------------------------------------------------------
 # KI-42/43 STRUCTURAL TEST FOR exp()'s ARGUMENT REDUCTION
 # ---------------------------------------------------------------------------
 # exp/exp2/exp10 reduce their argument by subtracting k*ln2 (resp. k*log10(2))
