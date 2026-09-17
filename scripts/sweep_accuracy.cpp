@@ -318,6 +318,7 @@ QCplx casinf128(QCplx);
 #include <random>
 #include <string>
 #include <map>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -1866,6 +1867,83 @@ __float128 to_q(const xp::QuadFloat& x) {
   return (((__float128)x.f0 + (__float128)x.f1) + (__float128)x.f2) + (__float128)x.f3;
 }
 
+// ── Device-result support (--score-results / --where) ────────────────────
+// A DeviceLimbs holds the raw IEEE-754 bit patterns written by sweep_device.
+// FP64 backends (DD): v[0]=hi, v[1]=lo, v[2..3] unused.
+// FP32 backends (FF/QF/TF): low 32 bits of v[0..1], v[0..3], v[0..2].
+// Complex ops: real component in v[0..3], imaginary in v[4..7].
+//
+// BackendDD/FF/QF/TF are defined later (with the sweep templates). Forward-
+// declare them so the tag-dispatch overloads below compile here; the bodies
+// only need the xp::* types already in scope.
+struct BackendDD;
+struct BackendFF;
+struct BackendQF;
+struct BackendTF;
+
+struct DeviceLimbs { uint64_t v[8] = {}; };
+using DeviceMap = std::unordered_map<std::string, DeviceLimbs>;
+
+inline std::string make_dev_key(const char* be, char k, const char* op, int pt) {
+  char buf[128];
+  std::snprintf(buf, sizeof(buf), "%s,%c,%s,%d", be, k, op, pt);
+  return buf;
+}
+
+// Reconstruct a __float128 from device limbs at word offset `off` (0=real, 4=imag).
+// Declared as overloads on backend type for clean call syntax below.
+inline __float128 dev_q(const DeviceLimbs& L, int off, const BackendDD*) {
+  return to_q(xp::DoubleDouble::from_bits(L.v[off], L.v[off+1]));
+}
+inline __float128 dev_q(const DeviceLimbs& L, int off, const BackendFF*) {
+  return to_q(xp::FloatFloat::from_bits((uint32_t)L.v[off], (uint32_t)L.v[off+1]));
+}
+inline __float128 dev_q(const DeviceLimbs& L, int off, const BackendQF*) {
+  return to_q(xp::QuadFloat::from_bits((uint32_t)L.v[off], (uint32_t)L.v[off+1],
+                                        (uint32_t)L.v[off+2], (uint32_t)L.v[off+3]));
+}
+inline __float128 dev_q(const DeviceLimbs& L, int off, const BackendTF*) {
+  return to_q(xp::TripleFloat::from_bits((uint32_t)L.v[off], (uint32_t)L.v[off+1],
+                                          (uint32_t)L.v[off+2]));
+}
+
+// Parse the device CSV produced by sweep_device into a lookup map.
+// Returns false on I/O error; malformed rows are silently skipped.
+bool load_device_results(const std::string& path, DeviceMap& out) {
+  std::FILE* f = std::fopen(path.c_str(), "rb");
+  if (!f) { std::fprintf(stderr, "cannot open device results: %s\n", path.c_str()); return false; }
+  char line[640]; bool saw_header = false;
+  while (std::fgets(line, sizeof(line), f)) {
+    if (line[0] == '#') continue;
+    if (!saw_header) { saw_header = true; continue; }  // skip "backend,kind,op,..." header
+    // Split on commas; expect exactly 12 fields.
+    char* tok[12]; int ntok = 0;
+    char* p = line;
+    while (ntok < 12) {
+      tok[ntok++] = p;
+      char* q = std::strchr(p, ',');
+      if (!q) { // last field or EOL
+        char* nl = std::strchr(p, '\n'); if (nl) *nl = '\0';
+        break;
+      }
+      *q = '\0'; p = q + 1;
+    }
+    if (ntok < 5) continue;
+    char   be[16], op[32]; char k = 0; int pt = 0;
+    if (std::sscanf(tok[0], "%15s", be) != 1) continue;
+    k  = tok[1][0];
+    if (std::sscanf(tok[2], "%31s", op) != 1) continue;
+    if (std::sscanf(tok[3], "%d", &pt) != 1) continue;
+    DeviceLimbs dl;
+    for (int i = 0; i < 8 && (i + 4) < ntok; ++i)
+      if (tok[i+4][0]) std::sscanf(tok[i+4], "%llx", (unsigned long long*)&dl.v[i]);
+    out[make_dev_key(be, k, op, pt)] = dl;
+  }
+  std::fclose(f);
+  return true;
+}
+// ── end device-result support ─────────────────────────────────────────────
+
 double score_scalar(__float128 got, __float128 ref, double cap) {
   if (q_isnan(ref)) return q_isnan(got) ? cap : 0.0;
   if (!q_finite(ref))                                     // ref is +-inf
@@ -2929,7 +3007,8 @@ void sweep_real(int id, const std::vector<GridPoint>& grid,
                 const std::vector<double>& a_in, const std::vector<double>& b_in,
                 const std::vector<double>& c_in, const std::vector<__float128>& ref,
                 std::vector<Row>& rows, std::vector<Cell>& cells,
-                const UlpCtx* ux) {
+                const UlpCtx* ux,
+                const std::vector<__float128>* precomp = nullptr) {
   typedef typename B::S S;
   Cell cell = {B::name(), 'r', kReal[id].name, B::cap(), 0.0, B::cap(), 0, 0};
   UlpCell ucell = make_ulp_cell(B::name(), 'r', kReal[id].name);
@@ -2938,8 +3017,11 @@ void sweep_real(int id, const std::vector<GridPoint>& grid,
   const int   nops    = kReal[id].nops;
   for (size_t i = 0; i < grid.size(); ++i) {
     const S sa(a_in[i]), sb(b_in[i]), sc(c_in[i]);
-    const S r = eval_real<S>(id, sa, sb, sc);
-    const double d = score_scalar(to_q(r), ref[i], B::cap());
+    // When precomp is set (--score-results path), use the device-produced
+    // value instead of computing locally.  got_q replaces to_q(r) everywhere.
+    const __float128 got_q = precomp ? (*precomp)[i]
+                                     : to_q(eval_real<S>(id, sa, sb, sc));
+    const double d = score_scalar(got_q, ref[i], B::cap());
     rows.push_back({B::name(), 'r', kReal[id].name, int(i), d, -1.0, -1.0, 'N'});
     Row& row_ = rows.back();
     // --- condition-aware ulp verdict -------------------------------------
@@ -2964,7 +3046,7 @@ void sweep_real(int id, const std::vector<GridPoint>& grid,
       // not about the defect count.
       const __float128 ref_stored = reference_real_q(
           id, to_q(S(a_in[i])), to_q(S(b_in[i])), to_q(S(c_in[i])));
-      const double m = ulps_scalar(to_q(r), ref_stored, sb_bits);
+      const double m = ulps_scalar(got_q, ref_stored, sb_bits);
       double kappa = 0.0;
       row_.ulps = m;
       if (m == kUnscorableUlps()) {
@@ -3113,7 +3195,9 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
                    const std::vector<double>& b_re, const std::vector<double>& b_im,
                    const std::vector<__float128>& ref_re, const std::vector<__float128>& ref_im,
                    std::vector<Row>& rows, std::vector<Cell>& cells,
-                   const UlpCtx* ux) {
+                   const UlpCtx* ux,
+                   const std::vector<__float128>* pre_re = nullptr,
+                   const std::vector<__float128>* pre_im = nullptr) {
   typedef typename B::S S;
   typedef typename B::Z Z;
   Cell cell = {B::name(), 'c', kComplex[id].name, B::cap(), 0.0, B::cap(), 0, 0};
@@ -3122,11 +3206,21 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
   for (size_t i = 0; i < grid.size(); ++i) {
     const Z a{S(grid[i].re), S(grid[i].im)};
     const Z b{S(b_re[i]), S(b_im[i])};
-    bool     is_real = false;
-    const Z  r  = eval_complex<S, Z>(id, a, b, is_real);
-    const double dre = score_component(to_q(r.re), ref_re[i], ref_im[i], B::cap());
+    // C_Abs is the only complex op returning a real result (is_real=true).
+    const bool is_real = (id == C_Abs);
+    __float128 got_re, got_im;
+    if (pre_re) {
+      got_re = (*pre_re)[i];
+      got_im = pre_im ? (*pre_im)[i] : __float128(0);
+    } else {
+      bool ir = false;
+      const Z r = eval_complex<S, Z>(id, a, b, ir);
+      got_re = to_q(r.re); got_im = to_q(r.im);
+      (void)ir;  // is_real is derived from id above, not from eval_complex
+    }
+    const double dre = score_component(got_re, ref_re[i], ref_im[i], B::cap());
     const double dim = is_real ? B::cap()
-                               : score_component(to_q(r.im), ref_im[i], ref_re[i], B::cap());
+                               : score_component(got_im, ref_im[i], ref_re[i], B::cap());
     const double d = dre < dim ? dre : dim;
     rows.push_back({B::name(), 'c', kComplex[id].name, int(i), d, -1.0, -1.0, 'N'});
     Row& row_ = rows.back();
@@ -3158,7 +3252,7 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
       // of the leading limb explicitly when the sum is zero -- and that must
       // be poisoned against the signed-zero grid family before it is trusted.
       const __float128 sref_re = ref_re[i], sref_im = ref_im[i];
-      const __float128 e_re = to_q(r.re) - sref_re, e_im = to_q(r.im) - sref_im;
+      const __float128 e_re = got_re - sref_re, e_im = got_im - sref_im;
       const __float128 mref = q_hypot(sref_re, sref_im);
       const bool bad = q_isnan(e_re) || q_isnan(e_im) ||
                        q_isnan(sref_re) || q_isnan(sref_im) ||
@@ -3343,15 +3437,101 @@ void run_sweep(uint64_t seed, const std::vector<GridPoint>& rgrid,
   }
 }
 
+// Like run_sweep but reads pre-computed device results from `dmap` instead of
+// calling eval_real / eval_complex. Inputs (a,b,c) and oracle references are
+// regenerated identically: same grid, same seed, same RNG. The scoring path
+// (oracle, bound derivation, ULP verdict) is IDENTICAL to run_sweep; the only
+// difference is the source of the computed value. This is what makes the
+// agreement proof work: on a serial host build (--arch host) both paths see the
+// same rounding and must produce byte-identical rows.
+template <class B>
+void build_real_precomp(const DeviceMap& dmap, int id, char kind,
+                        const std::vector<GridPoint>& grid,
+                        std::vector<__float128>& out) {
+  out.resize(grid.size());
+  for (size_t i = 0; i < grid.size(); ++i) {
+    auto it = dmap.find(make_dev_key(B::name(), kind, kReal[id].name, int(i)));
+    out[i] = (it != dmap.end()) ? dev_q(it->second, 0, (const B*)nullptr) : __float128(0);
+  }
+}
+template <class B>
+void build_complex_precomp(const DeviceMap& dmap, int id, char kind,
+                           const std::vector<GridPoint>& grid,
+                           std::vector<__float128>& out_re,
+                           std::vector<__float128>& out_im) {
+  out_re.resize(grid.size()); out_im.resize(grid.size());
+  for (size_t i = 0; i < grid.size(); ++i) {
+    auto it = dmap.find(make_dev_key(B::name(), kind, kComplex[id].name, int(i)));
+    if (it != dmap.end()) {
+      out_re[i] = dev_q(it->second, 0, (const B*)nullptr);
+      out_im[i] = dev_q(it->second, 4, (const B*)nullptr);
+    } else {
+      out_re[i] = out_im[i] = __float128(0);
+    }
+  }
+}
+
+void run_sweep_from_device(const DeviceMap& dmap, uint64_t seed,
+                           const std::vector<GridPoint>& rgrid,
+                           const std::vector<GridPoint>& cgrid,
+                           std::vector<Row>& rows, std::vector<Cell>& cells,
+                           const UlpCtx* ux) {
+  const size_t nr = rgrid.size(), nc = cgrid.size();
+  rows.reserve(4 * (R_COUNT * nr + C_COUNT * nc));
+
+  for (int id = 0; id < R_COUNT; ++id) {
+    Rng rng(stream_seed(seed, kReal[id].name, 0u));
+    std::vector<double>     a(nr), b(nr), c(nr);
+    std::vector<__float128> ref(nr);
+    for (size_t i = 0; i < nr; ++i) {
+      double av = rgrid[i].re, bv, cv;
+      fill_real_operands(id, i, av, rng, bv, cv);
+      repair_real(id, av, bv, cv);
+      a[i] = av; b[i] = bv; c[i] = cv;
+      ref[i] = reference_real(id, av, bv, cv);
+    }
+    std::vector<__float128> pDD, pFF, pQF, pTF;
+    build_real_precomp<BackendDD>(dmap, id, 'r', rgrid, pDD);
+    build_real_precomp<BackendFF>(dmap, id, 'r', rgrid, pFF);
+    build_real_precomp<BackendQF>(dmap, id, 'r', rgrid, pQF);
+    build_real_precomp<BackendTF>(dmap, id, 'r', rgrid, pTF);
+    sweep_real<BackendDD>(id, rgrid, a, b, c, ref, rows, cells, ux, &pDD);
+    sweep_real<BackendFF>(id, rgrid, a, b, c, ref, rows, cells, ux, &pFF);
+    sweep_real<BackendQF>(id, rgrid, a, b, c, ref, rows, cells, ux, &pQF);
+    sweep_real<BackendTF>(id, rgrid, a, b, c, ref, rows, cells, ux, &pTF);
+  }
+
+  for (int id = 0; id < C_COUNT; ++id) {
+    Rng rng(stream_seed(seed, kComplex[id].name, 1u));
+    std::vector<double>     bre(nc), bim(nc);
+    std::vector<__float128> rre(nc), rim(nc);
+    for (size_t i = 0; i < nc; ++i) {
+      fill_complex_operands(id, i, cgrid, cgrid[i].re, cgrid[i].im, rng, bre[i], bim[i]);
+      reference_complex(id, cgrid[i].re, cgrid[i].im, bre[i], bim[i], rre[i], rim[i]);
+    }
+    std::vector<__float128> pDD_re, pDD_im, pFF_re, pFF_im, pQF_re, pQF_im, pTF_re, pTF_im;
+    build_complex_precomp<BackendDD>(dmap, id, 'c', cgrid, pDD_re, pDD_im);
+    build_complex_precomp<BackendFF>(dmap, id, 'c', cgrid, pFF_re, pFF_im);
+    build_complex_precomp<BackendQF>(dmap, id, 'c', cgrid, pQF_re, pQF_im);
+    build_complex_precomp<BackendTF>(dmap, id, 'c', cgrid, pTF_re, pTF_im);
+    sweep_complex<BackendDD>(id, cgrid, bre, bim, rre, rim, rows, cells, ux, &pDD_re, &pDD_im);
+    sweep_complex<BackendFF>(id, cgrid, bre, bim, rre, rim, rows, cells, ux, &pFF_re, &pFF_im);
+    sweep_complex<BackendQF>(id, cgrid, bre, bim, rre, rim, rows, cells, ux, &pQF_re, &pQF_im);
+    sweep_complex<BackendTF>(id, cgrid, bre, bim, rre, rim, rows, cells, ux, &pTF_re, &pTF_im);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // I/O.
 // ---------------------------------------------------------------------------
 bool write_baseline(const std::string& path, const std::vector<Row>& rows,
-                    size_t nr, size_t nc, uint64_t seed) {
+                    size_t nr, size_t nc, uint64_t seed,
+                    const std::string& where = "") {
   std::FILE* f = std::fopen(path.c_str(), "wb");
   if (!f) { std::fprintf(stderr, "cannot open %s for writing\n", path.c_str()); return false; }
   std::fprintf(f, "# %s\n", kFormatVersion);
   std::fprintf(f, "# dense accuracy sweep baseline; see scripts/sweep_accuracy.cpp\n");
+  if (!where.empty()) std::fprintf(f, "# where: %s\n", where.c_str());
   std::fprintf(f, "# grid: real=%zu complex=%zu  seed=%llu\n",
                nr, nc, (unsigned long long)seed);
   std::fprintf(f, "# caps: DD=31.00 FF=14.00 QF=29.00 TF=21.70\n");
@@ -3364,13 +3544,23 @@ bool write_baseline(const std::string& path, const std::vector<Row>& rows,
   std::fprintf(f, "# ulps  = |got-ref| / (|ref| * 2^-p), the measurement of record\n");
   std::fprintf(f, "# bound = the derived bound; see docs/CORRECTNESS.md\n");
   std::fprintf(f, "# state = S scored | U unresolved | N unscorable | X no kappa\n");
-  std::fprintf(f, "backend,kind,op,point,digits,ulps,bound,state\n");
-  char buf[96];
+  // If a `where` label is given, it becomes the first column so that
+  // per-arch baselines (a100, mi250, ...) can be distinguished from host.
+  // The compare_baseline parser auto-detects this column.
+  if (!where.empty()) std::fprintf(f, "where,backend,kind,op,point,digits,ulps,bound,state\n");
+  else                std::fprintf(f, "backend,kind,op,point,digits,ulps,bound,state\n");
+  char buf[128];
   for (size_t i = 0; i < rows.size(); ++i) {
     const Row& r = rows[i];
-    const int  n = std::snprintf(buf, sizeof(buf), "%s,%c,%s,%d,%.2f,%.6g,%.6g,%c\n",
-                                 r.backend, r.kind, r.op, r.point, r.digits,
-                                 r.ulps, r.bound, r.state);
+    int n;
+    if (!where.empty())
+      n = std::snprintf(buf, sizeof(buf), "%s,%s,%c,%s,%d,%.2f,%.6g,%.6g,%c\n",
+                        where.c_str(), r.backend, r.kind, r.op, r.point, r.digits,
+                        r.ulps, r.bound, r.state);
+    else
+      n = std::snprintf(buf, sizeof(buf), "%s,%c,%s,%d,%.2f,%.6g,%.6g,%c\n",
+                        r.backend, r.kind, r.op, r.point, r.digits,
+                        r.ulps, r.bound, r.state);
     if (std::fwrite(buf, 1, size_t(n), f) != size_t(n)) {
       std::fprintf(stderr, "write failed\n"); std::fclose(f); return false;
     }
@@ -3609,11 +3799,26 @@ int compare_baseline(const std::string& path, const std::vector<Row>& fresh) {
       }
       continue;
     }
-    if (!saw_header && std::strncmp(line, "backend,", 8) == 0) { saw_header = true; continue; }
+    // Accept both the old header ("backend,...") and the new where-aware header
+    // ("where,backend,..."). Data lines with a leading `where` field are also
+    // handled: if the first comma-delimited token is not a backend name, skip it.
+    if (!saw_header && (std::strncmp(line, "backend,", 8) == 0 ||
+                        std::strncmp(line, "where,", 6) == 0)) { saw_header = true; continue; }
 
     char be[16], op[32]; char kind = 0; int point = 0;
     double dig = 0.0, base_ulps = 0.0, base_bound = 0.0; char st = 0;
-    if (std::sscanf(line, "%15[^,],%c,%31[^,],%d,%lf,%lf,%lf,%c", be, &kind, op,
+    // Auto-detect where column: if first token is not a known backend, skip it.
+    const char* parse_line = line;
+    {
+      char first[32] = {};
+      std::sscanf(line, "%31[^,]", first);
+      if (std::strcmp(first, "DD") != 0 && std::strcmp(first, "FF") != 0 &&
+          std::strcmp(first, "QF") != 0 && std::strcmp(first, "TF") != 0) {
+        const char* comma = std::strchr(line, ',');
+        if (comma) parse_line = comma + 1;
+      }
+    }
+    if (std::sscanf(parse_line, "%15[^,],%c,%31[^,],%d,%lf,%lf,%lf,%c", be, &kind, op,
                     &point, &dig, &base_ulps, &base_bound, &st) != 8) {
       std::fprintf(stderr, "malformed baseline line %zu: %s", parsed + 1, line);
       structural = true; break;
@@ -4282,6 +4487,11 @@ int main(int argc, char** argv) {
   // because the relative path did not resolve. Writing the baseline is now an
   // explicit --out.
   std::string out, grid_out, baseline, explain_op, ulp_dump, dump_op;
+  // `where` defaults to "host": every baseline written without an explicit
+  // --where carries the producer label, matching CORE_PLAN C6 ("when
+  // --score-results is absent, where is host"). Pass --where explicitly to
+  // override (e.g. a100 / mi250 when scoring device results).
+  std::string score_results_path, where_label = "host";
   int dump_point = -1;
   bool dump_terms = false;
   std::string ulp_register;
@@ -4384,6 +4594,12 @@ int main(int argc, char** argv) {
     else if (s == "--seed")      { seed = std::strtoull(need_v("--seed").c_str(), nullptr, 10); }
     else if (s == "--summary")   { quiet = false; }
     else if (s == "--quiet")     { quiet = true; }
+    else if (s == "--print-fingerprint") {
+      std::printf("%016llx\n", (unsigned long long)oracle_fingerprint());
+      return 0;
+    }
+    else if (s == "--score-results") { score_results_path = need_v("--score-results"); }
+    else if (s == "--where")     { where_label = need_v("--where"); }
     else { std::fprintf(stderr, "Unknown argument: %s\n", s.c_str()); usage(argv[0]); return 2; }
   }
   (void)out_set;
@@ -4410,7 +4626,19 @@ int main(int argc, char** argv) {
                               explain_point >= 0 ? &ulp_explains : nullptr};
   // The ulp verdict is now THE measurement, not a mode: every run computes it,
   // so the baseline it writes always carries it.
-  run_sweep(seed, rgrid, cgrid, rows, cells, &ux);
+  if (!score_results_path.empty()) {
+    DeviceMap dmap;
+    if (!load_device_results(score_results_path, dmap)) return 1;
+    if (dmap.empty()) {
+      std::fprintf(stderr, "no rows loaded from %s — empty or header-only?\n",
+                   score_results_path.c_str()); return 1;
+    }
+    std::printf("  loaded %zu device result rows from %s\n",
+                dmap.size(), score_results_path.c_str());
+    run_sweep_from_device(dmap, seed, rgrid, cgrid, rows, cells, &ux);
+  } else {
+    run_sweep(seed, rgrid, cgrid, rows, cells, &ux);
+  }
 
   if (!quiet) print_summary(cells, &ulp_cells);
 
@@ -4436,7 +4664,7 @@ int main(int argc, char** argv) {
     }
     const int rc = apply_register(ulp_register, ulp_fails);
     if (!out.empty()) {
-      if (!write_baseline(out, rows, rgrid.size(), cgrid.size(), seed)) return 1;
+      if (!write_baseline(out, rows, rgrid.size(), cgrid.size(), seed, where_label)) return 1;
       std::printf("wrote %s  (%zu rows)\n", out.c_str(), rows.size());
     }
     (void)bad;
@@ -4446,7 +4674,7 @@ int main(int argc, char** argv) {
   if (!baseline.empty()) return compare_baseline(baseline, rows);
 
 
-  if (!write_baseline(out, rows, rgrid.size(), cgrid.size(), seed)) return 1;
+  if (!write_baseline(out, rows, rgrid.size(), cgrid.size(), seed, where_label)) return 1;
   std::printf("\nwrote %s  (%zu rows)\n", out.c_str(), rows.size());
   if (!grid_out.empty()) {
     if (!write_grid(grid_out, rgrid, cgrid)) return 1;

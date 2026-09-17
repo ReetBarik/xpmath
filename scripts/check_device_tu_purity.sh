@@ -147,6 +147,18 @@ FILES=(
   # it is CLAIMED AS HOST by part 2 and goes red there.
   "tests/device_harness_test.cpp"
   "tests/hello_test_device.cpp"
+  # CORE_PLAN C6 step 1 (chunk A). The sweep's DEVICE PRODUCER, and the first
+  # entry here that is not under tests/. It belongs in this list more than most:
+  # it is the one device TU that sits next to the __float128-carrying scorer in
+  # scripts/, shares two headers with it (sweep_ops.hpp, sweep_inputs.hpp), and
+  # is the obvious place for somebody to "just widen this to binary128" while
+  # chasing a discrepancy. Listing it makes that a red gate instead of an A100
+  # build failure a week later.
+  #
+  # It needs no extra -I: its quoted includes of sweep_ops.hpp / sweep_inputs.hpp
+  # resolve next to itself, and device_harness.hpp is found through the
+  # -Itests already in INCS below.
+  "scripts/sweep_device.cpp"
 )
 
 # ===========================================================================

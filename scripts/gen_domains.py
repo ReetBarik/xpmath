@@ -128,9 +128,14 @@ def read_baseline():
     op = gzip.open if BASELINE.endswith(".gz") else open
     with op(BASELINE, "rt") as f:
         for line in f:
-            if line.startswith("#") or line.startswith("backend,"):
+            if (line.startswith("#") or line.startswith("backend,")
+                    or line.startswith("where,")):
                 continue
             p = line.rstrip("\n").split(",")
+            # C6 added an optional leading `where` column (host / a100 / ...).
+            # Auto-detect: if the first token is not a backend name, skip it.
+            if p and p[0] not in CAPS:
+                p = p[1:]
             be, kind, opn, point, digits = p[0], p[1], p[2], p[3], p[4]
             rows[(be, kind, opn)].append((int(point), float(digits)))
             states[(be, kind, opn)][p[7]] += 1
