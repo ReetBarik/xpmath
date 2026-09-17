@@ -392,9 +392,7 @@ endif()  # ===================== END KOKKOS-LINKED TESTS =====================
 # successful compile only proves nothing is MISSING, not that nothing extra was
 # pulled in.
 #
-# tf_no_kokkos_smoke.cpp does not exist -- TF real is the one backend with no
-# executed standalone smoke. Deliberately not invented here; it is its own task.
-foreach(_sm dd dd_complex ff ff_complex qf qf_complex tf_complex)
+foreach(_sm dd dd_complex ff ff_complex qf qf_complex tf tf_complex)
   add_executable(${_sm}_no_kokkos_smoke standalone/${_sm}_no_kokkos_smoke.cpp)
   target_include_directories(${_sm}_no_kokkos_smoke PRIVATE ${CMAKE_SOURCE_DIR}/include)
   target_compile_features(${_sm}_no_kokkos_smoke PRIVATE cxx_std_17)
@@ -530,7 +528,12 @@ endif()
 add_executable(sweep_accuracy ${CMAKE_SOURCE_DIR}/scripts/sweep_accuracy.cpp)
 target_include_directories(sweep_accuracy PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_compile_features(sweep_accuracy PRIVATE cxx_std_17)
-target_compile_options(sweep_accuracy PRIVATE -fext-numeric-literals)
+# GNU ONLY. -fext-numeric-literals is a gcc spelling; clang does not know it and
+# hard-errors on an unknown argument rather than warning, which would take out
+# sweep_accuracy and with it both gates, oracle_conv_test and both gate
+# selftests. The top-level CMakeLists.txt site is guarded the same way.
+target_compile_options(sweep_accuracy PRIVATE
+  $<$<CXX_COMPILER_ID:GNU>:-fext-numeric-literals>)
 # NO quadmath. __float128 is still the sweep's carrier -- ulp arithmetic, the
 # to_q() widenings, the CSV formatting -- but a __float128 is a COMPILER type
 # whose arithmetic lives in libgcc, and the `*q` elementary functions that DID
