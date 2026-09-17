@@ -49,17 +49,22 @@
 // __float128, which is a compiler type, so there was never anything to gate on;
 // it runs unconditionally now.
 //
-// NAMESPACE PATH.  Uses the explicit Kokkos::Experimental path via the
-// `namespace ff = Kokkos::Experimental` alias (ff::add / ff::sqrt / ff::atan / …),
+// NAMESPACE PATH.  Uses the `ff::` alias (ff::add / ff::sqrt / ff::atan / …),
 // matching every other FF test in this suite (ff_property_test, ff_invariant_test,
-// ff_eft_test; and formerly ff_accuracy_test, now the sweep).
+// ff_eft_test; and formerly ff_accuracy_test, now the sweep). It aliases `xp` --
+// the STANDALONE core -- rather than Kokkos::Experimental, as of CORE_PLAN C4.
+// third_party/include/ff_math.hpp is a true alias header
+// (`using FloatFloat = xp::FloatFloat`), so this names exactly the types it
+// named before; what the repoint drops is that header's #include <Kokkos_Core.hpp>.
+// The wrapper layer is still exercised by the demos and the Kokkos-linked tests.
 //
 // SCOPE (per plan): real FF kernels only — no complex (ff_complex.hpp), no DD/QF
 // (T1.6 / T3.6), no per-op differential accuracy (T2.4, the sibling task).
 // Host-side execution is sufficient: all four kernels are inherently serial and
-// the precision claim does not depend on where the ops run, so Kokkos is
-// initialized/finalized (to satisfy KOKKOS_INLINE_FUNCTION symbol linkage) but no
-// parallel_for is spawned. ff_math.hpp is NOT modified (rule 4): the one place a
+// the precision claim does not depend on where the ops run. There is no Kokkos
+// here at all any more: the initialize/finalize pair this file used to carry
+// started nothing it ever launched into, and no parallel_for was ever spawned.
+// ff_math.hpp is NOT modified (rule 4): the one place a
 // kernel exposes a numeric surprise (K1 naive), it is REPORTED and explained,
 // never patched. Any FFEXP/FFCSSNR/FFNINT diagnostic print during the run would be
 // treated exactly like T2.3's B4 (narrow domain with in-source B-task citation) —
@@ -72,7 +77,7 @@
 // ============================================================================
 
 #include "test_utils_host.hpp"
-#include <ff_math.hpp>
+#include <xp/ff_math.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -81,7 +86,7 @@
 #include <vector>
 
 using namespace kokkos_ep;
-namespace ff = Kokkos::Experimental;
+namespace ff = xp;
 
 
 // ----------------------------------------------------------------------------
@@ -120,13 +125,11 @@ static AccStats stats_of(const std::vector<double>& d) {
 
 
 // ============================================================================
-int main(int argc, char** argv) {
-  Kokkos::initialize(argc, argv);
+int main() {
   int rc = 0;
   {
     std::printf("=== ff_cancellation_test (T2.5): end-to-end cancellation kernels "
                 "for FF ===\n");
-    std::printf("Execution space: %s\n", Kokkos::DefaultExecutionSpace::name());
     std::printf("Host-side kernels (inherently serial); gate = mean_digits >= %.2f "
                 "(= max_digits 14 - 3 headroom).\n\n",
                 kTol);
@@ -393,7 +396,6 @@ int main(int argc, char** argv) {
     std::printf("\n=== ff_cancellation_test: %s ===\n",
                 rc == 0 ? "ALL PASSED" : "FAILURES PRESENT");
   }
-  Kokkos::finalize();
 
   return rc;
 }

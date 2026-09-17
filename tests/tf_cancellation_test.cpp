@@ -234,8 +234,10 @@ static void test_K4() {
 }
 
 // ============================================================================
-int main(int argc, char** argv) {
-  Kokkos::initialize(argc, argv);
+// No Kokkos. The kernels below are host-side and inherently serial; the
+// Kokkos::initialize/finalize pair that used to bracket them started nothing
+// this test ever launched into. CORE_PLAN C4 unlinked it.
+int main() {
   int rc = 0;
   {
     std::printf("=== tf_cancellation_test: TF end-to-end cancellation kernels ===\n");
@@ -250,7 +252,6 @@ int main(int argc, char** argv) {
     rc = ep_exit_code();
     std::printf("\n=== tf_cancellation_test: %s ===\n", rc == 0 ? "ALL PASSED" : "FAILURES PRESENT");
   }
-  Kokkos::finalize();
   return rc;
 }
 

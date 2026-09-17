@@ -2,7 +2,8 @@
 # tests/CMakeLists.txt — extended-precision test suite (T0.1 harness)
 # ============================================================================
 # Registered from the top-level CMakeLists.txt via add_subdirectory(tests),
-# guarded by option KOKKOS_EP_BUILD_TESTS (default ON) and enable_testing().
+# guarded by option XPMATH_BUILD_TESTS (default ON) and enable_testing().
+# (KOKKOS_EP_BUILD_TESTS is still accepted as a deprecated alias -- CORE_PLAN C4.)
 
 # --- Oracle availability: THERE IS NOTHING LEFT TO GATE ---------------------
 # This file used to open with a LIBQUADMATH probe. The __float128 oracle reached
@@ -75,6 +76,39 @@ function(kokkos_ep_add_test name)
   add_executable(${name} ${name}.cpp)
   target_include_directories(${name} PRIVATE ${THIRD_PARTY_INCLUDE})
   target_link_libraries(${name} PRIVATE Kokkos::kokkos)
+  # Opens the Kokkos half of tests/test_utils_host.hpp -- <Kokkos_Core.hpp>, the
+  # compat wrappers, and run_unary_op/run_binary_op. Defined HERE and nowhere
+  # else, so "does this target link Kokkos" and "does its TU see Kokkos" are the
+  # same question with one answer. See the header's note.
+  target_compile_definitions(${name} PRIVATE XPMATH_TEST_HAVE_KOKKOS=1)
+  add_test(NAME ${name} COMMAND ${name})
+endfunction()
+
+# --- Helper: define + register one test that links NO Kokkos ---------------
+# Usage: xpm_add_host_test(<name>)  expects tests/<name>.cpp
+#
+# CORE_PLAN C4 step 1. Same shape as kokkos_ep_add_test above, minus the two
+# lines that make a target Kokkos's: no Kokkos::kokkos link, no
+# THIRD_PARTY_INCLUDE, and no XPMATH_TEST_HAVE_KOKKOS. The include path is the
+# xp CORE plus this directory, which is what a host-oracle test that names
+# xp:: types and tests/test_utils_host.hpp actually needs.
+#
+# THE SEVEN TARGETS THIS EXISTS FOR were linking Kokkos to call
+# Kokkos::initialize/finalize around code that never launched a kernel --
+# corpus_test referenced ZERO Kokkos APIs and still could not build without an
+# install. That is not a small tidy-up: it is why a Kokkos build failure and a
+# library defect were indistinguishable from outside, and why the Kokkos-free
+# suite was 24 targets when 33 of them need nothing from Kokkos.
+#
+# It takes no contraction flags: nothing registered through it is an EFT test.
+# If that ever changes, the target must go through an EFT helper instead, or the
+# contraction guard below will not know about it.
+function(xpm_add_host_test name)
+  add_executable(${name} ${name}.cpp)
+  target_include_directories(${name} PRIVATE
+                             ${CMAKE_SOURCE_DIR}/include
+                             ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_features(${name} PRIVATE cxx_std_17)
   add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
@@ -138,6 +172,7 @@ function(kokkos_ep_add_eft_test_contract_on name)
   add_executable(${tgt} ${name}.cpp)
   target_include_directories(${tgt} PRIVATE ${THIRD_PARTY_INCLUDE})
   target_link_libraries(${tgt} PRIVATE Kokkos::kokkos)
+  target_compile_definitions(${tgt} PRIVATE XPMATH_TEST_HAVE_KOKKOS=1)
   add_test(NAME ${tgt} COMMAND ${tgt})
 
   # Force contraction ON (the mirror image of kokkos_ep_add_eft_test).
@@ -170,15 +205,40 @@ function(kokkos_ep_add_eft_test_contract_on name)
   set_property(GLOBAL APPEND PROPERTY XPMATH_EFT_ON_TARGETS ${tgt})
 endfunction()
 
+# --- HOST-ORACLE TESTS THAT LINK NO KOKKOS ---------------------------------
+# CORE_PLAN C4 step 1. These seven were registered inside the Kokkos block
+# below until C4, and every one of them was there for the same non-reason: a
+# Kokkos::initialize/finalize pair bracketing host-side code that launches
+# nothing. corpus_test did not even have that -- it referenced zero Kokkos APIs
+# and linked the library anyway.
+#
+# Three of them (dd_e2e, ff_cancellation, qf_cancellation) additionally reached
+# their types through third_party/include/<x>_math.hpp, whose only material
+# content beyond `using T = xp::T` is #include <Kokkos_Core.hpp>. They now
+# include <xp/..._math.hpp> directly and alias `xp` instead of
+# Kokkos::Experimental. The types are IDENTICAL -- the wrappers are true
+# aliases, not distinct wrapper types -- so this changes what is compiled, not
+# what is measured.
+#
+# WHAT THIS COSTS: the wrapper layer loses these seven as incidental coverage.
+# It is still exercised, by the demos and by the Kokkos-linked tests below, and
+# after C10 by the xpmath-kokkos repository.
+xpm_add_host_test(hello_test)
+xpm_add_host_test(corpus_test)
+xpm_add_host_test(dd_e2e_test)
+xpm_add_host_test(ff_cancellation_test)
+xpm_add_host_test(qf_cancellation_test)
+xpm_add_host_test(tf_cancellation_test)
+xpm_add_host_test(tf_property_test)
+
 # --- Registered tests -----------------------------------------------------
 # Everything from here to the "END KOKKOS-LINKED TESTS" marker links
 # Kokkos::kokkos, because it exercises the compat wrappers in
 # third_party/include/. The Kokkos-free tests -- both gates, pow_domain,
-# exp_reduction, trig_reduction, the standalone smokes, the consumer package --
-# are registered after that marker and build with XPMATH_WITH_KOKKOS=OFF.
+# exp_reduction, trig_reduction, the standalone smokes, the consumer package,
+# the contraction-flag pair and the seven above -- are registered outside it and
+# build with XPMATH_WITH_KOKKOS=OFF.
 if(XPMATH_WITH_KOKKOS)
-kokkos_ep_add_test(hello_test)
-kokkos_ep_add_test(corpus_test)
 # T1.2 non-overlap invariant: oracle-independent, no contraction flags needed.
 kokkos_ep_add_test(dd_invariant_test)
 # T2.2 non-overlap invariant for FF: FP32-typed fl(hi+lo)==hi over every FF op.
@@ -190,9 +250,8 @@ kokkos_ep_add_test(ff_invariant_test)
 kokkos_ep_add_test(dd_property_test)
 # T1.4 differential accuracy: per-op digits-of-accuracy against the __float128
 # oracle. Plain helper — NOT an EFT test, so no contraction flags.
-# T1.6 end-to-end cancellation kernels: __float128-oracle-scored, host-side. Plain
-# helper — NOT an EFT test, so no contraction flags (kernels are not EFT atoms).
-kokkos_ep_add_test(dd_e2e_test)
+# T1.6 end-to-end cancellation kernels (dd_e2e_test) moved to the Kokkos-free
+# block above in C4.
 kokkos_ep_add_eft_test(dd_eft_test)
 # T2.1 EFT unit tests for FF: twoSum + Dekker twoProduct, FP64 oracle (exact —
 # 25-bit sum / 48-bit product fit in FP64's 53-bit mantissa, so it needs no type
@@ -218,7 +277,9 @@ kokkos_ep_add_test(ff_property_test)
 # subtractive-cancellation adjacency to contract. So this test mirrors
 # dd_e2e_test's registration exactly (no EFT helper) — the contraction hazard the
 # EFT helper guards (Dekker twoProduct's a1*b1-c11) is not on any gated path here.
-kokkos_ep_add_test(ff_cancellation_test)
+# (ff_cancellation_test itself moved to the Kokkos-free block above in C4; the
+# contraction reasoning is unchanged and xpm_add_host_test applies no flags
+# either.)
 # T1.5 FMA-contraction guard: same source, two postures (see dd_fma_guard_test.cpp).
 kokkos_ep_add_eft_test(dd_fma_guard_test)              # -> dd_fma_guard_test              (OFF, gates)
 kokkos_ep_add_eft_test_contract_on(dd_fma_guard_test)  # -> dd_fma_guard_test_contract_on  (ON, reports)
@@ -299,7 +360,7 @@ kokkos_ep_add_eft_test_contract_on(qf_fma_guard_test)  # -> qf_fma_guard_test_co
 # pass/fail. The Dekker-twoProduct contraction hazard the EFT helper guards is on no
 # gated path here (it is covered by qf_fma_guard_test, T3.5). So this test mirrors
 # dd_e2e_test / ff_cancellation_test registration exactly (no EFT helper).
-kokkos_ep_add_test(qf_cancellation_test)
+# (qf_cancellation_test itself moved to the Kokkos-free block above in C4.)
 
 # S10 Phase 2: TF (TripleFloat, 3×FP32) test suite. TF analogue of T3.1-T3.6 (QF),
 # T2.1-T2.6 (FF), T1.1-T1.6 (DD). Same registration pattern as QF: EFT test with
@@ -307,15 +368,23 @@ kokkos_ep_add_test(qf_cancellation_test)
 # helper (no contraction flags).
 kokkos_ep_add_eft_test(tf_eft_test)                    # -> tf_eft_test              (OFF, gates)
 kokkos_ep_add_eft_test_contract_on(tf_eft_test)        # -> tf_eft_test_contract_on  (ON, reports)
-kokkos_ep_add_test(tf_property_test)                   # algebraic identities (Group A/B/C)
-kokkos_ep_add_test(tf_cancellation_test)               # e2e cancellation kernels (K1-K4)
+# tf_property_test (algebraic identities, Group A/B/C) and tf_cancellation_test
+# (e2e cancellation kernels K1-K4) moved to the Kokkos-free block above in C4.
 
 kokkos_ep_add_eft_test(tf_fma_guard_test)              # -> tf_fma_guard_test              (OFF, gates)
 kokkos_ep_add_eft_test_contract_on(tf_fma_guard_test)  # -> tf_fma_guard_test_contract_on  (ON, reports)
 
+endif()  # ===================== END KOKKOS-LINKED TESTS =====================
+
 # ---------------------------------------------------------------------------
 # THE CONTRACTION FLAG GUARD
 # ---------------------------------------------------------------------------
+# OUTSIDE the XPMATH_WITH_KOKKOS guard as of CORE_PLAN C4 step 6. Both targets
+# are script-driven -- one runs a .cmake checker, the other a shell script --
+# and neither compiles or links anything, so being Kokkos-CONDITIONAL was never
+# a property of what they check. It was, however, the reason the two suite sizes
+# differed by 28 while only 26 targets actually linked Kokkos.
+#
 # -ffp-contract=off on the EFT targets is what keeps the Dekker twoProduct an
 # error-free transform. Drop it and nothing fails -- the error term collapses
 # to zero and the EFT tests go on passing while validating a transform the
@@ -358,8 +427,22 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/contraction_manifest.txt" "${_xp_manifes
 # silently lost its contraction flag by ceasing to exist. Same contract as
 # ci.yml's `expected=49` -- adding or removing a guarded target is a deliberate
 # act that updates a number here.
-set(XPMATH_EFT_OFF_EXPECTED 8)   # dd/ff/qf/tf _eft_test + dd/ff/qf/tf _fma_guard_test
-set(XPMATH_EFT_ON_EXPECTED  5)   # the four *_fma_guard_test_contract_on + tf_eft_test_contract_on
+#
+# THEY ARE PER-CONFIGURATION, AND THAT IS TRANSITIONAL. Every contraction-guarded
+# target is still registered by an EFT helper inside the Kokkos block above, so
+# with XPMATH_WITH_KOKKOS=OFF none of them exists and the honest expectation is
+# 0/0 -- an assertion that there are no guarded targets in that configuration,
+# which is checkable and currently true. CORE_PLAN C4 steps 2-3 move the EFT
+# tests onto the device harness; when they do, BOTH branches below become 8/5
+# and this if() collapses. A future reader who finds it still here has found an
+# unfinished C4.
+if(XPMATH_WITH_KOKKOS)
+  set(XPMATH_EFT_OFF_EXPECTED 8)   # dd/ff/qf/tf _eft_test + dd/ff/qf/tf _fma_guard_test
+  set(XPMATH_EFT_ON_EXPECTED  5)   # the four *_fma_guard_test_contract_on + tf_eft_test_contract_on
+else()
+  set(XPMATH_EFT_OFF_EXPECTED 0)
+  set(XPMATH_EFT_ON_EXPECTED  0)
+endif()
 message(STATUS "contraction guard: ${_xp_n_off} OFF targets, ${_xp_n_on} ON targets "
                "(expected ${XPMATH_EFT_OFF_EXPECTED}/${XPMATH_EFT_ON_EXPECTED})")
 
@@ -375,8 +458,6 @@ add_test(NAME contraction_flags_guard
 add_test(NAME contraction_flags_selftest
          COMMAND ${CMAKE_SOURCE_DIR}/validation/contraction_flags_selftest.sh
                  ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
-
-endif()  # ===================== END KOKKOS-LINKED TESTS =====================
 
 # ---------------------------------------------------------------------------
 # STANDALONE SMOKES -- the Kokkos-free core, as real ctest targets
