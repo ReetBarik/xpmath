@@ -38,11 +38,14 @@ self-test target (`*_selftest`) that poisons its input and requires it to fail.
 Read **docs/CORRECTNESS.md** before adding anything that judges correctness; the
 whole point is that nothing else issues a competing verdict. **61 ctest targets
 with Kokkos and the same 61 without it** (`-DXPMATH_WITH_KOKKOS=OFF`) — asserted
-by CI in both lanes, not assumed, and measured as identical NAME SETS rather than
-merely equal counts. The two used to differ (49/21, then 52/24): a majority of
-the suite existed only inside an `if(XPMATH_WITH_KOKKOS)` block, so "green
-without Kokkos" was a strict-subset claim. CORE_PLAN C4 removed the block — no
-test TU links Kokkos, and the device-side tests launch through
+by CI in both lanes as a COUNT, not assumed; the two `ctest -N` name lists were
+additionally MEASURED identical as sets on the C4 chunk-E gate run. With no
+`if(XPMATH_WITH_KOKKOS)` block left there is no mechanism to register a
+different target per configuration, so the count is the tripwire and the
+structure is the guarantee. The two used to differ (49/21, then 52/24): a
+majority of the suite existed only inside an `if(XPMATH_WITH_KOKKOS)` block,
+so "green without Kokkos" was a strict-subset claim. CORE_PLAN C4 removed the
+block — no test TU links Kokkos, and the device-side tests launch through
 `tests/device_harness.hpp`. The wrapper layer in `third_party/include/` is still
 exercised, by the eight demos, until C10 moves them out.
 
