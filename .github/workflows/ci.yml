@@ -22,12 +22,18 @@
 #                   that catches a target moving across a guard, not just a
 #                   missing dependency.
 #   device-nvcc     Does each of the eight headers compile for a CUDA device?
+#                   Plus a ninth TU for tests/device_harness.hpp, so the
+#                   harness's CUDA path is compiled by something.
 #   device-hip      Same for HIP/ROCm, plus the gfx90a codegen guard over the
 #                   emitted device asm: branch reach (tiers 1-3) and recursive
-#                   device stack (tier 4).  UNVERIFIED — see `continue-on-error`.
-#                   The UNVERIFIED applies to the ROCm container, not to the
-#                   guard: both guards were run locally against ROCm 7.0.2, each
-#                   confirmed to fail on the pre-fix source and pass on the fixed.
+#                   device stack (tier 4).  GATING as of C3 — the
+#                   `continue-on-error: true` that made it advisory is gone.
+#                   It was advisory because the ROCm container had never run;
+#                   the guards themselves were always executed locally against
+#                   ROCm 7.0.2, each confirmed to fail on the pre-fix source and
+#                   pass on the fixed.  Leaving the lane advisory is why the
+#                   missing hip_runtime.h include (S8c cause 2, nine dead gfx90a
+#                   targets) survived to be found by hand on MI250X instead.
 #
 # TOOLCHAIN NOTES THAT MATTER (do not "simplify" these away):
 #
@@ -193,7 +199,7 @@ jobs:
       - name: Assert the Kokkos-free suite is the expected size
         run: |
           set -euo pipefail
-          expected=22
+          expected=24
           actual=$(ctest --test-dir build-nokokkos -N | awk '/^Total Tests: /{print $3}')
           echo "registered without Kokkos: ${actual} (expected ${expected})"
           if [ "${actual}" != "${expected}" ]; then
@@ -541,7 +547,7 @@ jobs:
       - name: Assert the full suite is registered
         run: |
           set -euo pipefail
-          expected=50
+          expected=52
           actual=$(ctest --test-dir build -N | awk '/^Total Tests: /{print $3}')
           echo "registered targets: ${actual} (expected ${expected})"
           if [ "${actual}" != "${expected}" ]; then
@@ -593,6 +599,12 @@ jobs:
           - {hdr: ff_complex, kind: complex, type: FloatFloatComplex,   real: FloatFloat,   scalar: float,  lead: hi}
           - {hdr: qf_complex, kind: complex, type: QuadFloatComplex,    real: QuadFloat,    scalar: float,  lead: f0}
           - {hdr: tf_complex, kind: complex, type: TripleFloatComplex,  real: TripleFloat,  scalar: float,  lead: f0}
+          # Not a header of the library.  tests/device_harness.hpp is the
+          # Kokkos-free launch layer C4-C8 measure through (CORE_PLAN C3), and
+          # its CUDA path is compiled by nothing else in this workflow.  The HIP
+          # lane compiles it too; between them both vendor paths are covered
+          # before anything depends on them.
+          - {hdr: device_harness, kind: harness}
     steps:
       - name: Install git (the CUDA image is minimal)
         run: |
@@ -661,6 +673,36 @@ jobs:
           __global__ void k(const S* in, S* o) { touch(in[0], in[1], o); }
           EOF
           fi
+          if [ "${{ matrix.kind }}" = "harness" ]; then
+            cat > /tmp/tu.cu <<'EOF'
+          // The device harness, INSTANTIATED rather than merely included: a
+          // header of templates nobody instantiates compiles clean while being
+          // completely broken, which is the "passes on silence" trap CORE_PLAN
+          // §0 forbids.  Nothing runs -- this is a -c compile -- but
+          // xpt::buffer<double>, the __global__ launch_n<Fn> template and the
+          // cudaMalloc/cudaMemcpy/cudaDeviceSynchronize calls must type-check
+          // and codegen for sm_80.
+          #include <device_harness.hpp>
+          #include <xp/dd_math.hpp>
+          #include <cstddef>
+          // A functor struct, not a lambda: the harness deliberately does not
+          // require nvcc --extended-lambda of its callers.
+          struct HarnessFn {
+              const double* in; double* out;
+              XPMATH_INLINE_FUNCTION void operator()(std::size_t i) const {
+                  out[i] = xp::sqrt(xp::DoubleDouble{in[i]}).hi;
+              }
+          };
+          void harness_compiles() {
+              xpt::buffer<double> a(16), b(16);
+              a.to_device();
+              xpt::parallel_for_n(a.size(), HarnessFn{a.device(), b.device()});
+              xpt::fence();
+              b.from_device();
+              if (xpt::last_error() != 0) { (void)xpt::where_name(); }
+          }
+          EOF
+          fi
           sed -i -e 's/HEADER/${{ matrix.hdr }}/' \
                  -e 's/xp::TYPE/xp::${{ matrix.type }}/' \
                  -e 's/xp::REALTYPE/xp::${{ matrix.real }}/' \
@@ -673,33 +715,42 @@ jobs:
         # dash does not have it (first CI run: "time: not found", exit 127).
         shell: bash
         run: |
-          time nvcc -std=c++17 -c -arch=sm_80 -Iinclude /tmp/tu.cu -o /tmp/tu.o
+          # -Itests is for the device_harness row only.  It changes nothing for
+          # the eight header rows: they include nothing from tests/, and the
+          # claim that the headers stand alone is enforced by
+          # scripts/check_standalone_no_kokkos.sh, not by this include path.
+          time nvcc -std=c++17 -c -arch=sm_80 -Iinclude -Itests /tmp/tu.cu -o /tmp/tu.o
 
   # ==========================================================================
-  # 6. Device compile lane (HIP).  UNVERIFIED BY CONSTRUCTION.
+  # 6. Device compile lane (HIP).  GATING as of CORE_PLAN C3.
   #
-  #    No hipcc exists on the machine this workflow was authored on, so unlike
-  #    every other lane here nothing about this one was executed before it was
-  #    committed.  It is therefore `continue-on-error: true`: it reports, it
-  #    does not gate.  Once a run confirms the image and the flags, delete that
-  #    line and the lane becomes real.
+  #    HISTORY, because the reason it was advisory matters.  No hipcc existed on
+  #    the machine this workflow was authored on, so unlike every other lane
+  #    nothing about this one had been executed when it was committed, and it
+  #    carried `continue-on-error: true`: it reported, it did not gate.  The two
+  #    steps below were later run by hand against ROCm 7.0.2 / gfx90a on a
+  #    machine with hipcc (14 s for the compile; the codegen guard exits 0 on
+  #    the fixed tree and 1 on the pre-fix one), but the GitHub side -- the
+  #    `rocm/dev-ubuntu-24.04:latest` container, its hipcc version, whether a
+  #    hosted runner has the disk and the time -- stayed unexercised, so the
+  #    line stayed: a first red would have been indistinguishable from a broken
+  #    image.
   #
-  #    UPDATE.  The two steps below HAVE since been run by hand against ROCm
-  #    7.0.2 / gfx90a on a machine with hipcc (14 s for the compile; the guard
-  #    exits 0 on the current tree and 1 on the pre-fix one).  What remains
-  #    unverified is the GitHub side: the `rocm/dev-ubuntu-24.04:latest`
-  #    container, its hipcc version, and whether a hosted runner has the disk
-  #    and time for it.  `continue-on-error: true` therefore STAYS -- the
-  #    branch-reach guard cannot gate merges from inside a lane whose
-  #    environment has never once executed, because the first red would be
-  #    indistinguishable from a broken image.  Delete the line after the first
-  #    green run and the guard becomes gating along with the rest of the lane.
+  #    C3 REMOVES IT, and the argument for removing it is what the lane missed.
+  #    include/xp/trig_reduction.hpp called __double_as_longlong under a guard
+  #    that hipcc satisfies, while no xp/ header included a vendor runtime.
+  #    nvcc hides that by force-including cuda_runtime.h; hipcc does not.  This
+  #    lane is the ONLY automated thing that could have caught it, and because
+  #    it was advisory the defect survived to be found by hand on MI250X as S8c
+  #    cause 2 -- nine targets that would not build.  An advisory lane that
+  #    reports a real defect nobody has to act on is a lane that does not exist.
+  #
+  #    On failure: fix the code.  Do NOT restore continue-on-error.
   # ==========================================================================
   device-hip:
-    name: hipcc device compile (UNVERIFIED, non-gating)
+    name: hipcc device compile
     runs-on: ubuntu-24.04
     container: rocm/dev-ubuntu-24.04:latest
-    continue-on-error: true
     steps:
       - name: Install git (the ROCm image is minimal)
         run: |
@@ -713,7 +764,7 @@ jobs:
           export PATH=/opt/rocm/bin:$PATH
           hipcc --version | head -5
 
-      - name: hipcc -c over all eight headers
+      - name: hipcc -c over all eight headers plus the device harness
         shell: bash
         run: |
           set -euo pipefail
@@ -721,6 +772,12 @@ jobs:
           cat > /tmp/hip_tu.hip <<'EOF'
           // Compile-only HIP smoke.  No __float128, no <vector>.
           #include <hip/hip_runtime.h>
+          // The test harness (CORE_PLAN C3), compiled here because hipcc is the
+          // toolchain it exists for and nothing else in CI compiles it.  It is
+          // INSTANTIATED below, not merely included: a header of templates that
+          // nobody instantiates compiles clean while being completely broken,
+          // which is the same "passes on silence" trap CORE_PLAN §0 forbids.
+          #include <device_harness.hpp>
           #include <xp/dd_math.hpp>
           #include <xp/dd_complex.hpp>
           #include <xp/ff_math.hpp>
@@ -763,13 +820,34 @@ jobs:
                      + xp::tgamma(a).hi
                      + (double)xp::tgamma(c).hi;
           }
+          // Harness instantiation.  Nothing runs -- this is a -c compile -- but
+          // xpt::buffer<double>, the __global__ launch_n<Fn> template and the
+          // hipMalloc/hipMemcpy/hipDeviceSynchronize calls all have to type-check
+          // and codegen for gfx90a.  A functor struct, not a lambda: the harness
+          // deliberately does not require --extended-lambda of its callers.
+          struct HarnessFn {
+              const double* in; double* out;
+              XPMATH_INLINE_FUNCTION void operator()(std::size_t i) const {
+                  out[i] = xp::sqrt(xp::DoubleDouble{in[i]}).hi;
+              }
+          };
+          void harness_compiles() {
+              xpt::buffer<double> a(16), b(16);
+              a.to_device();
+              xpt::parallel_for_n(a.size(), HarnessFn{a.device(), b.device()});
+              xpt::fence();
+              b.from_device();
+              if (xpt::last_error() != 0) { (void)xpt::where_name(); }
+          }
           EOF
           # --save-temps=obj keeps the device .s next to the object so the
           # branch-reach guard below has something to read.  It is the reason
           # this step writes into a directory rather than straight to /tmp.
           mkdir -p /tmp/hipsave
+          # -Itests is for device_harness.hpp; the harness is a test header, not
+          # part of the installed library, and must never be on the public path.
           time hipcc -std=c++17 --offload-arch=gfx90a --save-temps=obj \
-               -c -Iinclude /tmp/hip_tu.hip -o /tmp/hipsave/hip_tu.o
+               -c -Iinclude -Itests /tmp/hip_tu.hip -o /tmp/hipsave/hip_tu.o
           ls -la /tmp/hipsave/*-amdgcn-amd-amdhsa-*.s
 
       # ----------------------------------------------------------------------

@@ -1,17 +1,29 @@
 # `tests/` — the ctest suite
 
-50 registered targets with Kokkos, **22 without it**. The count is asserted in
-CI (`.github/workflows/ci.yml`, `expected=50`), not assumed. That is how this
+52 registered targets with Kokkos, **24 without it**. The count is asserted in
+CI (`.github/workflows/ci.yml`, `expected=52`), not assumed. That is how this
 lane once ran 34 targets while reporting 31. Four targets used to sit behind
 `if(XPMATH_MPFR_FOUND)`, so a runner missing a `-dev` package lost coverage and
 stayed green; that guard is gone — MPFR/MPC are the sweep oracle now, and a
 missing package is a configure `FATAL_ERROR`.
 
 `-DXPMATH_WITH_KOKKOS=OFF` drops the 28 targets that link Kokkos and keeps the
-other 22 — both gates, both gate self-tests, the oracle-conversion and reduction
-pairs, `domains_fresh`, `build_provenance`, `device_tu_purity`, the consumer
-package test and the seven standalone smokes. Measured: 21/21 in 169 s with no
-Kokkos installed, before `device_tu_purity` made it 22.
+other 24 — both gates, both gate self-tests, the oracle-conversion and reduction
+pairs, `domains_fresh`, `build_provenance`, `device_tu_purity`,
+`device_harness_test`, the consumer package test and the eight standalone
+smokes. Measured: 21/21 in 169 s with no Kokkos installed, before
+`device_tu_purity` made it 22 and C3's `tf_no_kokkos_smoke` +
+`device_harness_test` made it 24.
+
+`device_harness_test` is the self-test for `tests/device_harness.hpp`, the
+Kokkos-free CUDA/HIP/serial launch harness C3 added for C4–C8 to measure
+through. Under plain `g++` what runs is the harness's SERIAL fallback, which is
+deliberate: that fallback is the path nobody exercises on a GPU node and the one
+every device test will assume behaves like the vendor paths. It cannot pass on
+silence — it poisons both sides of the output buffer before the launch and
+requires every element to differ from the poison AND to equal an exact function
+of its index, so a kernel that never ran, or a `from_device()` that copied
+nothing, is red rather than quiet.
 
 `device_tu_purity` is in the Kokkos-free set by design rather than by accident.
 It preprocesses `tests/test_utils_device.hpp` — the half of the harness a

@@ -398,3 +398,208 @@ name allowlist that would rot.
   `tests/test_utils_device.hpp`, `scripts/check_device_tu_purity.sh` and
   `tests/CMakeLists.txt`) and the `.gitignore` line. None is code. Gate 2 built
   the final tree, and `device_tu_purity` was re-run against it directly.
+---
+
+## C3 — A Kokkos-free device harness, and the two real gfx90a build blockers
+
+**Branch:** `core/c3-device-harness`. **Base:** `main` @ `520280c`.
+
+**Outcome.** Green. Both gfx90a build blockers that were still live are fixed, the
+Kokkos-free device harness exists with a self-test that cannot pass on silence,
+the `device-hip` CI lane is gating, and the TF standalone smoke gap is closed.
+Counts moved 50 -> 52 and 22 -> 24 exactly as the section said they would.
+
+**What the section fixed, and what it only narrowed.** S8c's "39 of 49 targets
+do not build on gfx90a" was measured at `0230239` and two of its four causes
+were already fixed on `main` before this section started. C3 fixes the two that
+remained — the missing HIP runtime include and the unconditional
+`-fext-numeric-literals` — so the live blocker is smaller again. **This section
+does not measure it.** No gfx90a hardware was touched here; the number stays
+C8's to produce, and nothing below should be read as a target count.
+
+### Step 1 — the HIP bit-cast bug: PRIMARY path, not the fallback
+
+`include/xp/trig_reduction.hpp` calls `__double_as_longlong` and
+`__float_as_int` under `XPMATH_ON_DEVICE_CUDA_OR_HIP`, and no `xp/` header
+included a vendor runtime. nvcc force-includes `cuda_runtime.h` into every TU
+it compiles, so the names were always declared there; hipcc has no equivalent
+behaviour, so under hipcc they were simply undefined.
+
+The primary fix was taken: a guarded `#include <hip/hip_runtime.h>` under
+`__HIPCC__`, placed in `include/xp/config.hpp` beside the
+`XPMATH_ON_DEVICE_CUDA_OR_HIP` definition.
+
+Three decisions inside that, recorded because the fallback is still available
+and a later reader should know why it was not needed:
+
+- **`__HIPCC__`, not `__HIP_DEVICE_COMPILE__`.** The latter is the device pass
+  only. Both passes must see the same declarations or they disagree on the
+  symbol, and `hip/hip_runtime.h` is written to be included in both.
+- **No `cuda_runtime.h` companion.** nvcc already supplies it, so the include
+  would buy nothing while adding a failure mode for clang-CUDA.
+- **In `config.hpp`, not `trig_reduction.hpp`.** `config.hpp` is the header
+  every other `xp/` header already includes, so the next intrinsic user costs
+  nothing.
+
+**The fallback was not exercised and its premise was not tested.** The fallback
+is to delete the intrinsic branch and use `std::memcpy` unconditionally, then
+prove via `scripts/xpm_lint_device_asm.sh` that the gfx90a codegen did not
+regress. It is unnecessary only if the primary fix compiles under hipcc, and
+**there is no hipcc on this login node** — nothing local can execute that test.
+The evidence is the `device-hip` CI lane, which step 5 made gating in the same
+commit precisely so this claim is checked by something rather than asserted.
+
+### Step 5 — the `device-hip` lane is now gating
+
+`continue-on-error: true` is gone from the lane and "UNVERIFIED, non-gating" is
+gone from its name. The lane header comment keeps the history, because the
+reason it was advisory is the argument for removing it: the lane is the only
+automated thing that could have caught the step-1 defect, and because it was
+advisory the defect instead survived to be found by hand on MI250X as S8c cause
+2. An advisory lane that reports a real defect nobody must act on is a lane that
+does not exist.
+
+**The other `continue-on-error: true` in the file was left alone.** There are
+two. The second belongs to "Report against the committed baseline (non-gating)"
+inside the monotone-gate lane, and removing it would convert a deliberately
+non-gating report into a gate that fails on coverage growth. Only the device-hip
+one was removed.
+
+### Deviation — the harness is compiled by BOTH device lanes, not just HIP
+
+The plan's step 5 says to add `tests/device_harness.hpp` to the headers the hip
+lane compiles. That was done. It was ALSO added to `device-nvcc`, as a ninth
+matrix row (`kind: harness`), which the plan does not ask for.
+
+The reason: C4–C8 measure the core THROUGH this harness, and with only the HIP
+lane compiling it the entire CUDA path — `cudaMalloc`, `cudaMemcpy`,
+`cudaDeviceSynchronize`, the `<<<>>>` launch — would ship having been compiled
+by nothing at all. That is the same "unverified by construction" state step 5
+exists to end, and C7 is an A100 section. Adding the row costs one container
+job.
+
+In both lanes the harness is **instantiated**, not merely included. A header of
+templates that nobody instantiates compiles clean while being completely broken,
+which is the §0 "passes on silence" trap in a different costume. Each lane
+builds a functor struct, a `buffer<double>`, a `parallel_for_n` launch, a fence
+and a copy-back, and compiles it `-c` for sm_80 / gfx90a respectively.
+
+`tf_math.hpp` needed no adding: the hip lane already compiled all eight xp
+headers.
+
+### Deviation — `last_error()` is sticky, and the name does not say so
+
+The surface C3 specifies is `int last_error(); // 0 == ok; vendor error code
+otherwise`, and that spelling was kept verbatim. Its SEMANTICS are the first
+nonzero code since process start, not the most recent one.
+
+A literal "last" would be actively harmful here: `cudaGetLastError()` and
+`hipGetLastError()` CLEAR the error as they report it, so one later successful
+call would erase the evidence of an earlier failed one and a broken run would
+test green. Every vendor call in the harness funnels its code into a sticky slot
+instead, and `last_error()` reads that slot. The header documents it at the
+point of definition. Recorded here because the name is the spec's and the
+behaviour is not what the name suggests.
+
+### The harness self-test cannot pass on silence, and was made to fail
+
+`tests/device_harness_test.cpp` poisons the output buffer on BOTH sides before
+the launch — host-side, then `to_device()`, so the poison is resident in device
+memory — and the kernel writes `in[i]*2 + 1` with `in[i] = 0.5*i`, i.e. exactly
+`i + 1`, a value that is always ≥ 1.0 against a poison of −12345.0. A kernel
+that never runs leaves poison on the device; a `from_device()` that copies
+nothing leaves poison on the host. Either is red.
+
+The unreachability of the poison is asserted AT RUNTIME rather than argued in a
+comment, so a later edit to either constant that made the poison reachable
+would turn the check into a tautology loudly instead of quietly.
+
+MEASURED both ways, kernel body neutered to `(void)i;` and then restored
+byte-identical:
+
+```
+neutered  ->  the kernel actually wrote every element [FAIL]  4096 of 4096 elements still hold the poison
+              every element is exactly i + 1          [FAIL]  4096 wrong; first at i=0: got -12345 want 1
+              FAIL (2 failures)                              exit=1
+              ctest: 9 - device_harness_test (Failed)
+
+restored  ->  1/1 Test #9: device_harness_test .....  Passed  0.00 sec
+              100% tests passed, 0 tests failed out of 1
+```
+
+### Gate
+
+Fresh `rm -rf` build of each configuration, then the full suite. Both counts
+were asserted before the suite was allowed to run, because `ctest --test-dir` on
+a missing directory exits 0 and a suite that never ran is indistinguishable from
+one that passed.
+
+**Gate 1** — `scripts/xpm_build.sh --arch host --build-dir /tmp/c3_host`:
+
+```
+host: registered 52 (expected 52)
+
+52/52 Test #40: sweep_monotone_gate_selftest .....   Passed  675.42 sec
+
+100% tests passed, 0 tests failed out of 52
+
+Total Test time (real) = 705.21 sec
+```
+
+**Gate 2** — `scripts/xpm_build.sh --arch host --no-kokkos --build-dir /tmp/c3_nok`:
+
+```
+nok: registered 24 (expected 24)
+
+24/24 Test #12: sweep_monotone_gate_selftest .....   Passed  676.02 sec
+
+100% tests passed, 0 tests failed out of 24
+
+Total Test time (real) = 676.03 sec
+```
+
+**Gate 3** — `scripts/check_standalone_no_kokkos.sh`, now 18 steps over eight TUs
+rather than 16 over seven:
+
+```
+[14/18] run TF ...
+tf_no_kokkos_smoke: PASS (0 failures)
+[17/18] preprocessed output contains no Kokkos ...
+      ok (62307 preprocessed lines, 0 Kokkos hits)
+[18/18] include/xp/*.hpp name Kokkos only in comments ...
+      ok
+
+=== PASS: the standalone core stands alone ===
+```
+
+**Gate 4** — `scripts/check_device_tu_purity.sh`, two files now:
+
+```
+device-TU purity: g++ 13.3.0, 2 file(s)
+  ok   tests/test_utils_device.hpp  (56339 preprocessed lines, 0 in-repo __float128)
+  ok   tests/device_harness.hpp     (22204 preprocessed lines, 0 in-repo __float128)
+device-TU purity: PASS
+```
+
+**NOT a gate this section can run.** Nothing above executes hipcc or nvcc. The
+two device lanes are the real gate for C3 and they run on the PR.
+
+### Notes for later sections
+
+- **Counts of record are now 52 with Kokkos and 24 without**, asserted in
+  `.github/workflows/ci.yml` (`expected=52`, `expected=24`) and stated in
+  `tests/README.md`. C3 added `tf_no_kokkos_smoke` and `device_harness_test`.
+- `CLAUDE.md` still says 49 / 21. It was already stale at 50 / 22 before this
+  section, so C3 did not silently fold a two-cycle documentation drift into its
+  own diff. It wants a docs pass.
+- `scripts/check_device_tu_purity.sh`'s `FILES` list now holds two entries. C4
+  extends it with every `*_test_device.cpp` it creates.
+- `tests/device_harness.hpp` is a TEST header. It is not installed, it is not on
+  the public include path, and the two device lanes reach it with an explicit
+  `-Itests`. Nothing in `include/xp/` may ever include it.
+- **The harness has been COMPILED for both vendors and EXECUTED on neither.**
+  ctest runs its serial fallback; the CUDA and HIP paths are compile-only in CI.
+  First execution on real hardware is C7 (A100) and C8 (MI250X).
+- `-Wall -Wextra` on the standalone smokes surfaces two pre-existing
+  set-but-unused warnings in `include/xp/tf_math.hpp` (`k_log2`) and
+  `include/xp/tf_complex.hpp` (`y2`). Neither is C3's and neither was touched.
