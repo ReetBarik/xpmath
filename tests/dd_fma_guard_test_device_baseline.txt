@@ -1,0 +1,28 @@
+# dd_fma_guard_test_device contraction-ON baseline (T1.5, CORE_PLAN C4 chunk C)
+#
+# The FIRST non-comment line below is the recorded number of Dekker-twoProduct
+# mismatches observed by dd_fma_guard_test_device_contract_on (the
+# -ffp-contract=fast / --fmad=true build of the DEVICE half). It is historical
+# data, not a pass/fail gate: the ON variant always exits 0 on the measurement.
+# On each run it compares its live count against this number and prints
+# "baseline: OK" if unchanged or "*** DRIFT ***" if it differs.
+#
+# WHY THIS IS A SEPARATE FILE FROM dd_fma_guard_baseline.txt. The host half and
+# the device half are separate compilations, and "did the compiler fuse the
+# Dekker sequence" is a question about ONE compilation. On a GPU build they are
+# not even the same compiler. Sharing a baseline would mean a real device-side
+# drift could be masked by an unchanged host number, or vice versa.
+#
+# Drift means the compiler's contraction behaviour changed since this was
+# recorded (a compiler upgrade, a new -march/ISA target that gained FMA, a
+# different device backend, or a flag change). That is a WARNING to investigate,
+# not a failure. If the new value is correct for the new toolchain, update the
+# number below.
+#
+# Recorded environment:
+#   compiler : GCC 13.3.0 (x86_64-suse-linux), -O3 -ffp-contract=fast
+#   ISA      : baseline x86-64 (no -mfma / -march=native), so no FMA emitted
+#   backend  : tests/device_harness.hpp serial host loop (no CUDA, no HIP)
+#   result   : 0 mismatches -- GCC did NOT contract `a1*b1 - p` on this ISA
+#              target, matching the host half's recorded 0.
+0

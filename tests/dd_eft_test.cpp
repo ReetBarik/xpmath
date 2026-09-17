@@ -43,9 +43,11 @@
 // EFT silently breaks — the test would then validate a transform the shipped
 // binary does not actually perform. This translation unit is therefore compiled
 // with -ffp-contract=off on host (and --fmad=false on CUDA), applied by the
-// kokkos_ep_add_eft_test() helper in tests/CMakeLists.txt. (T1.5 later builds the
-// full contraction-on/off regression matrix; T1.1 only needs the posture here so
-// its own results are meaningful.)
+// xpm_add_host_eft_test() helper in tests/CMakeLists.txt (it was
+// kokkos_ep_add_eft_test() until C4 unlinked this target from Kokkos; the
+// contraction posture is byte-identical, only the Kokkos link went away).
+// (T1.5 later builds the full contraction-on/off regression matrix; T1.1 only
+// needs the posture here so its own results are meaningful.)
 //
 // Cross-reference: docs/TEST_SUITE_PLAN.md, Phase 1, "T1.1: EFT unit tests for
 // DD" and "The six test layers" layer 1.
@@ -55,12 +57,33 @@
 //   Test B — Dekker twoProd bit-exactness (same corpus shape; splitter-overflow
 //            and under/overflow regimes skipped — see Dekker's precondition note)
 //   Test C — named hard cases (regression corpus + hand-picked)
-//   Test D — device parity (run the SAME helpers in a Kokkos parallel_for)
+//
+// THIS IS THE HOST HALF. CORE_PLAN section C4 step 2 split the TU.
+//   There used to be a Test D here: the same two helpers run inside a Kokkos
+//   parallel_for, with the results copied back and scored against the SAME
+//   binary128 oracle Tests A/B use. That shape cannot be built for a GPU, and the
+//   reason is structural rather than a flag away: nvcc gives every TU a device
+//   pass and rejects std::vector<__float128> inside it (S6), so the oracle and
+//   the launch cannot share a file. The whole target was therefore unbuildable on
+//   A100 (S8b) — Tests A, B and C included, none of which need a device.
+//
+//   Test D now lives in tests/dd_eft_test_device.cpp, which links no Kokkos,
+//   launches through tests/device_harness.hpp, and carries no 128-bit type. It
+//   proves exactness against two INDEPENDENT exact transforms (Dekker fast2sum
+//   and the FMA identity) rather than against a widening oracle, because a
+//   widening oracle is the one thing that cannot cross onto the device; that
+//   file's header block states the limitation. This file keeps the strong
+//   argument over the large corpora, and now builds anywhere.
+//
+//   Consequently NOTHING BELOW LAUNCHES A KERNEL and nothing below mentions
+//   Kokkos. That is a maintained property, not an accident: C4 step 4 adds a
+//   mirror check that no host-side test TU contains parallel_for / KOKKOS_LAMBDA
+//   / xpt::parallel_for_n.
 // ============================================================================
 
 #include "test_utils_host.hpp"
 #include "corpus.hpp"
-#include <dd_math.hpp>
+#include <xp/dd_math.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -87,24 +110,23 @@ using namespace kokkos_ep;
 
 struct TwoOut { double hi; double lo; };
 
-// Mirrors the twoSum embedded in Kokkos::Experimental::add, with
+// Mirrors the twoSum embedded in xp::add (Kokkos::Experimental::add), with
 // a.lo == b.lo == 0. Knuth's twoSum: unconditionally exact for all finite
 // FP64 a, b when a + b does not overflow (subnormals included — addition has no
 // underflow hazard).
-KOKKOS_INLINE_FUNCTION TwoOut two_sum(double a, double b) {
+XPMATH_INLINE_FUNCTION TwoOut two_sum(double a, double b) {
     double s   = a + b;
     double e   = s - a;
     double err = (b - e) + (a - (s - e));   // == a.lo/b.lo-free t2 term in `add`
     return TwoOut{ s, err };                 // hi = s = fl(a+b), lo = err = exact error
 }
 
-// Mirrors the Dekker twoProduct embedded in Kokkos::Experimental::multiply,
-// equivalently the standalone `two_prod`, with
-// a.lo == b.lo == 0. Splitter 134217729.0 = 2^27 + 1. Exact provided no overflow
+// Mirrors the Dekker twoProduct embedded in xp::multiply, equivalently the
+// standalone `two_prod`, with a.lo == b.lo == 0. Splitter 134217729.0 = 2^27 + 1. Exact provided no overflow
 // occurs in the splitter (a*split), in a1*b1, or in the product, and no underflow
 // occurs (Dekker 1971; Muller et al., "Handbook of Floating-Point Arithmetic",
 // §4.4 — Veltkamp/Dekker require operands and result in the normal range).
-KOKKOS_INLINE_FUNCTION TwoOut two_prod_dekker(double a, double b) {
+XPMATH_INLINE_FUNCTION TwoOut two_prod_dekker(double a, double b) {
     const double split = 134217729.0;        // 2^27 + 1
     double cona = a * split, conb = b * split;
     double a1 = cona - (cona - a), b1 = conb - (conb - b);
@@ -348,83 +370,8 @@ static NamedResult run_named_cases() {
     return R;
 }
 
-// ----------------------------------------------------------------------------
-// Test D — device parity. Run the SAME helpers inside a Kokkos parallel_for,
-// copy results back, and compare bit-exactly against the host __float128 oracle.
-// On a Serial-only Kokkos this reduces to host execution (still a valid run); on
-// CUDA/HIP/SYCL it catches device-side FP differences (subnormal flush,
-// contraction) the host pass cannot see. Inputs are drawn from the splitter- and
-// underflow-safe range [-1e100, 1e100] so no element is skipped.
-// ----------------------------------------------------------------------------
-static NamedResult run_device_parity() {
-    NamedResult R;
-    using exec_space = Kokkos::DefaultExecutionSpace;
-    const int nd = 100'000;
-
-    std::vector<double> ha(nd), hb(nd);
-    {
-        std::mt19937_64 gen(99999ULL);
-        std::uniform_real_distribution<double> d(-1e100, 1e100);
-        for (int i = 0; i < nd; ++i) { ha[i] = d(gen); hb[i] = d(gen); }
-    }
-
-    Kokkos::View<double*, exec_space> va("va", nd), vb("vb", nd);
-    Kokkos::View<double*, exec_space> s_hi("s_hi", nd), s_lo("s_lo", nd);
-    Kokkos::View<double*, exec_space> p_hi("p_hi", nd), p_lo("p_lo", nd);
-    auto hva = Kokkos::create_mirror_view(va);
-    auto hvb = Kokkos::create_mirror_view(vb);
-    for (int i = 0; i < nd; ++i) { hva(i) = ha[i]; hvb(i) = hb[i]; }
-    Kokkos::deep_copy(va, hva);
-    Kokkos::deep_copy(vb, hvb);
-
-    Kokkos::parallel_for("dd_eft_device", Kokkos::RangePolicy<exec_space>(0, nd),
-        KOKKOS_LAMBDA(int i) {
-            TwoOut s = two_sum(va(i), vb(i));
-            TwoOut p = two_prod_dekker(va(i), vb(i));
-            s_hi(i) = s.hi; s_lo(i) = s.lo;
-            p_hi(i) = p.hi; p_lo(i) = p.lo;
-        });
-    Kokkos::fence();
-
-    auto hshi = Kokkos::create_mirror_view(s_hi);
-    auto hslo = Kokkos::create_mirror_view(s_lo);
-    auto hphi = Kokkos::create_mirror_view(p_hi);
-    auto hplo = Kokkos::create_mirror_view(p_lo);
-    Kokkos::deep_copy(hshi, s_hi);
-    Kokkos::deep_copy(hslo, s_lo);
-    Kokkos::deep_copy(hphi, p_hi);
-    Kokkos::deep_copy(hplo, p_lo);
-
-    long sum_fail = 0, prod_fail = 0;
-    int samples_left = 5;
-    for (int i = 0; i < nd; ++i) {
-        double a = ha[i], b = hb[i];
-        // twoSum parity
-        float128 s_lhs = (float128)hshi(i) + (float128)hslo(i);
-        float128 s_rhs = (float128)a + (float128)b;
-        if (s_lhs != s_rhs) {
-            ++sum_fail;
-            if (samples_left > 0) { print_fail_sample("twoSum", a, b); --samples_left; }
-        }
-        // twoProd parity
-        float128 p_lhs = (float128)hphi(i) + (float128)hplo(i);
-        float128 p_rhs = (float128)a * (float128)b;
-        if (p_lhs != p_rhs) {
-            ++prod_fail;
-            if (samples_left > 0) { print_fail_sample("twoProd", a, b); --samples_left; }
-        }
-    }
-    std::printf("    device twoSum : %ld/%d passed\n",  (long)nd - sum_fail,  nd);
-    std::printf("    device twoProd: %ld/%d passed\n",  (long)nd - prod_fail, nd);
-    R.total  = 2 * nd;
-    R.passed = (int)(2L * nd - sum_fail - prod_fail);
-    return R;
-}
-
-
 // ============================================================================
-int main(int argc, char** argv) {
-    Kokkos::initialize(argc, argv);
+int main(int, char**) {
     int rc = 0;
     {
         std::printf("=== dd_eft_test (T1.1): EFT bit-exactness for DD twoSum + Dekker twoProd ===\n");
@@ -450,16 +397,10 @@ int main(int argc, char** argv) {
         std::printf("  Test C named cases: %d/%d passed\n\n", C.passed, C.total);
         KOKKOS_EP_ASSERT(C.passed == C.total, "a named EFT case failed");
 
-        // -- Test D: device parity ------------------------------------------
-        std::printf("[Test D] device parity (%s)\n",
-                    Kokkos::DefaultExecutionSpace::name());
-        NamedResult D = run_device_parity();
-        std::printf("  Test D device parity: %d/%d passed\n\n", D.passed, D.total);
-        KOKKOS_EP_ASSERT(D.passed == D.total, "device EFT parity mismatch vs host binary128 oracle");
+        // Test D (device parity) moved to tests/dd_eft_test_device.cpp in C4.
 
         rc = ep_exit_code();
         std::printf("=== dd_eft_test: %s ===\n", rc == 0 ? "ALL PASSED" : "FAILURES PRESENT");
     }
-    Kokkos::finalize();
     return rc;
 }

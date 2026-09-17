@@ -38,8 +38,8 @@
 // A SINGLE SOURCE, TWO TARGETS
 // ----------------------------
 // This one file is compiled TWICE by tests/CMakeLists.txt into two executables:
-//   dd_fma_guard_test              (kokkos_ep_add_eft_test          -> OFF)
-//   dd_fma_guard_test_contract_on  (kokkos_ep_add_eft_test_contract_on -> ON)
+//   dd_fma_guard_test              (xpm_add_host_eft_test             -> OFF)
+//   dd_fma_guard_test_contract_on  (xpm_add_host_eft_test_contract_on  -> ON)
 // Single-source (not two-sources-with-shared-header) is deliberate: the whole
 // point is to run the IDENTICAL test body over the IDENTICAL inputs under
 // different compile flags. Compiling the same bytes twice makes "identical" a
@@ -65,11 +65,29 @@
 // included below purely as a labeled CONTROL (it must stay exact under both
 // postures). dd_math.hpp is NOT modified. Higher-level ops (log/sin/…) are out of
 // scope. See the "Scope-out" list in the T1.5 task.
+//
+// THIS IS THE HOST HALF. CORE_PLAN section C4 step 2 split the TU.
+//   There used to be a run_device_pass() here, running the same Dekker sequence
+//   through a Kokkos parallel_for against the same binary128 reference. That
+//   cannot be built for a GPU and the obstruction is structural, not a flag:
+//   nvcc gives every TU a device pass and rejects std::vector<__float128> inside
+//   it (S6), so the oracle and the launch cannot share a file. The whole target,
+//   host pass included, was therefore unbuildable on A100 (S8b).
+//
+//   The device pass is now tests/dd_fma_guard_test_device.cpp, with the same two
+//   postures and the same baseline mechanism. It links no Kokkos and carries no
+//   128-bit type, so its reference is the FMA identity fma(a,b,-a*b) rather than
+//   the binary128 product — exact for the same reason and immune to contraction
+//   for a better one (an EXPLICIT fused operation is not what -ffp-contract
+//   licenses the compiler to change).
+//
+//   Consequently NOTHING BELOW LAUNCHES A KERNEL. F is now the host mismatch
+//   count alone.
 // ============================================================================
 
 #include "test_utils_host.hpp"
 #include "corpus.hpp"
-#include <dd_math.hpp>
+#include <xp/dd_math.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -84,7 +102,7 @@
 using namespace kokkos_ep;
 
 // Which contraction posture were we compiled under? Set by the CMake helpers
-// (kokkos_ep_add_eft_test -> 0, kokkos_ep_add_eft_test_contract_on -> 1). Default
+// (xpm_add_host_eft_test -> 0, xpm_add_host_eft_test_contract_on -> 1). Default
 // to OFF/gate if somehow unset so a flagless build fails loud rather than silently
 // skipping the gate.
 #ifndef KOKKOS_EP_CONTRACTION_MODE
@@ -112,7 +130,7 @@ struct TwoOut { double hi; double lo; };
 // twoSum (Knuth) — mirrors the transform embedded in `add`,
 // with a.lo == b.lo == 0. CONTROL: all +/-, no mul-then-± adjacency, so no
 // compiler can contract it; it must stay exact under both postures.
-KOKKOS_INLINE_FUNCTION TwoOut two_sum(double a, double b) {
+XPMATH_INLINE_FUNCTION TwoOut two_sum(double a, double b) {
     double s   = a + b;
     double e   = s - a;
     double err = (b - e) + (a - (s - e));
@@ -123,7 +141,7 @@ KOKKOS_INLINE_FUNCTION TwoOut two_sum(double a, double b) {
 // with a.lo == b.lo == 0. Splitter 134217729.0 = 2^27 + 1.
 // THE PRIMITIVE UNDER TEST: `a1*b1 - p` (and the a1*b2 / a2*b1 / a2*b2 terms) are
 // the mul-then-± pairs a compiler may fuse into an FMA, which would break the EFT.
-KOKKOS_INLINE_FUNCTION TwoOut two_prod_dekker(double a, double b) {
+XPMATH_INLINE_FUNCTION TwoOut two_prod_dekker(double a, double b) {
     const double split = 134217729.0;        // 2^27 + 1
     double cona = a * split, conb = b * split;
     double a1 = cona - (cona - a), b1 = conb - (conb - b);
@@ -237,49 +255,6 @@ static GuardCount run_host_pass(const std::vector<std::pair<double,double>>& in,
     return c;
 }
 
-// Device pass: recompute two_prod_dekker inside a parallel_for on the default
-// execution space (governed by the CUDA --fmad flag on a CUDA build; reduces to
-// host on a Serial build). Mirrors dd_eft_test's Test D.
-static GuardCount run_device_pass(const std::vector<std::pair<double,double>>& in,
-                                  const std::vector<TwoOut>& ref, int& samples_left) {
-    using exec_space = Kokkos::DefaultExecutionSpace;
-    const int n = (int)in.size();
-
-    Kokkos::View<double*, exec_space> va("va", n), vb("vb", n);
-    Kokkos::View<double*, exec_space> p_hi("p_hi", n), p_lo("p_lo", n);
-    auto hva = Kokkos::create_mirror_view(va);
-    auto hvb = Kokkos::create_mirror_view(vb);
-    for (int i = 0; i < n; ++i) { hva(i) = in[i].first; hvb(i) = in[i].second; }
-    Kokkos::deep_copy(va, hva);
-    Kokkos::deep_copy(vb, hvb);
-
-    Kokkos::parallel_for("dd_fma_guard_device", Kokkos::RangePolicy<exec_space>(0, n),
-        KOKKOS_LAMBDA(int i) {
-            TwoOut p = two_prod_dekker(va(i), vb(i));
-            p_hi(i) = p.hi; p_lo(i) = p.lo;
-        });
-    Kokkos::fence();
-
-    auto hphi = Kokkos::create_mirror_view(p_hi);
-    auto hplo = Kokkos::create_mirror_view(p_lo);
-    Kokkos::deep_copy(hphi, p_hi);
-    Kokkos::deep_copy(hplo, p_lo);
-
-    GuardCount c;
-    for (int i = 0; i < n; ++i) {
-        ++c.tested;
-        if (hphi(i) != ref[i].hi || hplo(i) != ref[i].lo) {
-            ++c.mismatches;
-            if (samples_left > 0) {
-                print_mismatch("twoProd", "device", in[i].first, in[i].second,
-                               TwoOut{hphi(i), hplo(i)}, ref[i]);
-                --samples_left;
-            }
-        }
-    }
-    return c;
-}
-
 // twoSum control pass (host): must stay exact under both postures.
 static GuardCount run_sum_control(const std::vector<std::pair<double,double>>& in,
                                   int& samples_left) {
@@ -348,14 +323,14 @@ static void check_baseline(long observed) {
 
 
 // ============================================================================
-int main(int argc, char** argv) {
-    Kokkos::initialize(argc, argv);
+int main(int, char**) {
     int rc = 0;
     {
         std::printf("=== dd_fma_guard_test (T1.5): FMA-contraction guard for DD Dekker twoProduct ===\n");
         std::printf("contraction posture: %s\n", kPostureName);
-        std::printf("execution space: %s\n", Kokkos::DefaultExecutionSpace::name());
-        std::printf("Oracle: __float128 exact product (contraction-immune)\n\n");
+        std::printf("execution space: host (the device pass moved to "
+                    "dd_fma_guard_test_device in C4)\n");
+        std::printf("Oracle: binary128 exact product (contraction-immune)\n\n");
 
         // Build inputs + contraction-immune reference once.
         std::vector<std::pair<double,double>> inputs = build_inputs();
@@ -372,15 +347,13 @@ int main(int argc, char** argv) {
         std::printf("[control] twoSum (contraction-immune): tested=%ld mismatches=%ld\n",
                     S.tested, S.mismatches);
 
-        // --- Dekker twoProduct: host + device passes -------------------------
+        // --- Dekker twoProduct: host pass ------------------------------------
         GuardCount H = run_host_pass(inputs, ref, samples_left);
-        GuardCount D = run_device_pass(inputs, ref, samples_left);
-        const long F = H.mismatches + D.mismatches;
+        const long F = H.mismatches;
 
         std::printf("[twoProd] host  : tested=%ld mismatches=%ld\n", H.tested, H.mismatches);
-        std::printf("[twoProd] device: tested=%ld mismatches=%ld\n", D.tested, D.mismatches);
         std::printf("\ncontraction posture: %s. tested=%ld exact=%ld mismatches=%ld\n",
-                    kPostureName, H.tested + D.tested, (H.tested + D.tested) - F, F);
+                    kPostureName, H.tested, H.tested - F, F);
 
 #if KOKKOS_EP_CONTRACTION_MODE == 0
         // OFF variant: FAIL-GATE. The error terms MUST be exact — a stronger form
@@ -420,6 +393,5 @@ int main(int argc, char** argv) {
         std::printf("=== dd_fma_guard_test [ON]: REPORTED (mismatches=%ld, exit 0) ===\n", F);
 #endif
     }
-    Kokkos::finalize();
     return rc;
 }

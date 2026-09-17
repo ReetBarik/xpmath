@@ -88,6 +88,25 @@ FILES=(
   "tests/ff_eft_test.cpp"
   "tests/tf_eft_test.cpp"
   "tests/tf_fma_guard_test.cpp"
+  # CORE_PLAN C4 step 2 (chunk C): the DEVICE HALVES of the split DD/FF mixed
+  # TUs. Each one's host half kept the target name, the oracle and
+  # tests/test_utils_host.hpp; these carry the kernel and nothing that needs a
+  # type wider than a machine word. Listing them here is the point of the split
+  # -- an unlisted device half would be a device TU nobody is checking, which is
+  # the state the eight mixed TUs were already in.
+  "tests/dd_eft_test_device.cpp"
+  "tests/dd_fma_guard_test_device.cpp"
+  "tests/dd_property_test_device.cpp"
+  "tests/ff_property_test_device.cpp"
+  # ff_fma_guard_test.cpp is here WITHOUT a _device sibling, on purpose. Chunk C
+  # migrated it WHOLE rather than splitting it: post-C2 it includes
+  # test_utils_device.hpp only, and its oracle is an exact FP64 product (a
+  # 48-bit result in a 53-bit mantissa), not a 128-bit one. MEASURED on this
+  # tree before adding it: the only mentions of the wide type's name in that
+  # file are prose, which the preprocessor strips. Note that a STRING LITERAL
+  # would not be stripped -- one of its printf lines was reworded for exactly
+  # that reason.
+  "tests/ff_fma_guard_test.cpp"
 )
 
 INCS=(-I"${REPO_ROOT}/include" -I"${REPO_ROOT}/tests" -I"${REPO_ROOT}/third_party/include")
