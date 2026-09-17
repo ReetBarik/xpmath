@@ -196,10 +196,25 @@ jobs:
       - name: Build
         run: cmake --build build-nokokkos -j"$(nproc)"
 
+      # THIS NUMBER IS NOW THE SAME AS THE FULL LANE'S, AND THAT IS THE POINT.
+      #
+      # It was 24 against the full suite's 52 -- 28 targets existed only when
+      # Kokkos did, so the Kokkos-free lane was a strict subset and "green
+      # without Kokkos" was a much weaker statement than "green". CORE_PLAN C4
+      # closed that gap: no test TU links Kokkos any more, the device tests run
+      # on tests/device_harness.hpp instead of Kokkos::parallel_for, and
+      # tests/CMakeLists.txt has no if(XPMATH_WITH_KOKKOS) block left to move a
+      # target across.
+      #
+      # So the two lanes now register the SAME 61 targets, and MEASURED on the
+      # C4 chunk-E gate run the two `ctest -N` name lists are not merely equal in
+      # length but IDENTICAL as sets. If these two numbers ever diverge again,
+      # something re-introduced a Kokkos-conditional target -- fix that, do not
+      # fork the constants.
       - name: Assert the Kokkos-free suite is the expected size
         run: |
           set -euo pipefail
-          expected=24
+          expected=61
           actual=$(ctest --test-dir build-nokokkos -N | awk '/^Total Tests: /{print $3}')
           echo "registered without Kokkos: ${actual} (expected ${expected})"
           if [ "${actual}" != "${expected}" ]; then
@@ -547,7 +562,12 @@ jobs:
       - name: Assert the full suite is registered
         run: |
           set -euo pipefail
-          expected=52
+          # 52 -> 61 in CORE_PLAN C4. Not 9 new tests: C4 split eight mixed TUs
+          # (plus hello_test, which the plan did not list -- see its header) into
+          # host and device halves, and each half registers separately. The
+          # Kokkos-free lane above now asserts this SAME number; see the comment
+          # there for why the two converged and what a future divergence means.
+          expected=61
           actual=$(ctest --test-dir build -N | awk '/^Total Tests: /{print $3}')
           echo "registered targets: ${actual} (expected ${expected})"
           if [ "${actual}" != "${expected}" ]; then
@@ -605,6 +625,25 @@ jobs:
           # lane compiles it too; between them both vendor paths are covered
           # before anything depends on them.
           - {hdr: device_harness, kind: harness}
+          # Also not a header.  This row compiles the eight real
+          # tests/*_test_device.cpp translation units CORE_PLAN C4 produced,
+          # with nvcc, for sm_80.
+          #
+          # WHY C4 ADDED IT RATHER THAN LEAVING IT TO C5.  C4's entire claim is
+          # that these TUs can be given a DEVICE PASS -- that is what splitting
+          # the mixed TUs was for, and S6 is the defect it answers (nvcc's
+          # device pass walks STL member signatures and rejects
+          # std::vector<__float128>, so a TU carrying the binary128 oracle
+          # cannot be compiled for a device at all).  The in-tree gate for that
+          # claim, scripts/check_device_tu_purity.sh, is a PROXY: it
+          # preprocesses with g++ and asserts no __float128 arrives from this
+          # repository.  That is necessary and not sufficient -- it is a
+          # statement about one token, checked by a compiler that is not the one
+          # whose rejection started this.  Without this row the claim ships
+          # verified by nothing but its own proxy, and C5 builds a device tree
+          # on top of it.  That is the "unverified by construction" state the C3
+          # block argues against, one section later.  One container job.
+          - {hdr: device_tests, kind: devtests}
     steps:
       - name: Install git (the CUDA image is minimal)
         run: |
@@ -619,6 +658,7 @@ jobs:
           g++ -dumpfullversion
 
       - name: Generate the device TU
+        if: matrix.kind != 'devtests'
         shell: bash
         run: |
           set -euo pipefail
@@ -711,6 +751,7 @@ jobs:
           cat /tmp/tu.cu
 
       - name: nvcc -c (compile only, sm_80)
+        if: matrix.kind != 'devtests'
         # Container jobs default to `sh -e {0}`; `time` is a bash keyword and
         # dash does not have it (first CI run: "time: not found", exit 127).
         shell: bash
@@ -720,6 +761,36 @@ jobs:
           # claim that the headers stand alone is enforced by
           # scripts/check_standalone_no_kokkos.sh, not by this include path.
           time nvcc -std=c++17 -c -arch=sm_80 -Iinclude -Itests /tmp/tu.cu -o /tmp/tu.o
+
+      - name: nvcc -c over every tests/*_test_device.cpp (compile only, sm_80)
+        if: matrix.kind == 'devtests'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # -x cu: these are .cpp by extension because they are also built by
+          # the host g++ suite, where ctest runs the harness's serial fallback.
+          # nvcc would otherwise hand them to the host compiler and give them no
+          # device pass at all, which is the one thing this step exists to do.
+          #
+          # THE GLOB MUST NOT BE EMPTY.  A `for f in tests/*_test_device.cpp`
+          # over zero matches compiles nothing and exits 0, which is CORE_PLAN
+          # §0's "passes on silence" -- and it is a live failure mode here, not
+          # a hypothetical: a rename would produce exactly that.  The expected
+          # count is asserted against the same number
+          # scripts/check_device_tu_purity.sh part 1b asserts.
+          expected=8
+          mapfile -t tus < <(ls tests/*_test_device.cpp)
+          echo "device test TUs: ${#tus[@]} (expected ${expected})"
+          if [ "${#tus[@]}" != "${expected}" ]; then
+            echo "::error::found ${#tus[@]} tests/*_test_device.cpp, expected ${expected}."
+            echo "::error::Update this count and FILES in scripts/check_device_tu_purity.sh together."
+            exit 1
+          fi
+          for f in "${tus[@]}"; do
+            echo "=== $f"
+            time nvcc -std=c++17 -x cu -c -arch=sm_80 \
+                 -Iinclude -Itests "$f" -o "/tmp/$(basename "$f").o"
+          done
 
   # ==========================================================================
   # 6. Device compile lane (HIP).  GATING as of CORE_PLAN C3.
@@ -849,6 +920,41 @@ jobs:
           time hipcc -std=c++17 --offload-arch=gfx90a --save-temps=obj \
                -c -Iinclude -Itests /tmp/hip_tu.hip -o /tmp/hipsave/hip_tu.o
           ls -la /tmp/hipsave/*-amdgcn-amd-amdhsa-*.s
+
+      # The eight tests/*_test_device.cpp TUs CORE_PLAN C4 produced, compiled
+      # for gfx90a.  See the matching `devtests` row in the nvcc lane above for
+      # why C4 added this rather than leaving it to C5: the in-tree purity gate
+      # preprocesses with g++ and checks one token, which is necessary and not
+      # sufficient, and hipcc is half of what C8 will run these on.
+      #
+      # Separate from the step above, and not folded into it, because that TU is
+      # the CODEGEN guard's subject -- the tier 1-4 checks below read the .s it
+      # saves, and adding eight unrelated objects to it would change what those
+      # tiers are judging.  This step is a plain compile with no --save-temps.
+      - name: hipcc -c over every tests/*_test_device.cpp (compile only, gfx90a)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH=/opt/rocm/bin:$PATH
+          # -x hip for the same reason the nvcc lane passes -x cu: the files are
+          # .cpp because the host g++ suite builds them too, and without this
+          # hipcc gives them no device pass -- the one thing being checked.
+          #
+          # THE GLOB MUST NOT BE EMPTY (CORE_PLAN §0): zero matches would
+          # compile nothing and exit 0.
+          expected=8
+          mapfile -t tus < <(ls tests/*_test_device.cpp)
+          echo "device test TUs: ${#tus[@]} (expected ${expected})"
+          if [ "${#tus[@]}" != "${expected}" ]; then
+            echo "::error::found ${#tus[@]} tests/*_test_device.cpp, expected ${expected}."
+            echo "::error::Update this count and FILES in scripts/check_device_tu_purity.sh together."
+            exit 1
+          fi
+          for f in "${tus[@]}"; do
+            echo "=== $f"
+            time hipcc -std=c++17 -x hip --offload-arch=gfx90a \
+                 -c -Iinclude -Itests "$f" -o "/tmp/$(basename "$f").o"
+          done
 
       # ----------------------------------------------------------------------
       # gfx90a device-codegen guard.  TWO defects, one pass.

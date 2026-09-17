@@ -1,19 +1,26 @@
 # `tests/` — the ctest suite
 
-52 registered targets with Kokkos, **24 without it**. The count is asserted in
-CI (`.github/workflows/ci.yml`, `expected=52`), not assumed. That is how this
-lane once ran 34 targets while reporting 31. Four targets used to sit behind
-`if(XPMATH_MPFR_FOUND)`, so a runner missing a `-dev` package lost coverage and
-stayed green; that guard is gone — MPFR/MPC are the sweep oracle now, and a
-missing package is a configure `FATAL_ERROR`.
+**61 registered targets, with Kokkos or without it — the same 61 either way.**
+The count is asserted in CI (`.github/workflows/ci.yml`, `expected=61` in *both*
+lanes), not assumed. That is how this lane once ran 34 targets while reporting
+31. Four targets used to sit behind `if(XPMATH_MPFR_FOUND)`, so a runner missing
+a `-dev` package lost coverage and stayed green; that guard is gone — MPFR/MPC
+are the sweep oracle now, and a missing package is a configure `FATAL_ERROR`.
 
-`-DXPMATH_WITH_KOKKOS=OFF` drops the 28 targets that link Kokkos and keeps the
-other 24 — both gates, both gate self-tests, the oracle-conversion and reduction
-pairs, `domains_fresh`, `build_provenance`, `device_tu_purity`,
-`device_harness_test`, the consumer package test and the eight standalone
-smokes. Measured: 21/21 in 169 s with no Kokkos installed, before
-`device_tu_purity` made it 22 and C3's `tf_no_kokkos_smoke` +
-`device_harness_test` made it 24.
+`-DXPMATH_WITH_KOKKOS=OFF` now drops **nothing**. It used to drop 28 of 52,
+leaving 24, because those 28 targets only existed inside an
+`if(XPMATH_WITH_KOKKOS)` block; "green without Kokkos" was therefore a much
+weaker claim than "green". CORE_PLAN C4 removed the block: no test TU links
+Kokkos, the device-side tests launch through `tests/device_harness.hpp` instead
+of `Kokkos::parallel_for`, and the three `kokkos_ep_add_*` helpers that linked
+`Kokkos::kokkos` are deleted. MEASURED on the C4 gate run — the two `ctest -N`
+name lists are not merely the same length, they are identical as sets.
+
+52 → 61 is not nine new tests. C4 split nine mixed translation units (eight
+named in the plan, plus `hello_test`) into a host half and a device half, and
+each half registers as its own target. The Kokkos wrapper layer in
+`third_party/include/` is still exercised — by the eight `src/demo_*.cpp`
+targets, until C10 moves them to the `xpmath-kokkos` repo.
 
 `device_harness_test` is the self-test for `tests/device_harness.hpp`, the
 Kokkos-free CUDA/HIP/serial launch harness C3 added for C4–C8 to measure
@@ -25,13 +32,31 @@ requires every element to differ from the poison AND to equal an exact function
 of its index, so a kernel that never ran, or a `from_device()` that copied
 nothing, is red rather than quiet.
 
-`device_tu_purity` is in the Kokkos-free set by design rather than by accident.
-It preprocesses `tests/test_utils_device.hpp` — the half of the harness a
-device translation unit may include — and fails if `__float128` reaches it from
-any file in this repository. That header names the xp core rather than the
-`third_party/include` Kokkos wrappers, so the gate needs no Kokkos install, and
-the lane most likely to introduce a device-purity regression is the one where
-nobody builds with Kokkos at all.
+`device_tu_purity` needs no Kokkos install, which is deliberate rather than
+incidental: it names the xp core rather than the `third_party/include` wrappers,
+and the lane most likely to introduce a device-purity regression is the one
+where nobody builds with Kokkos at all. It runs **two checks pointing in
+opposite directions**, and neither implies the other:
+
+- **forward** — no device TU may carry `__float128`. Each listed
+  `tests/*_test_device.cpp` and `tests/test_utils_device.hpp` is preprocessed
+  and fails if `__float128` reaches it *from a file in this repository*. The
+  provenance qualifier is load-bearing: `/usr/include/bits/floatn.h` typedefs
+  the type unconditionally on x86_64, so a name-blind grep can only ever be red.
+- **mirror** (C4) — no host TU may contain a kernel launch
+  (`Kokkos::parallel_for`, `xpt::parallel_for_n`, `KOKKOS_LAMBDA`). The host set
+  is *derived*, not maintained: every top-level `tests/*.cpp` that the device
+  list does not claim. A new test is therefore host by default and gets the
+  mirror for free; giving it a launch turns the mirror red until it is added to
+  the device list, which subjects it to the forward check. There is no third
+  state. This also preprocesses rather than greps source, because several host
+  halves explain in prose comments where their launch went and a raw grep cannot
+  tell a comment from a call.
+
+Both halves refuse to pass on an empty input set, and the gate has been seen
+red: C4 poisoned a host TU with a real launch, watched it fail, and restored the
+file byte-identically. It found one genuine defect on its first run —
+`hello_test` had been taken off Kokkos but left mixed.
 
 **What judges correctness is `docs/CORRECTNESS.md`.** Read it before adding
 anything that issues a verdict; the whole point of the current arrangement is
@@ -90,8 +115,18 @@ Four backends: `dd` (2×FP64, p=106), `ff` (2×FP32, p=48), `qf` (4×FP32, p=96)
 
 ## Scaffolding
 
-`hello_test` (harness plumbing on a trivial DD round-trip) and `corpus_test`
-(the corner-case corpus itself). Neither runs a real math op.
+`hello_test` / `hello_test_device` (harness plumbing on a trivial DD round-trip)
+and `corpus_test` (the corner-case corpus itself). Neither runs a real math op.
+
+The `hello_test` pair is the C4 split in miniature and worth reading as the
+worked example. The host half asserts `DD(x) → binary128 == x` bit-exactly over
+10^6 inputs; the device half launches an identity kernel over the *same* 10^6
+inputs (same engine, same seed, distribution constructed per draw so the
+sequences really do match) and asserts the returned limbs are bit-identical to
+the limbs that went in. The pre-split file asserted `digits_of_accuracy(device
+output, oracle) >= max_digits`; bit-equality is strictly stronger and needs no
+oracle, so the device half carries no `__float128` and the claim survives the
+split intact.
 
 ## Retired
 
