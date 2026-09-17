@@ -69,6 +69,7 @@ CXX="${CXX:-g++}"
 # The maintained list. C4 extends this with every *_test_device.cpp.
 FILES=(
   "tests/test_utils_device.hpp"
+  "tests/device_harness.hpp"
 )
 
 INCS=(-I"${REPO_ROOT}/include" -I"${REPO_ROOT}/tests" -I"${REPO_ROOT}/third_party/include")

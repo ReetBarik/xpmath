@@ -399,6 +399,33 @@ foreach(_sm dd dd_complex ff ff_complex qf qf_complex tf tf_complex)
   add_test(NAME ${_sm}_no_kokkos_smoke COMMAND ${_sm}_no_kokkos_smoke)
 endforeach()
 
+# ---------------------------------------------------------------------------
+# device_harness_test -- the self-test for tests/device_harness.hpp
+# ---------------------------------------------------------------------------
+# The harness (CORE_PLAN C3) is the Kokkos-free CUDA/HIP/serial launch layer
+# that C4-C8 measure the core through. Here it compiles with plain g++, so what
+# runs is its SERIAL fallback -- deliberately, because that fallback is the
+# thing most likely to rot: nobody exercises it on a GPU node, and every device
+# test will depend on it behaving like the vendor paths.
+#
+# In the KOKKOS-FREE set, next to the standalone smokes, for the same reason
+# device_tu_purity is: the harness includes no Kokkos and must never need one.
+# It counts in both configurations. Together with the tf smoke added to the
+# foreach above, C3 takes the totals from 50/22 to 52 with Kokkos and 24
+# without.
+#
+# The test cannot pass on silence. It poisons both sides of the output buffer
+# before the launch and requires every element to differ from the poison AND to
+# equal an exact function of its index, so a kernel that never ran, or a
+# from_device() that copied nothing, is RED rather than quiet. See the file
+# header.
+add_executable(device_harness_test device_harness_test.cpp)
+target_include_directories(device_harness_test PRIVATE
+                           ${CMAKE_SOURCE_DIR}/include
+                           ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(device_harness_test PRIVATE cxx_std_17)
+add_test(NAME device_harness_test COMMAND device_harness_test)
+
 # COMPLEX accuracy, all four backends. Until these landed, every target above
 # scored REAL arithmetic only — `grep -c complex tests/CMakeLists.txt` was 0 —
 # and the complex headers were covered solely by the demos, which print a table
