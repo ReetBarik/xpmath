@@ -673,14 +673,14 @@ int main(int argc, char** argv) {
                   be[i].name, be[i].guard, be[i].p, be[i].C);
     std::printf("\n");
 
-    std::printf("XPMATH_INLINE_FUNCTION double xp_ph_ipio2_d(int k) {\n");
+    std::printf("XPMATH_NOINLINE_FUNCTION double xp_ph_ipio2_d(int k) {\n");
     std::printf("    constexpr double t[%d] = {\n", nd);
     for (int k = 0; k < nd; ++k)
       std::printf("        %8ld.0%s%s", cd[k], k + 1 < nd ? "," : "",
                   (k % 6 == 5 || k + 1 == nd) ? "\n" : "");
     std::printf("    };\n    return t[k];\n}\n\n");
 
-    std::printf("XPMATH_INLINE_FUNCTION float xp_ph_ipio2_f(int k) {\n");
+    std::printf("XPMATH_NOINLINE_FUNCTION float xp_ph_ipio2_f(int k) {\n");
     std::printf("    constexpr float t[%d] = {\n", nf);
     for (int k = 0; k < nf; ++k)
       std::printf("        %5ld.0f%s%s", cf[k], k + 1 < nf ? "," : "",
@@ -693,11 +693,11 @@ int main(int argc, char** argv) {
     std::printf("// count-is-pinned assertion in tests/trig_reduction_test.cpp bite.\n");
     std::printf("// MEASURED residuals: 2^%.2f (FP64, %d words) and 2^%.2f (FP32, %d words).\n",
                 residd, npd, residf, npf);
-    std::printf("XPMATH_INLINE_FUNCTION double xp_ph_pio2_d(int k) {\n    constexpr double t[%d] = {",
+    std::printf("XPMATH_NOINLINE_FUNCTION double xp_ph_pio2_d(int k) {\n    constexpr double t[%d] = {",
                 (int)pd.size());
     for (size_t i = 0; i < pd.size(); ++i) std::printf("%s\n        %.20a", i ? "," : "", pd[i]);
     std::printf("\n    };\n    return t[k];\n}\n\n");
-    std::printf("XPMATH_INLINE_FUNCTION float xp_ph_pio2_f(int k) {\n    constexpr float t[%d] = {",
+    std::printf("XPMATH_NOINLINE_FUNCTION float xp_ph_pio2_f(int k) {\n    constexpr float t[%d] = {",
                 (int)pf.size());
     for (size_t i = 0; i < pf.size(); ++i) std::printf("%s\n        %.12af", i ? "," : "", pf[i]);
     std::printf("\n    };\n    return t[k];\n}\n\n");

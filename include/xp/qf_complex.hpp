@@ -532,10 +532,16 @@ XPMATH_NOINLINE_FUNCTION QuadFloatComplex sqrt(QuadFloatComplex z) {
 // dd_complex.hpp:179-184. Real exp + joint sincos are the table-free QF
 // transcendentals (T3.0b §6/§7). NOTE the swapped sincos args (header §sincos):
 // qf sincos writes (sin, cos), so pass (s, c) to keep c=cos(y), s=sin(y).
-XPMATH_INLINE_FUNCTION QuadFloatComplex exp(QuadFloatComplex z) {
+XPMATH_NOINLINE_FUNCTION QuadFloatComplex exp(QuadFloatComplex z) {
     QuadFloat er = exp(z.re);
-    QuadFloat c, s;
-    sincos(z.im, s, c);
+    // Call NOINLINE sin and cos separately rather than INLINE sincos.  Inlining
+    // sincos's 140-line body into this function (which also calls NOINLINE
+    // exp(QF)) causes nvcc to miscompute the stack frame size.  sin/cos each
+    // return a single QuadFloat (4 floats = registers, no SRet pointer across
+    // function boundaries) — the same proven pattern as NOINLINE exp(QF).
+    // The redundant argument-reduction is acceptable in sweep_device context.
+    QuadFloat c = cos(z.im);
+    QuadFloat s = sin(z.im);
     return QuadFloatComplex(multiply(er, c), multiply(er, s));
 }
 

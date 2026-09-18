@@ -58,6 +58,18 @@ left is submitting it, not composing it.
 | **Our mitigation** | switched to MPFR/MPC at 400 bits as the ONLY oracle. libquadmath is gone: `--oracle=mpfr` is an accepted no-op and `--oracle=quadmath` is REFUSED (see `scripts/sweep_accuracy.cpp` around line 4342). |
 | **Note** | This one is a *reference* defect, not a codegen defect: it made our measurements wrong rather than our results wrong. Filing it needs the write-up TD-1 and TD-2 already have. |
 
+### TD-4 · nvcc ptxas underestimates `__local__` spill frames
+
+| | |
+|---|---|
+| **Report** | not yet written up separately; the measurement is job 1001685 / C7 |
+| **File against** | NVIDIA CUDA (nvcc / ptxas) |
+| **Found** | 2026-09-18, A100/sm_80 C7 bringup |
+| **Affects** | CUDA 12.9.1, sm_80, `nvcc_wrapper`, `-O3` |
+| **Symptom** | A large `XPMATH_NOINLINE_FUNCTION` device callee (exp(QF) inlined into exp(QFC); sincos inlined into atan2(QF)) is compiled with a `__local__` spill frame smaller than the stores ptxas emits. `compute-sanitizer --tool memcheck` reports `Invalid __local__ write of size 4 bytes` at a fixed offset in the callee (`exp(QF)+0x151b0`, then `atan2(QF)+0x2ad30` after the exp extract). The kernel's CUDA last-error stays 0; the corruption is silent without the sanitizer. `cudaDeviceSetLimit(cudaLimitStackSize, 16384)` does **not** help: ptxas sizes the frame statically. `#pragma unroll 1` on the Taylor/squarings loops did not move the offset. |
+| **Our mitigation** | Extract the oversized inline bodies into NOINLINE helpers (`detail::qf_exp_cw_reduce` / `qf_exp_taylor` / `qf_exp_squarings`); mark `sin`/`cos` NOINLINE and call them instead of inlining `sincos` into `angle()` / `exp(QFC)` / `exp(TFC)`. Same pattern on the Payne-Hanek helpers. `XPMATH_NOINLINE_FUNCTION` under CUDA is `__host__ __device__ __noinline__ inline` (COMDAT + noinline); `-Wattributes` on that token is suppressed by a CUDA-only `#pragma GCC diagnostic ignored "-Wattributes"` in `include/xp/config.hpp`. |
+| **Verified fixed** | `compute-sanitizer --tool memcheck` on `$HOME/sweep_device_sm80`: `ERROR SUMMARY: 0 errors`. Full A100 sweep, 436,080 rows, last_error()==0, Cobalt job 1001685, gpu06. |
+
 ---
 
 ## Related, but not defects

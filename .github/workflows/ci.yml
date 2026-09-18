@@ -206,15 +206,16 @@ jobs:
       # tests/CMakeLists.txt has no if(XPMATH_WITH_KOKKOS) block left to move a
       # target across.
       #
-      # So the two lanes now register the SAME 61 targets, and MEASURED on the
-      # C4 chunk-E gate run the two `ctest -N` name lists are not merely equal in
-      # length but IDENTICAL as sets. If these two numbers ever diverge again,
-      # something re-introduced a Kokkos-conditional target -- fix that, do not
-      # fork the constants.
+      # So the two lanes now register the SAME 63 targets (C4's 61 plus C7's
+      # sweep_device_gate_a100 and its selftest). MEASURED on the C4 chunk-E
+      # gate run the two `ctest -N` name lists were identical as sets at 61;
+      # the identity claim is the same, the count moved. If these two numbers
+      # ever diverge, something re-introduced a Kokkos-conditional target --
+      # fix that, do not fork the constants.
       - name: Assert the Kokkos-free suite is the expected size
         run: |
           set -euo pipefail
-          expected=61
+          expected=63
           actual=$(ctest --test-dir build-nokokkos -N | awk '/^Total Tests: /{print $3}')
           echo "registered without Kokkos: ${actual} (expected ${expected})"
           if [ "${actual}" != "${expected}" ]; then
@@ -235,12 +236,12 @@ jobs:
       #
       # NOTHING ELSE IN CI CHECKS THAT. The step above counts the union; a target
       # tagged BOTH sides, or a target that quietly stopped being registered in
-      # one, leaves the union at 61 and is invisible there. The configure-side
+      # one, leaves the union at 63 and is invisible there. The configure-side
       # assertion in tests/CMakeLists.txt catches an UNTAGGED test, not a
       # double-tagged one. This step is the missing half, and it costs two
       # configures and no build.
       #
-      # 38 + 24 = 62, and the union is 61. The one deliberate overlap is
+      # 40 + 24 = 64, and the union is 63. The one deliberate overlap is
       # build_provenance, which is registered in EVERY tree with a computed tag:
       # a `--only device` tree is what C7 and C8 configure on a compute node, and
       # that tree's logs are the artifacts whose provenance is hardest to
@@ -274,8 +275,8 @@ jobs:
             echo "::error::a tree registered ZERO tests (host=${h} device=${d} suite=${a})"
             exit 1
           fi
-          if [ "${h}" != "38" ] || [ "${d}" != "24" ] || [ "${a}" != "61" ]; then
-            echo "::error::expected host 38 / device 24 / suite 61, got ${h} / ${d} / ${a}"
+          if [ "${h}" != "40" ] || [ "${d}" != "24" ] || [ "${a}" != "63" ]; then
+            echo "::error::expected host 40 / device 24 / suite 63, got ${h} / ${d} / ${a}"
             exit 1
           fi
           overlap=$(comm -12 /tmp/host.names /tmp/device.names)
@@ -288,7 +289,7 @@ jobs:
             echo "::error::host union device is not the full suite -- a target is in neither tree."
             exit 1
           fi
-          echo "partition exact: 38 + 24 - 1 shared (build_provenance) = 61"
+          echo "partition exact: 40 + 24 - 1 shared (build_provenance) = 63"
 
       - name: ctest
         run: ctest --test-dir build-nokokkos -j4 --timeout 1800 --output-on-failure
@@ -628,12 +629,12 @@ jobs:
       - name: Assert the full suite is registered
         run: |
           set -euo pipefail
-          # 52 -> 61 in CORE_PLAN C4. Not 9 new tests: C4 split eight mixed TUs
-          # (plus hello_test, which the plan did not list -- see its header) into
-          # host and device halves, and each half registers separately. The
+          # 61 -> 63 in CORE_PLAN C7: sweep_device_gate_a100 and
+          # sweep_device_gate_selftest. C4 had already converged both lanes at
+          # 61 (nine mixed TUs split into host and device halves). The
           # Kokkos-free lane above now asserts this SAME number; see the comment
           # there for why the two converged and what a future divergence means.
-          expected=61
+          expected=63
           actual=$(ctest --test-dir build -N | awk '/^Total Tests: /{print $3}')
           echo "registered targets: ${actual} (expected ${expected})"
           if [ "${actual}" != "${expected}" ]; then

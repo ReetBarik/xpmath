@@ -247,7 +247,7 @@ from the data.
 ### The bare path — one tree, one compiler, everything
 
 **This still works, it is what CI runs, and it is the right way to build on a
-host.** One `cmake`, one compiler, all 61 registered tests including both gates
+host.** One `cmake`, one compiler, all 63 registered tests including both gates
 and both gate self-tests:
 
 ```bash
@@ -274,10 +274,10 @@ runs both and returns one verdict:
 
 | tree | compiler | contains |
 |---|---|---|
-| `<dir>/host` | always `g++`, no Kokkos, identical on all three arches | `sweep_accuracy`, **both gates, both gate self-tests**, `oracle_conv_test`, `domains_fresh` — 38 tests |
+| `<dir>/host` | always `g++`, no Kokkos, identical on all three arches | `sweep_accuracy`, **both gates, both gate self-tests**, `sweep_device_gate_a100` and its self-test, `oracle_conv_test`, `domains_fresh` — 40 tests |
 | `<dir>/device` | the arch's compiler and Kokkos | the `*_test_device` halves, the harness self-test, the demos — 24 tests |
 
-38 + 24 = 62 and the union is 61: `build_provenance` is registered in every
+40 + 24 = 64 and the union is 63: `build_provenance` is registered in every
 tree, because a `--only device` tree configured on a compute node still has a
 build directory whose artifacts must be traceable. It is the one intentional
 overlap.

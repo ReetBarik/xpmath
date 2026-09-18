@@ -337,7 +337,10 @@ static EftCount run_device_parity() {
   const float* hqhi = q_hi.host();
   const float* hqlo = q_lo.host();
 
-  long sum_fail = 0, prod_fail = 0, sqr_fail = 0;
+  long sum_fail = 0;
+#if KOKKOS_EP_CONTRACTION_MODE == 0
+  long prod_fail = 0, sqr_fail = 0;
+#endif
   long sum_skip = 0, prod_skip = 0, sqr_skip = 0;
 #if KOKKOS_EP_CONTRACTION_MODE == 1
   long prod_tri = 0, prod_cor = 0, prod_zero = 0, prod_wrong = 0;

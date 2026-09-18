@@ -64,6 +64,23 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
   endif()
 endif()
 
+# Suppress -Wattributes in CUDA host-pass compilation.
+# XPMATH_NOINLINE_FUNCTION expands to '__host__ __device__ __noinline__ inline'
+# under nvcc.  The combination of the C++ 'inline' keyword (needed for
+# header-only COMDAT linkage) and the __noinline__ attribute (needed to prevent
+# call-site inlining for the CUDA frame-size fix) is self-contradictory to GCC,
+# which warns regardless of how the forward declaration is annotated.  There is
+# no source-level combination that satisfies both requirements without this
+# warning; suppressing it is the standard practice for CUDA header-only
+# libraries that need the same pattern.
+if(CMAKE_CUDA_COMPILER)
+  string(FIND "${CMAKE_CUDA_FLAGS}" "-Xcompiler=-Wno-attributes" _wattr)
+  if(_wattr EQUAL -1)
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=-Wno-attributes"
+        CACHE STRING "" FORCE)
+  endif()
+endif()
+
 # ---------------------------------------------------------------------------
 # KOKKOS IS OPTIONAL, AND THAT IS THE WHOLE POINT OF include/xp/.
 #
@@ -94,7 +111,7 @@ option(XPMATH_WITH_KOKKOS
 # separate change; this one only makes the halves addressable.
 #
 # BOTH DEFAULT ON, AND THAT IS LOAD-BEARING. With both ON the build is exactly
-# what it was before this option existed -- one tree, one compiler, all 61
+# what it was before this option existed -- one tree, one compiler, all 63
 # ctest targets. That is the `cmake -B build` path documented in CLAUDE.md and
 # it is what CI runs; a default that changed the target set would be a silent
 # CI change wearing a refactor's clothes.

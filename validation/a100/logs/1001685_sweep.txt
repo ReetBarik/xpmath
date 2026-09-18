@@ -1,0 +1,8 @@
+# Producer stdout from Cobalt interactive job 1001685
+# host: gpu06  queue: gpu_a100  2026-09-18
+# binary: $HOME/sweep_device_sm80  (copied from /tmp/c8_a100/device/tests/sweep_device)
+# sanitizer (same binary, --out /tmp/dummy.csv): ERROR SUMMARY: 0 errors
+
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/c7_a100_raw.csv

@@ -1909,8 +1909,18 @@ inline __float128 dev_q(const DeviceLimbs& L, int off, const BackendTF*) {
 
 // Parse the device CSV produced by sweep_device into a lookup map.
 // Returns false on I/O error; malformed rows are silently skipped.
+// Gzipped inputs are accepted: C7 commits the A100 raw results as
+// validation/a100/logs/1001685_raw.csv.gz, and compare_baseline already
+// reads the scored baseline through gzip -dc. One scorer, one decompressor.
 bool load_device_results(const std::string& path, DeviceMap& out) {
-  std::FILE* f = std::fopen(path.c_str(), "rb");
+  const bool gz = path.size() > 3 && path.compare(path.size() - 3, 3, ".gz") == 0;
+  std::FILE* f = nullptr;
+  if (gz) {
+    const std::string cmd = "gzip -dc '" + path + "'";
+    f = popen(cmd.c_str(), "r");
+  } else {
+    f = std::fopen(path.c_str(), "rb");
+  }
   if (!f) { std::fprintf(stderr, "cannot open device results: %s\n", path.c_str()); return false; }
   char line[640]; bool saw_header = false;
   while (std::fgets(line, sizeof(line), f)) {
@@ -1939,7 +1949,14 @@ bool load_device_results(const std::string& path, DeviceMap& out) {
       if (tok[i+4][0]) std::sscanf(tok[i+4], "%llx", (unsigned long long*)&dl.v[i]);
     out[make_dev_key(be, k, op, pt)] = dl;
   }
-  std::fclose(f);
+  int reader_status = 0;
+  if (gz) reader_status = pclose(f); else std::fclose(f);
+  if (gz && reader_status != 0) {
+    std::fprintf(stderr,
+                 "decompressor failed on device results %s (status %d)\n",
+                 path.c_str(), reader_status);
+    return false;
+  }
   return true;
 }
 // ── end device-result support ─────────────────────────────────────────────

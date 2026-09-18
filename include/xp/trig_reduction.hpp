@@ -291,8 +291,8 @@ XPMATH_INLINE_FUNCTION int xp_ph_compress(const S* e, int m, S* out, int n, S* g
 // and uses the return value to pick the quadrant.
 
 template <typename S>
-XPMATH_INLINE_FUNCTION int xp_ph_reduce(const S* w, int nw, int guard, int ntab,
-                                        S* frac, int nfrac) {
+XPMATH_NOINLINE_FUNCTION int xp_ph_reduce(const S* w, int nw, int guard, int ntab,
+                                          S* frac, int nfrac) {
     typedef PhTraits<S> P;
     const int cb = P::kChunk;
 

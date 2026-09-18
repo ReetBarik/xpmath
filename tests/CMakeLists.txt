@@ -623,7 +623,7 @@ xpm_add_device_eft_test_contract_on(qf_fma_guard_test)  # -> qf_fma_guard_test_c
 #
 # NO add_test(). C6 step 5 is where the device GATES are specified, and that is
 # a later section's work; a placeholder test here would move the pinned suite
-# counts (device 24, union 61, in three places in .github/workflows/ci.yml)
+# counts (device 24, union 63, in three places in .github/workflows/ci.yml)
 # once now and again then. The counts are therefore UNCHANGED by this chunk,
 # and the tag-completeness assertion at the bottom of this file is satisfied
 # trivially -- it constrains registered TESTS, and this registers none.
@@ -1242,30 +1242,55 @@ xpm_tag_test(host sweep_monotone_gate_selftest sweep_absolute_gate_selftest)
 # ---------------------------------------------------------------------------
 # C6 DEVICE GATES -- registered ONLY when a per-arch baseline exists
 # ---------------------------------------------------------------------------
-# CORE_PLAN C6 step 5. sweep_device_gate_<arch> runs the monotone comparison
-# against validation/sweep/sweep_baseline_<arch>.csv.gz. They are not in CI --
-# GitHub has no GPU -- and that is stated here rather than left implied.
+# CORE_PLAN C6 step 5, filled in by C7 (a100). sweep_device_gate_<arch> is a
+# HOST test: it re-scores the committed raw device limbs with the host
+# MPFR/MPC oracle and monotone-compares against
+# validation/sweep/sweep_baseline_<arch>.csv.gz. It does not launch on a GPU,
+# so it IS in CI -- the thing GitHub cannot do is re-produce the limbs, and
+# those are the committed artifact.
 #
-# ON THIS MACHINE NO SUCH FILE EXISTS (ls validation/sweep/sweep_baseline_*.csv.gz
-# is empty), so this loop registers ZERO tests. C7 (a100) and C8 (mi250) commit
-# the arch baselines and wire the add_test() bodies; the gates appear then.
-# Count tripwires (host 38, device 24, union 61) are therefore UNCHANGED by
-# this block -- that is the point of the EXISTS guard.
+# C7 landed sweep_baseline_a100.csv.gz and wired the a100 arm. mi250 still
+# FATAL_ERRORs if its baseline is committed without an add_test() body: that
+# is C8's to fill in, not a silent "zero tests" hole.
 #
-# The FATAL_ERROR below is deliberate: an arch baseline landed without the
-# gate command being filled in is a C7/C8 bug, not a silent "zero tests" hole.
+# Count tripwires move with the a100 arm: host 38 -> 40 (gate + selftest),
+# device 24 unchanged, union 61 -> 63.
 foreach(_xp_arch IN ITEMS a100 mi250)
   set(_xp_dev_base
       "${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline_${_xp_arch}.csv.gz")
   if(EXISTS "${_xp_dev_base}")
-    message(FATAL_ERROR
-      "C6: ${_xp_dev_base} exists, but sweep_device_gate_${_xp_arch} is not "
-      "wired yet. C7/C8 own the add_test() body (produce via sweep_device, "
-      "score via sweep_accuracy --score-results --where ${_xp_arch}, monotone "
-      "compare against the arch baseline). Fill that in before committing "
-      "the baseline.")
+    if(_xp_arch STREQUAL "a100")
+      set(_xp_dev_raw
+          "${CMAKE_SOURCE_DIR}/validation/a100/logs/1001685_raw.csv.gz")
+      if(NOT EXISTS "${_xp_dev_raw}")
+        message(FATAL_ERROR
+          "C7: ${_xp_dev_base} exists, but the raw limbs it was scored from "
+          "(${_xp_dev_raw}) do not. The gate re-scores those limbs; without "
+          "them it cannot run.")
+      endif()
+      add_test(NAME sweep_device_gate_${_xp_arch}
+               COMMAND sweep_accuracy
+                       --score-results ${_xp_dev_raw}
+                       --where ${_xp_arch}
+                       --baseline ${_xp_dev_base})
+      xpm_tag_test(host sweep_device_gate_${_xp_arch})
+    else()
+      message(FATAL_ERROR
+        "C6: ${_xp_dev_base} exists, but sweep_device_gate_${_xp_arch} is not "
+        "wired yet. C8 owns the add_test() body (produce via sweep_device, "
+        "score via sweep_accuracy --score-results --where ${_xp_arch}, monotone "
+        "compare against the arch baseline). Fill that in before committing "
+        "the baseline.")
+    endif()
   endif()
 endforeach()
+
+if(EXISTS "${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline_a100.csv.gz")
+  add_test(NAME sweep_device_gate_selftest
+           COMMAND ${CMAKE_SOURCE_DIR}/validation/gate_selftest.sh
+                   $<TARGET_FILE:sweep_accuracy> device ${CMAKE_CURRENT_BINARY_DIR})
+  xpm_tag_test(host sweep_device_gate_selftest)
+endif()
 
 # ---------------------------------------------------------------------------
 # KI-42/43 STRUCTURAL TEST FOR exp()'s ARGUMENT REDUCTION
@@ -1450,6 +1475,10 @@ set_tests_properties(sweep_absolute_gate sweep_monotone_gate
                      PROPERTIES TIMEOUT 600)
 set_tests_properties(sweep_absolute_gate_selftest sweep_monotone_gate_selftest
                      PROPERTIES TIMEOUT 1200)
+if(EXISTS "${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline_a100.csv.gz")
+  set_tests_properties(sweep_device_gate_a100 PROPERTIES TIMEOUT 600)
+  set_tests_properties(sweep_device_gate_selftest PROPERTIES TIMEOUT 1200)
+endif()
 # Nine compiles of sweep_accuracy.cpp, four at a time.
 set_tests_properties(oracle_conv_selftest PROPERTIES TIMEOUT 600)
 
