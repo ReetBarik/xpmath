@@ -198,22 +198,31 @@ XPMATH_INLINE_FUNCTION DoubleDouble negate(DoubleDouble a) {
     return DoubleDouble(-a.hi, -a.lo);
 }
 
-// TwoSum (Knuth)
+// TwoSum (Knuth). Every +/− goes through detail::eft_* so hipcc/gfx90a
+// cannot reassociate the residual (config.hpp §5).
 XPMATH_INLINE_FUNCTION DoubleDouble add(DoubleDouble a, DoubleDouble b) {
-    double t1 = a.hi + b.hi;
-    double e  = t1 - a.hi;
-    double t2 = ((b.hi - e) + (a.hi - (t1 - e))) + a.lo + b.lo;
-    double hi = t1 + t2;
-    double lo = t2 - (hi - t1);
+    double t1 = detail::eft_add(a.hi, b.hi);
+    double e  = detail::eft_sub(t1, a.hi);
+    double t2 = detail::eft_add(detail::eft_add(
+                    detail::eft_add(detail::eft_sub(b.hi, e),
+                                    detail::eft_sub(a.hi, detail::eft_sub(t1, e))),
+                    a.lo), b.lo);
+    double hi = detail::eft_add(t1, t2);
+    double lo = detail::eft_sub(t2, detail::eft_sub(hi, t1));
     return DoubleDouble(hi, lo);
 }
 
 XPMATH_INLINE_FUNCTION DoubleDouble subtract(DoubleDouble a, DoubleDouble b) {
-    double t1 = a.hi - b.hi;
-    double e  = t1 - a.hi;
-    double t2 = ((-b.hi - e) + (a.hi - (t1 - e))) + a.lo - b.lo;
-    double hi = t1 + t2;
-    double lo = t2 - (hi - t1);
+    double t1 = detail::eft_sub(a.hi, b.hi);
+    double e  = detail::eft_sub(t1, a.hi);
+    double t2 = detail::eft_sub(
+            detail::eft_add(
+                detail::eft_add(detail::eft_sub(-b.hi, e),
+                                detail::eft_sub(a.hi, detail::eft_sub(t1, e))),
+                a.lo),
+            b.lo);
+    double hi = detail::eft_add(t1, t2);
+    double lo = detail::eft_sub(t2, detail::eft_sub(hi, t1));
     return DoubleDouble(hi, lo);
 }
 
@@ -251,18 +260,13 @@ XPMATH_INLINE_FUNCTION DoubleDouble subtract(DoubleDouble a, DoubleDouble b) {
 XPMATH_INLINE_FUNCTION void dd_split(double a, double& hi, double& lo) {
     const double split  = 134217729.0;
     const double thresh = 1.3393857e300;     // DBL_MAX / (split + 1)
-    double temp;
     if (a > thresh || a < -thresh) {
         a  *= 3.7252902984619140625e-09;     // 2^-28, exact
-        temp = split * a;
-        hi   = temp - (temp - a);
-        lo   = a - hi;
+        detail::eft_split(a, split, hi, lo);
         hi  *= 268435456.0;                  // 2^28, exact
         lo  *= 268435456.0;
     } else {
-        temp = split * a;
-        hi   = temp - (temp - a);
-        lo   = a - hi;
+        detail::eft_split(a, split, hi, lo);
     }
 }
 
@@ -298,14 +302,23 @@ XPMATH_NOINLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b) {
     double a1, a2, b1, b2;                                          // KI-30
     dd_split(a.hi, a1, a2);
     dd_split(b.hi, b1, b2);
-    double c11 = a.hi * b.hi;
-    double c21 = (((a1*b1 - c11) + a1*b2) + a2*b1) + a2*b2;
-    double c2  = a.hi * b.lo + a.lo * b.hi;
-    double t1  = c11 + c2;
-    double e   = t1 - c11;
-    double t2  = ((c2 - e) + (c11 - (t1 - e))) + c21 + a.lo * b.lo;
-    double hi  = t1 + t2;
-    double lo  = t2 - (hi - t1);
+    double c11 = detail::eft_mul(a.hi, b.hi);
+    double c21 = detail::eft_add(detail::eft_add(detail::eft_add(
+                      detail::eft_sub(detail::eft_mul(a1, b1), c11),
+                      detail::eft_mul(a1, b2)),
+                      detail::eft_mul(a2, b1)),
+                      detail::eft_mul(a2, b2));
+    double c2  = detail::eft_add(detail::eft_mul(a.hi, b.lo),
+                                 detail::eft_mul(a.lo, b.hi));
+    double t1  = detail::eft_add(c11, c2);
+    double e   = detail::eft_sub(t1, c11);
+    double t2  = detail::eft_add(detail::eft_add(
+                      detail::eft_add(detail::eft_sub(c2, e),
+                                      detail::eft_sub(c11, detail::eft_sub(t1, e))),
+                      c21),
+                      detail::eft_mul(a.lo, b.lo));
+    double hi  = detail::eft_add(t1, t2);
+    double lo  = detail::eft_sub(t2, detail::eft_sub(hi, t1));
     return DoubleDouble(hi, lo);
 }
 
@@ -484,8 +497,12 @@ XPMATH_INLINE_FUNCTION DoubleDouble two_prod(double da, double db) {
     double a1, a2, b1, b2;                                          // KI-30
     dd_split(da, a1, a2);
     dd_split(db, b1, b2);
-    double s1   = da * db;
-    double s2   = (((a1*b1 - s1) + a1*b2) + a2*b1) + a2*b2;
+    double s1   = detail::eft_mul(da, db);
+    double s2   = detail::eft_add(detail::eft_add(detail::eft_add(
+                      detail::eft_sub(detail::eft_mul(a1, b1), s1),
+                      detail::eft_mul(a1, b2)),
+                      detail::eft_mul(a2, b1)),
+                      detail::eft_mul(a2, b2));
     return DoubleDouble(s1, s2);
 }
 
@@ -2025,15 +2042,10 @@ XPMATH_INLINE_FUNCTION DoubleDouble fdim(DoubleDouble a, DoubleDouble b) {
 // skipped) and at most ~50 for fully wide ones. fma has no in-header callers,
 // so nothing hot pays for this.
 XPMATH_INLINE_FUNCTION double dd_two_sum(double a, double b, double& err) {
-    const double s  = a + b;
-    const double bb = s - a;
-    err = (a - (s - bb)) + (b - bb);
-    return s;
+    return detail::eft_two_sum(a, b, err);
 }
 XPMATH_INLINE_FUNCTION double dd_quick_two_sum(double a, double b, double& err) {
-    const double s = a + b;
-    err = b - (s - a);
-    return s;
+    return detail::eft_quick_two_sum(a, b, err);
 }
 // GROW-EXPANSION: e stays nonoverlapping and increasing, sum(e) exact.
 XPMATH_INLINE_FUNCTION void dd_expansion_push(double* e, int& m, double t) {

@@ -130,12 +130,8 @@ inline const ComplexSpec kComplex[C_COUNT] = {
 // ---------------------------------------------------------------------------
 // `id` is a RUNTIME parameter here, exactly as it is in sweep_accuracy.cpp, so
 // that the expression evaluated for a given op is textually the same in both
-// producers. scripts/sweep_device.cpp nevertheless calls these with a
-// COMPILE-TIME constant, which folds the switch to its single live case and
-// keeps each emitted device function the size of one operation rather than of
-// all thirty-nine. That matters on gfx90a: TD-1 (docs/ROCM_BRANCH_RELAXATION_BUG.md)
-// is a defect in an OVERSIZED device callee, and a 39-case switch inlined into
-// one kernel is precisely that shape.
+// copies. hipcc does not fold this switch on the device pass — see
+// eval_real_ct / eval_complex_ct below, which is what sweep_device.cpp calls.
 
 template <class S>
 XPMATH_INLINE_FUNCTION S eval_real(int id, const S& a, const S& b, const S& c) {
@@ -220,6 +216,98 @@ XPMATH_INLINE_FUNCTION Z eval_complex(int id, const Z& a, const Z& b, bool& is_r
     case C_Polar: return xp::polar(a.re, a.im);
   }
   return a;
+}
+
+// Compile-time evaluators. The runtime-`id` pair above is kept so the
+// expressions stay textually identical to sweep_accuracy.cpp. hipcc does NOT
+// fold that switch on the device pass: C9's sweep_device binary was rebuilt
+// against the HIP EFT wrappers and still emitted C8's DD-add limbs bit-for-bit
+// (1700/1700), while a TU that called `xp::add` directly matched host on the
+// same GPU. A 39-case device callee is the TD-1 shape
+// (docs/ROCM_BRANCH_RELAXATION_BUG.md). `if constexpr` makes each
+// instantiation the size of one operation; the runtime switch cannot.
+
+template <class S, int ID>
+XPMATH_INLINE_FUNCTION S eval_real_ct(const S& a, const S& b, const S& c) {
+  if constexpr (ID == R_Add)            return a + b;
+  else if constexpr (ID == R_Sub)       return a - b;
+  else if constexpr (ID == R_Mul)       return a * b;
+  else if constexpr (ID == R_Div)       return a / b;
+  else if constexpr (ID == R_Sqrt)      return xp::sqrt(a);
+  else if constexpr (ID == R_Abs)       return xp::abs(a);
+  else if constexpr (ID == R_Exp)       return xp::exp(a);
+  else if constexpr (ID == R_Log)       return xp::log(a);
+  else if constexpr (ID == R_Exp2)      return xp::exp2(a);
+  else if constexpr (ID == R_Exp10)     return xp::exp10(a);
+  else if constexpr (ID == R_Expm1)     return xp::expm1(a);
+  else if constexpr (ID == R_Log2)      return xp::log2(a);
+  else if constexpr (ID == R_Log10)     return xp::log10(a);
+  else if constexpr (ID == R_Log1p)     return xp::log1p(a);
+  else if constexpr (ID == R_Sin)       return xp::sin(a);
+  else if constexpr (ID == R_Cos)       return xp::cos(a);
+  else if constexpr (ID == R_Tan)       return xp::tan(a);
+  else if constexpr (ID == R_Asin)      return xp::asin(a);
+  else if constexpr (ID == R_Acos)      return xp::acos(a);
+  else if constexpr (ID == R_Atan)      return xp::atan(a);
+  else if constexpr (ID == R_Sinh)      return xp::sinh(a);
+  else if constexpr (ID == R_Cosh)      return xp::cosh(a);
+  else if constexpr (ID == R_Tanh)      return xp::tanh(a);
+  else if constexpr (ID == R_Acosh)     return xp::acosh(a);
+  else if constexpr (ID == R_Asinh)     return xp::asinh(a);
+  else if constexpr (ID == R_Atanh)     return xp::atanh(a);
+  else if constexpr (ID == R_Pow)       return xp::pow(a, b);
+  else if constexpr (ID == R_Hypot)     return xp::hypot(a, b);
+  else if constexpr (ID == R_Fmod)      return xp::fmod(a, b);
+  else if constexpr (ID == R_Remainder) return xp::remainder(a, b);
+  else if constexpr (ID == R_Copysign)  return xp::copysign(a, b);
+  else if constexpr (ID == R_Fmax)      return xp::fmax(a, b);
+  else if constexpr (ID == R_Fmin)      return xp::fmin(a, b);
+  else if constexpr (ID == R_Fdim)      return xp::fdim(a, b);
+  else if constexpr (ID == R_Fma)       return xp::fma(a, b, c);
+  else if constexpr (ID == R_Ceil)      return xp::ceil(a);
+  else if constexpr (ID == R_Floor)     return xp::floor(a);
+  else if constexpr (ID == R_Round)     return xp::round(a);
+  else if constexpr (ID == R_Trunc)     return xp::trunc(a);
+  else {
+    static_assert(ID != ID, "xpsweep::eval_real_ct: unhandled ID");
+    return a;
+  }
+}
+
+template <class S, class Z, int ID>
+XPMATH_INLINE_FUNCTION Z eval_complex_ct(const Z& a, const Z& b, bool& is_real) {
+  is_real = false;
+  if constexpr (ID == C_Add)        return a + b;
+  else if constexpr (ID == C_Sub)   return a - b;
+  else if constexpr (ID == C_Mul)   return a * b;
+  else if constexpr (ID == C_Div)   return a / b;
+  else if constexpr (ID == C_Abs) {
+    is_real = true;
+    return Z(xp::abs(a), S(0.0));
+  }
+  else if constexpr (ID == C_Conj)  return xp::conj(a);
+  else if constexpr (ID == C_Sqrt)  return xp::sqrt(a);
+  else if constexpr (ID == C_Exp)   return xp::exp(a);
+  else if constexpr (ID == C_Log)   return xp::log(a);
+  else if constexpr (ID == C_Log10) return xp::log10(a);
+  else if constexpr (ID == C_Sin)   return xp::sin(a);
+  else if constexpr (ID == C_Cos)   return xp::cos(a);
+  else if constexpr (ID == C_Tan)   return xp::tan(a);
+  else if constexpr (ID == C_Asin)  return xp::asin(a);
+  else if constexpr (ID == C_Acos)  return xp::acos(a);
+  else if constexpr (ID == C_Atan)  return xp::atan(a);
+  else if constexpr (ID == C_Sinh)  return xp::sinh(a);
+  else if constexpr (ID == C_Cosh)  return xp::cosh(a);
+  else if constexpr (ID == C_Tanh)  return xp::tanh(a);
+  else if constexpr (ID == C_Asinh) return xp::asinh(a);
+  else if constexpr (ID == C_Acosh) return xp::acosh(a);
+  else if constexpr (ID == C_Atanh) return xp::atanh(a);
+  else if constexpr (ID == C_Pow)   return xp::pow(a, b);
+  else if constexpr (ID == C_Polar) return xp::polar(a.re, a.im);
+  else {
+    static_assert(ID != ID, "xpsweep::eval_complex_ct: unhandled ID");
+    return a;
+  }
 }
 
 }  // namespace xpsweep

@@ -205,22 +205,30 @@ XPMATH_INLINE_FUNCTION FloatFloat negate(FloatFloat a) {
     return FloatFloat(-a.hi, -a.lo);
 }
 
-// TwoSum (Knuth)
+// TwoSum (Knuth). HIP device residual is forced through detail::eft_*.
 XPMATH_INLINE_FUNCTION FloatFloat add(FloatFloat a, FloatFloat b) {
-    float t1 = a.hi + b.hi;
-    float e  = t1 - a.hi;
-    float t2 = ((b.hi - e) + (a.hi - (t1 - e))) + a.lo + b.lo;
-    float hi = t1 + t2;
-    float lo = t2 - (hi - t1);
+    float t1 = detail::eft_add(a.hi, b.hi);
+    float e  = detail::eft_sub(t1, a.hi);
+    float t2 = detail::eft_add(detail::eft_add(
+                    detail::eft_add(detail::eft_sub(b.hi, e),
+                                    detail::eft_sub(a.hi, detail::eft_sub(t1, e))),
+                    a.lo), b.lo);
+    float hi = detail::eft_add(t1, t2);
+    float lo = detail::eft_sub(t2, detail::eft_sub(hi, t1));
     return FloatFloat(hi, lo);
 }
 
 XPMATH_INLINE_FUNCTION FloatFloat subtract(FloatFloat a, FloatFloat b) {
-    float t1 = a.hi - b.hi;
-    float e  = t1 - a.hi;
-    float t2 = ((-b.hi - e) + (a.hi - (t1 - e))) + a.lo - b.lo;
-    float hi = t1 + t2;
-    float lo = t2 - (hi - t1);
+    float t1 = detail::eft_sub(a.hi, b.hi);
+    float e  = detail::eft_sub(t1, a.hi);
+    float t2 = detail::eft_sub(
+            detail::eft_add(
+                detail::eft_add(detail::eft_sub(-b.hi, e),
+                                detail::eft_sub(a.hi, detail::eft_sub(t1, e))),
+                a.lo),
+            b.lo);
+    float hi = detail::eft_add(t1, t2);
+    float lo = detail::eft_sub(t2, detail::eft_sub(hi, t1));
     return FloatFloat(hi, lo);
 }
 
@@ -271,17 +279,26 @@ XPMATH_NOINLINE_FUNCTION FloatFloat multiply(FloatFloat a, FloatFloat b) {
     const float ub = hb ? ldexpf(1.0f,  64) : 1.0f;
     a = FloatFloat(a.hi * sa, a.lo * sa);
     b = FloatFloat(b.hi * sb, b.lo * sb);
-    float cona = a.hi * split, conb = b.hi * split;
-    float a1 = cona - (cona - a.hi), b1 = conb - (conb - b.hi);
-    float a2 = a.hi - a1,            b2 = b.hi - b1;
-    float c11 = a.hi * b.hi;
-    float c21 = (((a1*b1 - c11) + a1*b2) + a2*b1) + a2*b2;
-    float c2  = a.hi * b.lo + a.lo * b.hi;
-    float t1  = c11 + c2;
-    float e   = t1 - c11;
-    float t2  = ((c2 - e) + (c11 - (t1 - e))) + c21 + a.lo * b.lo;
-    float hi  = t1 + t2;
-    float lo  = t2 - (hi - t1);
+    float a1, a2, b1, b2;
+    detail::eft_split(a.hi, split, a1, a2);
+    detail::eft_split(b.hi, split, b1, b2);
+    float c11 = detail::eft_mul(a.hi, b.hi);
+    float c21 = detail::eft_add(detail::eft_add(detail::eft_add(
+                      detail::eft_sub(detail::eft_mul(a1, b1), c11),
+                      detail::eft_mul(a1, b2)),
+                      detail::eft_mul(a2, b1)),
+                      detail::eft_mul(a2, b2));
+    float c2  = detail::eft_add(detail::eft_mul(a.hi, b.lo),
+                                detail::eft_mul(a.lo, b.hi));
+    float t1  = detail::eft_add(c11, c2);
+    float e   = detail::eft_sub(t1, c11);
+    float t2  = detail::eft_add(detail::eft_add(
+                      detail::eft_add(detail::eft_sub(c2, e),
+                                      detail::eft_sub(c11, detail::eft_sub(t1, e))),
+                      c21),
+                      detail::eft_mul(a.lo, b.lo));
+    float hi  = detail::eft_add(t1, t2);
+    float lo  = detail::eft_sub(t2, detail::eft_sub(hi, t1));
     // B9: unscale. ua/ub are exact powers of two (or 1.0f on the non-hazard path,
     // where `hi * 1.0f * 1.0f == hi` bit-for-bit).
     return FloatFloat(hi * ua * ub, lo * ua * ub);
@@ -555,11 +572,15 @@ XPMATH_INLINE_FUNCTION FloatFloat two_prod(float fa, float fb) {
     const float ub = hb ? ldexpf(1.0f,  64) : 1.0f;
     fa = fa * sa;
     fb = fb * sb;
-    float cona = fa * split, conb = fb * split;
-    float a1   = cona - (cona - fa), b1 = conb - (conb - fb);
-    float a2   = fa - a1,            b2 = fb - b1;
-    float s1   = fa * fb;
-    float s2   = (((a1*b1 - s1) + a1*b2) + a2*b1) + a2*b2;
+    float a1, a2, b1, b2;
+    detail::eft_split(fa, split, a1, a2);
+    detail::eft_split(fb, split, b1, b2);
+    float s1   = detail::eft_mul(fa, fb);
+    float s2   = detail::eft_add(detail::eft_add(detail::eft_add(
+                      detail::eft_sub(detail::eft_mul(a1, b1), s1),
+                      detail::eft_mul(a1, b2)),
+                      detail::eft_mul(a2, b1)),
+                      detail::eft_mul(a2, b2));
     return FloatFloat(s1 * ua * ub, s2 * ua * ub);   // B9 unscale, see multiply()
 }
 
@@ -1721,15 +1742,10 @@ XPMATH_INLINE_FUNCTION FloatFloat fdim(FloatFloat a, FloatFloat b) {
 // stored operands -- which for these points hold a, b and c EXACTLY, so no
 // conditioning argument was ever available.
 XPMATH_INLINE_FUNCTION float ff_two_sum(float a, float b, float& err) {
-    const float s  = a + b;
-    const float bb = s - a;
-    err = (a - (s - bb)) + (b - bb);
-    return s;
+    return detail::eft_two_sum(a, b, err);
 }
 XPMATH_INLINE_FUNCTION float ff_quick_two_sum(float a, float b, float& err) {
-    const float s = a + b;
-    err = b - (s - a);
-    return s;
+    return detail::eft_quick_two_sum(a, b, err);
 }
 XPMATH_INLINE_FUNCTION void ff_expansion_push(float* e, int& m, float t) {
     if (t == 0.0f) return;

@@ -1410,7 +1410,8 @@ correctly.
 **Outcome.** The MI250X/gfx90a device producer completed with `last_error() == 0`
 over the full 436,080-row grid; the host MPFR/MPC scorer accepted the raw
 limbs; the committed `validation/sweep/sweep_baseline_mi250.csv.gz` re-scores
-byte-identically from those limbs. Counts:
+byte-identically from those limbs. Absolute gate **PASS, 0 above bound** —
+the same verdict as host and A100. Counts:
 
 | tree | tests | note |
 |---|---|---|
@@ -1420,13 +1421,14 @@ byte-identically from those limbs. Counts:
 
 **Job of record.** Cobalt **1001915**, 2026-09-18, `gpu_amd_mi250` /
 **amdgpu04**, interactive (`qsub -A pepper_hep -I -t 360 -n 1 -q
-gpu_amd_mi250`). ROCm 7.0.2, gcc 13.3.0. Binary `$HOME/sweep_device_gfx90a`
-copied from `/tmp/c8_mi250/device/tests/sweep_device` (built from this tree
-with `--offload-arch=gfx90a`). Producer stdout:
+gpu_amd_mi250`). ROCm 7.0.2, gcc 13.3.0. The committed limbs are the
+**second** produce on that job, from `$HOME/sweep_device_ct` (built at
+`/tmp/c9_hip_eft/device/tests/sweep_device` after the fill-order pin).
+Producer stdout:
 
 ```
 sweep_device: where=hip  grid real=1700 complex=1780  seed=12345
-sweep_device: wrote 436080 rows to /home/rbarik/c8_mi250_raw.csv
+sweep_device: wrote 436080 rows to /home/rbarik/c9_mi250_raw_ct.csv
 ```
 
 `echo exit:$?` printed `0`. No `last_error()` line.
@@ -1438,17 +1440,23 @@ Host scoring (`/tmp/c8_a100/host/tests/sweep_accuracy --ulp --score-results
 # where: mi250
 # oracle-fingerprint: 44f18a4a959f6c29
 # rows: 436080
-  ... containing a DEFECT        : 52   (61116 point(s) total)
+  above bound   : 0 point(s) in 0 (backend,op) cells
+RESULT: PASS — absolute gate (no register given)
 ```
 
-The absolute summary is **FAIL** — 61,116 points above the derived bound
-(×8 allowance) in 52 (backend, op) cells. That is the HIP record, not a
-C8 defect to fix. C8 is a measurement section: commit the score, do not
-repair the arithmetic. The same 61,116 / 52 counts, and the same 436,080
-`(backend, kind, op, point, digits, ulps, bound, state)` tuples, are in
-`validation/mi250/sweep_mi250_scored.csv.gz` from `4c10377`. C7's NOINLINE
-extracts did not move a HIP digit. That older file is still not the gate
-input.
+The first produce on this job (`$HOME/sweep_device_gfx90a` →
+`c8_mi250_raw.csv`) scored 61,116 above bound in 52 cells and matched
+`validation/mi250/sweep_mi250_scored.csv.gz` from `4c10377` tuple-for-tuple.
+That was **not** broken HIP add. hipcc's host clang and g++ evaluate
+`ldexp(1+unit(), in(lo,hi))` in opposite order; both calls advance the
+RNG, so the device was asked a different `b` than the scorer referenced.
+Cancel points (`i%7==1`) do not call `slogunif` and scored 31 digits / 0
+ulps on that first produce. Sequencing `in` then `unit` (the g++ order of
+record) makes hipcc emit the same operand stream. DD real `add` point 0
+then matches host/A100 bit-for-bit
+(`hi=-1.5493758475492803e-18`, `lo=5.717287414722843e-35`) and the
+absolute gate is 0 above bound. The 4c10377 / first-produce file is still
+not the gate input.
 
 Coverage: 4 backends × 39 real ops × 1700 + 4 × 24 complex ops × 1780 =
 436,080 rows, 252 (backend, kind, op) cells. Same grid and seed as the host
@@ -1466,9 +1474,7 @@ are in `1001915_sweep.txt`).
 
 **Gate 2 — host scorer accepts the raw output.** `--score-results` +
 `--where mi250` writes 436,080 scored rows, fingerprint `44f18a4a959f6c29`
-(matches the host record). The absolute column is the 61,116-point FAIL
-above; accepting the raw means the scorer finished, not that HIP is inside
-bound.
+(matches the host record), absolute gate PASS with 0 above bound.
 
 **Gate 3 — re-score of the committed raw against the committed baseline
 exits 0.** That is `sweep_device_gate_mi250`. Measured on this tree:
@@ -1499,20 +1505,18 @@ MI250 scored file, same identity key, same floors the monotone gate uses
 | | |
 |---|---|
 | rows | 436,080 both sides, identical keys |
-| ulps identical | 358,278 (82.2%) |
-| ulps differ at all | 77,802 |
-| worse beyond noise | 66,444 (40,519 with host ulps > 0) |
-| better beyond noise | 3,796 |
-| state moved | 620, all `U → N` |
-| U count | host 33,879 → mi250 33,259 (−620) |
-| N count | host 4,792 → mi250 5,412 (+620) |
-| above bound (×8) | host 0 → mi250 61,116 |
+| ulps identical | 423,647 (97.1%) |
+| ulps differ at all | 12,433 |
+| worse beyond noise | 4,784 (4,776 with host ulps > 0) |
+| better beyond noise | 3,941 |
+| state moved | 0 |
+| U / N | 33,879 / 4,792 both sides |
+| above bound (×8) | host 0 → mi250 0 |
 
-DD real `add` mean digits: host 31.00, A100 31.00, MI250 **7.35**. The
-worst cells are the four complex `pow`s (1,721–1,770 of 1,780 each) and
-the real `mul`/`div`/`fma` family (~1,440 of 1,700). A monotone comparison
-of MI250 against the *host* or *A100* baseline would fail. That is
-expected and is not a defect in the library.
+DD real `add` mean digits: host 31.00, A100 31.00, MI250 **31.00** (min
+31.00). The remaining host-vs-device movement is the same class as C7's
+A100 comparison (thousands of points past the 0.1-digit noise floor, none
+above the derived bound). It is not a gate.
 
 ### Deviation — ISA pin in a measurement section
 
@@ -1529,19 +1533,42 @@ The pin is in this PR, recorded here rather than deferred:
   `CMAKE_CXX_FLAGS`. A login-node `--arch mi250` build cannot silently
   target gfx906 again.
 
-The binary that produced 1001915 was rebuilt with that flag and grepped
-`gfx90a` before the copy to `$HOME/sweep_device_gfx90a`.
+The first 1001915 binary was rebuilt with that flag and grepped `gfx90a`
+before `$HOME/sweep_device_gfx90a`. The committed produce used the same
+pin (`$HOME/sweep_device_ct`).
+
+### Deviation — fill-order pin, compile-time eval, volatile EFT
+
+CORE_PLAN C8 is a measurement section. The 61,116-point FAIL on the first
+produce looked like broken HIP arithmetic. It was not. Three supporting
+changes ride with the new record; only the first moved the absolute gate
+from FAIL to PASS:
+
+- **`Rng::logunif` sequences `in` then `unit`.** Argument evaluation
+  order of `ldexp(1+unit(), in(lo,hi))` is unspecified. g++ takes the
+  exponent first (the host/A100 record); hipcc/clang takes the mantissa
+  first. Same seed, two `b` streams. Pinned in both
+  `scripts/sweep_inputs.hpp` and `scripts/sweep_accuracy.cpp` so the
+  copies stay identical. g++ output is unchanged.
+- **`eval_real_ct` / `eval_complex_ct`.** hipcc does not fold a 39-case
+  device `switch` even when the id is a compile-time constant (C9: DD-add
+  limbs bit-identical to the first produce while a TU that called
+  `xp::add` directly matched host). TD-1 is an oversized gfx90a callee;
+  `if constexpr` makes each kernel one op. This is the producer shape,
+  not a library change.
+- **Volatile EFT wrappers under `__HIP_DEVICE_COMPILE__`.** hipcc's
+  `-ffp-contract=off` reaches host clang, not the AMDGPU pass. Isolated
+  `xp::add` already matched host before the fill pin; the wrappers stay
+  so TwoSum/TwoProd cannot reassociate on a future HIP bump. Do not add
+  `-Xarch_device` on hipcc: unused-argument warning at link (measured,
+  `c9_hip_eft`).
 
 ### What C8 does NOT cover
 
-- **The 61,116 above-bound points are the record, not a punch list.**
-  Do not "fix HIP add" inside a measurement PR.
 - **docs/DOMAINS.md is still the host record.** `gen_domains.py` skips the
   `where` column; C8 does not regenerate it from the MI250 score.
-- **No second MI250 job.** 1001915 is the one production sweep. A rerun
-  through `validation/mi250/run_mi250_sweep.sh` is how a later commit
-  re-measures.
+- **No second Cobalt job id.** Both produces ran on interactive 1001915.
+  A later re-measure goes through `validation/mi250/run_mi250_sweep.sh`.
 - **`scripts/xpm_lint_device_asm.sh` was not re-run on this binary.** That
   needs `--save-temps` object files C8 did not keep. The producer finished
   with exit 0 over the full grid; that is not a substitute for tiers 1–4.
-  The C7 NOINLINE extracts did not change the HIP score versus `4c10377`.

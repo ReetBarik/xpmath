@@ -64,14 +64,15 @@
 // payload, a signed zero and a subnormal all survive that and only that.
 //
 // ONE KERNEL PER (BACKEND, OP), BY CONSTRUCTION
-// xpsweep::eval_real / eval_complex take the op id as a runtime argument, so
-// that their text matches the scorer's copy exactly. This file nevertheless
-// instantiates them at a COMPILE-TIME id, which folds the switch to its single
-// live case. That is not a micro-optimisation: TD-1
-// (docs/ROCM_BRANCH_RELAXATION_BUG.md) is a gfx90a miscompile of an OVERSIZED
-// device callee, and a 39-case switch inlined into one kernel is precisely the
-// shape that triggers it. 252 small kernels is the safe arrangement; one giant
-// one is the unsafe arrangement that happens to be less typing.
+// The scorer's evaluators take the op id as a runtime argument so their text
+// matches sweep_accuracy.cpp. Passing a compile-time constant into that
+// switch is NOT enough on gfx90a: hipcc leaves the 39-case callee intact
+// (C9: DD-add limbs bit-identical to C8 across all 1700 points, while a TU
+// that called `xp::add` directly matched host on the same GPU). TD-1
+// (docs/ROCM_BRANCH_RELAXATION_BUG.md) is a miscompile of an OVERSIZED
+// device callee; that shared switch is exactly the shape. The kernels
+// therefore call eval_real_ct / eval_complex_ct, whose `if constexpr` makes
+// each instantiation the size of one operation.
 //
 // THE DOMAIN DIAGNOSTICS ARE COMPILED OUT (XPMATH_ENABLE_DIAGNOSTICS=0, set on
 // the target). The sweep evaluates every op at overflow, at poles and outside
@@ -174,7 +175,7 @@ struct RealKernel {
 
   XPMATH_INLINE_FUNCTION void operator()(std::size_t i) const {
     const S sa(a[i]), sb(b[i]), sc(c[i]);
-    const S r = xpsweep::eval_real<S>(ID, sa, sb, sc);
+    const S r = xpsweep::eval_real_ct<S, ID>(sa, sb, sc);
     Limbs<S>::store(r, out + i * Limbs<S>::n);
   }
 };
@@ -196,7 +197,7 @@ struct ComplexKernel {
     // scorer interprets it, so the flag is consumed and dropped here; it exists
     // so this evaluator stays textually identical to the scorer's.
     bool    is_real = false;
-    const Z r = xpsweep::eval_complex<S, Z>(ID, a, b, is_real);
+    const Z r = xpsweep::eval_complex_ct<S, Z, ID>(a, b, is_real);
     (void)is_real;
     const int n = Limbs<S>::n;
     Limbs<S>::store(r.re, out + i * (2 * n));

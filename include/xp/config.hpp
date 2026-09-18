@@ -302,5 +302,83 @@ using std::rint;
 using std::sqrt;
 #endif
 
+// ============================================================
+// 5. Error-free transforms — HIP device must not reassociate them
+// ============================================================
+// Knuth TwoSum / Dekker TwoProd are sequences of IEEE rounded ops whose
+// residuals are the rounding error. hipcc/gfx90a (ROCm 7.0.2) reassociates
+// those residuals on the device pass even when CMAKE_CXX_FLAGS carries
+// -ffp-contract=off: that flag reaches the host clang, not the AMDGPU
+// backend. CUDA is fine because --fmad=false is a device flag. Host g++
+// is fine because -ffp-contract=off is the flag it honours.
+//
+// hipcc's -ffp-contract=off reaches the host clang, not AMDGPU; CUDA
+// --fmad=false is a device flag. Volatile forces each rounded op to
+// hit the pipe on the HIP device pass. Host / CUDA / SYCL keep the
+// bare operators so those records stay bit-identical.
+//
+// The C8 first-produce 61,116-above-bound table was NOT this. That was
+// unsequenced Rng::logunif (g++ vs hipcc argument order) — see
+// scripts/sweep_inputs.hpp and docs/CORE_PLAN_STATUS.md C8. Isolated
+// xp::add already matched host on gfx90a before these wrappers. They
+// stay so a future HIP bump cannot reassociate TwoSum/TwoProd.
+template <class T>
+XPMATH_INLINE_FUNCTION T eft_add(T a, T b) {
+#if defined(__HIP_DEVICE_COMPILE__)
+    volatile T va = a;
+    volatile T vb = b;
+    return va + vb;
+#else
+    return a + b;
+#endif
+}
+
+template <class T>
+XPMATH_INLINE_FUNCTION T eft_sub(T a, T b) {
+#if defined(__HIP_DEVICE_COMPILE__)
+    volatile T va = a;
+    volatile T vb = b;
+    return va - vb;
+#else
+    return a - b;
+#endif
+}
+
+template <class T>
+XPMATH_INLINE_FUNCTION T eft_mul(T a, T b) {
+#if defined(__HIP_DEVICE_COMPILE__)
+    volatile T va = a;
+    volatile T vb = b;
+    return va * vb;
+#else
+    return a * b;
+#endif
+}
+
+// Knuth TwoSum. No |a|>=|b| assumption.
+template <class T>
+XPMATH_INLINE_FUNCTION T eft_two_sum(T a, T b, T& err) {
+    const T s  = eft_add(a, b);
+    const T bb = eft_sub(s, a);
+    err = eft_add(eft_sub(a, eft_sub(s, bb)), eft_sub(b, bb));
+    return s;
+}
+
+// FastTwoSum. Caller guarantees |a| >= |b|.
+template <class T>
+XPMATH_INLINE_FUNCTION T eft_quick_two_sum(T a, T b, T& err) {
+    const T s = eft_add(a, b);
+    err = eft_sub(b, eft_sub(s, a));
+    return s;
+}
+
+// Veltkamp split: a = hi + lo with ~half the mantissa in each.
+template <class T>
+XPMATH_INLINE_FUNCTION void eft_split(T a, T split, T& hi, T& lo) {
+    const T temp = eft_mul(split, a);
+    hi = eft_sub(temp, eft_sub(temp, a));
+    lo = eft_sub(a, hi);
+}
+
 }  // namespace detail
 }  // namespace xp

@@ -22,9 +22,11 @@
 #        sweep_accuracy --score-results <raw> --where mi250 --out <scored>
 #      and, if the committed baseline exists, monotone-compare against it.
 #
-# Job 1001915 (2026-09-18, amdgpu04, interactive) is the run of record. It
-# did steps 2 and 3 by hand after a login-node build; this script is the
-# submit-able form of that recipe.
+# Job 1001915 (2026-09-18, amdgpu04, interactive) is the run of record.
+# The committed limbs are the second produce on that job, after Rng::logunif
+# was sequenced (in then unit) so hipcc and g++ draw the same operands.
+# Steps 2 and 3 were done by hand after a login-node build; this script is
+# the submit-able form of that recipe.
 #
 # SUBMIT — script mode:
 #     qsub -A pepper_hep -n 1 -t 360 -q gpu_amd_mi250 --mode script \
