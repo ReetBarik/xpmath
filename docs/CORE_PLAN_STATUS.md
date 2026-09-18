@@ -1248,3 +1248,155 @@ nothing. It lands with the first arch baseline.
 - **The scoring numbers did not move.** The re-baseline added a column; it
   did not change a digit, ulp, bound or state. Gate 1 measured that before
   the format change.
+
+---
+
+## C7 — A100 device sweep
+
+**Branch:** `core/c7-a100-sweep`. **Base:** `main` @ `4c10377`.
+
+**Outcome.** The A100/sm_80 device producer completed with `last_error() == 0`
+over the full 436,080-row grid; the host MPFR/MPC scorer accepted the raw
+limbs; the committed `validation/sweep/sweep_baseline_a100.csv.gz` re-scores
+byte-identically from those limbs. Counts:
+
+| tree | tests | note |
+|---|---|---|
+| `<dir>/host` | 40 | +`sweep_device_gate_a100` +`sweep_device_gate_selftest` |
+| `<dir>/device` | 24 | unchanged |
+| bare both-ON | 63 | 40 + 24 − 1 shared (`build_provenance`) |
+
+**Job of record.** Cobalt **1001685**, 2026-09-18, `gpu_a100` / **gpu06**,
+interactive (`qsub -A pepper_hep -I -t 360 -n 1 -q gpu_a100`). CUDA 12.9.1,
+gcc 13.3.0. Binary `$HOME/sweep_device_sm80` copied from
+`/tmp/c8_a100/device/tests/sweep_device` (built from this tree, then still
+dirty). Producer stdout:
+
+```
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/c7_a100_raw.csv
+```
+
+Host scoring (`/tmp/c8_a100/host/tests/sweep_accuracy --ulp --score-results
+... --where a100`):
+
+```
+# where: a100
+# oracle-fingerprint: 44f18a4a959f6c29
+# rows: 436080
+RESULT: PASS — absolute gate (no register given)
+  above bound   : 0
+  unresolved    : 0          (in the gate summary; the per-op table still
+                              carries U/N columns the format cannot score)
+```
+
+Coverage: 4 backends × 39 real ops × 1700 + 4 × 24 complex ops × 1780 =
+436,080 rows, 252 (backend, kind, op) cells. Same grid and seed as the host
+record.
+
+Raw limbs: `validation/a100/logs/1001685_raw.csv.gz`. Scored baseline:
+`validation/sweep/sweep_baseline_a100.csv.gz`. Cobalt droppings under
+`validation/a100/logs/1001685.{cobaltlog,error,output}` (`.output` is empty:
+the job was interactive, stdout stayed on the terminal; the producer lines
+are in `1001685_sweep.txt`).
+
+### Gate
+
+**Gate 1 — producer completes.** `last_error() == 0`, 436,080 rows, exit 0.
+
+**Gate 2 — host scorer accepts the raw output.** `--score-results` +
+`--where a100` writes 436,080 scored rows, fingerprint `44f18a4a959f6c29`
+(matches the host record), absolute gate PASS with 0 above bound.
+
+**Gate 3 — re-score of the committed raw against the committed baseline
+exits 0.** That is `sweep_device_gate_a100`. It does not launch on a GPU:
+GitHub re-scores the committed limbs. The GPU re-measurement is
+`validation/a100/run_a100_sweep.sh`.
+
+**Gate 4 — `sweep_device_gate_selftest`.** The monotone poison matrix, pointed
+at the A100 baseline via `--score-results` of the committed raw.
+
+### Host vs A100 (informational; not a gate)
+
+Compared `validation/sweep/sweep_baseline.csv.gz` (`where=host`) to the A100
+scored file, same identity key, same floors the monotone gate uses
+(`kNoiseFactor = 10^0.1`).
+
+| | |
+|---|---|
+| rows | 436,080 both sides, identical keys |
+| ulps identical | 429,171 (98.4%) |
+| ulps differ at all | 6,909 |
+| worse beyond noise | 1,221 (1,219 with host ulps > 0) |
+| better beyond noise | 1,130 |
+| state moved | 3,507, all `S → N` |
+| U count | 33,879 both (unchanged) |
+| N count | host 4,792 → a100 8,299 (+3,507) |
+
+The 3,507 `S → N` rows are almost entirely **DD complex atan** (1,772) and
+**DD complex atanh** (1,735): the A100 score marks them unscorable (digit
+gate / the format cannot carry the question under FTZ), the host score
+does not. That is why this section commits a *separate* A100 baseline rather
+than asking the host monotone gate to swallow device rounding. The 1,221 /
+1,130 worse/better split is otherwise spread across inverse-trig and log/pow
+cells; it is the noise a per-arch record exists to absorb.
+
+A monotone comparison of A100 against the *host* baseline would fail. That
+is expected and is not a defect in the library.
+
+### Deviation — library fix in a measurement section
+
+CORE_PLAN C7 is a measurement section: produce, score, commit, do not fix
+defects. The A100 producer could not complete that charter as-shipped.
+`compute-sanitizer --tool memcheck` reported `Invalid __local__ write of
+size 4 bytes` in `exp(QuadFloat)` (called from `exp(QuadFloatComplex)`),
+then, after extracting the Cody-Waite/Taylor/squarings helpers, in
+`atan2(QuadFloat)` (via `angle()` inlining `sincos`). `cudaLimitStackSize`
+does not help: nvcc/ptxas underestimates the `__local__` spill frame of an
+oversized NOINLINE callee and sizes it statically (TD-4 in
+`docs/TOOLCHAIN_DEFECTS.md`).
+
+The fix is in this PR, recorded here rather than deferred:
+
+- `detail::qf_exp_cw_reduce` / `qf_exp_taylor` / `qf_exp_squarings` extracted
+  from `exp(QF)` as `XPMATH_NOINLINE_FUNCTION`.
+- `sin`/`cos` already (QF) or newly (TF) NOINLINE; `angle()` and
+  `exp(QFC)` / `exp(TFC)` call them instead of inlining `sincos`.
+- Payne-Hanek `xp_ph_reduce` and the ipio2/pio2 lookups NOINLINE, matching
+  the generator (`scripts/gen_trig_reduction_constants.cpp`).
+- `XPMATH_FWDDECL_FUNCTION` for forward declarations, so `inline` /
+  `noinline` do not disagree across a declaration and a definition.
+- CUDA `XPMATH_NOINLINE_FUNCTION` is `__host__ __device__ __noinline__
+  inline` (COMDAT + noinline). `-Wattributes` on that token is irreducible;
+  a CUDA-only `#pragma GCC diagnostic ignored "-Wattributes"` in
+  `include/xp/config.hpp` is the suppression that actually reaches nvcc's
+  host pass. A `CMAKE_CUDA_FLAGS -Xcompiler=-Wno-attributes` line is also
+  present and does **not** reach `nvcc_wrapper` used as `CXX`.
+- `tests/tf_fma_guard_test.cpp`: `prod_fail` / `sqr_fail` declared only
+  under `KOKKOS_EP_CONTRACTION_MODE == 0`, which is the only arm that uses
+  them (nvcc 177-D otherwise).
+
+`compute-sanitizer` after the fix: `ERROR SUMMARY: 0 errors` over the full
+grid. That sanitizer run is supporting evidence, not a plan deliverable —
+C7's gates are the four above.
+
+`scripts/sweep_device.cpp` still raises the CUDA stack limit to 16 KB. That
+did **not** fix TD-4; it is left as headroom for the frames ptxas sized
+correctly.
+
+### What C7 does NOT cover
+
+- **No MI250X baseline.** `sweep_baseline_mi250.csv.gz` is still absent;
+  the mi250 arm of the CMake loop still `FATAL_ERROR`s if that file is
+  committed without an `add_test()` body. C8 owns that. The scored artifact
+  under `validation/mi250/sweep_mi250_scored.csv.gz` (commit `4c10377`) is
+  not the gate input.
+- **docs/DOMAINS.md is still the host record.** `gen_domains.py` skips the
+  `where` column; C7 does not regenerate it from the A100 score.
+- **No second A100 job.** 1001685 is the one production sweep. A rerun
+  through `validation/a100/run_a100_sweep.sh` is how a later commit
+  re-measures.
+- **HIP/gfx90a was not re-sanitized.** The NOINLINE pattern is the same
+  class as the gfx90a TD-1 mitigation and is expected to be safe there;
+  C8 is the place that measures it.

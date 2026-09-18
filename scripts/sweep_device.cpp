@@ -524,6 +524,28 @@ int main(int argc, char** argv) {
     }
   }
 
+#if defined(XPT_BACKEND_CUDA)
+  {
+    // Safety margin, not the CUDA frame-size fix. nvcc/ptxas sizes the
+    // __local__ spill frame statically; cudaLimitStackSize cannot enlarge a
+    // frame ptxas underestimated, which is what produced the Invalid
+    // __local__ write in exp(QFC) / atan2(QF) (TD-4). The real fix is
+    // XPMATH_NOINLINE_FUNCTION on the oversized callees. 16 KB is left as
+    // headroom for the frames ptxas DID size correctly.
+    cudaError_t serr = cudaDeviceSetLimit(cudaLimitStackSize, 16384);
+    if (serr != cudaSuccess) {
+      std::fprintf(stderr,
+        "sweep_device: cudaDeviceSetLimit(stackSize,16384) failed: %d (%s)\n",
+        (int)serr, cudaGetErrorString(serr));
+    }
+    // Also clear any error the limit call may have posted to the CUDA error queue.
+    cudaGetLastError();
+    std::size_t actual = 0;
+    cudaDeviceGetLimit(&actual, cudaLimitStackSize);
+    std::fprintf(stderr, "sweep_device: CUDA stack limit = %zu B\n", actual);
+  }
+#endif
+
   RealAll<xpsweep::R_COUNT - 1>::run(ctx);
   ComplexAll<xpsweep::C_COUNT - 1>::run(ctx);
 

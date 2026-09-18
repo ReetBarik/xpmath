@@ -75,7 +75,7 @@ The wrapper drives both halves for a named GPU and returns one merged verdict:
 
 ```sh
 scripts/xpm_build.sh --arch {host|a100|mi250} --build-dir <dir>
-# <dir>/host    g++, no Kokkos, identical on every arch — 38 tests
+# <dir>/host    g++, no Kokkos, identical on every arch — 40 tests
 # <dir>/device  the arch's compiler and Kokkos       — 24 tests
 scripts/xpm_build.sh --arch a100 --build-dir <dir> --only device   # on a compute node
 ```

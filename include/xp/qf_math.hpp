@@ -91,21 +91,21 @@ namespace xp {
 struct QuadFloat;
 XPMATH_INLINE_FUNCTION QuadFloat add(QuadFloat a, QuadFloat b);
 XPMATH_INLINE_FUNCTION QuadFloat subtract(QuadFloat a, QuadFloat b);
-XPMATH_NOINLINE_FUNCTION QuadFloat multiply(QuadFloat a, QuadFloat b);
-XPMATH_NOINLINE_FUNCTION QuadFloat divide(QuadFloat a, QuadFloat b);
+XPMATH_FWDDECL_FUNCTION QuadFloat multiply(QuadFloat a, QuadFloat b);
+XPMATH_FWDDECL_FUNCTION QuadFloat divide(QuadFloat a, QuadFloat b);
 XPMATH_INLINE_FUNCTION QuadFloat multiply_scalar(QuadFloat a, float b);
 XPMATH_INLINE_FUNCTION QuadFloat divide_scalar(QuadFloat a, float b);
 XPMATH_INLINE_FUNCTION QuadFloat mul_pwr2(QuadFloat a, float b);
 XPMATH_INLINE_FUNCTION QuadFloat negate(QuadFloat a);
 XPMATH_INLINE_FUNCTION QuadFloat abs(QuadFloat a);
 XPMATH_INLINE_FUNCTION QuadFloat sqr(QuadFloat a);
-XPMATH_NOINLINE_FUNCTION QuadFloat sqrt(QuadFloat a);
+XPMATH_FWDDECL_FUNCTION QuadFloat sqrt(QuadFloat a);
 XPMATH_INLINE_FUNCTION QuadFloat round_to_nearest_int(QuadFloat a);
 XPMATH_INLINE_FUNCTION QuadFloat pow_int(QuadFloat a, int n);
 // T3.0b transcendentals (forward decls — struct-independent, but several call
 // each other, so declare the whole family up front).
-XPMATH_NOINLINE_FUNCTION QuadFloat exp(QuadFloat a);
-XPMATH_NOINLINE_FUNCTION QuadFloat log(QuadFloat a);
+XPMATH_FWDDECL_FUNCTION QuadFloat exp(QuadFloat a);
+XPMATH_FWDDECL_FUNCTION QuadFloat log(QuadFloat a);
 XPMATH_INLINE_FUNCTION QuadFloat pow(QuadFloat a, QuadFloat b);
 XPMATH_INLINE_FUNCTION void      sincos(QuadFloat a, QuadFloat& sin_a, QuadFloat& cos_a);
 XPMATH_INLINE_FUNCTION void      sinhcosh(QuadFloat a, QuadFloat& sinh_a, QuadFloat& cosh_a);
@@ -1007,6 +1007,62 @@ XPMATH_INLINE_FUNCTION QuadFloat pow_int(QuadFloat a, int n) {
 // faithfully from QD and cited. sin_table/cos_table/inv_fact are therefore NOT
 // generated — see docs/PORT_NOTES_QF.md.
 
+// Cody-Waite six-piece ln2 reduction for exp(QuadFloat). Extracted as a
+// NOINLINE device function for the same reason sin/cos are NOINLINE in this
+// file: six sequential subtract() calls — each inlining sloppy_add + renorm_4
+// (~150 ops) — placed directly inside exp(QF) balloon its inlined body to a
+// size where nvcc miscomputes the register-spill frame, producing Invalid
+// __local__ writes when exp(QF) is called from exp(QuadFloatComplex).  The
+// fix is identical to the sincos-in-exp(QFC) fix (see qf_complex.hpp:exp):
+// move the large inline block into a NOINLINE callee so the offending bodies
+// are outside exp(QF)'s own frame.  cudaLimitStackSize does NOT help; the
+// spill frame is statically sized by ptxas and #pragma unroll 1 had no effect
+// because the six subtracts are fixed sequential code, not a loop.
+namespace detail {
+XPMATH_NOINLINE_FUNCTION QuadFloat qf_exp_cw_reduce(QuadFloat a, float kf) {
+    // Six-piece 16-bit-chunk decomposition of ln2.  Bit patterns are the same
+    // as those in exp(QuadFloat) (KI-42); kept here rather than passed as args
+    // so they fold to immediates in the helper's own compilation unit.
+    const float kLn2_1 =  0x1.62e4p-1f;
+    const float kLn2_2 =  0x1.7f7ep-20f;
+    const float kLn2_3 = -0x1.c61p-37f;
+    const float kLn2_4 = -0x1.950ep-54f;
+    const float kLn2_5 =  0x1.e3b4p-72f;
+    const float kLn2_6 = -0x1.9ffp-90f;
+    QuadFloat s = subtract(a,  QuadFloat(kf * kLn2_1));
+    s = subtract(s, QuadFloat(kf * kLn2_2));
+    s = subtract(s, QuadFloat(kf * kLn2_3));
+    s = subtract(s, QuadFloat(kf * kLn2_4));
+    s = subtract(s, QuadFloat(kf * kLn2_5));
+    s = subtract(s, QuadFloat(kf * kLn2_6));      // |s| <= log2/2
+    return s;
+}
+
+// Taylor series e^r - 1 for exp(QuadFloat).  Extracted NOINLINE for the same
+// reason as qf_exp_cw_reduce: divide_scalar (XPMATH_INLINE_FUNCTION) inlined
+// into the loop body within exp(QF) was the second-largest contributor to
+// exp(QF)'s frame size after the Cody-Waite subtracts.  With it here instead,
+// its inline body is outside exp(QF)'s own frame.
+XPMATH_NOINLINE_FUNCTION QuadFloat qf_exp_taylor(QuadFloat r, float eps) {
+    // sum = r + r^2/2! + r^3/3! + ... = e^r - 1, |r| <= log2/2/2^6.
+    QuadFloat term = r, sum = r;
+    for (int l1 = 2; l1 <= 60; ++l1) {
+        term = divide_scalar(multiply(term, r), (float)l1);
+        sum  = add(sum, term);
+        if (fabs(term.f0) <= eps * fabs(sum.f0)) break;
+    }
+    return sum;
+}
+
+// nq=6 squarings in (e^r - 1) form: s -> s*(s+2), iterated.  Extracted
+// NOINLINE so the inline add body (sloppy_add + renorm_4, ~150 ops) does not
+// contribute to exp(QF)'s frame.
+XPMATH_NOINLINE_FUNCTION QuadFloat qf_exp_squarings(QuadFloat sum) {
+    for (int i = 0; i < 6; ++i) sum = multiply(sum, add(sum, QuadFloat(2.0f)));
+    return sum;
+}
+}  // namespace detail
+
 // e^a.  Mathematical mirror of exp(qd_real), QD 2.3.24 qd_real.cpp:925-983
 // (same reduce-by-m*log2 / scale-by-2^-nq / Taylor / square-nq-times skeleton),
 // but with the table-free divide-by-k Taylor of dd_math.hpp:345 / ff_math.hpp:347
@@ -1055,19 +1111,9 @@ XPMATH_NOINLINE_FUNCTION QuadFloat exp(QuadFloat a) {
     //     5 pieces 1393 rows > 1 ulp, worst 1.331e+04   <- one short is FATAL
     //     6 pieces    0 rows > 1 ulp, worst 0.6732
     // and 6 pieces equals a 400-bit oracle reduction, so nothing is left.
-    const float kLn2_1 =  0x1.62e4p-1f;    // 15 significant bits
-    const float kLn2_2 =  0x1.7f7ep-20f;   // 16
-    const float kLn2_3 = -0x1.c61p-37f;    // 13
-    const float kLn2_4 = -0x1.950ep-54f;   // 16
-    const float kLn2_5 =  0x1.e3b4p-72f;   // 15
-    const float kLn2_6 = -0x1.9ffp-90f;    // 13
+    // The six subtracts are in a NOINLINE helper -- see detail::qf_exp_cw_reduce.
     const float kf = (float)nz;            // exact integer, |kf| <= 151
-    s0 = subtract(a,  QuadFloat(kf * kLn2_1));
-    s0 = subtract(s0, QuadFloat(kf * kLn2_2));
-    s0 = subtract(s0, QuadFloat(kf * kLn2_3));
-    s0 = subtract(s0, QuadFloat(kf * kLn2_4));
-    s0 = subtract(s0, QuadFloat(kf * kLn2_5));
-    s0 = subtract(s0, QuadFloat(kf * kLn2_6));      // |s0| <= log2/2
+    s0 = detail::qf_exp_cw_reduce(a, kf);           // |s0| <= log2/2
 
     if (s0.f0 == 0.0f && s0.f1 == 0.0f) {
         return QuadFloat(ldexpf(1.0f, nz));         // result = 2^nz exactly
@@ -1079,30 +1125,13 @@ XPMATH_NOINLINE_FUNCTION QuadFloat exp(QuadFloat a) {
     // instead of doubling it. See dd_math.hpp's exp for the derivation. nq = 6
     // here, so the shipped form multiplied the series error by 64 and left
     // `log` an absolute floor of ~9.3 units of 2^-96, flat in |ln v|.
-    s1 = mul_pwr2(s0, ldexpf(1.0f, -nq));           // r = s0 / 2^nq
-    QuadFloat s2 = s1, s3 = s1;                     // term = r, sum = e^r - 1
-    // gfx90a size hygiene: this loop has a data-dependent early exit, so a
-    // full unroll buys little and costs I-cache -- and the bytes it adds are
-    // what pushes the enclosing callee past the 131,068-byte S_BRANCH reach.
-    // (exp Taylor series)
-#if defined(__clang__)
-#pragma clang loop unroll_count(4)
-#endif
-    for (int l1 = 2; l1 <= 60; ++l1) {
-        s0 = multiply(s2, s1);
-        s2 = divide_scalar(s0, (float)l1);      // term = r^l1 / l1!
-        s3 = add(s3, s2);
-        if (detail::fabs(s2.f0) <= eps * detail::fabs(s3.f0)) break;
-        // NOTE: no return-0 on l1 == 60 (see header comment); fall through with s3.
-    }
-    // gfx90a size hygiene: this loop has a data-dependent early exit, so a
-    // full unroll buys little and costs I-cache -- and the bytes it adds are
-    // what pushes the enclosing callee past the 131,068-byte S_BRANCH reach.
-    // (exp squaring ladder)
-#if defined(__clang__)
-#pragma clang loop unroll_count(4)
-#endif
-    for (int i = 0; i < nq; ++i) s3 = multiply(s3, add(s3, QuadFloat(2.0f)));
+    // Scale down by 2^nq (exact, no Dekker splitter), run Taylor and squarings
+    // through NOINLINE helpers so their large inline bodies (divide_scalar and
+    // sloppy_add respectively) stay outside exp(QF)'s own frame.  The helpers
+    // are in detail::qf_exp_taylor / detail::qf_exp_squarings.
+    const QuadFloat r = mul_pwr2(s0, ldexpf(1.0f, -nq)); // r = s0 / 2^nq
+    QuadFloat s3 = detail::qf_exp_taylor(r, eps);         // e^r - 1
+    s3 = detail::qf_exp_squarings(s3);                    // (1+s)^(2^nq) - 1
     s3 = add(QuadFloat(1.0f), s3);
 
     // Final scaling by 2^nz.  PORT_NOTES §4a: power-of-2 multiplication is exact
@@ -1419,11 +1448,20 @@ XPMATH_INLINE_FUNCTION void sincos(QuadFloat a, QuadFloat& sin_a, QuadFloat& cos
 }
 
 // tan(a) = sin(a)/cos(a).  QD qd_real.cpp:2473 (sincos then s/c).
-XPMATH_INLINE_FUNCTION QuadFloat sin(QuadFloat a) {
-    QuadFloat s, c; sincos(a, s, c); return s;
+// sin and cos are NOINLINE: a kernel calling exp(QuadFloatComplex) calls both,
+// and inlining sincos's body into each would produce a frame that is too large
+// for nvcc to correctly lay out alongside a NOINLINE exp(QF) call.  Each
+// returns a single QuadFloat (4 floats = registers, no SRet), same pattern as
+// NOINLINE exp(QuadFloat).  exp(QF) itself is guarded against the same
+// ptxas spill-frame underestimate by extracting the Cody-Waite reduction,
+// Taylor loop and squarings into NOINLINE helpers (detail::qf_exp_cw_reduce,
+// qf_exp_taylor, qf_exp_squarings) — see the exp body above and
+// qf_complex.hpp:exp for context.
+XPMATH_NOINLINE_FUNCTION QuadFloat sin(QuadFloat a) {
+    QuadFloat s = QuadFloat(0.0f), c = QuadFloat(0.0f); sincos(a, s, c); return s;
 }
-XPMATH_INLINE_FUNCTION QuadFloat cos(QuadFloat a) {
-    QuadFloat s, c; sincos(a, s, c); return c;
+XPMATH_NOINLINE_FUNCTION QuadFloat cos(QuadFloat a) {
+    QuadFloat s = QuadFloat(0.0f), c = QuadFloat(0.0f); sincos(a, s, c); return c;
 }
 XPMATH_INLINE_FUNCTION QuadFloat tan(QuadFloat a) {
     QuadFloat s, c; sincos(a, s, c); return divide(s, c);
@@ -1519,9 +1557,14 @@ XPMATH_INLINE_FUNCTION QuadFloat angle(QuadFloat x, QuadFloat y) {
     QuadFloat a  = QuadFloat(detail::atan2(ny.f0, nx.f0));   // FP32 seed
     bool use_x = (detail::fabs(nx.f0) <= detail::fabs(ny.f0));
     QuadFloat target = use_x ? nx : ny;
+    // nvcc/CUDA frame-size hygiene: inline sincos in this 3-iteration Newton loop
+    // caused atan2(QF,QF) to be 175 KB of device code — the same ptxas spill-frame
+    // miscompute as sincos-in-exp(QFC).  Calling NOINLINE sin/cos instead keeps the
+    // sincos body outside atan2's own frame.  Redundant argument reduction is
+    // acceptable in sweep_device context (same tradeoff as exp(QFC); see qf_complex.hpp).
     for (int k = 0; k < 3; ++k) {
-        QuadFloat sin_a, cos_a;
-        sincos(a, sin_a, cos_a);
+        QuadFloat cos_a = cos(a);   // NOINLINE — sincos body stays in cos(QF)'s frame
+        QuadFloat sin_a = sin(a);   // NOINLINE — sincos body stays in sin(QF)'s frame
         if (use_x) {
             // Newton on cos: z' = z - (x - cos z)/(-sin z) -> a -= (target-cos)/sin
             a = subtract(a, divide(subtract(target, cos_a), sin_a));
@@ -1612,9 +1655,15 @@ XPMATH_INLINE_FUNCTION void sinhcosh(QuadFloat a, QuadFloat& sinh_a, QuadFloat& 
         // gfx90a size hygiene: this loop has a data-dependent early exit, so a
         // full unroll buys little and costs I-cache -- and the bytes it adds are
         // what pushes the enclosing callee past the 131,068-byte S_BRANCH reach.
+        // nvcc/CUDA size hygiene: same shape as exp's Taylor loop — two inline
+        // divide_scalar calls per iteration, inlined into sinhcosh (which is
+        // XPMATH_INLINE_FUNCTION), which is then inlined into NOINLINE sinh/cosh.
+        // Unrolling inflates the sinh/cosh spill frame past ptxas's estimate.
         // (sinhcosh sinh/cosh Taylor series)
 #if defined(__clang__)
 #pragma clang loop unroll_count(4)
+#elif defined(__CUDACC__)
+#pragma unroll 1
 #endif
         for (int k = 1; k <= 60; ++k) {
             sinh_term = divide_scalar(multiply(sinh_term, a2), (float)((2*k) * (2*k + 1)));

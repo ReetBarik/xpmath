@@ -36,8 +36,8 @@ bound derived from the format and the condition number, and **two** ctest gates
 over that number (`sweep_absolute_gate`, `sweep_monotone_gate`), each with a
 self-test target (`*_selftest`) that poisons its input and requires it to fail.
 Read **docs/CORRECTNESS.md** before adding anything that judges correctness; the
-whole point is that nothing else issues a competing verdict. **61 ctest targets
-with Kokkos and the same 61 without it** (`-DXPMATH_WITH_KOKKOS=OFF`) — asserted
+whole point is that nothing else issues a competing verdict. **63 ctest targets
+with Kokkos and the same 63 without it** (`-DXPMATH_WITH_KOKKOS=OFF`) — asserted
 by CI in both lanes as a COUNT, not assumed; the two `ctest -N` name lists were
 additionally MEASURED identical as sets on the C4 chunk-E gate run. With no
 `if(XPMATH_WITH_KOKKOS)` block left there is no mechanism to register a

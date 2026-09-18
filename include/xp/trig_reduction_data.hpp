@@ -77,7 +77,7 @@ inline constexpr int kPhGuardFF      = 107;   // p=48  C=54.741
 inline constexpr int kPhGuardTF      = 155;   // p=72  C=78.649
 inline constexpr int kPhGuardQF      = 202;   // p=96  C=101.121
 
-XPMATH_INLINE_FUNCTION double xp_ph_ipio2_d(int k) {
+XPMATH_NOINLINE_FUNCTION double xp_ph_ipio2_d(int k) {
     constexpr double t[52] = {
         10680707.0,         7228996.0,         1387004.0,         2578385.0,        16069853.0,        12639074.0,
          9804092.0,         4427841.0,        16666979.0,        11263675.0,        12935607.0,         2387514.0,
@@ -92,7 +92,7 @@ XPMATH_INLINE_FUNCTION double xp_ph_ipio2_d(int k) {
     return t[k];
 }
 
-XPMATH_INLINE_FUNCTION float xp_ph_ipio2_f(int k) {
+XPMATH_NOINLINE_FUNCTION float xp_ph_ipio2_f(int k) {
     constexpr float t[24] = {
          2607.0f,         2435.0f,         1764.0f,         3652.0f,          338.0f,         2556.0f,          629.0f,         2001.0f,
          3923.0f,         1245.0f,         3085.0f,         2914.0f,         2393.0f,         2364.0f,         1081.0f,           65.0f,
@@ -106,7 +106,7 @@ XPMATH_INLINE_FUNCTION float xp_ph_ipio2_f(int k) {
 // 110, QF needs 100); one word fewer misses it, which is what makes the
 // count-is-pinned assertion in tests/trig_reduction_test.cpp bite.
 // MEASURED residuals: 2^-163.62 (FP64, 3 words) and 2^-103.22 (FP32, 4 words).
-XPMATH_INLINE_FUNCTION double xp_ph_pio2_d(int k) {
+XPMATH_NOINLINE_FUNCTION double xp_ph_pio2_d(int k) {
     constexpr double t[3] = {
         0x1.921fb54442d180000000p+0,
         0x1.1a62633145c070000000p-54,
@@ -115,7 +115,7 @@ XPMATH_INLINE_FUNCTION double xp_ph_pio2_d(int k) {
     return t[k];
 }
 
-XPMATH_INLINE_FUNCTION float xp_ph_pio2_f(int k) {
+XPMATH_NOINLINE_FUNCTION float xp_ph_pio2_f(int k) {
     constexpr float t[4] = {
         0x1.921fb6000000p+0f,
         -0x1.777a5c000000p-25f,

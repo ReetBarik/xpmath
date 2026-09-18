@@ -501,10 +501,11 @@ XPMATH_NOINLINE_FUNCTION TripleFloatComplex sqrt(TripleFloatComplex z) {
 // the table-free TF transcendentals (S10 Phase 1 §3). NOTE the swapped sincos
 // args (header §SINCOS): tf sincos writes (sin, cos), so pass (s, c) to keep
 // c=cos(y), s=sin(y).
-XPMATH_INLINE_FUNCTION TripleFloatComplex exp(TripleFloatComplex z) {
+XPMATH_NOINLINE_FUNCTION TripleFloatComplex exp(TripleFloatComplex z) {
     TripleFloat er = exp(z.re);
-    TripleFloat c, s;
-    sincos(z.im, s, c);
+    // Same approach as qf_complex.hpp: call NOINLINE sin and cos separately.
+    TripleFloat c = cos(z.im);
+    TripleFloat s = sin(z.im);
     return TripleFloatComplex(multiply(er, c), multiply(er, s));
 }
 

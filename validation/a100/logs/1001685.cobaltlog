@@ -1,0 +1,24 @@
+Jobid: 1001685
+qsub -A pepper_hep -I -t 360 -n 1 -q gpu_a100
+Fri Sep 18 15:04:06 2026 +0000 (UTC) submitted with cwd set to: /home/rbarik/kokkos-extended-precision-demo
+jobid 1001685 submitted from terminal /dev/pts/38
+Fri Sep 18 18:13:12 2026 +0000 (UTC) 
+Fri Sep 18 18:13:12 2026 +0000 (UTC) Command: '/usr/bin/ssh' 'gpu06' '/usr/libexec/cobalt/cobalt-launcher.py' '--nf' '/var/tmp/cobalt.1001685' '--jobid' '1001685' '--cwd' '/home/rbarik/kokkos-extended-precision-demo' '--env' 'COBALT_JOBID=1001685' '/bin/sleep' '21600'
+Fri Sep 18 18:13:12 2026 +0000 (UTC) 
+Fri Sep 18 18:13:12 2026 +0000 (UTC) Environment:
+Fri Sep 18 18:13:12 2026 +0000 (UTC) SHELL=/bin/bash
+Fri Sep 18 18:13:12 2026 +0000 (UTC) COBALT_NODEFILE=/tmp/tmpm68mnX
+Fri Sep 18 18:13:12 2026 +0000 (UTC) COBALT_PARTNAME=gpu06
+Fri Sep 18 18:13:12 2026 +0000 (UTC) COBALT_JOBID=1001685
+Fri Sep 18 18:13:12 2026 +0000 (UTC) COBALT_STARTTIME=1789755177
+Fri Sep 18 18:13:12 2026 +0000 (UTC) LOGNAME=rbarik
+Fri Sep 18 18:13:12 2026 +0000 (UTC) USER=rbarik
+Fri Sep 18 18:13:12 2026 +0000 (UTC) COBALT_ENDTIME=1789776777
+Fri Sep 18 18:13:12 2026 +0000 (UTC) COBALT_PARTSIZE=1
+Fri Sep 18 18:13:12 2026 +0000 (UTC) HOME=/home/rbarik
+Fri Sep 18 18:13:12 2026 +0000 (UTC) COBALT_JOBSIZE=1
+Fri Sep 18 18:13:12 2026 +0000 (UTC) 
+Fri Sep 18 18:13:12 2026 +0000 (UTC) Info: stdin received from /dev/null
+Fri Sep 18 18:13:12 2026 +0000 (UTC) Info: stdout sent to /home/rbarik/kokkos-extended-precision-demo/1001685.output
+Fri Sep 18 18:13:12 2026 +0000 (UTC) Info: stderr sent to /home/rbarik/kokkos-extended-precision-demo/1001685.error
+Fri Sep 18 18:13:12 2026 +0000 (UTC) 

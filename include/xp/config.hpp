@@ -117,6 +117,26 @@
 #endif
 
 // ============================================================
+// 2a-fwd. XPMATH_FWDDECL_FUNCTION — for forward declarations only
+// ============================================================
+// Forward declarations need the host/device qualifier so the compiler knows
+// whether the function is callable from host, device, or both — but they do
+// NOT need `inline` or `noinline`.  Those are code-generation hints that only
+// make sense on a definition that has a body.  Using XPMATH_INLINE_FUNCTION or
+// XPMATH_NOINLINE_FUNCTION on a forward declaration and a different one on the
+// definition causes GCC's -Wattributes to fire in either direction ("noinline
+// follows inline declaration" or "inline follows noinline declaration").  A
+// dedicated forward-declaration macro with only the host/device qualifier
+// eliminates the mismatch entirely.
+#if !defined(XPMATH_FWDDECL_FUNCTION)
+#if defined(__CUDACC__) || defined(__HIPCC__)
+#define XPMATH_FWDDECL_FUNCTION __host__ __device__
+#else
+#define XPMATH_FWDDECL_FUNCTION
+#endif
+#endif
+
+// ============================================================
 // 2b. XPMATH_NOINLINE_FUNCTION — AMDGPU branch-reach guard
 // ============================================================
 // gfx9/gfx90a S_BRANCH carries a signed 16-bit dword displacement: +/-131,068
@@ -146,10 +166,30 @@
 #if !defined(XPMATH_NOINLINE_FUNCTION)
 #if defined(__HIPCC__) && (defined(__AMDGCN__) || defined(__HIP_DEVICE_COMPILE__)) \
     && !defined(XPMATH_DISABLE_AMDGPU_SIZE_GUARD)
+// HIP/gfx90a: prevents BranchRelaxation from scavenging s[30:31].
+// __attribute__((noinline)) is the hipcc/LLVM spelling; tested on ROCm 7.0.2.
 #define XPMATH_NOINLINE_FUNCTION __host__ __device__ inline __attribute__((noinline))
+#elif defined(__CUDACC__)
+// CUDA: __noinline__ is the nvcc-native spelling; __attribute__((noinline))
+// may suppress device-function emission under nvcc and cause error 700.
+#define XPMATH_NOINLINE_FUNCTION __host__ __device__ __noinline__ inline
 #else
 #define XPMATH_NOINLINE_FUNCTION XPMATH_INLINE_FUNCTION
 #endif
+#endif
+
+// Suppress -Wattributes for CUDA host-pass compilation.
+// XPMATH_NOINLINE_FUNCTION expands to '__host__ __device__ __noinline__ inline'
+// under nvcc.  The C++ 'inline' keyword is required for header-only COMDAT
+// linkage; '__noinline__' is required to prevent call-site inlining (the CUDA
+// frame-size fix, docs/TOOLCHAIN_DEFECTS.md).  Having both on the same
+// declaration is unavoidably self-contradictory to GCC, which fires
+// -Wattributes regardless of how the forward declaration is annotated.
+// This is a library-level false positive: the combination is intentional.
+// The suppression applies to the remainder of every TU that includes this
+// header under nvcc; it does not affect plain g++/clang++ or hipcc builds.
+#if defined(__CUDACC__)
+#  pragma GCC diagnostic ignored "-Wattributes"
 #endif
 
 // ============================================================

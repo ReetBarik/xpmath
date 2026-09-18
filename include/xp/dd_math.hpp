@@ -80,17 +80,17 @@ namespace xp {
 struct DoubleDouble;
 XPMATH_INLINE_FUNCTION DoubleDouble add(DoubleDouble a, DoubleDouble b);
 XPMATH_INLINE_FUNCTION DoubleDouble subtract(DoubleDouble a, DoubleDouble b);
-XPMATH_NOINLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b);
-XPMATH_NOINLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b);
+XPMATH_FWDDECL_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b);
+XPMATH_FWDDECL_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b);
 XPMATH_INLINE_FUNCTION DoubleDouble multiply_scalar(DoubleDouble a, double b);
 XPMATH_INLINE_FUNCTION DoubleDouble divide_scalar(DoubleDouble a, double b);
 XPMATH_INLINE_FUNCTION DoubleDouble negate(DoubleDouble a);
 XPMATH_INLINE_FUNCTION DoubleDouble abs(DoubleDouble a);
-XPMATH_NOINLINE_FUNCTION DoubleDouble sqrt(DoubleDouble a);
+XPMATH_FWDDECL_FUNCTION DoubleDouble sqrt(DoubleDouble a);
 XPMATH_INLINE_FUNCTION DoubleDouble round_to_nearest_int(DoubleDouble a);
 XPMATH_INLINE_FUNCTION DoubleDouble pow_int(DoubleDouble a, int n);
-XPMATH_NOINLINE_FUNCTION DoubleDouble exp(DoubleDouble a);
-XPMATH_NOINLINE_FUNCTION DoubleDouble log(DoubleDouble a);
+XPMATH_FWDDECL_FUNCTION DoubleDouble exp(DoubleDouble a);
+XPMATH_FWDDECL_FUNCTION DoubleDouble log(DoubleDouble a);
 XPMATH_INLINE_FUNCTION DoubleDouble pow(DoubleDouble a, DoubleDouble b);
 // KI-44: the unevaluated-pair trio behind pow. Defined after the Shewchuk
 // expansion helpers they use (dd_expansion_push / _compress, ~line 1715), which

@@ -23,7 +23,7 @@
 # Everything is written under the build directory. validation/ is READ ONLY
 # here: the committed baseline and register are the fixtures, never the target.
 #
-#   validation/gate_selftest.sh <sweep_accuracy binary> monotone|absolute [workdir]
+#   validation/gate_selftest.sh <sweep_accuracy binary> monotone|absolute|device [workdir]
 #
 # ctest passes the build directory as <workdir>. Each sweep run is ~35s and each
 # case is one run. MEASURED under ctest: `absolute` 135 s, `monotone` 674 s. It
@@ -33,8 +33,8 @@
 # than 4% -- add a case there and raise the timeout in the same commit.
 set -u
 
-bin="${1:?usage: gate_selftest.sh <sweep_accuracy> monotone|absolute [workdir]}"
-mode="${2:?usage: gate_selftest.sh <sweep_accuracy> monotone|absolute [workdir]}"
+bin="${1:?usage: gate_selftest.sh <sweep_accuracy> monotone|absolute|device [workdir]}"
+mode="${2:?usage: gate_selftest.sh <sweep_accuracy> monotone|absolute|device [workdir]}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 base="$root/validation/sweep/sweep_baseline.csv.gz"
 reg="$root/validation/sweep/open_defects.txt"
@@ -58,6 +58,10 @@ case "$work" in
 esac
 
 fails=0
+# Prepended to every sweep_accuracy invocation. Empty for monotone/absolute;
+# device mode fills it with --score-results/--where so the same poison matrix
+# re-scores committed A100 limbs instead of re-running the host library.
+extra=()
 
 # run <name> <expect> <args...>
 #
@@ -79,7 +83,7 @@ fails=0
 run() {
   local name="$1" expect="$2"; shift 2
   local out="$work/$name.log" rc
-  "$bin" --quiet "$@" > "$out" 2>&1; rc=$?
+  "$bin" --quiet "${extra[@]}" "$@" > "$out" 2>&1; rc=$?
   local got ok
   if [ "$rc" -eq 0 ]; then got=pass; else got="$rc"; fi
   case "$expect" in
@@ -113,8 +117,17 @@ poison_col() {  # poison_col <field> <value> <outfile>
 }
 
 case "$mode" in
-monotone)
-  echo "=== sweep_monotone_gate self-test ==============================="
+monotone|device)
+  if [ "$mode" = device ]; then
+    echo "=== sweep_device_gate_a100 self-test ==============================="
+    raw="$root/validation/a100/logs/1001685_raw.csv.gz"
+    base="$root/validation/sweep/sweep_baseline_a100.csv.gz"
+    [ -f "$raw" ] || { echo "selftest: missing $raw" >&2; exit 2; }
+    [ -f "$base" ] || { echo "selftest: missing $base" >&2; exit 2; }
+    extra=(--score-results "$raw" --where a100)
+  else
+    echo "=== sweep_monotone_gate self-test ==============================="
+  fi
 
   # The control. If this does not pass, nothing below means anything.
   # THIS BUILD'S FINGERPRINT, asked of the binary rather than assumed.
@@ -131,7 +144,7 @@ monotone)
   # So the poisons that are meant to be ATTRIBUTABLE are stamped with the
   # fingerprint this build actually produces. Then they mean "same reference,
   # better rows" everywhere, which is the condition exit 5 is for.
-  "$bin" --quiet --out "$work/fp_probe.csv" >/dev/null 2>&1
+  "$bin" --quiet "${extra[@]}" --out "$work/fp_probe.csv" >/dev/null 2>&1
   self_fp="$(sed -n 's/^# oracle-fingerprint: //p' "$work/fp_probe.csv" | head -1)"
   if [ -z "$self_fp" ]; then
     echo "  FAIL  could not read this build's oracle fingerprint" >&2
@@ -280,7 +293,7 @@ monotone)
   # binary computes, which is the only reading that is portable -- and it is a
   # stronger control than the old one, which could only ever make a statement
   # about the committed baseline.
-  "$bin" --quiet --out "$work/self.csv" >/dev/null 2>&1
+  "$bin" --quiet "${extra[@]}" --out "$work/self.csv" >/dev/null 2>&1
   awk -F, -v OFS=, '/^#/{print;next} /^(where|backend),/{print;next}
                     {$7 = $7*1.05; print}' "$work/self.csv" \
       | gzip > "$work/subnoise.csv.gz"
@@ -417,7 +430,7 @@ absolute)
   ;;
 
 *)
-  echo "selftest: unknown mode '$mode' (want monotone or absolute)" >&2; exit 2 ;;
+  echo "selftest: unknown mode '$mode' (want monotone, absolute or device)" >&2; exit 2 ;;
 esac
 
 echo

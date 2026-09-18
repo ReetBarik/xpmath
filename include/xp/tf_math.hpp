@@ -80,20 +80,20 @@ namespace xp {
 struct TripleFloat;
 XPMATH_INLINE_FUNCTION TripleFloat add(TripleFloat a, TripleFloat b);
 XPMATH_INLINE_FUNCTION TripleFloat subtract(TripleFloat a, TripleFloat b);
-XPMATH_NOINLINE_FUNCTION TripleFloat multiply(TripleFloat a, TripleFloat b);
-XPMATH_NOINLINE_FUNCTION TripleFloat divide(TripleFloat a, TripleFloat b);
+XPMATH_FWDDECL_FUNCTION TripleFloat multiply(TripleFloat a, TripleFloat b);
+XPMATH_FWDDECL_FUNCTION TripleFloat divide(TripleFloat a, TripleFloat b);
 XPMATH_INLINE_FUNCTION TripleFloat multiply_scalar(TripleFloat a, float b);
 XPMATH_INLINE_FUNCTION TripleFloat divide_scalar(TripleFloat a, float b);
 XPMATH_INLINE_FUNCTION TripleFloat mul_pwr2(TripleFloat a, float b);
 XPMATH_INLINE_FUNCTION TripleFloat negate(TripleFloat a);
 XPMATH_INLINE_FUNCTION TripleFloat abs(TripleFloat a);
 XPMATH_INLINE_FUNCTION TripleFloat sqr(TripleFloat a);
-XPMATH_NOINLINE_FUNCTION TripleFloat sqrt(TripleFloat a);
+XPMATH_FWDDECL_FUNCTION TripleFloat sqrt(TripleFloat a);
 XPMATH_INLINE_FUNCTION TripleFloat round_to_nearest_int(TripleFloat a);
 XPMATH_INLINE_FUNCTION TripleFloat pow_int(TripleFloat a, int n);
-XPMATH_NOINLINE_FUNCTION TripleFloat exp(TripleFloat a);
-XPMATH_NOINLINE_FUNCTION TripleFloat log(TripleFloat a);
-XPMATH_NOINLINE_FUNCTION TripleFloat log1p(TripleFloat a);   // asinh() is defined above it
+XPMATH_FWDDECL_FUNCTION TripleFloat exp(TripleFloat a);
+XPMATH_FWDDECL_FUNCTION TripleFloat log(TripleFloat a);
+XPMATH_FWDDECL_FUNCTION TripleFloat log1p(TripleFloat a);   // asinh() is defined above it
 XPMATH_INLINE_FUNCTION TripleFloat pow(TripleFloat a, TripleFloat b);
 // KI-44: the unevaluated-pair trio behind pow, defined after the expansion
 // helpers they use (tf_expansion_push / _compress, ~line 1732).
@@ -379,6 +379,7 @@ struct TripleFloat {
 XPMATH_INLINE_FUNCTION TripleFloat operator+(float a, TripleFloat b) { return add(TripleFloat(a), b); }
 XPMATH_INLINE_FUNCTION TripleFloat operator-(float a, TripleFloat b) { return subtract(TripleFloat(a), b); }
 XPMATH_INLINE_FUNCTION TripleFloat operator*(float a, TripleFloat b) { return multiply_scalar(b, a); }
+
 XPMATH_INLINE_FUNCTION TripleFloat operator/(float a, TripleFloat b) { return divide(TripleFloat(a), b); }
 
 #if !defined(XPMATH_ON_DEVICE)
@@ -1154,14 +1155,14 @@ XPMATH_INLINE_FUNCTION void sincos(TripleFloat a, TripleFloat& sin_a, TripleFloa
     else { sin_a = negate(cos_r); cos_a = sin_r; }
 }
 
-XPMATH_INLINE_FUNCTION TripleFloat sin(TripleFloat a) {
-    TripleFloat s, c;
+// sin and cos are NOINLINE for the same reason as qf_math.hpp's versions.
+XPMATH_NOINLINE_FUNCTION TripleFloat sin(TripleFloat a) {
+    TripleFloat s = TripleFloat(0.0f), c = TripleFloat(0.0f);
     sincos(a, s, c);
     return s;
 }
-
-XPMATH_INLINE_FUNCTION TripleFloat cos(TripleFloat a) {
-    TripleFloat s, c;
+XPMATH_NOINLINE_FUNCTION TripleFloat cos(TripleFloat a) {
+    TripleFloat s = TripleFloat(0.0f), c = TripleFloat(0.0f);
     sincos(a, s, c);
     return c;
 }
