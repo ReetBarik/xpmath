@@ -284,7 +284,17 @@ declare -A ARCH_CUDA_ARCHITECTURES=(
 declare -A ARCH_CONTRACT=(
   [host]="-ffp-contract=off"
   [a100]="--fmad=false"
-  [mi250]="-ffp-contract=off"
+  # --offload-arch is load-bearing for C8. After C4, sweep_device and the
+  # other device TUs do not link Kokkos, so they do not inherit
+  # Kokkos_HIP_ARCHITECTURES=gfx90a. Login-node hipcc then defaults to
+  # gfx906 (MI50). MEASURED on the first 1001915 build: strings showed
+  # only gfx906. Pin it here, on the device-tree CMAKE_CXX_FLAGS, so a
+  # login-node --arch mi250 build cannot silently target the wrong ISA.
+  # Do NOT add -Xarch_device: that is a CUDA-clang spelling. hipcc
+  # accepts it as one unused argument and warns at every link
+  # (MEASURED, c9_hip_eft). The HIP device pass is pinned by the
+  # volatile EFT wrappers in include/xp/config.hpp, not by this flag.
+  [mi250]="-ffp-contract=off --offload-arch=gfx90a"
 )
 
 # The host tree, as constants rather than as a fourth table row -- there is no

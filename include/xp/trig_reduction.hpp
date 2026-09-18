@@ -220,17 +220,12 @@ struct PhTraits<float> {
 
 template <typename S>
 XPMATH_INLINE_FUNCTION S xp_ph_two_sum(S a, S b, S& err) {
-    const S s  = a + b;
-    const S bb = s - a;
-    err = (a - (s - bb)) + (b - bb);
-    return s;
+    return eft_two_sum(a, b, err);
 }
 
 template <typename S>
 XPMATH_INLINE_FUNCTION S xp_ph_quick_two_sum(S a, S b, S& err) {
-    const S s = a + b;
-    err = b - (s - a);
-    return s;
+    return eft_quick_two_sum(a, b, err);
 }
 
 template <typename S>

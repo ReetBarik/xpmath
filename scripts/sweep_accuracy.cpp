@@ -405,7 +405,14 @@ struct Rng {
   double unit() { return double(g() >> 11) * (1.0 / 9007199254740992.0); }
   int    in(int lo, int hi) { return lo + int(g() % uint64_t(hi - lo + 1)); }
   bool   coin() { return (g() & 1ull) != 0ull; }
-  double logunif(int lo, int hi) { return std::ldexp(1.0 + unit(), in(lo, hi)); }
+  // `in` BEFORE `unit`. See scripts/sweep_inputs.hpp — the two copies must
+  // stay sequenced identically. g++ vs hipcc/clang unsequenced argument
+  // order was the C8/C9 MI250 61k-above-bound record.
+  double logunif(int lo, int hi) {
+    const int e = in(lo, hi);
+    const double u = unit();
+    return std::ldexp(1.0 + u, e);
+  }
   double slogunif(int lo, int hi) { const double v = logunif(lo, hi); return coin() ? v : -v; }
 };
 
@@ -741,7 +748,8 @@ void fill_real_operands(int id, size_t i, double a, Rng& rng, double& b, double&
 
   const bool cancel = (i % 7 == 1);
   if (cancel) {
-    const double eps = std::ldexp(1.0, -rng.in(1, 53)) * (rng.coin() ? 1.0 : -1.0);
+    const int e = rng.in(1, 53);
+    const double eps = std::ldexp(1.0, -e) * (rng.coin() ? 1.0 : -1.0);
     b = (id == R_Add) ? -a * (1.0 + eps) : a * (1.0 + eps);
   } else {
     b = rng.slogunif(s.b_lo, s.b_hi);
@@ -772,7 +780,8 @@ void fill_complex_operands(int id, size_t i, const std::vector<GridPoint>& grid,
     return;
   }
   if (i % 7 == 1) {
-    const double eps = std::ldexp(1.0, -rng.in(1, 53)) * (rng.coin() ? 1.0 : -1.0);
+    const int e = rng.in(1, 53);
+    const double eps = std::ldexp(1.0, -e) * (rng.coin() ? 1.0 : -1.0);
     const double s   = (id == C_Add) ? -(1.0 + eps) : (1.0 + eps);
     bre = are * s; bim = aim * s;
     return;

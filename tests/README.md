@@ -1,7 +1,7 @@
 # `tests/` — the ctest suite
 
-**63 registered targets, with Kokkos or without it — the same 63 either way.**
-The count is asserted in CI (`.github/workflows/ci.yml`, `expected=63` in *both*
+**64 registered targets, with Kokkos or without it — the same 64 either way.**
+The count is asserted in CI (`.github/workflows/ci.yml`, `expected=64` in *both*
 lanes), not assumed. That is how this lane once ran 34 targets while reporting
 31. Four targets used to sit behind `if(XPMATH_MPFR_FOUND)`, so a runner missing
 a `-dev` package lost coverage and stayed green; that guard is gone — MPFR/MPC
@@ -73,7 +73,7 @@ scores them. That is C6's shape — **one scorer, two producers** — and the
 producer issues no verdict, holds no oracle and computes no ulps, because
 `docs/CORRECTNESS.md` permits exactly one scorer.
 
-It registers **no `add_test()`**, so the 63 above is unchanged by the producer
+It registers **no `add_test()`**, so the 64 above is unchanged by the producer
 itself; the device *gates* that consume it are C7 (`sweep_device_gate_a100`)
 and C8 (`sweep_device_gate_mi250`). Do not "fix" the count on account of this
 target.
@@ -85,6 +85,7 @@ target.
 | `sweep_absolute_gate` | No point is above its derived bound unless it is listed in `validation/sweep/open_defects.txt`. Checked in both directions: an unlisted point above bound fails, and a listed point no longer above bound also fails. |
 | `sweep_monotone_gate` | No point is worse than `validation/sweep/sweep_baseline.csv.gz`. |
 | `sweep_device_gate_a100` | Re-scores the committed A100 raw limbs (`validation/a100/logs/1001685_raw.csv.gz`) and monotone-compares against `validation/sweep/sweep_baseline_a100.csv.gz`. Host test; no GPU. |
+| `sweep_device_gate_mi250` | Re-scores the committed MI250X raw limbs (`validation/mi250/logs/1001915_raw.csv.gz`) and monotone-compares against `validation/sweep/sweep_baseline_mi250.csv.gz`. Host test; no GPU. |
 | `sweep_absolute_gate_selftest` | Poisons the register — an entry deleted, a bogus entry added, the register emptied — and requires the absolute gate to fail each time. |
 | `sweep_monotone_gate_selftest` | Poisons the baseline and requires the monotone gate to fail through a **named exit code**: 1 regression, 2 coverage removed, 3 record drift, 5 improvement drift, 6 coverage growth. Also requires it to pass clean input. |
 | `sweep_device_gate_selftest` | The same poison matrix as `sweep_monotone_gate_selftest`, against the A100 baseline, via `--score-results` of the committed raw limbs. |

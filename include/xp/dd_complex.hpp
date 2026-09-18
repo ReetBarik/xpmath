@@ -126,10 +126,7 @@ namespace detail {
 
 // Exact sum of two doubles (Knuth two_sum; no ordering assumption).
 XPMATH_INLINE_FUNCTION double dd_cross_two_sum(double a, double b, double& err) {
-    const double s  = a + b;
-    const double bb = s - a;
-    err = (a - (s - bb)) + (b - bb);
-    return s;
+    return detail::eft_two_sum(a, b, err);
 }
 
 // Shewchuk grow-expansion into a fixed-length, magnitude-descending expansion.

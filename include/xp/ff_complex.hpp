@@ -71,10 +71,7 @@ namespace detail {
 
 // Exact sum of two floats (Knuth two_sum; no ordering assumption).
 XPMATH_INLINE_FUNCTION float ff_cross_two_sum(float a, float b, float& err) {
-    const float s  = a + b;
-    const float bb = s - a;
-    err = (a - (s - bb)) + (b - bb);
-    return s;
+    return detail::eft_two_sum(a, b, err);
 }
 
 XPMATH_INLINE_FUNCTION void ff_cross_accum(float* e, float w) {

@@ -123,18 +123,13 @@ XPMATH_INLINE_FUNCTION QuadFloat round(QuadFloat a);
 
 // fl(a+b) and err, assuming |a| >= |b|.  QD inline.h:35-39 (quick_two_sum).
 XPMATH_INLINE_FUNCTION float qf_quick_two_sum(float a, float b, float& err) {
-    float s = a + b;
-    err = b - (s - a);
-    return s;
+    return detail::eft_quick_two_sum(a, b, err);
 }
 
 // fl(a+b) and err (Knuth TwoSum, no ordering assumption).  QD inline.h:49-55.
 // Mirror of the twoSum inside ff_math.hpp add() (ff_math.hpp:174-181).
 XPMATH_INLINE_FUNCTION float qf_two_sum(float a, float b, float& err) {
-    float s  = a + b;
-    float bb = s - a;
-    err = (a - (s - bb)) + (b - bb);
-    return s;
+    return detail::eft_two_sum(a, b, err);
 }
 
 // Veltkamp split with QD's large-magnitude guard.  Port of qd::split,
@@ -169,18 +164,13 @@ XPMATH_INLINE_FUNCTION float qf_two_sum(float a, float b, float& err) {
 XPMATH_INLINE_FUNCTION void qf_split(float a, float& hi, float& lo) {
     const float split  = 8193.0f;
     const float thresh = 4.1528233e34f;      // FLT_MAX / (split + 1)
-    float temp;
     if (a > thresh || a < -thresh) {
         a *= 6.103515625e-05f;               // 2^-14, exact
-        temp = split * a;
-        hi   = temp - (temp - a);
-        lo   = a - hi;
+        detail::eft_split(a, split, hi, lo);
         hi  *= 16384.0f;                     // 2^14, exact
         lo  *= 16384.0f;
     } else {
-        temp = split * a;
-        hi   = temp - (temp - a);
-        lo   = a - hi;
+        detail::eft_split(a, split, hi, lo);
     }
 }
 
@@ -198,22 +188,29 @@ XPMATH_INLINE_FUNCTION void qf_split(float a, float& hi, float& lo) {
 // that path. Non-finite operands (±inf, NaN) take the same branch and
 // propagate whatever `a * b` gives, which is already the IEEE answer.
 XPMATH_INLINE_FUNCTION float qf_two_prod(float a, float b, float& err) {
-    float p = a * b;
+    float p = detail::eft_mul(a, b);
     if (!detail::isfinite(p)) { err = 0.0f; return p; }
     float a1, a2, b1, b2;
     qf_split(a, a1, a2);
     qf_split(b, b1, b2);
-    err = ((a1 * b1 - p) + a1 * b2 + a2 * b1) + a2 * b2;
+    err = detail::eft_add(detail::eft_add(detail::eft_add(
+              detail::eft_sub(detail::eft_mul(a1, b1), p),
+              detail::eft_mul(a1, b2)),
+              detail::eft_mul(a2, b1)),
+              detail::eft_mul(a2, b2));
     return p;
 }
 
 // fl(a*a) and err.  QD inline.h:101-113 (two_sqr).
 XPMATH_INLINE_FUNCTION float qf_two_sqr(float a, float& err) {
-    float q = a * a;
+    float q = detail::eft_mul(a, a);
     if (!detail::isfinite(q)) { err = 0.0f; return q; }
     float hi, lo;
     qf_split(a, hi, lo);
-    err = ((hi * hi - q) + 2.0f * hi * lo) + lo * lo;
+    err = detail::eft_add(detail::eft_add(
+              detail::eft_sub(detail::eft_mul(hi, hi), q),
+              detail::eft_mul(detail::eft_mul(2.0f, hi), lo)),
+              detail::eft_mul(lo, lo));
     return q;
 }
 
@@ -510,15 +507,21 @@ XPMATH_INLINE_FUNCTION QuadFloat sloppy_add(QuadFloat a, QuadFloat b) {
     float u0, u1, u2, u3;
     float w0, w1, w2, w3;
 
-    s0 = a.f0 + b.f0;  s1 = a.f1 + b.f1;  s2 = a.f2 + b.f2;  s3 = a.f3 + b.f3;
+    s0 = detail::eft_add(a.f0, b.f0);  s1 = detail::eft_add(a.f1, b.f1);
+    s2 = detail::eft_add(a.f2, b.f2);  s3 = detail::eft_add(a.f3, b.f3);
 
-    v0 = s0 - a.f0;    v1 = s1 - a.f1;    v2 = s2 - a.f2;    v3 = s3 - a.f3;
-    u0 = s0 - v0;      u1 = s1 - v1;      u2 = s2 - v2;      u3 = s3 - v3;
-    w0 = a.f0 - u0;    w1 = a.f1 - u1;    w2 = a.f2 - u2;    w3 = a.f3 - u3;
+    v0 = detail::eft_sub(s0, a.f0);    v1 = detail::eft_sub(s1, a.f1);
+    v2 = detail::eft_sub(s2, a.f2);    v3 = detail::eft_sub(s3, a.f3);
+    u0 = detail::eft_sub(s0, v0);      u1 = detail::eft_sub(s1, v1);
+    u2 = detail::eft_sub(s2, v2);      u3 = detail::eft_sub(s3, v3);
+    w0 = detail::eft_sub(a.f0, u0);    w1 = detail::eft_sub(a.f1, u1);
+    w2 = detail::eft_sub(a.f2, u2);    w3 = detail::eft_sub(a.f3, u3);
 
-    u0 = b.f0 - v0;    u1 = b.f1 - v1;    u2 = b.f2 - v2;    u3 = b.f3 - v3;
+    u0 = detail::eft_sub(b.f0, v0);    u1 = detail::eft_sub(b.f1, v1);
+    u2 = detail::eft_sub(b.f2, v2);    u3 = detail::eft_sub(b.f3, v3);
 
-    t0 = w0 + u0;      t1 = w1 + u1;      t2 = w2 + u2;      t3 = w3 + u3;
+    t0 = detail::eft_add(w0, u0);      t1 = detail::eft_add(w1, u1);
+    t2 = detail::eft_add(w2, u2);      t3 = detail::eft_add(w3, u3);
 
     s1 = qf_two_sum(s1, t0, t0);
     qf_three_sum(s2, t0, t1);

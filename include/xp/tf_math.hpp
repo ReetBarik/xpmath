@@ -120,18 +120,13 @@ XPMATH_INLINE_FUNCTION TripleFloat round(TripleFloat a);
 // fl(a+b) and err, assuming |a| >= |b|.  QD inline.h:35-39 (quick_two_sum).
 // Mirrors qf_quick_two_sum (qf_math.hpp:124-128).
 XPMATH_INLINE_FUNCTION float tf_quick_two_sum(float a, float b, float& err) {
-    float s = a + b;
-    err = b - (s - a);
-    return s;
+    return detail::eft_quick_two_sum(a, b, err);
 }
 
 // fl(a+b) and err (Knuth TwoSum, no ordering assumption).  QD inline.h:49-55.
 // Mirror of the twoSum inside ff_math.hpp add() (ff_math.hpp:200-207).
 XPMATH_INLINE_FUNCTION float tf_two_sum(float a, float b, float& err) {
-    float s  = a + b;
-    float bb = s - a;
-    err = (a - (s - bb)) + (b - bb);
-    return s;
+    return detail::eft_two_sum(a, b, err);
 }
 
 // Veltkamp split with QD's large-magnitude guard.  Port of qd::split,
@@ -150,18 +145,13 @@ XPMATH_INLINE_FUNCTION float tf_two_sum(float a, float b, float& err) {
 XPMATH_INLINE_FUNCTION void tf_split(float a, float& hi, float& lo) {
     const float split  = 8193.0f;
     const float thresh = 4.1528233e34f;      // FLT_MAX / (split + 1)
-    float temp;
     if (a > thresh || a < -thresh) {
         a *= 6.103515625e-05f;               // 2^-14, exact
-        temp = split * a;
-        hi   = temp - (temp - a);
-        lo   = a - hi;
+        detail::eft_split(a, split, hi, lo);
         hi  *= 16384.0f;                     // 2^14, exact
         lo  *= 16384.0f;
     } else {
-        temp = split * a;
-        hi   = temp - (temp - a);
-        lo   = a - hi;
+        detail::eft_split(a, split, hi, lo);
     }
 }
 
@@ -175,22 +165,29 @@ XPMATH_INLINE_FUNCTION void tf_split(float a, float& hi, float& lo) {
 // NaN-tailed; the error term of an overflowed product carries no information
 // and 0 is the only defensible value.
 XPMATH_INLINE_FUNCTION float tf_two_prod(float a, float b, float& err) {
-    float p = a * b;
+    float p = detail::eft_mul(a, b);
     if (!detail::isfinite(p)) { err = 0.0f; return p; }
     float a1, a2, b1, b2;
     tf_split(a, a1, a2);
     tf_split(b, b1, b2);
-    err = ((a1 * b1 - p) + a1 * b2 + a2 * b1) + a2 * b2;
+    err = detail::eft_add(detail::eft_add(detail::eft_add(
+              detail::eft_sub(detail::eft_mul(a1, b1), p),
+              detail::eft_mul(a1, b2)),
+              detail::eft_mul(a2, b1)),
+              detail::eft_mul(a2, b2));
     return p;
 }
 
 // fl(a*a) and err.  QD inline.h:101-113 (two_sqr).
 XPMATH_INLINE_FUNCTION float tf_two_sqr(float a, float& err) {
-    float q = a * a;
+    float q = detail::eft_mul(a, a);
     if (!detail::isfinite(q)) { err = 0.0f; return q; }
     float hi, lo;
     tf_split(a, hi, lo);
-    err = ((hi * hi - q) + 2.0f * hi * lo) + lo * lo;
+    err = detail::eft_add(detail::eft_add(
+              detail::eft_sub(detail::eft_mul(hi, hi), q),
+              detail::eft_mul(detail::eft_mul(2.0f, hi), lo)),
+              detail::eft_mul(lo, lo));
     return q;
 }
 

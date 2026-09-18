@@ -1249,39 +1249,32 @@ xpm_tag_test(host sweep_monotone_gate_selftest sweep_absolute_gate_selftest)
 # so it IS in CI -- the thing GitHub cannot do is re-produce the limbs, and
 # those are the committed artifact.
 #
-# C7 landed sweep_baseline_a100.csv.gz and wired the a100 arm. mi250 still
-# FATAL_ERRORs if its baseline is committed without an add_test() body: that
-# is C8's to fill in, not a silent "zero tests" hole.
+# C7 landed the a100 arm; C8 lands mi250. Both re-score committed raw limbs
+# (no GPU). Count tripwires: host 40 -> 41, device 24 unchanged, union 63 -> 64.
 #
-# Count tripwires move with the a100 arm: host 38 -> 40 (gate + selftest),
-# device 24 unchanged, union 61 -> 63.
+# Raw paths are job-of-record files. A baseline without its raw is a
+# configure error -- the gate cannot run.
+set(_xp_dev_raw_a100
+    "${CMAKE_SOURCE_DIR}/validation/a100/logs/1001685_raw.csv.gz")
+set(_xp_dev_raw_mi250
+    "${CMAKE_SOURCE_DIR}/validation/mi250/logs/1001915_raw.csv.gz")
 foreach(_xp_arch IN ITEMS a100 mi250)
   set(_xp_dev_base
       "${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline_${_xp_arch}.csv.gz")
   if(EXISTS "${_xp_dev_base}")
-    if(_xp_arch STREQUAL "a100")
-      set(_xp_dev_raw
-          "${CMAKE_SOURCE_DIR}/validation/a100/logs/1001685_raw.csv.gz")
-      if(NOT EXISTS "${_xp_dev_raw}")
-        message(FATAL_ERROR
-          "C7: ${_xp_dev_base} exists, but the raw limbs it was scored from "
-          "(${_xp_dev_raw}) do not. The gate re-scores those limbs; without "
-          "them it cannot run.")
-      endif()
-      add_test(NAME sweep_device_gate_${_xp_arch}
-               COMMAND sweep_accuracy
-                       --score-results ${_xp_dev_raw}
-                       --where ${_xp_arch}
-                       --baseline ${_xp_dev_base})
-      xpm_tag_test(host sweep_device_gate_${_xp_arch})
-    else()
+    set(_xp_dev_raw "${_xp_dev_raw_${_xp_arch}}")
+    if(NOT EXISTS "${_xp_dev_raw}")
       message(FATAL_ERROR
-        "C6: ${_xp_dev_base} exists, but sweep_device_gate_${_xp_arch} is not "
-        "wired yet. C8 owns the add_test() body (produce via sweep_device, "
-        "score via sweep_accuracy --score-results --where ${_xp_arch}, monotone "
-        "compare against the arch baseline). Fill that in before committing "
-        "the baseline.")
+        "C7/C8: ${_xp_dev_base} exists, but the raw limbs it was scored from "
+        "(${_xp_dev_raw}) do not. The gate re-scores those limbs; without "
+        "them it cannot run.")
     endif()
+    add_test(NAME sweep_device_gate_${_xp_arch}
+             COMMAND sweep_accuracy
+                     --score-results ${_xp_dev_raw}
+                     --where ${_xp_arch}
+                     --baseline ${_xp_dev_base})
+    xpm_tag_test(host sweep_device_gate_${_xp_arch})
   endif()
 endforeach()
 
@@ -1478,6 +1471,9 @@ set_tests_properties(sweep_absolute_gate_selftest sweep_monotone_gate_selftest
 if(EXISTS "${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline_a100.csv.gz")
   set_tests_properties(sweep_device_gate_a100 PROPERTIES TIMEOUT 600)
   set_tests_properties(sweep_device_gate_selftest PROPERTIES TIMEOUT 1200)
+endif()
+if(EXISTS "${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline_mi250.csv.gz")
+  set_tests_properties(sweep_device_gate_mi250 PROPERTIES TIMEOUT 600)
 endif()
 # Nine compiles of sweep_accuracy.cpp, four at a time.
 set_tests_properties(oracle_conv_selftest PROPERTIES TIMEOUT 600)
