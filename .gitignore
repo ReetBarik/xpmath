@@ -58,6 +58,9 @@ scripts/xp_corpus.bin
 !/validation/a100/logs/*.output
 !/validation/a100/logs/*.error
 !/validation/a100/logs/*.cobaltlog
+!/validation/mi250/logs/*.output
+!/validation/mi250/logs/*.error
+!/validation/mi250/logs/*.cobaltlog
 
 # Device-validation build products. validation/mi250/run_mi250.sh compiles on
 # the compute node with --save-temps=obj, which drops ~25 MB of .bc/.hipi/.o/.s

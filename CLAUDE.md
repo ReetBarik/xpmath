@@ -36,8 +36,8 @@ bound derived from the format and the condition number, and **two** ctest gates
 over that number (`sweep_absolute_gate`, `sweep_monotone_gate`), each with a
 self-test target (`*_selftest`) that poisons its input and requires it to fail.
 Read **docs/CORRECTNESS.md** before adding anything that judges correctness; the
-whole point is that nothing else issues a competing verdict. **63 ctest targets
-with Kokkos and the same 63 without it** (`-DXPMATH_WITH_KOKKOS=OFF`) — asserted
+whole point is that nothing else issues a competing verdict. **64 ctest targets
+with Kokkos and the same 64 without it** (`-DXPMATH_WITH_KOKKOS=OFF`) — asserted
 by CI in both lanes as a COUNT, not assumed; the two `ctest -N` name lists were
 additionally MEASURED identical as sets on the C4 chunk-E gate run. With no
 `if(XPMATH_WITH_KOKKOS)` block left there is no mechanism to register a
@@ -300,10 +300,11 @@ Platform Constraints were found, and then the two step-2 wrapper validations of
 2026-09-16: A100 again (S8b, Cobalt `1000938` — 38 passed / 2 failed / 9 not
 built of 49, the five-test device gate GREEN) and MI250X again (S8c, Cobalt
 `1000943` — 8 passed / 2 failed / **39 not built** of 49, and not one of the 8
-compiles a line of gfx90a code). None produced an accuracy table — the
-`__float128` oracle cannot share a translation unit with device code (S6) — so
-every number in `validation/sweep/` and `docs/DOMAINS.md` is still CPU-measured,
-and `docs/DOMAINS.md` remains host-only and wrong below ~1e-31 under FTZ.
+compiles a line of gfx90a code). None of those four produced an accuracy table — the `__float128` oracle cannot
+share a translation unit with device code (S6). C6 split the producer from the
+scorer; C7 and C8 then committed the A100 and MI250X records
+(`validation/sweep/sweep_baseline_{a100,mi250}.csv.gz`). `docs/DOMAINS.md`
+remains host-only and wrong below ~1e-31 under FTZ.
 
 `validation/a100/` is TRACKED AGAIN as of S8b and carries job `1000938`'s logs;
 the older S1 artifacts under that path were pruned and the S1 record is still

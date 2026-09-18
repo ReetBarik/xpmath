@@ -1400,3 +1400,148 @@ correctly.
 - **HIP/gfx90a was not re-sanitized.** The NOINLINE pattern is the same
   class as the gfx90a TD-1 mitigation and is expected to be safe there;
   C8 is the place that measures it.
+
+---
+
+## C8 — MI250X device sweep
+
+**Branch:** `core/c8-mi250-sweep`. **Base:** `main` @ `b6e266d`.
+
+**Outcome.** The MI250X/gfx90a device producer completed with `last_error() == 0`
+over the full 436,080-row grid; the host MPFR/MPC scorer accepted the raw
+limbs; the committed `validation/sweep/sweep_baseline_mi250.csv.gz` re-scores
+byte-identically from those limbs. Counts:
+
+| tree | tests | note |
+|---|---|---|
+| `<dir>/host` | 41 | +`sweep_device_gate_mi250` |
+| `<dir>/device` | 24 | unchanged |
+| bare both-ON | 64 | 41 + 24 − 1 shared (`build_provenance`) |
+
+**Job of record.** Cobalt **1001915**, 2026-09-18, `gpu_amd_mi250` /
+**amdgpu04**, interactive (`qsub -A pepper_hep -I -t 360 -n 1 -q
+gpu_amd_mi250`). ROCm 7.0.2, gcc 13.3.0. Binary `$HOME/sweep_device_gfx90a`
+copied from `/tmp/c8_mi250/device/tests/sweep_device` (built from this tree
+with `--offload-arch=gfx90a`). Producer stdout:
+
+```
+sweep_device: where=hip  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/c8_mi250_raw.csv
+```
+
+`echo exit:$?` printed `0`. No `last_error()` line.
+
+Host scoring (`/tmp/c8_a100/host/tests/sweep_accuracy --ulp --score-results
+... --where mi250`):
+
+```
+# where: mi250
+# oracle-fingerprint: 44f18a4a959f6c29
+# rows: 436080
+  ... containing a DEFECT        : 52   (61116 point(s) total)
+```
+
+The absolute summary is **FAIL** — 61,116 points above the derived bound
+(×8 allowance) in 52 (backend, op) cells. That is the HIP record, not a
+C8 defect to fix. C8 is a measurement section: commit the score, do not
+repair the arithmetic. The same 61,116 / 52 counts, and the same 436,080
+`(backend, kind, op, point, digits, ulps, bound, state)` tuples, are in
+`validation/mi250/sweep_mi250_scored.csv.gz` from `4c10377`. C7's NOINLINE
+extracts did not move a HIP digit. That older file is still not the gate
+input.
+
+Coverage: 4 backends × 39 real ops × 1700 + 4 × 24 complex ops × 1780 =
+436,080 rows, 252 (backend, kind, op) cells. Same grid and seed as the host
+and A100 records.
+
+Raw limbs: `validation/mi250/logs/1001915_raw.csv.gz`. Scored baseline:
+`validation/sweep/sweep_baseline_mi250.csv.gz`. Cobalt droppings under
+`validation/mi250/logs/1001915.{cobaltlog,error,output}` (`.output` is empty:
+the job was interactive, stdout stayed on the terminal; the producer lines
+are in `1001915_sweep.txt`).
+
+### Gate
+
+**Gate 1 — producer completes.** `last_error() == 0`, 436,080 rows, exit 0.
+
+**Gate 2 — host scorer accepts the raw output.** `--score-results` +
+`--where mi250` writes 436,080 scored rows, fingerprint `44f18a4a959f6c29`
+(matches the host record). The absolute column is the 61,116-point FAIL
+above; accepting the raw means the scorer finished, not that HIP is inside
+bound.
+
+**Gate 3 — re-score of the committed raw against the committed baseline
+exits 0.** That is `sweep_device_gate_mi250`. Measured on this tree:
+
+```
+  compared      : 436080 points against .../sweep_baseline_mi250.csv.gz
+  decreased     : 0
+  increased     : 0
+  unchanged     : 436080
+  state moved   : 0
+  record drift  : 0 bound, 0 digits
+
+RESULT: PASS — no point above the 0.1-digit noise floor got worse
+```
+
+It does not launch on a GPU: GitHub re-scores the committed limbs. The GPU
+re-measurement is `validation/mi250/run_mi250_sweep.sh`.
+
+No fourth gate. `sweep_device_gate_selftest` stays pointed at the A100
+baseline; C8 does not add a second poison matrix.
+
+### Host vs MI250 (informational; not a gate)
+
+Compared `validation/sweep/sweep_baseline.csv.gz` (`where=host`) to the
+MI250 scored file, same identity key, same floors the monotone gate uses
+(`kNoiseFactor = 10^0.1`).
+
+| | |
+|---|---|
+| rows | 436,080 both sides, identical keys |
+| ulps identical | 358,278 (82.2%) |
+| ulps differ at all | 77,802 |
+| worse beyond noise | 66,444 (40,519 with host ulps > 0) |
+| better beyond noise | 3,796 |
+| state moved | 620, all `U → N` |
+| U count | host 33,879 → mi250 33,259 (−620) |
+| N count | host 4,792 → mi250 5,412 (+620) |
+| above bound (×8) | host 0 → mi250 61,116 |
+
+DD real `add` mean digits: host 31.00, A100 31.00, MI250 **7.35**. The
+worst cells are the four complex `pow`s (1,721–1,770 of 1,780 each) and
+the real `mul`/`div`/`fma` family (~1,440 of 1,700). A monotone comparison
+of MI250 against the *host* or *A100* baseline would fail. That is
+expected and is not a defect in the library.
+
+### Deviation — ISA pin in a measurement section
+
+CORE_PLAN C8 is a measurement section. The first login-node `sweep_device`
+build for job 1001915 targeted **gfx906** (MI50): after C4 the device TUs
+do not link Kokkos, so they do not inherit `Kokkos_HIP_ARCHITECTURES`, and
+login-node hipcc's default is gfx906. `strings` of that binary had no
+`gfx90a`. It was not run on amdgpu04.
+
+The pin is in this PR, recorded here rather than deferred:
+
+- `scripts/xpm_build.sh` `ARCH_CONTRACT[mi250]` is now
+  `-ffp-contract=off --offload-arch=gfx90a`, on the device-tree
+  `CMAKE_CXX_FLAGS`. A login-node `--arch mi250` build cannot silently
+  target gfx906 again.
+
+The binary that produced 1001915 was rebuilt with that flag and grepped
+`gfx90a` before the copy to `$HOME/sweep_device_gfx90a`.
+
+### What C8 does NOT cover
+
+- **The 61,116 above-bound points are the record, not a punch list.**
+  Do not "fix HIP add" inside a measurement PR.
+- **docs/DOMAINS.md is still the host record.** `gen_domains.py` skips the
+  `where` column; C8 does not regenerate it from the MI250 score.
+- **No second MI250 job.** 1001915 is the one production sweep. A rerun
+  through `validation/mi250/run_mi250_sweep.sh` is how a later commit
+  re-measures.
+- **`scripts/xpm_lint_device_asm.sh` was not re-run on this binary.** That
+  needs `--save-temps` object files C8 did not keep. The producer finished
+  with exit 0 over the full grid; that is not a substitute for tiers 1–4.
+  The C7 NOINLINE extracts did not change the HIP score versus `4c10377`.

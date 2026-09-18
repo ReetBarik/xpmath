@@ -1,0 +1,8 @@
+# Producer stdout from Cobalt interactive job 1001915
+# host: amdgpu04  queue: gpu_amd_mi250  2026-09-18
+# binary: $HOME/sweep_device_gfx90a  (from /tmp/c8_mi250/device/tests/sweep_device)
+# ISA: gfx90a (login-node hipcc defaults to gfx906 unless --offload-arch=gfx90a)
+
+sweep_device: where=hip  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/c8_mi250_raw.csv
+exit:0
