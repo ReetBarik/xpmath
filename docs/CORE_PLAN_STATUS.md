@@ -1633,6 +1633,14 @@ validation/check_device_domains_fresh.sh   → PASS
 ctest `-R 'domains_fresh|device_domains_fresh'` expected green in the host
 tree after the count bump.
 
+### Follow-up — docs-fresh on CI
+
+PR CI failed `check_device_domains_fresh` on ubuntu-24.04 (Python 3.12) while
+the same check passed locally (Python 3.6): hairline mean-ulp deltas from
+float-summation order differed in eight table cells. Fixed by sorting before
+`math.fsum` and snapping `|delta| < 1e-6` to printed `0`, then verifying
+byte-identical output under 3.6 and 3.12.
+
 ### What C9 does NOT cover
 
 - Does not fix any accuracy defect the device sweeps found — there were none

@@ -49,6 +49,7 @@ DEVICE CAUSE CLASSES (DEVICE_PRECISION.md only)
 
 import collections
 import gzip
+import math
 import os
 import sys
 
@@ -222,7 +223,9 @@ def fmt_mag(v):
 
 
 def fmt_ulps(v):
-    if v == 0:
+    # Snap sub-ulp display noise so tiny float residuals print as 0 rather
+    # than oscillating between "0" and "0.000977" across CPython versions.
+    if abs(v) < 1e-6:
         return "0"
     if v < 1e-3:
         return "%.3g" % v
@@ -374,11 +377,16 @@ def compare_arch(host_rows, device_rows, grid):
 
 
 def mean_ulps_scored(rows, keys):
-    """Mean ulps over points with state `S` only. N/U carry ulps=-1 / 0."""
-    scored = [rows[k][1] for k in keys if rows[k][3] == "S"]
+    """Mean ulps over points with state `S` only. N/U carry ulps=-1 / 0.
+
+    Values are sorted before `math.fsum` so the sum is associativity-stable
+    across CPython versions. Without that, hairline deltas (1e-3 on a 1e12
+    mean) flip between 3.6 and 3.12 and trip `device_domains_fresh` on CI.
+    """
+    scored = sorted(rows[k][1] for k in keys if rows[k][3] == "S")
     if not scored:
         return 0.0
-    return sum(scored) / len(scored)
+    return math.fsum(scored) / len(scored)
 
 
 def cell_device_stats(host_rows, device_rows, grid, be, kind, op):
