@@ -36,8 +36,8 @@ bound derived from the format and the condition number, and **two** ctest gates
 over that number (`sweep_absolute_gate`, `sweep_monotone_gate`), each with a
 self-test target (`*_selftest`) that poisons its input and requires it to fail.
 Read **docs/CORRECTNESS.md** before adding anything that judges correctness; the
-whole point is that nothing else issues a competing verdict. **64 ctest targets
-with Kokkos and the same 64 without it** (`-DXPMATH_WITH_KOKKOS=OFF`) — asserted
+whole point is that nothing else issues a competing verdict. **65 ctest targets
+with Kokkos and the same 65 without it** (`-DXPMATH_WITH_KOKKOS=OFF`) — asserted
 by CI in both lanes as a COUNT, not assumed; the two `ctest -N` name lists were
 additionally MEASURED identical as sets on the C4 chunk-E gate run. With no
 `if(XPMATH_WITH_KOKKOS)` block left there is no mechanism to register a
@@ -303,8 +303,10 @@ built of 49, the five-test device gate GREEN) and MI250X again (S8c, Cobalt
 compiles a line of gfx90a code). None of those four produced an accuracy table — the `__float128` oracle cannot
 share a translation unit with device code (S6). C6 split the producer from the
 scorer; C7 and C8 then committed the A100 and MI250X records
-(`validation/sweep/sweep_baseline_{a100,mi250}.csv.gz`). `docs/DOMAINS.md`
-remains host-only and wrong below ~1e-31 under FTZ.
+(`validation/sweep/sweep_baseline_{a100,mi250}.csv.gz`). `docs/DEVICE_PRECISION.md`
+compares those to the host record (FTZ/DAZ, FMA contraction, vendor libm, gfx90a
+mitigations) and is gated by `device_domains_fresh`. `docs/DOMAINS.md` is still
+the host domain table; its opening section says so and points at the device doc.
 
 `validation/a100/` is TRACKED AGAIN as of S8b and carries job `1000938`'s logs;
 the older S1 artifacts under that path were pruned and the S1 record is still
@@ -324,6 +326,9 @@ libquadmath, so the acceptance check that means something is the `nm -D
 - **docs/CORRECTNESS.md** — the whole correctness contract: the one measurement,
   the derived bound, the two gates and their exact exit codes (1/2/3/4/5/6). Read
   this first before touching anything that judges correctness.
+- **docs/DOMAINS.md** — host domain limits per op (generated; `domains_fresh`)
+- **docs/DEVICE_PRECISION.md** — host vs A100 vs MI250X ulps (generated;
+  `device_domains_fresh`)
 - **docs/CONSUMING.md** — installing/consuming `xpmath::xpmath` as a CMake package
 - **docs/ULP_METRIC.md** — derivation behind the ulp metric and the bound terms
 - **docs/ROCM_BRANCH_RELAXATION_BUG.md**, **docs/ROCM_RECURSIVE_DEVICE_STACK.md** —
@@ -341,7 +346,7 @@ libquadmath, so the acceptance check that means something is the `nm -D
   one arc and lists what they do NOT cover. Read the closeout block first; it is
   the only place the not-covered list is written down. S8 remains **PARTIAL** —
   its own block says so, and S8b/S8c narrowed it without closing it.
-- **docs/CORE_PLAN_STATUS.md** — STATUS blocks for the CORE arc (C0/C1/C2), parallel to UPSTREAM_PLAN_STATUS.md
+- **docs/CORE_PLAN_STATUS.md** — STATUS blocks for the CORE arc (C0–C9), parallel to UPSTREAM_PLAN_STATUS.md
 - **docs/TOOLCHAIN_DEFECTS.md** — catalog of toolchain defects (gcc/nvcc/hipcc/libquadmath) with workarounds
 - **docs/TEST_SUITE_PLAN.md** — test suite architecture and conventions
 - **docs/PERF_PLAN.md** — performance measurement plan (PARKED pending the upstream restructure)

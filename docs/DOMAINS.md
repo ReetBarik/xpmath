@@ -1,7 +1,7 @@
 # Domain limits — where each operation can and cannot be trusted
 
 **GENERATED FILE — do not edit.** Produced by `scripts/gen_domains.py` from
-`validation/sweep/sweep_baseline.csv`, `validation/sweep/sweep_grid.csv` and
+`validation/sweep/sweep_baseline.csv.gz`, `validation/sweep/sweep_grid.csv` and
 `validation/sweep/open_defects.txt`. Regenerate with:
 
 ```bash
@@ -9,8 +9,30 @@ scripts/gen_domains.py > docs/DOMAINS.md
 ```
 
 `validation/check_domains_fresh.sh` fails if this file is not what the
-generator currently emits. It is **not** wired into ctest — see the note at
-the end of this file for whoever sets up CI in S7.
+generator currently emits.
+
+---
+
+## Device precision — every number below is host-measured
+
+**Every digit count, trusted band and verdict in this document is from the
+host baseline** (`validation/sweep/sweep_baseline.csv.gz`, `where=host`).
+It does **not** describe what the same op does on a GPU. Subnormal trailing
+limbs, vendor `libm`, and the gfx90a mitigations can all move a cell; the
+measured record of those moves is
+[`docs/DEVICE_PRECISION.md`](DEVICE_PRECISION.md), generated from the three
+baselines by `scripts/gen_domains.py --device-precision` and gated by
+`device_domains_fresh`.
+
+Arch coverage (an absent arch is a named gap, never a missing column):
+
+- a100: PRESENT — 436080 rows, where=`a100`, job Cobalt 1001685 (docs/CORE_PLAN_STATUS.md §C7)
+- mi250: PRESENT — 436080 rows, where=`mi250`, job Cobalt 1001915 (docs/CORE_PLAN_STATUS.md §C8)
+
+Absolute gate (`ulps ≤ 8 × derived bound`) on every present arch:
+- host: 0 above bound
+- a100: 0 above bound
+- mi250: 0 above bound
 
 ---
 
@@ -33,6 +55,8 @@ it does not.
 subnormal, so the type stops carrying its nominal digit count even though the
 leading word is still fine. It is the number that matters for small inputs:
 FF is out of digits below ~2e-31 while DD keeps all 31 down to ~2e-292.
+Whether a GPU's FTZ/DAZ mode destroys that floor further is measured in
+`docs/DEVICE_PRECISION.md`, not assumed from the format facts above.
 
 Column meanings:
 
@@ -484,30 +508,26 @@ for each cell that has any:
 
 ## Totals across all 252 cells
 
-| classification | points below 50% of cap |
+| classification | cells |
 |---|---:|
-| UNDERFLOW | 0 |
-| OVERFLOW | 0 |
-| ARG_RANGE | 0 |
-| CONDITIONING | 0 |
-| UNEXPLAINED | 0 |
-| **total triaged** | **252** |
+| at or below bound | 1 |
+| UNRESOLVED | 251 |
+| OPEN DEFECT | 0 |
+| **total cells** | **252** |
 
-Out of 428,592 scored points.
+Out of 436,080 scored points (1700 real + 1780 complex inputs × 4 backends
+× 63 ops).
 
 ---
 
-## Note for CI (S7)
+## Freshness
 
 `validation/check_domains_fresh.sh` regenerates this file and diffs it against
 the committed copy, exiting nonzero on any difference. It needs only Python 3
-and the three committed CSVs — no build, no Kokkos, no libquadmath — and runs
-in well under a second. It is deliberately **not** registered as a ctest test,
-because the rest of the suite tests compiled numerics and a documentation
-freshness check does not belong in the same gate. Wire it into CI directly.
+and the committed CSVs — no build, no Kokkos. Registered as the `domains_fresh`
+ctest target. The device counterpart is `device_domains_fresh`.
 
 Note that the check only proves the markdown matches the CSVs. If a numeric fix
-lands, the CSVs must be regenerated first — `scripts/sweep_accuracy` to
 lands, the baseline must be regenerated first — `scripts/sweep_accuracy --ulp
 --register validation/sweep/open_defects.txt --out <tmp>`, gzipped into
 `validation/sweep/sweep_baseline.csv.gz` — and only then this file.

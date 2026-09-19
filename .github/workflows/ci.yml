@@ -89,7 +89,7 @@ jobs:
   # 1. Generated-doc freshness.  ~3 s.  Python 3 and the CSVs, nothing else.
   # ==========================================================================
   docs-fresh:
-    name: docs freshness (DOMAINS.md)
+    name: docs freshness (DOMAINS.md + DEVICE_PRECISION.md)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -97,6 +97,17 @@ jobs:
         run: |
           python3 --version
           bash validation/check_domains_fresh.sh
+      - name: validation/check_device_domains_fresh.sh
+        run: |
+          bash validation/check_device_domains_fresh.sh
+          # Positive arch accounting — the script already greps, but assert
+          # the committed file too so a generator that forgot an arch cannot
+          # land by editing only the check.
+          test -s docs/DEVICE_PRECISION.md
+          n_a=$(grep -c a100 docs/DEVICE_PRECISION.md)
+          n_m=$(grep -c mi250 docs/DEVICE_PRECISION.md)
+          echo "committed DEVICE_PRECISION.md: a100=$n_a mi250=$n_m"
+          test "$n_a" -gt 0 && test "$n_m" -gt 0
 
   # ==========================================================================
   # 2. Standalone core: no Kokkos, two operating systems, two compiler families.
@@ -206,16 +217,17 @@ jobs:
       # tests/CMakeLists.txt has no if(XPMATH_WITH_KOKKOS) block left to move a
       # target across.
       #
-      # So the two lanes now register the SAME 64 targets (C4's 61 plus C7's
-      # a100 gate and selftest plus C8's mi250 gate). MEASURED on the C4 chunk-E
-      # gate run the two `ctest -N` name lists were identical as sets at 61;
-      # the identity claim is the same, the count moved. If these two numbers
-      # ever diverge, something re-introduced a Kokkos-conditional target --
-      # fix that, do not fork the constants.
+      # So the two lanes now register the SAME 65 targets (C4's 61 plus C7's
+      # a100 gate and selftest plus C8's mi250 gate plus C9's
+      # device_domains_fresh). MEASURED on the C4 chunk-E gate run the two
+      # `ctest -N` name lists were identical as sets at 61; the identity claim
+      # is the same, the count moved. If these two numbers ever diverge,
+      # something re-introduced a Kokkos-conditional target -- fix that, do not
+      # fork the constants.
       - name: Assert the Kokkos-free suite is the expected size
         run: |
           set -euo pipefail
-          expected=64
+          expected=65
           actual=$(ctest --test-dir build-nokokkos -N | awk '/^Total Tests: /{print $3}')
           echo "registered without Kokkos: ${actual} (expected ${expected})"
           if [ "${actual}" != "${expected}" ]; then
@@ -236,17 +248,19 @@ jobs:
       #
       # NOTHING ELSE IN CI CHECKS THAT. The step above counts the union; a target
       # tagged BOTH sides, or a target that quietly stopped being registered in
-      # one, leaves the union at 64 and is invisible there. The configure-side
+      # one, leaves the union at 65 and is invisible there. The configure-side
       # assertion in tests/CMakeLists.txt catches an UNTAGGED test, not a
       # double-tagged one. This step is the missing half, and it costs two
       # configures and no build.
       #
-      # 41 + 24 = 65, and the union is 64. The one deliberate overlap is
+      # 42 + 24 = 66, and the union is 65. The one deliberate overlap is
       # build_provenance, which is registered in EVERY tree with a computed tag:
       # a `--only device` tree is what C7 and C8 configure on a compute node, and
       # that tree's logs are the artifacts whose provenance is hardest to
       # reconstruct. The intersection is asserted to be exactly that one name, so
       # a second target joining it is a failure and not a rounding error.
+      # C9 added device_domains_fresh to the host tree (64 → 65 suite, 41 → 42
+      # host).
       #
       # Kokkos is OFF here, which is why this lives in this lane: the partition
       # is a property of the two options, the runner has no Kokkos, and the
@@ -275,8 +289,8 @@ jobs:
             echo "::error::a tree registered ZERO tests (host=${h} device=${d} suite=${a})"
             exit 1
           fi
-          if [ "${h}" != "41" ] || [ "${d}" != "24" ] || [ "${a}" != "64" ]; then
-            echo "::error::expected host 41 / device 24 / suite 64, got ${h} / ${d} / ${a}"
+          if [ "${h}" != "42" ] || [ "${d}" != "24" ] || [ "${a}" != "65" ]; then
+            echo "::error::expected host 42 / device 24 / suite 65, got ${h} / ${d} / ${a}"
             exit 1
           fi
           overlap=$(comm -12 /tmp/host.names /tmp/device.names)
@@ -289,7 +303,7 @@ jobs:
             echo "::error::host union device is not the full suite -- a target is in neither tree."
             exit 1
           fi
-          echo "partition exact: 41 + 24 - 1 shared (build_provenance) = 64"
+          echo "partition exact: 42 + 24 - 1 shared (build_provenance) = 65"
 
       - name: ctest
         run: ctest --test-dir build-nokokkos -j4 --timeout 1800 --output-on-failure
@@ -629,11 +643,12 @@ jobs:
       - name: Assert the full suite is registered
         run: |
           set -euo pipefail
-          # 63 -> 64 in CORE_PLAN C8: sweep_device_gate_mi250. C7 added the
-          # a100 gate and the shared device-gate selftest (61 -> 63). The
-          # Kokkos-free lane above now asserts this SAME number; see the comment
-          # there for why the two converged and what a future divergence means.
-          expected=64
+          # 64 -> 65 in CORE_PLAN C9: device_domains_fresh. C8 added
+          # sweep_device_gate_mi250; C7 added the a100 gate and the shared
+          # device-gate selftest. The Kokkos-free lane above now asserts this
+          # SAME number; see the comment there for why the two converged and
+          # what a future divergence means.
+          expected=65
           actual=$(ctest --test-dir build -N | awk '/^Total Tests: /{print $3}')
           echo "registered targets: ${actual} (expected ${expected})"
           if [ "${actual}" != "${expected}" ]; then
