@@ -1425,9 +1425,15 @@ xpm_tag_test(host consumer_package)
 
 add_test(NAME domains_fresh
          COMMAND ${CMAKE_SOURCE_DIR}/validation/check_domains_fresh.sh)
-# HOST: docs/DOMAINS.md is generated from the HOST baseline. C9 adds the device
-# counterpart (device_domains_fresh) once there is a device baseline to read.
+# HOST: docs/DOMAINS.md is generated from the HOST baseline; the device section
+# at the top points at DEVICE_PRECISION.md but does not score device rows.
 xpm_tag_test(host domains_fresh)
+
+add_test(NAME device_domains_fresh
+         COMMAND ${CMAKE_SOURCE_DIR}/validation/check_device_domains_fresh.sh)
+# HOST: docs/DEVICE_PRECISION.md is generated from the three committed baselines
+# (host + a100 + mi250). Needs no GPU — the baselines are already scored. CORE_PLAN C9.
+xpm_tag_test(host device_domains_fresh)
 
 # ---------------------------------------------------------------------------
 # DEVICE-TU PURITY

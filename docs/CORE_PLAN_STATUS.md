@@ -1572,3 +1572,71 @@ from FAIL to PASS:
 - **`scripts/xpm_lint_device_asm.sh` was not re-run on this binary.** That
   needs `--save-temps` object files C8 did not keep. The producer finished
   with exit 0 over the full grid; that is not a substitute for tiers 1–4.
+
+---
+
+## C9 — `docs/DEVICE_PRECISION.md`, and DOMAINS stops being silently host-only
+
+**Branch:** `core/c9-device-precision-doc`. **Base:** `main` @ `8ea3e71`.
+
+**Outcome.** Both device arches arrived with committed baselines (C7 A100 /
+Cobalt 1001685, C8 MI250X / Cobalt 1001915). The degradation rule did not fire:
+every table in `docs/DEVICE_PRECISION.md` has a measured `a100` and `mi250`
+column. Absolute gate on all three arches is **0 above bound**, so
+`validation/sweep/open_defects.txt` stays empty — that is a measured finding,
+not an oversight. Suite count: **64 → 65** (`device_domains_fresh`); host tree
+**41 → 42**.
+
+### What landed
+
+1. `scripts/gen_domains.py` reads all three baselines. Default stdout is still
+   `docs/DOMAINS.md`; `--device-precision` emits `docs/DEVICE_PRECISION.md`.
+2. `docs/DOMAINS.md` gains a device section **above** the backend table: every
+   number below is host-measured; pointer to `DEVICE_PRECISION.md`; arch
+   coverage and absolute-gate zeros for host/a100/mi250.
+3. `docs/DEVICE_PRECISION.md` answers the four mechanisms with measured
+   numbers, then a per-op mean-ulps table (252 cells) with a cause label.
+4. `validation/check_device_domains_fresh.sh` + ctest `device_domains_fresh`,
+   and the CI `docs-fresh` lane runs both checks. The check greps that `a100`
+   and `mi250` each appear at least once in the generated doc (present with
+   data, or present as `NO BASELINE`).
+5. `README.md`, `CLAUDE.md`, `docs/CORRECTNESS.md`, `tests/README.md`, and the
+   CI count assertions (65 / host 42 / device 24) updated. Device accuracy is
+   no longer described as unmeasured.
+
+### The four mechanisms (measured)
+
+| mechanism | result |
+|---|---|
+| **FTZ/DAZ** | Measured `abs` full-precision floor identical host/a100/mi250 for all four backends (DD ~5e-324, QF/TF/FF 1e-30 on this grid). FTZ did **not** raise the trusted `abs` band. The FTZ signal is scorability: A100 moves **3507** points `S → N` (DD complex `atan` 1772 + `atanh` 1735); MI250 moves **0**. Those two cells are the only `FTZ` cause labels (2 of 252). |
+| **FMA contraction** | Arithmetic / selection / rounding family (`add`…`polar`, 158640 points): **bit-identical** host↔a100 and host↔mi250. `FMA` cause count: **0**. |
+| **Vendor libm** | All remaining host↔device ulp moves. A100: 1221 worse / 1130 better beyond the 0.1-digit noise floor (among jointly-`S` points). MI250: 4784 / 3941. Cause label `VENDOR_LIBM`: **80** of 252 cells. |
+| **gfx90a mitigations** | MI250 producer completed (`last_error()==0`, 436080 rows); absolute gate 0; arithmetic bit-identical. Asm lint tiers 1–4 were not re-run on the C8 binary (no `--save-temps`); recorded as such in C8 and not claimed here. |
+
+Cause totals: match 170, FMA 0, FTZ 2, VENDOR_LIBM 80, UNATTRIBUTED **0**,
+NO BASELINE 0.
+
+### open_defects.txt
+
+**Still empty.** Host, A100 and MI250 absolute gates all report 0 above
+`8 ×` the derived bound. C9 did not enlarge the register. That is the
+finding: the device deltas are inside the bound, not open defects.
+
+### Gate
+
+```
+validation/check_domains_fresh.sh          → PASS
+validation/check_device_domains_fresh.sh   → PASS
+  a100 mentions: 17; mi250 mentions: 16   (both nonzero)
+```
+
+ctest `-R 'domains_fresh|device_domains_fresh'` expected green in the host
+tree after the count bump.
+
+### What C9 does NOT cover
+
+- Does not fix any accuracy defect the device sweeps found — there were none
+  above bound to fix.
+- Does not re-run A100 or MI250 produce jobs; it reads the committed baselines.
+- Does not close S8; the cross-vendor matrix remains S8's own measure.
+- Does not claim the gfx90a asm lint was re-run (C8 deferred it).

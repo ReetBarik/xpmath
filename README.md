@@ -124,19 +124,24 @@ the result was correct to every digit the format can hold, not that error was
 zero. Inputs are drawn per operation from an `mt19937_64` reseeded with `--seed`
 each time, so a single-operation run reproduces the corresponding row exactly.
 
-**Where each operation stops being trustworthy — [`docs/DOMAINS.md`](docs/DOMAINS.md).**
-The tables below report accuracy on a random corpus drawn from each operation's
-comfortable range. They do not tell you where an operation *fails*, and every
-backend has such ranges. `docs/DOMAINS.md` covers all 4 backends x 63 operations,
-generated from a 436,080-point sweep: for each cell it gives the input band where
-the operation holds 90% of its cap, the measured digit count at the boundary
-where it degrades, and a classification of the cause. The headline limits are now
-mostly format limits: the three FP32-word backends (FF, QF, TF) bottom out near
-1e-31 and top out at 3.4e38 where DD reaches ~2e-292 and 1.8e308, and on the FP32
-backends the trailing limbs go subnormal well before the leading word does. Of
-the 26,723 points scoring below half their cap, 15,660 are format range
-(UNDERFLOW / OVERFLOW / ARG_RANGE), 9,672 are measured ill-conditioning, and
-1,391 are neither — see [`docs/history/KNOWN_ISSUES.md`](docs/history/KNOWN_ISSUES.md), whose 34
+**Where each operation stops being trustworthy — [`docs/DOMAINS.md`](docs/DOMAINS.md)
+(host) and [`docs/DEVICE_PRECISION.md`](docs/DEVICE_PRECISION.md) (host vs A100
+vs MI250X).** The tables below report accuracy on a random corpus drawn from each
+operation's comfortable range. They do not tell you where an operation *fails*,
+and every backend has such ranges. `docs/DOMAINS.md` covers all 4 backends × 63
+operations on the host, generated from a 436,080-point sweep: for each cell it
+gives the input band where the operation holds 90% of its cap, the measured digit
+count at the boundary where it degrades, and a classification of the cause.
+**Those numbers are host-measured.** Device floors, FTZ/DAZ, vendor `libm` and
+the gfx90a mitigations are measured separately in `docs/DEVICE_PRECISION.md`
+against the committed A100 and MI250X baselines (Cobalt 1001685 / 1001915). The
+headline host limits are mostly format limits: the three FP32-word backends
+(FF, QF, TF) bottom out near 1e-31 and top out at 3.4e38 where DD reaches
+~2e-292 and 1.8e308, and on the FP32 backends the trailing limbs go subnormal
+well before the leading word does. Of the 26,723 points scoring below half their
+cap, 15,660 are format range (UNDERFLOW / OVERFLOW / ARG_RANGE), 9,672 are
+measured ill-conditioning, and 1,391 are neither — see
+[`docs/history/KNOWN_ISSUES.md`](docs/history/KNOWN_ISSUES.md), whose 34
 entries are all resolved as of `85eea13`.
 
 **Accuracy only — no cost figures are reported here.** How to present the cost
@@ -166,7 +171,9 @@ were not regenerated when the artifacts were re-baselined at `85eea13`. Every
 figure in them is therefore a lower bound on what the current code does, and no
 table is given for TF at all. The current measured numbers, on all four backends
 and regenerated with the library, are in
-[`docs/DOMAINS.md`](docs/DOMAINS.md) and `validation/sweep/sweep_baseline.csv`.
+[`docs/DOMAINS.md`](docs/DOMAINS.md) (host) and
+[`docs/DEVICE_PRECISION.md`](docs/DEVICE_PRECISION.md) (device), from
+`validation/sweep/sweep_baseline{,_a100,_mi250}.csv.gz`.
 
 #### DD (double-double) — ceiling 31.00 digits
 
