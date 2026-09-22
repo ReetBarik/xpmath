@@ -1,44 +1,49 @@
 # NOTICE
 
-This repository combines Reet-authored Kokkos code (Apache-2.0) with C++/Kokkos
-ports of two upstream extended-precision packages: DDFUN, authored by David H.
-Bailey (DHB-License, a modified-BSD-3-Clause variant), and QD, authored by Yozo
-Hida, Xiaoye S. Li, and David H. Bailey at Lawrence Berkeley National Laboratory
+This repository combines Reet-authored code (Apache-2.0) with C++ ports of two
+upstream extended-precision packages: DDFUN, authored by David H. Bailey
+(DHB-License, a modified-BSD-3-Clause variant), and QD, authored by Yozo Hida,
+Xiaoye S. Li, and David H. Bailey at Lawrence Berkeley National Laboratory
 (LBNL-BSD-License). These are **different licenses** and are tracked separately.
 
 It is therefore **multi-licensed**:
 
 - **Four DDFUN-derived headers** — DD and FF, real and complex — carry
   `LicenseRef-DHB-License`.
-- **Two QD-derived headers** — QF, real and complex — carry
-  `LicenseRef-LBNL-BSD-License`.
-- **One Kokkos-extension header** carries `Apache-2.0 WITH LLVM-exception` to
-  match Kokkos itself.
+- **Four QD-related / composed headers** — QF and TF, real and complex — carry
+  `LicenseRef-LBNL-BSD-License` (QF) or the license stated in their SPDX headers
+  (TF).
 - **Everything else** is Apache-2.0 by default.
 
-The mapping below is authoritative.
+The Kokkos::Experimental compat wrappers that used to live under
+`third_party/include/` moved to the **xpmath-kokkos** repository in CORE_PLAN
+C10 (last present here at commit `158d618`). Licensing for that layer is
+recorded there.
+
+The mapping below is authoritative for **this** repository.
 
 ## Per-file license mapping
 
 | File(s) | License | Notes |
 |---|---|---|
-| `third_party/include/dd_math.hpp` | DHB-License | C++/Kokkos port of DDFUN v04 (real). See `LICENSES/LicenseRef-DHB-License.txt`. |
-| `third_party/include/dd_complex.hpp` | DHB-License | C++/Kokkos port of DDFUN v04 (complex). See `LICENSES/LicenseRef-DHB-License.txt`. |
-| `third_party/include/ff_math.hpp` | DHB-License | DD→FF mechanical translation; PORT_NOTES.md documents FP32-specific fixes. See `LICENSES/LicenseRef-DHB-License.txt`. |
-| `third_party/include/ff_complex.hpp` | DHB-License | DD→FF mechanical translation; PORT_NOTES.md documents FP32-specific fixes. See `LICENSES/LicenseRef-DHB-License.txt`. |
-| `third_party/include/qf_math.hpp` | LBNL-BSD-License | C++/Kokkos port of QD 2.3.24 quad-double (real), retargeted from 4×FP64 to 4×FP32. **Not** a DDFUN derivative. See `LICENSES/LicenseRef-LBNL-BSD-License.txt`. |
-| `third_party/include/qf_complex.hpp` | LBNL-BSD-License | QF complex layer composed on the QD-derived real four-word algorithms. **Not** a DDFUN derivative. See `LICENSES/LicenseRef-LBNL-BSD-License.txt`. |
-| Everything else (demos, tests, harness, corpus, scripts, docs) | Apache-2.0 | Covered by the top-level `LICENSE`. |
+| `include/xp/dd_math.hpp` | DHB-License | C++ port of DDFUN v04 (real). See `LICENSES/LicenseRef-DHB-License.txt`. |
+| `include/xp/dd_complex.hpp` | DHB-License | C++ port of DDFUN v04 (complex). See `LICENSES/LicenseRef-DHB-License.txt`. |
+| `include/xp/ff_math.hpp` | DHB-License | DD→FF mechanical translation; PORT_NOTES.md documents FP32-specific fixes. |
+| `include/xp/ff_complex.hpp` | DHB-License | DD→FF mechanical translation; PORT_NOTES.md documents FP32-specific fixes. |
+| `include/xp/qf_math.hpp` | LBNL-BSD-License | C++ port of QD 2.3.24 quad-double (real), retargeted from 4×FP64 to 4×FP32. **Not** a DDFUN derivative. |
+| `include/xp/qf_complex.hpp` | LBNL-BSD-License | QF complex layer composed on the QD-derived real four-word algorithms. **Not** a DDFUN derivative. |
+| `include/xp/tf_math.hpp`, `include/xp/tf_complex.hpp` | see SPDX headers | Triple-float backend; see each file's SPDX line. |
+| Everything else (tests, harness, corpus, scripts, docs) | Apache-2.0 | Covered by the top-level `LICENSE`. |
 
 ## The DDFUN-derived files
 
-`third_party/include/dd_math.hpp` and `third_party/include/dd_complex.hpp`
-(double-double), together with `third_party/include/ff_math.hpp` and
-`third_party/include/ff_complex.hpp` (float-float), are derivative works of
-DDFUN v04. The FF headers are a mechanical translation of the DD headers from
-2×FP64 to 2×FP32 (see `PORT_NOTES.md` for the FP32-specific fixes); as
-modifications of a DDFUN derivative they inherit the DHB-License unchanged under
-its §3 grant-back. All four:
+`include/xp/dd_math.hpp` and `include/xp/dd_complex.hpp` (double-double),
+together with `include/xp/ff_math.hpp` and `include/xp/ff_complex.hpp`
+(float-float), are derivative works of DDFUN v04. The FF headers are a
+mechanical translation of the DD headers from 2×FP64 to 2×FP32 (see
+`PORT_NOTES.md` for the FP32-specific fixes); as modifications of a DDFUN
+derivative they inherit the DHB-License unchanged under its §3 grant-back. All
+four:
 
 - Original author: David H. Bailey (Lawrence Berkeley National Lab,
   retired / University of California, Davis).
@@ -79,10 +84,10 @@ commercial-use questions about DDFUN.
 
 ## The QD-derived files
 
-`third_party/include/qf_math.hpp` and `third_party/include/qf_complex.hpp`
-(quad-float, 4×FP32) are derivative works of **QD 2.3.24**, not of DDFUN. QD is
-a separate package with a separate license and a different author set, so these
-two files are tracked apart from the DDFUN-derived headers above. Both:
+`include/xp/qf_math.hpp` and `include/xp/qf_complex.hpp` (quad-float, 4×FP32)
+are derivative works of **QD 2.3.24**, not of DDFUN. QD is a separate package
+with a separate license and a different author set, so these two files are
+tracked apart from the DDFUN-derived headers above. Both:
 
 - Original authors: Yozo Hida, Xiaoye S. Li, and David H. Bailey, Lawrence
   Berkeley National Laboratory.

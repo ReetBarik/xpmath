@@ -27,16 +27,11 @@ foreach(v XPMATH_SOURCE_DIR XPMATH_SCRATCH XPMATH_GENERATOR XPMATH_CXX_COMPILER)
   endif()
 endforeach()
 
-# The nested configure builds the WHOLE project, and the top-level CMakeLists
-# does find_package(Kokkos REQUIRED) unconditionally -- so it needs the same
-# prefix path the outer configure was given. Forwarded rather than rediscovered:
-# a nested build that found a DIFFERENT Kokkos would be testing a different
-# package than the one just built.
+# The nested configure builds the package under test. After CORE_PLAN C10 this
+# repository does not find or link Kokkos, so the nested build needs no Kokkos
+# prefix.
 if(NOT DEFINED XPMATH_PREFIX_PATH)
   set(XPMATH_PREFIX_PATH "")
-endif()
-if(NOT DEFINED XPMATH_KOKKOS_DIR)
-  set(XPMATH_KOKKOS_DIR "")
 endif()
 
 # Multi-config generators would need --config threaded through every nested
@@ -73,18 +68,9 @@ execute_process(
           -G "${XPMATH_GENERATOR}"
           -DCMAKE_CXX_COMPILER=${XPMATH_CXX_COMPILER}
           -DCMAKE_BUILD_TYPE=Release
-          # Spelled the NEW way on purpose (CORE_PLAN C4 renamed it). The
-          # deprecated KOKKOS_EP_BUILD_TESTS alias still works, but using it
-          # here would make every consumer_package run emit a deprecation
-          # warning about this repository's own tooling.
           -DXPMATH_BUILD_TESTS=OFF
-          # The package under test is header-only and Kokkos-free, so install
-          # it that way. This makes the nested build prove a second thing for
-          # free: that xpmath configures and installs with no Kokkos present.
-          -DXPMATH_WITH_KOKKOS=OFF
           -DCMAKE_INSTALL_PREFIX=${prefix_dir}
           "-DCMAKE_PREFIX_PATH=${XPMATH_PREFIX_PATH}"
-          -DKokkos_DIR=${XPMATH_KOKKOS_DIR}
   RESULT_VARIABLE rc
   OUTPUT_FILE "${XPMATH_SCRATCH}/configure.log"
   ERROR_FILE  "${XPMATH_SCRATCH}/configure.log")

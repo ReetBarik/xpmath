@@ -25,7 +25,7 @@
 // headers only, out of scope here). This header reimplements the first four
 // with zero Kokkos dependency, so the numeric core is usable from plain
 // C++17, CUDA, HIP and SYCL. Kokkos then consumes the same core through a
-// thin compat wrapper (third_party/include/dd_math.hpp).
+// compat layer in the xpmath-kokkos repository (formerly third_party/include/ here).
 //
 // Design rule: this header must never include a Kokkos header, and must
 // compile with `g++ -std=c++17` on a machine with no Kokkos installed.

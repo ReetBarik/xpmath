@@ -77,27 +77,14 @@
 # reintroduce the dependency this section exists to remove, and a reader would
 # have no way to tell it was dead.
 #
-# ${THIRD_PARTY_INCLUDE} goes with them. It is still SET by the top-level
-# CMakeLists.txt, which is where the demos consume it; nothing under tests/
-# references it any more.
-#
-# THE WRAPPER LAYER IS STILL EXERCISED, AND THAT IS WHY THIS IS SAFE.
-# third_party/include/ is what lets existing Kokkos code compile unchanged, so
-# losing coverage of it would be a real loss rather than a bookkeeping one. It
-# is covered by the eight src/demo_*.cpp targets, every one of which includes
-# the wrappers and links Kokkos, and every one of which still builds in the
-# --arch host configuration. C10 moves those demos to the xpmath-kokkos
-# repository, and from then on the wrapper layer is that repository's to test --
-# which is the right home for it, because that is where the Kokkos dependency
-# will live.
+# ${THIRD_PARTY_INCLUDE} went with them. CORE_PLAN C10 deleted the eight demos
+# and third_party/include/ entirely -- they last existed at commit 158d618 and
+# move to xpmath-kokkos (K6). This repository no longer finds or links Kokkos.
 #
 # What IS gone as of C4, and is written down here rather than inferred: the
-# wrappers no longer get incidental coverage from the test suite. Before this
-# section, 26 test targets compiled third_party/include/*_math.hpp as a side
-# effect of linking Kokkos. None do now. The wrappers are true aliases
-# (`using DoubleDouble = xp::DoubleDouble`), so what that coverage actually
-# proved was that the alias header parses -- but it proved it on every build,
-# and now only the demos do.
+# wrappers no longer get incidental coverage from the test suite. Before C4,
+# 26 test targets compiled third_party/include/*_math.hpp as a side effect of
+# linking Kokkos. None do now. After C10 the wrappers are not in this tree.
 # ===========================================================================
 
 # ===========================================================================
@@ -1413,14 +1400,14 @@ add_test(NAME consumer_package
                  -DXPMATH_GENERATOR=${CMAKE_GENERATOR}
                  -DXPMATH_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                  "-DXPMATH_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
-                 -DXPMATH_KOKKOS_DIR=${Kokkos_DIR}
                  -P "${CMAKE_SOURCE_DIR}/tests/consumer/run_consumer_test.cmake")
 set_tests_properties(consumer_package PROPERTIES
                      LABELS packaging
                      TIMEOUT 600)
 # HOST: the nested configure it drives is an ordinary host CMake build
-# (XPMATH_WITH_KOKKOS=OFF, XPMATH_BUILD_TESTS=OFF), and the package it checks is
-# the header-only export, which has no side.
+# (XPMATH_BUILD_TESTS=OFF), and the package it checks is the header-only
+# export. CORE_PLAN C10: no Kokkos_DIR to forward -- this repository does not
+# find Kokkos.
 xpm_tag_test(host consumer_package)
 
 add_test(NAME domains_fresh

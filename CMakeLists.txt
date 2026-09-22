@@ -6,10 +6,6 @@ cmake_minimum_required(VERSION 3.16)
 # PROJECT_NAME or CMAKE_PROJECT_NAME anywhere in the tree).
 project(xpmath VERSION 0.1.0 LANGUAGES CXX)
 
-# Included here, not next to the install rules, because CMAKE_INSTALL_BINDIR is
-# used by the demo install() further down -- before the package block. An
-# undefined CMAKE_INSTALL_* expands to the empty string and silently installs
-# to the prefix root.
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
@@ -47,9 +43,10 @@ if(CMAKE_GENERATOR MATCHES "Makefile|Ninja")
   endif()
 endif()
 
-# Filled in by the demo block below when Kokkos is linked, and passed to
-# check_build_provenance.cmake as the CLOSED SET of targets allowed to compile
-# above CMAKE_CXX_STANDARD. Empty here so a tree without those targets says so.
+# CLOSED SET of targets allowed to compile above CMAKE_CXX_STANDARD. After
+# CORE_PLAN C10 this repository links no Kokkos, so the set is permanently
+# empty: every TU is at CMAKE_CXX_STANDARD. Kept as a named variable so
+# check_build_provenance.cmake still has something to measure against.
 set(XPMATH_KOKKOS_LINKED_TARGETS "")
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -82,56 +79,36 @@ if(CMAKE_CUDA_COMPILER)
 endif()
 
 # ---------------------------------------------------------------------------
-# KOKKOS IS OPTIONAL, AND THAT IS THE WHOLE POINT OF include/xp/.
-#
-# The library is the headers in include/xp/. They do not include or require
-# Kokkos -- every mention of it in them is a comment. Until this option existed
-# the BUILD did not believe that: find_package(Kokkos REQUIRED) sat at the top
-# of this file and gated everything downstream of it, including the header-only
-# export, its install rules, and the entire test suite. So you could not build,
-# install or TEST the Kokkos-free core without Kokkos, and `sweep_accuracy` --
-# the binary behind both correctness gates, which links no Kokkos and includes
-# only include/ -- was unreachable on a machine that had none.
-#
-# With XPMATH_WITH_KOKKOS=OFF you get: the installable package, both gates, and
-# every test that does not link Kokkos. What you lose is exactly what genuinely
-# needs it -- the nine demos and the tests that exercise the compat wrappers in
-# third_party/include/.
-# ---------------------------------------------------------------------------
-option(XPMATH_WITH_KOKKOS
-       "Build the Kokkos demos and the Kokkos-linked tests (needs a Kokkos install)" ON)
-
-# ---------------------------------------------------------------------------
 # WHICH SIDE OF THE BUILD TO PRODUCE -- CORE_PLAN C5 step 1
 # ---------------------------------------------------------------------------
 # CMake supports exactly ONE CXX compiler per project and has no per-target
 # override, so "host tools with g++, device tests with nvcc/hipcc" can only be
 # two build trees. These two options are what lets one source tree produce
-# either half. C5's remaining steps (the wrapper driving both trees) are a
-# separate change; this one only makes the halves addressable.
+# either half. scripts/xpm_build.sh drives both.
 #
-# BOTH DEFAULT ON, AND THAT IS LOAD-BEARING. With both ON the build is exactly
-# what it was before this option existed -- one tree, one compiler, all 63
-# ctest targets. That is the `cmake -B build` path documented in CLAUDE.md and
-# it is what CI runs; a default that changed the target set would be a silent
-# CI change wearing a refactor's clothes.
+# BOTH DEFAULT ON, AND THAT IS LOAD-BEARING. With both ON the build is one
+# tree, one compiler, the full ctest suite -- the bare `cmake -B build` path
+# that CI runs. A default that changed the target set would be a silent CI
+# change wearing a refactor's clothes.
 #
 # THE FAILURE THIS PREVENTS is a host-only tool compiled by a device compiler.
 # On A100 (job 1000938) `xpm_build.sh --arch a100` set nvcc_wrapper
-# project-wide, so sweep_accuracy -- which links no Kokkos and no device code
-# at all -- went through nvcc and failed, taking both gates, oracle_conv_test
-# and both gate selftests down with it. Five of that job's eleven red results
-# were that one mistake.
+# project-wide, so sweep_accuracy -- which links no device code at all -- went
+# through nvcc and failed, taking both gates, oracle_conv_test and both gate
+# selftests down with it. Five of that job's eleven red results were that one
+# mistake.
 #
 # EVERY registered test is tagged host or device, and the assertion at the
-# bottom of tests/CMakeLists.txt fails the CONFIGURE if one is not. A target
-# that is silently built in both trees is the other half of the same defect:
-# it gets compiled twice, and the tree it does not belong to is the one that
-# will eventually break it.
+# bottom of tests/CMakeLists.txt fails the CONFIGURE if one is not.
+#
+# CORE_PLAN C10: this repository no longer finds or links Kokkos. The eight
+# demos and third_party/include/ compat wrappers moved to xpmath-kokkos (K6);
+# they last existed here at commit 158d618b4d02e9e1ed542438514290e27123079f.
+# Device execution in this repo is tests/device_harness.hpp (CUDA/HIP/serial).
 option(XPMATH_BUILD_HOST_TARGETS
        "Build the host-side targets: the oracle-scored tools, the gates and the host test halves" ON)
 option(XPMATH_BUILD_DEVICE_TARGETS
-       "Build the device-side targets: the *_test_device halves, the harness self-test and the demos" ON)
+       "Build the device-side targets: the *_test_device halves, the harness self-test and the standalone smokes" ON)
 
 if(NOT XPMATH_BUILD_HOST_TARGETS AND NOT XPMATH_BUILD_DEVICE_TARGETS)
   # Not a philosophical objection -- this configuration registers zero tests,
@@ -144,161 +121,13 @@ if(NOT XPMATH_BUILD_HOST_TARGETS AND NOT XPMATH_BUILD_DEVICE_TARGETS)
           "exit 0 having measured nothing. Turn at least one back ON.")
 endif()
 
-if(XPMATH_WITH_KOKKOS)
-find_package(Kokkos REQUIRED)
-
-# There is deliberately no libquadmath probe here any more, and no
-# Kokkos_ENABLE_LIBQUADMATH requirement. Until B3 this file warned when the
-# Kokkos install lacked the LIBQUADMATH TPL, and then ran a
-# check_cxx_source_compiles probe for impl/Kokkos_ComplexQuadPrecisionMath.hpp
-# (a header that is NOT upstream in Kokkos — this repo carried it as a patch)
-# to decide whether the four complex demos could be added at all. Both existed
-# only to serve the accuracy columns the demos used to print. Those columns are
-# gone: the demos are timing and smoke only, and the accuracy record is
-# validation/sweep/, scored in ulps against an MPFR/MPC oracle with one verdict
-# per point (docs/CORRECTNESS.md). With them went the patch, the probe, and the
-# requirement — a Kokkos built WITHOUT libquadmath, such as the MI250
-# (hip/gfx90a) install, is a first-class supported target.
-#
-# No target here uses libquadmath. The last consumer was the cost benchmark
-# (src/bench_cost.cpp, which called ::expq/::powq from libquadmath as the
-# incumbent being timed against), and it is deleted.
-
-set(THIRD_PARTY_INCLUDE "${CMAKE_SOURCE_DIR}/third_party/include")
-
-# S2 (renamed in S3): the standalone, Kokkos-free extended-precision core
-# lives in include/xp/. The compat wrappers in third_party/include/ resolve
-# `#include <xp/...>`
-# through this directory, so every target that already gets THIRD_PARTY_INCLUDE
-# needs it as well. Appended to the same variable (which tests/CMakeLists.txt
-# also consumes) so no individual target's include list has to change.
-list(APPEND THIRD_PARTY_INCLUDE "${CMAKE_SOURCE_DIR}/include")
-
-# --- THE EIGHT DEMOS ARE DEVICE TARGETS -- CORE_PLAN C5 step 1 --------------
-# Every one of them launches Kokkos kernels, so they belong on the side of the
-# split that gets the arch's compiler and the arch's Kokkos. Left ungated they
-# would be compiled by BOTH trees: once by the host tree's g++, where nothing
-# about them is being exercised that the device tree does not exercise better,
-# and once by the device tree's nvcc/hipcc, where they are the point. Building
-# them twice is the "silently built in both configurations" failure named above,
-# spelled with executables instead of tests.
-#
-# The demos are not ctest targets, so they do not appear in the tagged-test
-# assertion at the bottom of tests/CMakeLists.txt. This comment is where their
-# side is recorded.
-#
-# The install() list goes inside the same guard: naming a target that was never
-# added is a hard configure error, which is how KI-21 used to fire.
-#
-# CONSEQUENCE, WRITTEN DOWN RATHER THAN DISCOVERED LATER: third_party/include/
-# is exercised ONLY by these eight (tests/CMakeLists.txt's C4 block says so), so
-# a host-only tree does not compile the Kokkos compat wrappers at all. A build
-# with both options ON -- the default, the bare `cmake -B build`, and CI -- does.
-if(XPMATH_BUILD_DEVICE_TARGETS)
-
-add_executable(kokkos_ep_demo src/demo_real.cpp)
-target_include_directories(kokkos_ep_demo PRIVATE ${THIRD_PARTY_INCLUDE})
-target_link_libraries(kokkos_ep_demo PRIVATE Kokkos::kokkos)
-
-add_executable(kokkos_ep_demo_complex src/demo_complex.cpp)
-target_include_directories(kokkos_ep_demo_complex PRIVATE ${THIRD_PARTY_INCLUDE})
-target_link_libraries(kokkos_ep_demo_complex PRIVATE Kokkos::kokkos)
-
-# ---- FF (float-float) demos (T2.0) ------------------------------------------
-# Timing and smoke only, like the DD demos: no oracle, no libquadmath.
-# -fext-numeric-literals is already set globally for GCC.
-add_executable(kokkos_ep_demo_ff src/demo_ff_real.cpp)
-target_include_directories(kokkos_ep_demo_ff PRIVATE ${THIRD_PARTY_INCLUDE})
-target_link_libraries(kokkos_ep_demo_ff PRIVATE Kokkos::kokkos)
-
-add_executable(kokkos_ep_demo_ff_complex src/demo_ff_complex.cpp)
-target_include_directories(kokkos_ep_demo_ff_complex PRIVATE ${THIRD_PARTY_INCLUDE})
-target_link_libraries(kokkos_ep_demo_ff_complex PRIVATE Kokkos::kokkos)
-
-# ---- QF (quad-float, 4xFP32) demos (T3.0b real, T3.0c complex) ---------------
-# Timing and smoke only. These two used to carry the RC-0/RC-1 accuracy verdict
-# that B3 removed -- the correctness contract allows one verdict per point and
-# the sweep gates issue it (docs/CORRECTNESS.md).
-add_executable(kokkos_ep_demo_qf src/demo_qf_real.cpp)
-target_include_directories(kokkos_ep_demo_qf PRIVATE ${THIRD_PARTY_INCLUDE})
-target_link_libraries(kokkos_ep_demo_qf PRIVATE Kokkos::kokkos)
-
-add_executable(kokkos_ep_demo_qf_complex src/demo_qf_complex.cpp)
-target_include_directories(kokkos_ep_demo_qf_complex PRIVATE ${THIRD_PARTY_INCLUDE})
-target_link_libraries(kokkos_ep_demo_qf_complex PRIVATE Kokkos::kokkos)
-
-# ---- TF (triple-float, 3xFP32) demos (S10 Phase 5 real + complex) ----------
-# Timing and smoke only, same shape as the QF pair above.
-add_executable(kokkos_ep_demo_tf src/demo_tf_real.cpp)
-target_include_directories(kokkos_ep_demo_tf PRIVATE ${THIRD_PARTY_INCLUDE})
-target_link_libraries(kokkos_ep_demo_tf PRIVATE Kokkos::kokkos)
-
-add_executable(kokkos_ep_demo_tf_complex src/demo_tf_complex.cpp)
-target_include_directories(kokkos_ep_demo_tf_complex PRIVATE ${THIRD_PARTY_INCLUDE})
-target_link_libraries(kokkos_ep_demo_tf_complex PRIVATE Kokkos::kokkos)
-
-# THE ONLY TARGETS IN THIS PROJECT THAT LINK KOKKOS, and therefore the only
-# ones Kokkos's INTERFACE_COMPILE_FEATURES cxx_std_20 raises off C++17
-# (CORE_PLAN C5 step 6). Written here, next to the eight target() calls, so
-# adding a ninth Kokkos consumer and forgetting this list is a failing
-# build_provenance rather than a silently wrong stamp. After CORE_PLAN C4 no
-# test links Kokkos, so this list is the whole of the exception.
-set(XPMATH_KOKKOS_LINKED_TARGETS
-    kokkos_ep_demo
-    kokkos_ep_demo_complex
-    kokkos_ep_demo_ff
-    kokkos_ep_demo_ff_complex
-    kokkos_ep_demo_qf
-    kokkos_ep_demo_qf_complex
-    kokkos_ep_demo_tf
-    kokkos_ep_demo_tf_complex)
-
-
-# KI-21 is closed by deletion. The four complex demos used to be named through
-# XP_COMPLEX_DEMO_TARGETS because the probe could leave them unbuilt, and naming
-# a target that was never added is a hard configure error. Every demo is now
-# added unconditionally, so the list can be spelled out.
-install(TARGETS kokkos_ep_demo
-                kokkos_ep_demo_complex
-                kokkos_ep_demo_ff
-                kokkos_ep_demo_ff_complex
-                kokkos_ep_demo_qf
-                kokkos_ep_demo_qf_complex
-                kokkos_ep_demo_tf
-                kokkos_ep_demo_tf_complex
-        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-
-else()
-  message(STATUS
-    "XPMATH_BUILD_DEVICE_TARGETS=OFF: the eight Kokkos demos are not built in "
-    "this tree, and with them third_party/include/ is not compiled here.")
-endif()  # XPMATH_BUILD_DEVICE_TARGETS
-
-else()
-  message(STATUS
-    "XPMATH_WITH_KOKKOS=OFF: building the header-only package, both accuracy "
-    "gates and every Kokkos-free test. The nine demos and the wrapper-linked "
-    "tests are skipped -- they are the only things that need Kokkos.")
-endif()
-
 # ---- Installable package (header-only core) ---------------------------------
 #
-# WHAT IS INSTALLED, AND WHY IT IS NOT THE WHOLE REPO.
-#
-# xpmath the LIBRARY is the 11 headers in include/xp/. They are header-only and
+# xpmath the LIBRARY is the headers in include/xp/. They are header-only and
 # they do not include or require Kokkos -- every mention of Kokkos in them is a
-# comment (verified: `grep -n Kokkos include/xp/*.hpp` matches only comment
-# lines). tests/standalone/*_no_kokkos_smoke.cpp already compiles them with a
-# bare g++ and an include path containing only include/.
-#
-# So the exported package deliberately does NOT find_package(Kokkos). A consumer
-# who wants the numeric core gets it with zero TPLs; a consumer who wants device
-# execution brings their own Kokkos and uses it alongside. Making Kokkos a hard
-# requirement of the export would impose a dependency the headers do not have.
-#
-# third_party/include/ is the Kokkos COMPAT WRAPPER, not the library. It is not
-# installed: it exists so this repo's own Kokkos demos can include <xp/...>
-# through the old Kokkos-facing names.
+# comment explaining that the Kokkos layer lives in the xpmath-kokkos
+# repository. tests/standalone/*_no_kokkos_smoke.cpp compiles them with a bare
+# g++ and an include path containing only include/.
 
 add_library(xpmath INTERFACE)
 add_library(xpmath::xpmath ALIAS xpmath)
@@ -362,8 +191,7 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
 # calling cmake directly, which is what CI does and what anybody debugging
 # does. CMake is the one thing every build goes through, and it is also the
 # only place that knows the RESOLVED compiler version and the FINAL flags
-# (this file mutates CMAKE_CXX_FLAGS above, and Kokkos adds to the picture
-# through its interface).
+# (this file mutates CMAKE_CXX_FLAGS above).
 #
 # XPMATH_ARCH and XPMATH_OPT are supplied by the wrapper. A direct cmake call
 # leaves them at their defaults below, which says so rather than guessing.
@@ -407,33 +235,20 @@ else()
 endif()
 string(STRIP "${_xp_all_flags}" _xp_all_flags)
 
-if(XPMATH_WITH_KOKKOS)
-  set(_xp_kokkos_prefix "${Kokkos_DIR}")
-  if(NOT _xp_kokkos_prefix)
-    set(_xp_kokkos_prefix "${CMAKE_PREFIX_PATH}")
-  endif()
-else()
-  set(_xp_kokkos_prefix "(none: XPMATH_WITH_KOKKOS=OFF)")
-endif()
+# CORE_PLAN C10: this repository does not find or link Kokkos. The stamp fields
+# stay so build_provenance's required-key list does not change; the values say
+# so rather than echoing a deleted option.
+set(_xp_kokkos_prefix "(none: Kokkos lives in xpmath-kokkos)")
 
 string(TIMESTAMP _xp_stamp_utc "%Y-%m-%dT%H:%M:%SZ" UTC)
 
-# THE STANDARD THIS BUILD DOES NOT COMPILE EVERYTHING AT -- CORE_PLAN C5 step 6.
+# THE STANDARD THIS BUILD COMPILES AT -- CORE_PLAN C5 step 6 / C10
 #
-# `cxx-standard` above is what the project asks for. This field is what the
-# exceptions are, named rather than left for a future reader to rediscover the
-# way S8c did. It is derived from the Kokkos-linked target list, and
-# check_build_provenance.cmake MEASURES the same claim independently out of
-# compile_commands.json -- so a wrong value here is a failing test, not a
-# comment nobody checks.
-if(XPMATH_KOKKOS_LINKED_TARGETS)
-  list(LENGTH XPMATH_KOKKOS_LINKED_TARGETS _xp_n_raised)
-  string(REPLACE ";" " " _xp_raised_names "${XPMATH_KOKKOS_LINKED_TARGETS}")
-  set(_xp_raised
-      "c++20 on ${_xp_n_raised} Kokkos-linked target(s) (Kokkos INTERFACE_COMPILE_FEATURES cxx_std_20): ${_xp_raised_names}")
-else()
-  set(_xp_raised "(none: no target in this tree links Kokkos)")
-endif()
+# `cxx-standard` above is what the project asks for. `cxx-standard-raised` names
+# any exception. After C10 there are none: no target links Kokkos, so nothing
+# inherits INTERFACE_COMPILE_FEATURES cxx_std_20. check_build_provenance.cmake
+# MEASURES the same claim out of compile_commands.json.
+set(_xp_raised "(none: no target in this tree links Kokkos)")
 
 # WHICH SIDE OF THE C5 SPLIT THIS BUILD DIRECTORY IS -- CORE_PLAN C5 step 5.
 #
@@ -445,15 +260,7 @@ endif()
 # also makes the field impossible to disagree with the build it describes.
 #
 # `both` is a real and correct value, not a fallback: it is the one-tree,
-# one-compiler configuration the bare cmake path produces, and an artifact from
-# it genuinely was not produced by either half alone. The both-OFF case cannot
-# reach here -- the option block near the top of this file makes it a
-# FATAL_ERROR, because it would register zero tests and `ctest` over zero tests
-# exits 0.
-#
-# THE PATH IS NOT THE ANSWER. Two stamps produced by one wrapper run must be
-# told apart by CONTENT: a log pasted into a STATUS block, or a build-info.txt
-# copied off a compute node, arrives without its directory.
+# one-compiler configuration the bare cmake path produces.
 if(XPMATH_BUILD_HOST_TARGETS AND XPMATH_BUILD_DEVICE_TARGETS)
   set(_xp_tree "both")
 elseif(XPMATH_BUILD_HOST_TARGETS)
@@ -473,7 +280,7 @@ git-head: ${_xp_git_head}
 compiler: ${CMAKE_CXX_COMPILER}
 compiler-id: ${CMAKE_CXX_COMPILER_ID}
 compiler-version: ${CMAKE_CXX_COMPILER_VERSION}
-kokkos: ${XPMATH_WITH_KOKKOS}
+kokkos: OFF
 kokkos-prefix: ${_xp_kokkos_prefix}
 cxx-standard: ${CMAKE_CXX_STANDARD}
 cxx-standard-raised: ${_xp_raised}
@@ -488,19 +295,11 @@ if(_xp_git_head MATCHES "-dirty$")
 endif()
 message(STATUS "build provenance: ${CMAKE_BINARY_DIR}/build-info.txt (arch=${XPMATH_ARCH}, tree=${_xp_tree})")
 
-# ---- Tests (T0.1: backend-parameterized harness) ----------------------------
-# THIRD_PARTY_INCLUDE (set above) is NO LONGER consumed by tests/CMakeLists.txt.
-# CORE_PLAN C4 step 5 deleted the last two test-side users of it along with the
-# three kokkos_ep_add_* helpers. It stays set here because the eight demo
-# targets in src/ still include the Kokkos compat wrappers through it, and they
-# are what keeps that layer exercised until C10 moves them out.
-#
-# RENAMED BY CORE_PLAN C4: KOKKOS_EP_BUILD_TESTS -> XPMATH_BUILD_TESTS. The
-# project is xpmath, and after C4 the suite is not Kokkos-specific -- most of it
-# does not link Kokkos at all. The old spelling survives as a deprecated alias
-# because dropping it outright would be the worst possible failure mode: an
-# existing `-DKOKKOS_EP_BUILD_TESTS=OFF` would be ignored and the caller would
-# get the whole suite it asked not to build, silently. C10 removes the alias.
+# ---- Tests -----------------------------------------------------------------
+# RENAMED BY CORE_PLAN C4: KOKKOS_EP_BUILD_TESTS -> XPMATH_BUILD_TESTS.
+# The deprecated KOKKOS_EP_BUILD_TESTS alias is removed in CORE_PLAN C10 step 4;
+# until then it still lives below so a stale -D does not silently rebuild the
+# whole suite.
 option(XPMATH_BUILD_TESTS "Build the extended-precision test suite" ON)
 
 # NOT an option(): the alias must distinguish "not set" from "set to OFF", and

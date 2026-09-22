@@ -24,36 +24,9 @@ build and install this project on a host. It is what CI runs. If you are
 consuming xpmath, this is the whole of what you need; the two-tree section
 below is about testing it on a GPU and does not change what gets installed.
 
-### Building with Kokkos
-
-Kokkos ≥5.1 built at C++20, and nothing else. In particular **no
-`Kokkos_ENABLE_LIBQUADMATH=ON`**: that used to be a hard requirement because the
-demos scored themselves against a host `__float128` oracle reached through
-`impl/Kokkos_QuadPrecisionMath.hpp` (and, for the complex demos, a non-upstream
-patch header this repo carried). Those accuracy columns are gone — the accuracy
-record is `validation/sweep/` — so a Kokkos with libquadmath OFF, such as a
-`hip/gfx90a` install, configures cleanly. No target here uses libquadmath.
-
-### Building without Kokkos
-
-The build itself no longer requires Kokkos:
-
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DXPMATH_WITH_KOKKOS=OFF
-cmake --build build -j
-ctest --test-dir build
-```
-
-That gets you the installable package, **both accuracy gates**, and every test
-— no test in this repository links Kokkos any more. What it skips is the eight
-demos, which are the only remaining Kokkos consumers and the only thing that
-exercises the compat wrappers in `third_party/include/`.
-
-This used to be impossible. `find_package(Kokkos REQUIRED)` sat at the top of
-the top-level `CMakeLists.txt` and gated everything below it — including the
-header-only export, its install rules, and the whole test suite — so the
-Kokkos-free core could not be built, installed or tested without Kokkos, and
-`sweep_accuracy`, which links no Kokkos at all, was unreachable without it.
+This repository does **not** find or link Kokkos (CORE_PLAN C10). The
+`Kokkos::Experimental` wrappers and the eight timing demos live in the
+**xpmath-kokkos** repository. The `XPMATH_WITH_KOKKOS` CMake option is gone.
 
 ### Building the device side: two trees, one command
 
@@ -65,7 +38,7 @@ halves, both defaulting `ON`:
 | option | default | selects |
 |---|---|---|
 | `XPMATH_BUILD_HOST_TARGETS` | `ON` | the oracle-scored tools, the accuracy gates, the host test halves |
-| `XPMATH_BUILD_DEVICE_TARGETS` | `ON` | the `*_test_device` halves, the device-harness self-test, the demos |
+| `XPMATH_BUILD_DEVICE_TARGETS` | `ON` | the `*_test_device` halves, the device-harness self-test, the standalone smokes |
 
 **With both left alone you get the single-tree build above, unchanged.** That
 is the point of the defaults: a consumer, an installer and CI see no
@@ -75,8 +48,8 @@ The wrapper drives both halves for a named GPU and returns one merged verdict:
 
 ```sh
 scripts/xpm_build.sh --arch {host|a100|mi250} --build-dir <dir>
-# <dir>/host    g++, no Kokkos, identical on every arch — 41 tests
-# <dir>/device  the arch's compiler and Kokkos       — 24 tests
+# <dir>/host    g++, identical on every arch — host-tagged tests
+# <dir>/device  the arch's compiler (serial / nvcc / hipcc) — device-tagged tests
 scripts/xpm_build.sh --arch a100 --build-dir <dir> --only device   # on a compute node
 ```
 
@@ -110,16 +83,14 @@ cmake -S . -B build -DCMAKE_PREFIX_PATH=/where/you/installed/it
 ## No Kokkos required
 
 The exported package does **not** depend on Kokkos. The headers in `include/xp/`
-never include a Kokkos header — every mention of Kokkos in them is a comment —
-so a consumer gets the numeric core with no third-party libraries at all, not
-even libquadmath.
+never include a Kokkos header — every mention of Kokkos in them is a comment
+pointing at the **xpmath-kokkos** repository — so a consumer gets the numeric
+core with no third-party libraries at all, not even libquadmath.
 
-Kokkos is used by this repository's own eight demos and by nothing else — its
-device tests run on a Kokkos-free CUDA/HIP harness (`tests/device_harness.hpp`).
-The demos reach Kokkos through a compat wrapper in
-`third_party/include/` that is deliberately **not** installed. If you want
-xpmath inside Kokkos kernels, bring your own Kokkos and use it alongside — the
-types are annotated `XPMATH_INLINE_FUNCTION` and run on device.
+This repository's device tests run on a Kokkos-free CUDA/HIP harness
+(`tests/device_harness.hpp`). If you want xpmath inside Kokkos kernels, use
+**xpmath-kokkos** (or bring your own Kokkos alongside the installed headers —
+the types are annotated `XPMATH_INLINE_FUNCTION` and run on device).
 
 ## Versioning
 

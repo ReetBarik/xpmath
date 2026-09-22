@@ -44,8 +44,8 @@
 // header does NOT include or require Kokkos — see xp/config.hpp for how the
 // four portability facilities it needs (inline annotation, on-device
 // detection, scalar math dispatch, diagnostic printf) are supplied. Kokkos
-// users get `Kokkos::Experimental::TripleFloat` API through the compat wrapper
-// at third_party/include/tf_math.hpp, which is the only place
+// users get `Kokkos::Experimental::TripleFloat` API through the Kokkos::Experimental wrappers in xpmath-kokkos
+// (formerly third_party/include/tf_math.hpp here; last at commit 158d618). The only place
 // `namespace Kokkos` is mentioned.
 //
 // NAMING (ratified via S2 naming memo + S3): xp:: = extended precision,

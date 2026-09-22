@@ -7,7 +7,7 @@
 //
 // This file is the complex layer for the QF (quad-float, 4×FP32) backend on
 // branch qffunKokkos. It is a mechanical scalar-swap port of
-// third_party/include/ff_complex.hpp (this repo's float-float complex layer,
+// include/xp/ff_complex.hpp (this repo's float-float complex layer,
 // itself a DD→FF translation of dd_complex.hpp) from FloatFloat (2×FP32) to
 // QuadFloat (4×FP32). Every complex algorithm — the (ac−bd)+(ad+bc)i product,
 // the Kahan-style complex sqrt, exp = eˣ(cos y + i sin y), the log/atan2 polar
@@ -59,8 +59,8 @@
 // In particular this header does NOT include or require Kokkos — see
 // xp/config.hpp for how the portability facilities are supplied. Kokkos
 // users get today's `Kokkos::Experimental::QuadFloatComplex` API
-// unchanged through the compat wrapper at third_party/include/qf_complex.hpp,
-// which is the only place `namespace Kokkos` is mentioned.
+// unchanged through the Kokkos::Experimental wrappers in xpmath-kokkos
+// (formerly third_party/include/qf_complex.hpp here; last at commit 158d618).
 //
 // NAMING (ratified via S2 naming memo + S3): xp:: = extended precision,
 // companion to MxP (mixed precision). See include/xp/config.hpp for rationale.

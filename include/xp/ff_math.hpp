@@ -48,8 +48,8 @@
 // four portability facilities it needs (inline annotation, on-device
 // detection, scalar math dispatch, diagnostic printf) are supplied. Kokkos
 // users get today's `Kokkos::Experimental::FloatFloat` API unchanged through
-// the compat wrapper at third_party/include/ff_math.hpp, which is the only
-// place `namespace Kokkos` is mentioned.
+// the Kokkos::Experimental wrappers in the xpmath-kokkos repository
+// (formerly third_party/include/ff_math.hpp in this tree; last at commit 158d618).
 //
 // NAMING (ratified via S2 naming memo + S3): xp:: = extended precision,
 // companion to MxP (mixed precision). See include/xp/config.hpp for rationale.

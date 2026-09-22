@@ -71,17 +71,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# A new push to the same branch cancels the previous run; the Kokkos build is
-# the expensive part and there is no value in racing two of them.
+# A new push to the same branch cancels the previous run.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
-
-env:
-  KOKKOS_TAG: "5.1.0"
 
 jobs:
 
@@ -183,7 +179,7 @@ jobs:
   # wrappers -- so this lane, not the Kokkos one, is where it belongs.
   # ---------------------------------------------------------------------------
   no-kokkos-build:
-    name: build + ctest with XPMATH_WITH_KOKKOS=OFF
+    name: build + ctest (Kokkos-free repository)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -193,17 +189,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y g++-13 libmpfr-dev libgmp-dev libmpc-dev
 
-      - name: Configure with no Kokkos anywhere
+      - name: Configure (this repository has no Kokkos after CORE_PLAN C10)
         env:
           CXX: g++-13
         run: |
           cmake -S . -B build-nokokkos \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DXPMATH_WITH_KOKKOS=OFF
+                -DCMAKE_BUILD_TYPE=Release
 
-      # A Kokkos that is merely unused is not the same as one that is absent.
-      # If any target still links it, this fails at build time rather than
-      # quietly succeeding because the runner happens to have none installed.
+      # After C10 there is no Kokkos option to leave ON by mistake. This lane
+      # still proves the full suite configures and builds with nothing but
+      # g++ and the oracle libraries.
       - name: Build
         run: cmake --build build-nokokkos -j"$(nproc)"
 
@@ -231,8 +226,8 @@ jobs:
           actual=$(ctest --test-dir build-nokokkos -N | awk '/^Total Tests: /{print $3}')
           echo "registered without Kokkos: ${actual} (expected ${expected})"
           if [ "${actual}" != "${expected}" ]; then
-            echo "::error::${actual} targets registered without Kokkos, expected ${expected}."
-            echo "::error::A target moved across the XPMATH_WITH_KOKKOS guard."
+            echo "::error::${actual} targets registered, expected ${expected}."
+            echo "::error::A target was added or removed without updating this assertion."
             ctest --test-dir build-nokokkos -N
             exit 1
           fi
@@ -272,10 +267,8 @@ jobs:
         run: |
           set -euo pipefail
           cmake -S . -B build-hostonly -DCMAKE_BUILD_TYPE=Release \
-                -DXPMATH_WITH_KOKKOS=OFF \
                 -DXPMATH_BUILD_HOST_TARGETS=ON -DXPMATH_BUILD_DEVICE_TARGETS=OFF > /dev/null
           cmake -S . -B build-deviceonly -DCMAKE_BUILD_TYPE=Release \
-                -DXPMATH_WITH_KOKKOS=OFF \
                 -DXPMATH_BUILD_HOST_TARGETS=OFF -DXPMATH_BUILD_DEVICE_TARGETS=ON > /dev/null
           names() { ctest --test-dir "$1" -N | sed -n 's/^  Test *#[0-9]*: //p' | sort; }
           names build-hostonly   > /tmp/host.names
@@ -509,15 +502,13 @@ jobs:
           echo "(informational: a differing oracle makes this diff meaningless)"
 
   # ==========================================================================
-  # 4. Full build + ctest.  The expensive lane; Kokkos dominates the wall time,
-  #    so its INSTALL TREE is cached and rebuilt only when the key changes.
-  #
-  #    Cache key deliberately includes the CMake flags: flipping LIBQUADMATH or
-  #    the C++ standard must invalidate, or the lane silently tests the wrong
-  #    Kokkos.
+  # 4. Full build + ctest. After CORE_PLAN C10 this repository does not find or
+  #    link Kokkos, so this lane no longer builds a Kokkos install. It is the
+  #    same shape as no-kokkos-build, kept as a separate job so the libquadmath
+  #    symbol guard and the suite-size assertion stay on a dedicated lane.
   # ==========================================================================
   build-and-test:
-    name: Kokkos build + ctest (full suite, MPFR arm included)
+    name: full build + ctest (MPFR arm included)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -550,51 +541,15 @@ jobs:
           g++-13 -dumpfullversion
           cmake --version | head -1
 
-      - name: Cache Kokkos install tree
-        id: kokkos-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/kokkos-install
-          # Bump the trailing integer to force a rebuild. v1→v2 reflects the
-          # removal of -DKokkos_ENABLE_LIBQUADMATH=ON, which invalidates the cached
-          # tree.
-          key: kokkos-${{ env.KOKKOS_TAG }}-serial-noquadmath-cxx20-gcc13-ubuntu24-v2
-
-      - name: Build Kokkos ${{ env.KOKKOS_TAG }} (Serial)
-        if: steps.kokkos-cache.outputs.cache-hit != 'true'
-        run: |
-          set -euo pipefail
-          git clone --depth 1 --branch "${KOKKOS_TAG}" \
-            https://github.com/kokkos/kokkos.git /tmp/kokkos-src
-
-          # This step used to copy patches/kokkos_complex_quad_math.hpp into the
-          # Kokkos SOURCE tree, because the four complex demos included
-          # impl/Kokkos_ComplexQuadPrecisionMath.hpp for their __complex128
-          # accuracy columns and that header is not upstream in Kokkos.  B3
-          # deleted the columns and the patch with them; the demos are timing and
-          # smoke only now.  The LIBQUADMATH TPL is gone: the one consumer was
-          # kokkos_ep_bench_cost (which benchmarked backends against __float128),
-          # and it is deleted.
-
-          # KI-3: Kokkos itself REQUIRES C++20.  This is not the standard the
-          # consuming repo is built at (see the next step, which uses 17).
-          cmake -S /tmp/kokkos-src -B /tmp/kokkos-build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="${HOME}/kokkos-install" \
-            -DCMAKE_CXX_COMPILER=g++-13 \
-            -DCMAKE_CXX_STANDARD=20 \
-            -DKokkos_ENABLE_SERIAL=ON
-          cmake --build /tmp/kokkos-build -j"$(nproc)" --target install
-
-      # KI-3, other half: THIS repo is C++17.  Do not unify the two numbers.
+      # THIS repo is C++17. Kokkos (and the C++20 it requires) lives in
+      # xpmath-kokkos after CORE_PLAN C10.
       - name: Configure xpmath (C++17, -O3 -DNDEBUG)
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_STANDARD=17 \
             -DCMAKE_CXX_COMPILER=g++-13 \
-            -DCMAKE_CXX_FLAGS="-O3 -DNDEBUG" \
-            -DCMAKE_PREFIX_PATH="${HOME}/kokkos-install"
+            -DCMAKE_CXX_FLAGS="-O3 -DNDEBUG"
 
       - name: Build
         run: cmake --build build -j"$(nproc)"

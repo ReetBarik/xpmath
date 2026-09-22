@@ -7,7 +7,7 @@
 //
 // This file is the complex layer for the TF (triple-float, 3×FP32) backend on
 // branch main. It is a mechanical scalar-swap port of
-// third_party/include/qf_complex.hpp (this repo's quad-float complex layer,
+// include/xp/qf_complex.hpp (this repo's quad-float complex layer,
 // 4×FP32) to TripleFloat (3×FP32). Every complex algorithm — the (ac−bd)+(ad+bc)i
 // product, the Kahan-style complex sqrt, exp = eˣ(cos y + i sin y), the log/atan2
 // polar decomposition, the sin/cos/sinh/cosh angle-addition formulas — descends
@@ -43,8 +43,8 @@
 // In particular this header does NOT include or require Kokkos — see
 // xp/config.hpp for how the portability facilities are supplied. Kokkos
 // users get today's `Kokkos::Experimental::TripleFloatComplex` API
-// unchanged through the compat wrapper at third_party/include/tf_complex.hpp,
-// which is the only place `namespace Kokkos` is mentioned.
+// unchanged through the Kokkos::Experimental wrappers in xpmath-kokkos
+// (formerly third_party/include/tf_complex.hpp here; last at commit 158d618).
 //
 // NAMING (ratified via S2 naming memo + S3): xp:: = extended precision,
 // companion to MxP (mixed precision). See include/xp/config.hpp for rationale.

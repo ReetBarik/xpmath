@@ -38,8 +38,8 @@
 // In particular this header does NOT include or require Kokkos — see
 // xp/config.hpp for how the portability facilities are supplied. Kokkos
 // users get today's `Kokkos::Experimental::FloatFloatComplex` API
-// unchanged through the compat wrapper at third_party/include/ff_complex.hpp,
-// which is the only place `namespace Kokkos` is mentioned.
+// unchanged through the Kokkos::Experimental wrappers in xpmath-kokkos
+// (formerly third_party/include/ff_complex.hpp here; last at commit 158d618).
 //
 // NAMING (ratified via S2 naming memo + S3): xp:: = extended precision,
 // companion to MxP (mixed precision). See include/xp/config.hpp for rationale.
