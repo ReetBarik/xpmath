@@ -67,16 +67,16 @@
 #include <utility>
 #include <vector>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 
 // Which contraction posture were we compiled under? Set by the CMake helpers
 // (xpm_add_device_eft_test -> 0, ..._contract_on -> 1). Default to OFF/gate if
 // somehow unset, so a flagless build fails loud rather than silently skipping.
-#ifndef KOKKOS_EP_CONTRACTION_MODE
-#  define KOKKOS_EP_CONTRACTION_MODE 0
+#ifndef XPMATH_CONTRACTION_MODE
+#  define XPMATH_CONTRACTION_MODE 0
 #endif
 
-#if KOKKOS_EP_CONTRACTION_MODE == 0
+#if XPMATH_CONTRACTION_MODE == 0
 static const char* kPostureName = "OFF (-ffp-contract=off / --fmad=false)";
 #else
 static const char* kPostureName = "ON  (-ffp-contract=fast / --fmad=true)";
@@ -278,7 +278,7 @@ int main(int, char**) {
                 "cross-product)\n\n", n);
     // A guard that tested nothing passes silently, so the input count is itself
     // asserted rather than printed and trusted.
-    KOKKOS_EP_ASSERT(n > 0, "no in-domain input pairs were built — the guard would "
+    XPMATH_ASSERT(n > 0, "no in-domain input pairs were built — the guard would "
                             "have measured nothing");
 
     xpt::buffer<double> va(n), vb(n);
@@ -345,16 +345,16 @@ int main(int, char**) {
     // would be worse than reporting nothing. Sticky since process start.
     const int verr = xpt::last_error();
 
-#if KOKKOS_EP_CONTRACTION_MODE == 0
+#if XPMATH_CONTRACTION_MODE == 0
     // OFF variant: FAIL-GATE. The error terms MUST be exact.
     std::printf("\nmode=OFF: fail-gating on any mismatch.\n");
-    KOKKOS_EP_ASSERT(S.tested > 0, "the twoSum control tested nothing");
-    KOKKOS_EP_ASSERT(S.mismatches == 0,
+    XPMATH_ASSERT(S.tested > 0, "the twoSum control tested nothing");
+    XPMATH_ASSERT(S.mismatches == 0,
                      "twoSum control not exact under contraction-off (unexpected)");
-    KOKKOS_EP_ASSERT(F == 0,
+    XPMATH_ASSERT(F == 0,
                      "device Dekker twoProduct not exact under contraction-off — "
                      "the -ffp-contract=off / --fmad=false posture is not taking effect");
-    KOKKOS_EP_ASSERT(verr == 0, "device harness reported a nonzero vendor error code");
+    XPMATH_ASSERT(verr == 0, "device harness reported a nonzero vendor error code");
     rc = ep_exit_code();
     std::printf("=== dd_fma_guard_test_device [OFF]: %s ===\n",
                 rc == 0 ? "ALL EXACT (posture holds)" : "FAILURES PRESENT");
@@ -374,12 +374,12 @@ int main(int, char**) {
     if (S.mismatches != 0)
         std::printf("  WARNING: twoSum control showed %ld mismatches under ON — unexpected "
                     "(twoSum has no contractible adjacency).\n", S.mismatches);
-#  ifdef KOKKOS_EP_BASELINE_PATH
+#  ifdef XPMATH_BASELINE_PATH
     {
         // WARN-only drift check, same contract and same file format as the host
         // half: one integer on the first non-comment line, missing/unparseable
         // degrades to a hint, never a failure.
-        const char* path = KOKKOS_EP_BASELINE_PATH;
+        const char* path = XPMATH_BASELINE_PATH;
         std::ifstream f(path);
         if (!f) {
             std::printf("  baseline: no file at %s\n", path);
@@ -410,7 +410,7 @@ int main(int, char**) {
 #  endif
     // The reporter exits 0 on the MEASUREMENT and nonzero on the APPARATUS: a
     // launch that failed did not report anything.
-    KOKKOS_EP_ASSERT(verr == 0, "device harness reported a nonzero vendor error code");
+    XPMATH_ASSERT(verr == 0, "device harness reported a nonzero vendor error code");
     rc = ep_exit_code();
     std::printf("=== dd_fma_guard_test_device [ON]: REPORTED (mismatches=%ld, exit %d) ===\n",
                 F, rc);

@@ -50,7 +50,7 @@
 #include <cstdint>
 #include <cstdio>
 
-namespace kokkos_ep {
+namespace xpmath {
 
 // ============================================================================
 // Backend tags and traits
@@ -199,11 +199,11 @@ inline const ExpectedMinDropAnnotation* lookup_expected_min_drop(const char* op_
 // minimal — see the framework-choice note at the top of this header.
 
 // Each test file defines exactly one: `int g_ep_failures = 0;` at file scope.
-#define KOKKOS_EP_ASSERT(cond, msg)                                            \
+#define XPMATH_ASSERT(cond, msg)                                            \
   do {                                                                         \
     if (!(cond)) {                                                             \
       std::printf("ASSERT FAILED %s:%d: %s\n", __FILE__, __LINE__, (msg));     \
-      ++::kokkos_ep::detail::ep_failure_count();                              \
+      ++::xpmath::detail::ep_failure_count();                              \
     }                                                                          \
   } while (0)
 
@@ -222,4 +222,4 @@ inline int ep_exit_code() {
   return detail::ep_failure_count() == 0 ? 0 : 1;
 }
 
-}  // namespace kokkos_ep
+}  // namespace xpmath

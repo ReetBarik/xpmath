@@ -62,7 +62,7 @@
 #include <string>
 #include <vector>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 
 // test_utils_device.hpp declares `namespace dd = xp;` (and the DD/FF tags) but
 // has no QF tag — a TODO there. Rather than add a traits specialization to
@@ -449,13 +449,13 @@ int main(int, char**) {
   // A run that checked nothing is not a pass: if every result came back
   // uncheckable (a dead launch leaves the output buffers at whatever the
   // allocator returned) every count above reads 0 failures.
-  KOKKOS_EP_ASSERT(total_tested > 0,
+  XPMATH_ASSERT(total_tested > 0,
                    "no device result was checkable — the tripwire proved nothing");
-  KOKKOS_EP_ASSERT(gate_fail == 0,
+  XPMATH_ASSERT(gate_fail == 0,
                    "one or more QF ops violated the length-4 non-overlap gate on the device");
   // A nonzero vendor code is a TEST FAILURE, not a warning. Sticky since process
   // start, so a later good call cannot erase it.
-  KOKKOS_EP_ASSERT(xpt::last_error() == 0,
+  XPMATH_ASSERT(xpt::last_error() == 0,
                    "device harness reported a nonzero vendor error code");
 
   int rc = ep_exit_code();

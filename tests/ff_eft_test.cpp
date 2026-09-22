@@ -104,7 +104,7 @@
 #include <random>
 #include <vector>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 
 // ----------------------------------------------------------------------------
 // The two EFT primitives under test, mirrored from ff_math.hpp for RAW floats.
@@ -543,33 +543,33 @@ int main(int, char**) {
         EftCount A = run_host_batches(Op::Sum, "A");
         std::printf("  Test A twoSum: total tested=%ld, skipped=%ld, failures=%ld\n\n",
                     A.tested, A.skipped, A.failures);
-        KOKKOS_EP_ASSERT(A.failures == 0, "twoSum was not bit-exact for some finite input pair");
+        XPMATH_ASSERT(A.failures == 0, "twoSum was not bit-exact for some finite input pair");
 
         // -- Test B: Dekker twoProd -----------------------------------------
         std::printf("[Test B] Dekker twoProduct bit-exactness\n");
         EftCount B = run_host_batches(Op::Prod, "B");
         std::printf("  Test B Dekker twoProd: total tested=%ld, skipped=%ld, failures=%ld\n\n",
                     B.tested, B.skipped, B.failures);
-        KOKKOS_EP_ASSERT(B.failures == 0, "Dekker twoProd was not bit-exact for some in-domain input pair");
+        XPMATH_ASSERT(B.failures == 0, "Dekker twoProd was not bit-exact for some in-domain input pair");
 
         // -- Test C: named cases --------------------------------------------
         std::printf("[Test C] named hard cases\n");
         NamedResult C = run_named_cases();
         std::printf("  Test C named cases: %d passed, %d skipped, %d failed (of %d)\n\n",
                     C.passed, C.skipped, C.failed, C.total);
-        KOKKOS_EP_ASSERT(C.failed == 0, "a named EFT case failed");
+        XPMATH_ASSERT(C.failed == 0, "a named EFT case failed");
 
         // -- Test D: device parity ------------------------------------------
         std::printf("[Test D] device parity (%s)\n", xpt::where_name());
         NamedResult D = run_device_parity();
         std::printf("  Test D device parity: %d passed, %d skipped, %d failed (of %d)\n\n",
                     D.passed, D.skipped, D.failed, D.total);
-        KOKKOS_EP_ASSERT(D.failed == 0, "device EFT parity mismatch vs host FP64 oracle");
+        XPMATH_ASSERT(D.failed == 0, "device EFT parity mismatch vs host FP64 oracle");
         // A nonzero vendor code is a TEST FAILURE, not a warning: a launch that
         // never ran leaves the output buffers at whatever the allocator returned,
         // and the comparison loop cannot tell that from a clean pass. Sticky
         // since process start, so a later good call cannot erase it.
-        KOKKOS_EP_ASSERT(xpt::last_error() == 0,
+        XPMATH_ASSERT(xpt::last_error() == 0,
                          "device harness reported a nonzero vendor error code");
 
         rc = ep_exit_code();

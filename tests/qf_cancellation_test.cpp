@@ -97,7 +97,7 @@
 #include <string>
 #include <vector>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 
 // QF types live in xp; qf:: alias (matches the other qf tests).
 namespace qf = xp;
@@ -440,7 +440,7 @@ int main() {
     std::printf("  Kernels: K1_stable, K2_basel, K3_machin, K4_alt_harmonic "
                 "(+ K1_naive reported, not gated)\n");
     std::printf("  Total gate failures: %ld\n", kernel_failures);
-    KOKKOS_EP_ASSERT(kernel_failures == 0,
+    XPMATH_ASSERT(kernel_failures == 0,
                      "an end-to-end kernel's mean digits fell below tolerance");
 
     rc = ep_exit_code();

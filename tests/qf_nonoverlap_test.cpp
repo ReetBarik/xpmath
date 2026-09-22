@@ -173,7 +173,7 @@
 #include <string>
 #include <vector>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 
 // qf:: alias over the standalone core (matches qf_eft_test.cpp). This used to
 // read `namespace qf = Kokkos::Experimental;`; the C4 split unlinked Kokkos from
@@ -901,9 +901,9 @@ int main(int, char**) {
                   "(worst ratio %.4f). These are QD renorm's Shewchuk-weak non-overlap,\n"
                   "  not per-op bugs (see PORT_NOTES / T3.2 report). Under the strict "
                   "Priest gate they count as failures.\n", total_weak, overall_worst);
-    KOKKOS_EP_ASSERT(gate_fail == 0,
+    XPMATH_ASSERT(gate_fail == 0,
                      "one or more QF ops violated the length-4 non-overlap gate");
-    KOKKOS_EP_ASSERT(c_pass == c_total, "a corner-case invariant check failed");
+    XPMATH_ASSERT(c_pass == c_total, "a corner-case invariant check failed");
 
     rc = ep_exit_code();
     std::printf("\n=== qf_nonoverlap_test: %s ===\n",

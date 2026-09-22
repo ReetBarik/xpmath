@@ -49,7 +49,7 @@
 #include <utility>
 #include <vector>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 namespace ff = xp;
 
 static constexpr int kDeviceN = 100'000;   // 10^5 random inputs per identity
@@ -328,14 +328,14 @@ int main(int, char**) {
     // A run that checked nothing is not a pass: the domain filters and the
     // denormal-tail audit could in principle account for every input, and every
     // count above would then read 0 failures.
-    KOKKOS_EP_ASSERT(total_n > 0, "no identity check ran — every input was filtered out");
-    KOKKOS_EP_ASSERT(failures == 0,
+    XPMATH_ASSERT(total_n > 0, "no identity check ran — every input was filtered out");
+    XPMATH_ASSERT(failures == 0,
                      "a Group A bit-exact identity did not hold to the last bit on the device");
     // A nonzero vendor code is a TEST FAILURE, not a warning: a launch that never
     // ran leaves the output buffers at whatever the allocator returned, and the
     // comparison loop cannot tell that from a clean pass. Sticky since process
     // start, so a later good call cannot erase it.
-    KOKKOS_EP_ASSERT(xpt::last_error() == 0,
+    XPMATH_ASSERT(xpt::last_error() == 0,
                      "device harness reported a nonzero vendor error code");
 
     int rc = ep_exit_code();

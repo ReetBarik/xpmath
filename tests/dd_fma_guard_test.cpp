@@ -20,7 +20,7 @@
 //
 //   * contraction-OFF build  -> the error terms must be EXACT (F == 0). This is a
 //                               stronger restatement of what T1.1 already asserts,
-//                               and it FAIL-GATES (KOKKOS_EP_ASSERT).
+//                               and it FAIL-GATES (XPMATH_ASSERT).
 //   * contraction-ON  build  -> the compiler is ALLOWED to contract. Two outcomes,
 //                               both informative, neither a failure:
 //                                 (a) F == 0  — the compiler did NOT contract this
@@ -45,8 +45,8 @@
 // different compile flags. Compiling the same bytes twice makes "identical" a
 // guarantee of the build system, not a claim a reviewer has to verify across two
 // files that could drift. The only per-variant knobs are compile DEFINITIONS the
-// CMake helpers set: KOKKOS_EP_CONTRACTION_MODE (0 = OFF, 1 = ON) selects the
-// gate-vs-report behavior, and KOKKOS_EP_BASELINE_PATH (ON variant only) points
+// CMake helpers set: XPMATH_CONTRACTION_MODE (0 = OFF, 1 = ON) selects the
+// gate-vs-report behavior, and XPMATH_BASELINE_PATH (ON variant only) points
 // at the recorded baseline count.
 //
 // WHY THE ORACLE CANNOT BE CORRUPTED BY CONTRACTION
@@ -99,17 +99,17 @@
 #include <string>
 #include <vector>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 
 // Which contraction posture were we compiled under? Set by the CMake helpers
 // (xpm_add_host_eft_test -> 0, xpm_add_host_eft_test_contract_on -> 1). Default
 // to OFF/gate if somehow unset so a flagless build fails loud rather than silently
 // skipping the gate.
-#ifndef KOKKOS_EP_CONTRACTION_MODE
-#  define KOKKOS_EP_CONTRACTION_MODE 0
+#ifndef XPMATH_CONTRACTION_MODE
+#  define XPMATH_CONTRACTION_MODE 0
 #endif
 
-#if KOKKOS_EP_CONTRACTION_MODE == 0
+#if XPMATH_CONTRACTION_MODE == 0
 static const char* kPostureName = "OFF (-ffp-contract=off / --fmad=false)";
 #else
 static const char* kPostureName = "ON  (-ffp-contract=fast / --fmad=true)";
@@ -287,9 +287,9 @@ static GuardCount run_sum_control(const std::vector<std::pair<double,double>>& i
 // format is one integer on the first non-comment line; missing/unparseable file
 // degrades gracefully to "print and hint", still exit 0.
 // ----------------------------------------------------------------------------
-#ifdef KOKKOS_EP_BASELINE_PATH
+#ifdef XPMATH_BASELINE_PATH
 static void check_baseline(long observed) {
-    const char* path = KOKKOS_EP_BASELINE_PATH;
+    const char* path = XPMATH_BASELINE_PATH;
     std::ifstream f(path);
     if (!f) {
         std::printf("  baseline: no file at %s\n", path);
@@ -355,13 +355,13 @@ int main(int, char**) {
         std::printf("\ncontraction posture: %s. tested=%ld exact=%ld mismatches=%ld\n",
                     kPostureName, H.tested, H.tested - F, F);
 
-#if KOKKOS_EP_CONTRACTION_MODE == 0
+#if XPMATH_CONTRACTION_MODE == 0
         // OFF variant: FAIL-GATE. The error terms MUST be exact — a stronger form
         // of what T1.1 already asserts. The twoSum control must also stay exact.
         std::printf("\nmode=OFF: fail-gating on any mismatch.\n");
-        KOKKOS_EP_ASSERT(S.mismatches == 0,
+        XPMATH_ASSERT(S.mismatches == 0,
                          "twoSum control not exact under contraction-off (unexpected)");
-        KOKKOS_EP_ASSERT(F == 0,
+        XPMATH_ASSERT(F == 0,
                          "Dekker twoProduct not exact under contraction-off — "
                          "the -ffp-contract=off posture is not taking effect");
         rc = ep_exit_code();
@@ -386,7 +386,7 @@ int main(int, char**) {
         if (S.mismatches != 0)
             std::printf("  WARNING: twoSum control showed %ld mismatches under ON — unexpected "
                         "(twoSum has no contractible adjacency).\n", S.mismatches);
-#  ifdef KOKKOS_EP_BASELINE_PATH
+#  ifdef XPMATH_BASELINE_PATH
         check_baseline(F);
 #  endif
         rc = 0;  // reporter: always success

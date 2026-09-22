@@ -296,38 +296,9 @@ endif()
 message(STATUS "build provenance: ${CMAKE_BINARY_DIR}/build-info.txt (arch=${XPMATH_ARCH}, tree=${_xp_tree})")
 
 # ---- Tests -----------------------------------------------------------------
-# RENAMED BY CORE_PLAN C4: KOKKOS_EP_BUILD_TESTS -> XPMATH_BUILD_TESTS.
-# The deprecated KOKKOS_EP_BUILD_TESTS alias is removed in CORE_PLAN C10 step 4;
-# until then it still lives below so a stale -D does not silently rebuild the
-# whole suite.
+# XPMATH_BUILD_TESTS only. The deprecated KOKKOS_EP_BUILD_TESTS alias that C4
+# kept for one cycle was removed in CORE_PLAN C10 step 4.
 option(XPMATH_BUILD_TESTS "Build the extended-precision test suite" ON)
-
-# NOT an option(): the alias must distinguish "not set" from "set to OFF", and
-# option() would default it to a value and make every ordinary build look like a
-# deprecated invocation. An unset CACHE STRING is the empty string, so only an
-# explicit -D -- or a cache carried over from before the rename -- is non-empty.
-set(KOKKOS_EP_BUILD_TESTS "" CACHE STRING
-    "DEPRECATED alias for XPMATH_BUILD_TESTS. Removed in CORE_PLAN C10.")
-mark_as_advanced(KOKKOS_EP_BUILD_TESTS)
-if(NOT KOKKOS_EP_BUILD_TESTS STREQUAL "")
-  # ONCE, not once per configure. The sentinel is CACHE INTERNAL so a rebuild of
-  # an existing tree does not re-emit it; a fresh tree, or one where the operator
-  # changed the value, gets told.
-  if(NOT DEFINED _xpm_warned_build_tests_alias
-     OR NOT _xpm_warned_build_tests_alias STREQUAL "${KOKKOS_EP_BUILD_TESTS}")
-    message(DEPRECATION
-            "KOKKOS_EP_BUILD_TESTS is deprecated -- use XPMATH_BUILD_TESTS. "
-            "Honouring KOKKOS_EP_BUILD_TESTS=${KOKKOS_EP_BUILD_TESTS} and "
-            "ignoring XPMATH_BUILD_TESTS=${XPMATH_BUILD_TESTS} for this build "
-            "tree.")
-    set(_xpm_warned_build_tests_alias "${KOKKOS_EP_BUILD_TESTS}"
-        CACHE INTERNAL "deprecation warning already emitted for this value")
-  endif()
-  # The old name WINS when both are given. A caller who still spells it the old
-  # way is, by construction, one whose tooling has not been updated; silently
-  # preferring the new default would defeat the point of keeping the alias.
-  set(XPMATH_BUILD_TESTS ${KOKKOS_EP_BUILD_TESTS})
-endif()
 
 if(XPMATH_BUILD_TESTS)
   enable_testing()

@@ -24,7 +24,7 @@
 //
 //   * contraction-OFF build  -> the error terms must be EXACT. This is a stronger
 //                               restatement of what T3.1 already asserts, and it
-//                               FAIL-GATES (KOKKOS_EP_ASSERT).
+//                               FAIL-GATES (XPMATH_ASSERT).
 //   * contraction-ON  build  -> the compiler is ALLOWED to contract. Each input is
 //                               classified (see the three-way scheme below); the
 //                               verdict is REPORTED, not gated on contraction —
@@ -98,8 +98,8 @@
 // Compiling the IDENTICAL bytes over the IDENTICAL inputs under opposite compile
 // flags makes "identical test" a guarantee of the build system, not a claim a
 // reviewer must verify across two files. The only per-variant knobs are compile
-// DEFINITIONS the CMake helpers set: KOKKOS_EP_CONTRACTION_MODE (0 = OFF/gate,
-// 1 = ON/report) selects the gate-vs-report behavior, and KOKKOS_EP_BASELINE_PATH
+// DEFINITIONS the CMake helpers set: XPMATH_CONTRACTION_MODE (0 = OFF/gate,
+// 1 = ON/report) selects the gate-vs-report behavior, and XPMATH_BASELINE_PATH
 // (ON variant only) points at the recorded baseline count.
 //
 // WHY GROUND TRUTH IS PLAIN FP64 (PROVABLE, NO QUADMATH)
@@ -172,7 +172,7 @@
 #include <utility>
 #include <vector>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 
 // qf:: alias over the standalone core. This used to read
 // `namespace qf = Kokkos::Experimental;`; third_party/include/qf_math.hpp is a
@@ -184,11 +184,11 @@ namespace qf = xp;
 // (kokkos_ep_add_eft_test -> 0, kokkos_ep_add_eft_test_contract_on -> 1). Default
 // to OFF/gate if somehow unset so a flagless build fails loud rather than silently
 // skipping the gate.
-#ifndef KOKKOS_EP_CONTRACTION_MODE
-#  define KOKKOS_EP_CONTRACTION_MODE 0
+#ifndef XPMATH_CONTRACTION_MODE
+#  define XPMATH_CONTRACTION_MODE 0
 #endif
 
-#if KOKKOS_EP_CONTRACTION_MODE == 0
+#if XPMATH_CONTRACTION_MODE == 0
 static const char* kPostureName = "OFF (-ffp-contract=off / --fmad=false)";
 #else
 static const char* kPostureName = "ON  (-ffp-contract=fast / --fmad=true)";
@@ -551,7 +551,7 @@ static NamedResult run_named_cases() {
         GuardStat c; float e; float p = qf::qf_two_prod(a, b, e);
         classify(c, p, e, (double)a * (double)b, "twoProd", "named", a, b, samples_left);
         bool ok = (c.err_wrong == 0);                       // ON: only WRONG fails
-#if KOKKOS_EP_CONTRACTION_MODE == 0
+#if XPMATH_CONTRACTION_MODE == 0
         ok = ok && (c.err_zero == 0);                       // OFF: also gate collapse
 #endif
         std::printf("    qf_two_prod %-30s : %s [%s]\n", name, ok ? "PASS" : "FAIL", bucket(c));
@@ -564,7 +564,7 @@ static NamedResult run_named_cases() {
         GuardStat c; float e; float q = qf::qf_two_sqr(a, e);
         classify(c, q, e, (double)a * (double)a, "twoSqr", "named", a, a, samples_left);
         bool ok = (c.err_wrong == 0);
-#if KOKKOS_EP_CONTRACTION_MODE == 0
+#if XPMATH_CONTRACTION_MODE == 0
         ok = ok && (c.err_zero == 0);
 #endif
         std::printf("    qf_two_sqr  %-30s : %s [%s]\n", name, ok ? "PASS" : "FAIL", bucket(c));
@@ -616,9 +616,9 @@ static NamedResult run_named_cases() {
 // (never fails) — mirrors ff_fma_guard_test / dd_fma_guard_test verbatim. File
 // format is one integer on the first non-comment line.
 // ----------------------------------------------------------------------------
-#ifdef KOKKOS_EP_BASELINE_PATH
+#ifdef XPMATH_BASELINE_PATH
 static void check_baseline(long observed) {
-    const char* path = KOKKOS_EP_BASELINE_PATH;
+    const char* path = XPMATH_BASELINE_PATH;
     std::ifstream f(path);
     if (!f) {
         std::printf("  baseline: no file at %s\n", path);
@@ -713,20 +713,20 @@ int main(int, char**) {
         std::printf("  named cases: %d passed, %d skipped, %d failed (of %d)\n",
                     N.passed, N.skipped, N.failed, N.total);
 
-#if KOKKOS_EP_CONTRACTION_MODE == 0
+#if XPMATH_CONTRACTION_MODE == 0
         // OFF variant: FAIL-GATE. Every shipped Dekker error term MUST be exact —
         // a stronger form of what T3.1 already asserts. No collapse, no wrong term,
         // control exact, no named-case failure.
         std::printf("\nmode=OFF: fail-gating on any collapsed/wrong error term.\n");
-        KOKKOS_EP_ASSERT(S.mismatches == 0,
+        XPMATH_ASSERT(S.mismatches == 0,
                          "qf_two_sum control not exact under contraction-off (unexpected)");
-        KOKKOS_EP_ASSERT(P.err_wrong == 0 && Q.err_wrong == 0,
+        XPMATH_ASSERT(P.err_wrong == 0 && Q.err_wrong == 0,
                          "a QF Dekker error term was nonzero-but-wrong under contraction-off");
-        KOKKOS_EP_ASSERT(F == 0,
+        XPMATH_ASSERT(F == 0,
                          "a QF Dekker error term collapsed under contraction-off — "
                          "the -ffp-contract=off posture is not taking effect");
-        KOKKOS_EP_ASSERT(N.failed == 0, "a named QF Dekker corner case failed under contraction-off");
-        KOKKOS_EP_ASSERT(xpt::last_error() == 0,
+        XPMATH_ASSERT(N.failed == 0, "a named QF Dekker corner case failed under contraction-off");
+        XPMATH_ASSERT(xpt::last_error() == 0,
                          "device harness reported a nonzero vendor error code");
         rc = ep_exit_code();
         std::printf("=== qf_fma_guard_test [OFF]: %s ===\n",
@@ -756,14 +756,14 @@ int main(int, char**) {
         if (S.mismatches != 0)
             std::printf("  WARNING: qf_two_sum control showed %ld mismatches under ON — unexpected "
                         "(twoSum has no contractible adjacency).\n", S.mismatches);
-#  ifdef KOKKOS_EP_BASELINE_PATH
+#  ifdef XPMATH_BASELINE_PATH
         check_baseline(F);
 #  endif
         // Reporter: PASS unless a genuinely-broken (nonzero-wrong) term appeared.
         //
         // C4 chunk D — THE APPARATUS TERM IS NOT OPTIONAL. This line used to read
         // `rc = (wrong == 0 && N.failed == 0) ? 0 : 1;`, which never consults
-        // ep_exit_code(). That was survivable while every KOKKOS_EP_ASSERT in this
+        // ep_exit_code(). That was survivable while every XPMATH_ASSERT in this
         // file sat inside the OFF branch. The migration adds one to the path BOTH
         // postures take (the harness error check below), and a reporter that
         // printed ASSERT FAILED and still exited 0 would be worse than no check at
@@ -772,7 +772,7 @@ int main(int, char**) {
         // OFF-only: the reporter still exits 0 on the MEASUREMENT (ERR_ZERO under
         // ON is informative, not a fault), and nonzero on the APPARATUS. A launch
         // that failed did not report anything, so F and wrong would be noise.
-        KOKKOS_EP_ASSERT(xpt::last_error() == 0,
+        XPMATH_ASSERT(xpt::last_error() == 0,
                          "device harness reported a nonzero vendor error code");
         const int apparatus_rc = ep_exit_code();
         rc = (wrong == 0 && N.failed == 0 && apparatus_rc == 0) ? 0 : 1;

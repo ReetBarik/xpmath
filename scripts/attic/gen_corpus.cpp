@@ -252,8 +252,8 @@
 #include <utility>
 #include <vector>
 
-namespace cb = kokkos_ep::corpus_binary;
-namespace cc = kokkos_ep::corpus;
+namespace cb = xpmath::corpus_binary;
+namespace cc = xpmath::corpus;
 
 namespace {
 

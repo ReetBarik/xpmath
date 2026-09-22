@@ -5,8 +5,8 @@
 //
 // This header carries everything that touches the __float128 oracle: the
 // float128 alias, the q_* helpers, OracleTraits<B>::to_quad, the digit and ulp
-// metrics, the statistics structs, and the Kokkos runners (whose host_oracle
-// parameter is a std::function<float128(float128)>).
+// metrics, and the statistics structs. Device launches live in
+// tests/device_harness.hpp; this file is host-only.
 //
 // A TU that includes this header is a HOST translation unit and cannot be
 // compiled for a device target. If you are writing device-side test code,
@@ -26,32 +26,15 @@
 
 #include "test_utils_device.hpp"
 
-// Kokkos, and the compat wrappers, live on THIS side of the split. The device
-// header deliberately names only the xp core so it stays preprocessable without
-// a Kokkos install; the runners at the bottom of this file use Kokkos::View /
-// parallel_for, and the Kokkos-linked host TUs expect the Kokkos:: math
-// spellings the unsplit tests/test_utils.hpp used to hand them.
-//
-// BUT HOST-ORACLE IS NOT THE SAME THING AS KOKKOS-LINKED, and until CORE_PLAN
-// C4 this header conflated them. `corpus_test` references zero Kokkos APIs and
-// still could not compile without a Kokkos install, purely because it needed
-// float128 and ulp_error. So the Kokkos surface is now opt-in:
-// XPMATH_TEST_HAVE_KOKKOS is defined by the kokkos_ep_add_test* helpers in
-// tests/CMakeLists.txt and by nothing else. Without it this header is the
-// oracle and the statistics, and needs no Kokkos on the include path.
-//
-// It is a POSITIVE define on the linked targets rather than a negative one on
-// the unlinked targets on purpose: a new test that forgets the define fails to
-// compile the moment it names Kokkos, whereas a forgotten
-// XPMATH_TEST_NO_KOKKOS would silently pull the runtime back in.
-#if defined(XPMATH_TEST_HAVE_KOKKOS)
-#include <Kokkos_Core.hpp>
-#include <dd_math.hpp>
-#include <ff_math.hpp>
-#endif
+// CORE_PLAN C10 step 4: the opt-in Kokkos surface that used to live here
+// (XPMATH_TEST_HAVE_KOKKOS, #include <Kokkos_Core.hpp>, and the
+// run_unary_op / run_binary_op View+parallel_for runners) is gone. C4 moved
+// every caller onto tests/device_harness.hpp and deleted the helpers that
+// defined the gate; after C10 nothing in this repository finds or links
+// Kokkos. This header is the host oracle and statistics only.
 
 // Corner-case corpus (T0.2). Included at file scope (outside namespace
-// kokkos_ep) because corpus.hpp declares its own namespace kokkos_ep::corpus;
+// xpmath) because corpus.hpp declares its own namespace xpmath::corpus;
 // the actual integration note lives at the extension point further down.
 #include "corpus.hpp"
 
@@ -61,7 +44,7 @@
 #include <random>
 #include <vector>
 
-namespace kokkos_ep {
+namespace xpmath {
 
 using float128 = __float128;
 
@@ -314,131 +297,4 @@ inline void print_stats(const char* label, const AccStats& s) {
               s.ulp_max, s.n_ulp_scored, s.n_ulp_unscored);
 }
 
-
-// ============================================================================
-// Kokkos device runners
-// ============================================================================
-// These are the primitives every T*.4 accuracy test calls. Each:
-//   1. generates n host inputs (double) from input_dist(seed),
-//   2. deep-copies them into a device View of BackendTraits<Backend>::type,
-//   3. runs a parallel_for applying device_op to each element on device,
-//   4. copies results back to host,
-//   5. widens each result via OracleTraits<Backend>::to_quad and compares to
-//      host_oracle(input) with digits_of_accuracy,
-//   6. returns AccStats over the per-element digit counts.
-//
-// device_op MUST be a device-callable functor (KOKKOS_LAMBDA / KOKKOS_FUNCTION)
-// so it can be captured by value into the kernel. host_oracle runs on host only.
-//
-// Compiled only for the Kokkos-linked targets (see the XPMATH_TEST_HAVE_KOKKOS
-// note at the top). CORE_PLAN C4 migrates the remaining callers onto
-// tests/device_harness.hpp, after which this block goes away entirely.
-#if defined(XPMATH_TEST_HAVE_KOKKOS)
-
-template <typename Backend, typename DeviceOp>
-AccStats run_unary_op(int n, uint64_t seed,
-                      const InputDist& input_dist,
-                      const std::function<float128(float128)>& host_oracle,
-                      DeviceOp device_op) {
-  using T = typename BackendTraits<Backend>::type;
-  using exec_space = Kokkos::DefaultExecutionSpace;
-  using view_t     = Kokkos::View<T*,      Kokkos::LayoutRight, exec_space>;
-
-  // 1. host inputs
-  std::vector<double>   hin(n);
-  std::vector<float128> href(n);
-  {
-    std::mt19937_64 gen(seed);
-    for (int i = 0; i < n; ++i) hin[i] = input_dist(gen);
-  }
-  for (int i = 0; i < n; ++i) href[i] = host_oracle((float128)hin[i]);
-
-  // 2. inputs -> device
-  view_t din("din", n), dout("dout", n);
-  auto hmir = Kokkos::create_mirror_view(din);
-  for (int i = 0; i < n; ++i) hmir(i) = T(hin[i]);
-  Kokkos::deep_copy(din, hmir);
-
-  // 3. run op on device
-  Kokkos::parallel_for("run_unary_op", Kokkos::RangePolicy<exec_space>(0, n),
-                       KOKKOS_LAMBDA(int i) { dout(i) = device_op(din(i)); });
-  Kokkos::fence();
-
-  // 4. results -> host
-  auto rmir = Kokkos::create_mirror_view(dout);
-  Kokkos::deep_copy(rmir, dout);
-
-  // 5. per-element accuracy — BOTH metrics, from the same widened result.
-  std::vector<double> digs(n), ulps(n);
-  for (int i = 0; i < n; ++i) {
-    float128 got = OracleTraits<Backend>::to_quad(rmir(i));
-    digs[i] = digits_of_accuracy<Backend>(got, href[i]);
-    ulps[i] = ulp_error<Backend>(got, href[i]);
-  }
-
-  // 6. stats
-  return compute_stats(digs.data(), ulps.data(), n);
-}
-
-template <typename Backend, typename DeviceOp>
-AccStats run_binary_op(int n, uint64_t seed,
-                       const InputDist& input_dist_a,
-                       const InputDist& input_dist_b,
-                       const std::function<float128(float128, float128)>& host_oracle,
-                       DeviceOp device_op) {
-  using T = typename BackendTraits<Backend>::type;
-  using exec_space = Kokkos::DefaultExecutionSpace;
-  using view_t     = Kokkos::View<T*,      Kokkos::LayoutRight, exec_space>;
-
-  // 1. host inputs. One engine drives both streams (a then b per element) so a
-  //    run is fully reproducible from (seed, n).
-  std::vector<double>   ha(n), hb(n);
-  std::vector<float128> href(n);
-  {
-    std::mt19937_64 gen(seed);
-    for (int i = 0; i < n; ++i) { ha[i] = input_dist_a(gen); hb[i] = input_dist_b(gen); }
-  }
-  for (int i = 0; i < n; ++i) href[i] = host_oracle((float128)ha[i], (float128)hb[i]);
-
-  // 2. inputs -> device
-  view_t da("da", n), db("db", n), dout("dout", n);
-  auto hma = Kokkos::create_mirror_view(da);
-  auto hmb = Kokkos::create_mirror_view(db);
-  for (int i = 0; i < n; ++i) { hma(i) = T(ha[i]); hmb(i) = T(hb[i]); }
-  Kokkos::deep_copy(da, hma);
-  Kokkos::deep_copy(db, hmb);
-
-  // 3. run op on device
-  Kokkos::parallel_for("run_binary_op", Kokkos::RangePolicy<exec_space>(0, n),
-                       KOKKOS_LAMBDA(int i) { dout(i) = device_op(da(i), db(i)); });
-  Kokkos::fence();
-
-  // 4. results -> host
-  auto rmir = Kokkos::create_mirror_view(dout);
-  Kokkos::deep_copy(rmir, dout);
-
-  // 5. per-element accuracy — BOTH metrics, from the same widened result.
-  std::vector<double> digs(n), ulps(n);
-  for (int i = 0; i < n; ++i) {
-    float128 got = OracleTraits<Backend>::to_quad(rmir(i));
-    digs[i] = digits_of_accuracy<Backend>(got, href[i]);
-    ulps[i] = ulp_error<Backend>(got, href[i]);
-  }
-
-  // 6. stats
-  return compute_stats(digs.data(), ulps.data(), n);
-}
-
-#endif  // XPMATH_TEST_HAVE_KOKKOS
-
-// --- Corpus-pass runners ---------------------------------------------------
-// Same host->device->host->oracle pipeline as run_unary_op/run_binary_op, but
-// driven by a caller-supplied deterministic input vector (from corpus.hpp)
-// instead of (seed, n) + generator. Tests call these for the corpus pass; the
-// generator-based runners above are unchanged for the random pass.
-
-
-
-
-
-}  // namespace kokkos_ep
+}  // namespace xpmath
