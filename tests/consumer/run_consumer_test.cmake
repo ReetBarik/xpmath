@@ -2,16 +2,17 @@
 #
 # WHY THIS FILE EXISTS AND WHAT IT DOES NOT DO.
 #
-# The poison logic lives in ONE place: run_consumer_test.sh. This script does
-# not reimplement it. All it does is the part ctest cannot do for itself --
-# produce a completed `cmake --install` of this project into a scratch prefix,
-# at test RUN time, because no such install exists during the configure that
-# registers the test.
+# The poison logic and both clean consumers live in ONE place:
+# run_consumer_test.sh. This script does not reimplement them. All it does is
+# the part ctest cannot do for itself -- produce a completed `cmake --install`
+# of this project into a scratch prefix, at test RUN time, because no such
+# install exists during the configure that registers the test.
 #
 # So: configure + build + install xpmath into a throwaway prefix, then hand
-# that prefix to the shell script, which owns the clean case and both poisons.
-# Two implementations of the same contract would be exactly the duplication the
-# rest of this suite is trying to get rid of.
+# that prefix to the shell script, which owns the packaging smoke, the
+# examples/standalone build, and both poisons. Two implementations of the same
+# contract would be exactly the duplication the rest of this suite is trying to
+# get rid of.
 #
 # Invoked by tests/CMakeLists.txt, never by hand. For a manual run, call
 # run_consumer_test.sh directly against an install prefix you already have.

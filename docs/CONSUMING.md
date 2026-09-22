@@ -121,7 +121,9 @@ op in a specific range.
 tests/consumer/run_consumer_test.sh /where/you/installed/it
 ```
 
-Builds a separate project against the installed package from outside the build
-tree, and additionally requires two failures: an impossible version query must
-be refused, and removing the installed headers must break the build. A
-packaging test that only ever passes proves nothing about packaging.
+Builds two separate projects against the installed package from outside the
+build tree — `tests/consumer/` (packaging smoke) and `examples/standalone/`
+(the published usage example) — and additionally requires two failures: an
+impossible version query must be refused, and removing the installed headers
+must break the build. A packaging test that only ever passes proves nothing
+about packaging; building the example here is what keeps it from rotting.

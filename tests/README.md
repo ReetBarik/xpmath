@@ -128,7 +128,7 @@ Four backends: `dd` (2×FP64, p=106), `ff` (2×FP32, p=48), `qf` (4×FP32, p=96)
 
 | Target | What it asserts |
 |---|---|
-| `consumer_package` | A separate CMake project can `find_package(xpmath)` against the install tree and compile against it. |
+| `consumer_package` | A separate CMake project can `find_package(xpmath)` against the install tree and compile against it; also builds and runs `examples/standalone/`. |
 | `domains_fresh` | `docs/DOMAINS.md` still matches what the CSVs imply. |
 | `device_domains_fresh` | `docs/DEVICE_PRECISION.md` still matches the three baselines (host / a100 / mi250). |
 | `build_provenance` | The build directory carries a `build-info.txt` naming the arch, git HEAD (with `-dirty`), the resolved compiler and version, the Kokkos prefix, the full `CMAKE_CXX_FLAGS`, the `-O` level and a UTC timestamp. Written by the top-level `CMakeLists.txt` on **every** configure, not by `scripts/xpm_build.sh` — a stamp only the wrapper wrote would be missing from exactly the builds nobody can trace. Judges presence and non-emptiness of the fields, never their values; see the header of `check_build_provenance.cmake`. |

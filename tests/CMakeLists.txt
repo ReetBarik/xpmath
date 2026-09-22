@@ -1407,7 +1407,8 @@ set_tests_properties(consumer_package PROPERTIES
 # HOST: the nested configure it drives is an ordinary host CMake build
 # (XPMATH_BUILD_TESTS=OFF), and the package it checks is the header-only
 # export. CORE_PLAN C10: no Kokkos_DIR to forward -- this repository does not
-# find Kokkos.
+# find Kokkos. The same install prefix also builds examples/standalone/, so
+# the published usage example cannot rot while packaging stays green.
 xpm_tag_test(host consumer_package)
 
 add_test(NAME domains_fresh
