@@ -1,9 +1,12 @@
 # xpmath — Extended-precision arithmetic library
 
+Header-only C++17: four software-emulated extended-precision backends that
+compile under plain `g++`/`clang++`, `nvcc`, and `hipcc`. This repository is
+the **C++ library**. A separate **xpmath-kokkos** repository will carry the
+`Kokkos::Experimental` wrappers and timing demos; this tree finds and links no
+Kokkos.
 
 ## Using xpmath in your own project
-
-xpmath is a header-only C++17 library and installs as a CMake package:
 
 ```cmake
 find_package(xpmath 0.1 REQUIRED)
@@ -15,60 +18,52 @@ target_link_libraries(my_app PRIVATE xpmath::xpmath)
 xp::DoubleDouble y = xp::sqrt(xp::DoubleDouble(2.0));
 ```
 
-The exported package does **not** require Kokkos — the headers in
-`include/xp/` never include one. See [docs/CONSUMING.md](docs/CONSUMING.md)
-for install instructions, the versioning policy, and how to verify an
-install.
+See [docs/CONSUMING.md](docs/CONSUMING.md) for install instructions, the
+versioning policy, and how to verify an install. A runnable host example lives
+in [`examples/standalone/`](examples/standalone/) (compensated reduction via
+`find_package(xpmath)` only); CUDA and HIP variants of the same fold illustrate
+`tests/device_harness.hpp`.
 
 [![CI](https://github.com/ReetBarik/xpmath/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ReetBarik/xpmath/actions/workflows/ci.yml)
 
-The badge covers seven lanes: generated-doc freshness, the standalone no-Kokkos
-core on Linux **and** macOS/ARM, a full build + 20-test ctest run with
-`XPMATH_WITH_KOKKOS=OFF`, the 436,080-point monotone accuracy gate, the full
-Kokkos build + 48-test ctest suite, and per-header `nvcc` and `hipcc` device
-compiles.
-See `.github/workflows/ci.yml` and the S7 STATUS block in
-`docs/UPSTREAM_PLAN_STATUS.md`.
+CI covers generated-doc freshness, the standalone no-Kokkos core on Linux and
+macOS/ARM, a full build + 65-target ctest suite, the 436,080-point monotone
+accuracy gate, and per-header `nvcc` / `hipcc` device compiles (plus the gfx90a
+asm guard on the HIP lane). See `.github/workflows/ci.yml`.
 
 ## Section 1 — Motivation
 
-Many scientific and engineering applications — numerical linear algebra, particle
-physics, long-running N-body and climate integrations, ill-conditioned solvers —
-need arithmetic precision beyond what 64-bit IEEE double (FP64, ~16 decimal
-digits) can provide. On host CPUs that need has historically been served by GCC's
-libquadmath, which supplies software-emulated IEEE 128-bit quad precision through
-the `__float128` type. That path does not travel: libquadmath is host-only and
-x86_64-only, so code needing extra precision *inside* a portable compute kernel
-has had nowhere to go.
+Many scientific and engineering applications — numerical linear algebra,
+particle physics, long-running N-body and climate integrations, ill-conditioned
+solvers — need arithmetic precision beyond what 64-bit IEEE double (FP64,
+~16 decimal digits) can provide. On host CPUs that need has historically been
+served by GCC's libquadmath (`__float128`). That path does not travel:
+libquadmath is host-only and x86_64-only, so code needing extra precision
+*inside* a portable compute kernel has had nowhere to go.
 
-This repository provides four portable, software-emulated extended-precision
-backends usable in plain C++, CUDA, HIP, SYCL, and Kokkos — **DD** (double-double), **FF**
-(float-float), **QF** (quad-float), and **TF** (triple-float). All four are written against Kokkos
-alone, carry no hardware dependency, and compile for any Kokkos execution space:
-CPU, GPU, and everything else Kokkos targets. Each is validated for accuracy
-against an MPFR/MPC oracle at 400 bits. The accuracy record is `validation/sweep/`,
-scored in ulps with one verdict per point (see `docs/CORRECTNESS.md`). The demo
-tables in Section 2 below are an older measurement kept as a record — **the demos
-no longer measure accuracy and cannot regenerate them.**
+This repository provides four portable, software-emulated backends — **DD**
+(double-double), **FF** (float-float), **QF** (quad-float), and **TF**
+(triple-float) — as plain C++ headers under `include/xp/`. They carry no Kokkos
+dependency and compile for host, CUDA, HIP, and SYCL device passes. Accuracy is
+measured against an MPFR/MPC oracle at 400 bits: one measurement (error in
+ulps), one verdict per point (`docs/CORRECTNESS.md`). The host domain table is
+[`docs/DOMAINS.md`](docs/DOMAINS.md); host vs A100 vs MI250X is
+[`docs/DEVICE_PRECISION.md`](docs/DEVICE_PRECISION.md).
 
 ## Section 2 — Backends: types, ops, measured accuracy
 
 ### Precision types
 
-| Backend | C++ type | Precision (approx. decimal digits) | Underlying math header |
+| Backend | C++ type | Precision (approx. decimal digits) | Headers |
 |---|---|---|---|
-| DD (double-double, 2×FP64) | `Kokkos::Experimental::DoubleDouble` | ~31 | `third_party/include/dd_math.hpp` |
-| FF (float-float, 2×FP32) | `Kokkos::Experimental::FloatFloat` | ~14 | `third_party/include/ff_math.hpp` |
-| QF (quad-float, 4×FP32) | `Kokkos::Experimental::QuadFloat` | ~29 | `third_party/include/qf_math.hpp` |
-| TF (triple-float, 3×FP32) | `Kokkos::Experimental::TripleFloat` | ~21.7 | `third_party/include/tf_math.hpp` |
+| DD (double-double, 2×FP64) | `xp::DoubleDouble` | ~31 | `include/xp/dd_math.hpp`, `dd_complex.hpp` |
+| FF (float-float, 2×FP32) | `xp::FloatFloat` | ~14 | `include/xp/ff_math.hpp`, `ff_complex.hpp` |
+| QF (quad-float, 4×FP32) | `xp::QuadFloat` | ~29 | `include/xp/qf_math.hpp`, `qf_complex.hpp` |
+| TF (triple-float, 3×FP32) | `xp::TripleFloat` | ~21.7 | `include/xp/tf_math.hpp`, `tf_complex.hpp` |
 
-Every operation is documented in the header where it is defined; read the source
-for algorithm choices, coefficient sources, and citations to the underlying DDFUN
-/ QD references.
-
-Complex layers are provided for all four backends — `DoubleDoubleComplex`,
-`FloatFloatComplex`, `QuadFloatComplex`, `TripleFloatComplex` — mirroring the
-real-side type surface. See the corresponding `*_complex.hpp` header for each.
+Every operation is documented in the header where it is defined. Complex layers
+(`DoubleDoubleComplex`, `FloatFloatComplex`, `QuadFloatComplex`,
+`TripleFloatComplex`) mirror the real-side surface.
 
 ### Operation inventory
 
@@ -86,10 +81,10 @@ All four backends expose the same 39 real operations:
 
 **Tie convention.** `round` breaks halfway cases **to even** on every backend —
 IEEE 754 `roundToIntegralTiesToEven`, so `round(0.5) == 0`, `round(1.5) == 2`,
-`round(2.5) == 2`. This is a deliberate divergence from C99 `round`/libquadmath
-`roundq` (ties away from zero) and from QD 2.3.24's `nint` (ties toward
-`+infinity`); see KI-20 in `docs/history/KNOWN_ISSUES.md` for the reasoning. `remainder`
-is half-even too, as IEEE 754 requires of it.
+`round(2.5) == 2`. This is a deliberate divergence from C99 `round` /
+libquadmath `roundq` and from QD 2.3.24's `nint`; see KI-20 in
+`docs/history/KNOWN_ISSUES.md`. `remainder` is half-even too, as IEEE 754
+requires of it.
 
 All four complex layers expose the same 24 complex operations:
 
@@ -103,423 +98,129 @@ All four complex layers expose the same 24 complex operations:
 
 ### Measured accuracy
 
-Decimal digits of accuracy versus the `__float128` (libquadmath) host oracle,
-per operation, one table per backend.
+**Do not look here for digit tables.** Older README tables were a pre-fix
+demo capture scored against libquadmath; the demos are gone, those columns
+cannot be regenerated, and they are not the contract.
 
-**These tables are a historical capture, not a live measurement.** The demos
-used to print these columns and no longer do: they are timing and smoke only,
-and the accuracy record is `validation/sweep/` — error in ulps against an
-MPFR/MPC oracle at 400 bits, one verdict per point, two ctest gates over it
-(`docs/CORRECTNESS.md`). Running a demo today will not reproduce what follows.
-The columns were removed because they duplicated the sweep at lower resolution
-while requiring a Kokkos built with `Kokkos_ENABLE_LIBQUADMATH=ON` plus a
-non-upstream patch header; see `patches/README.md`.
+The live record is:
 
-**Measurement conditions.** `--batch 1000000 --repeats 5 --seed 12345`, 2 warmup
-launches, Kokkos 5.1 Serial execution space, GCC 13.3.0 / CMake 3.28.3, on an
-AMD EPYC 7532 host. Figures are decimal digits, computed per element as
-`-log10(|dev - ref| / |ref|)` and clamped to each backend's representable
-ceiling — 31.00 for DD, 14.00 for FF, 29.00 for QF. A cell at the ceiling means
-the result was correct to every digit the format can hold, not that error was
-zero. Inputs are drawn per operation from an `mt19937_64` reseeded with `--seed`
-each time, so a single-operation run reproduces the corresponding row exactly.
+| Document | What it answers |
+|---|---|
+| [`docs/CORRECTNESS.md`](docs/CORRECTNESS.md) | One measurement, one verdict, the two ctest gates and their exit codes |
+| [`docs/DOMAINS.md`](docs/DOMAINS.md) | Host: where each op holds ~90% of its digit cap (generated; `domains_fresh`) |
+| [`docs/DEVICE_PRECISION.md`](docs/DEVICE_PRECISION.md) | Host vs A100 vs MI250X ulps (generated; `device_domains_fresh`) |
+| `validation/sweep/sweep_baseline{,_a100,_mi250}.csv.gz` | The committed 436,080-row baselines the docs are generated from |
 
-**Where each operation stops being trustworthy — [`docs/DOMAINS.md`](docs/DOMAINS.md)
-(host) and [`docs/DEVICE_PRECISION.md`](docs/DEVICE_PRECISION.md) (host vs A100
-vs MI250X).** The tables below report accuracy on a random corpus drawn from each
-operation's comfortable range. They do not tell you where an operation *fails*,
-and every backend has such ranges. `docs/DOMAINS.md` covers all 4 backends × 63
-operations on the host, generated from a 436,080-point sweep: for each cell it
-gives the input band where the operation holds 90% of its cap, the measured digit
-count at the boundary where it degrades, and a classification of the cause.
-**Those numbers are host-measured.** Device floors, FTZ/DAZ, vendor `libm` and
-the gfx90a mitigations are measured separately in `docs/DEVICE_PRECISION.md`
-against the committed A100 and MI250X baselines (Cobalt 1001685 / 1001915). The
-headline host limits are mostly format limits: the three FP32-word backends
-(FF, QF, TF) bottom out near 1e-31 and top out at 3.4e38 where DD reaches
-~2e-292 and 1.8e308, and on the FP32 backends the trailing limbs go subnormal
-well before the leading word does. Of the 26,723 points scoring below half their
-cap, 15,660 are format range (UNDERFLOW / OVERFLOW / ARG_RANGE), 9,672 are
-measured ill-conditioning, and 1,391 are neither — see
-[`docs/history/KNOWN_ISSUES.md`](docs/history/KNOWN_ISSUES.md), whose 34
-entries are all resolved as of `85eea13`.
-
-**Accuracy only — no cost figures are reported here.** How to present the cost
-of each backend is still an open question and is deliberately left out rather
-than stated badly. The measurements below come from a single-threaded Serial
-build.
-
-These figures are optimization-invariant, and that was checked rather than
-assumed: for each of the backends tabulated below the full 39-operation sweep was re-run
-at `-O0` and at `-O3 -DNDEBUG`, and all 39 rows are identical across both
-builds in every statistic. `CMAKE_CXX_EXTENSIONS OFF` means the backends
-compile as strict ISO `-std=c++20`, where GCC leaves `-ffp-contract` off, so no
-Dekker or TwoSum sequence gets contracted into an FMA. The `*_fma_guard_test`
-targets pin that down directly — with contraction forced to `fast` at `-O3`,
-they still observe zero incorrect error terms.
-
-**Statistic note.** The four statistics reported are min, max, median, and
-mean. A p99 column was considered and is not reported — percentiles are not
-computed, and for an accuracy metric (where higher is better) the 99th
-percentile reads the *best* tail, which sits at the clamp ceiling for nearly
-every operation. `Min` is the worst observed element across the batch and is
-the column to read for worst-case behaviour.
-
-**Staleness warning — the three tables below predate the 34-issue fix arc.** They
-are demo output (`kokkos_ep_demo*`), each run costs hours of kernel time, and they
-were not regenerated when the artifacts were re-baselined at `85eea13`. Every
-figure in them is therefore a lower bound on what the current code does, and no
-table is given for TF at all. The current measured numbers, on all four backends
-and regenerated with the library, are in
-[`docs/DOMAINS.md`](docs/DOMAINS.md) (host) and
-[`docs/DEVICE_PRECISION.md`](docs/DEVICE_PRECISION.md) (device), from
-`validation/sweep/sweep_baseline{,_a100,_mi250}.csv.gz`.
-
-#### DD (double-double) — ceiling 31.00 digits
-
-| Op | Min | Max | Median | Mean |
-|---|---|---|---|---|
-| `add` | 31.00 | 31.00 | 31.00 | 31.00 |
-| `sub` | 31.00 | 31.00 | 31.00 | 31.00 |
-| `mul` | 31.00 | 31.00 | 31.00 | 31.00 |
-| `div` | 31.00 | 31.00 | 31.00 | 31.00 |
-| `sqrt` | 31.00 | 31.00 | 31.00 | 31.00 |
-| `abs` | 31.00 | 31.00 | 31.00 | 31.00 |
-| `exp` | 29.29 | 31.00 | 30.42 | 30.44 |
-| `log` | 30.86 | 31.00 | 31.00 | 31.00 |
-| `exp2` | 29.33 | 31.00 | 30.40 | 30.43 |
-| `exp10` | 29.28 | 31.00 | 30.36 | 30.40 |
-| `expm1` | 29.16 | 31.00 | 31.00 | 30.68 |
-| `log2` | 30.85 | 31.00 | 31.00 | 31.00 |
-| `log10` | 30.81 | 31.00 | 31.00 | 31.00 |
-| `log1p` | 30.90 | 31.00 | 31.00 | 31.00 |
-| `sin` | 20.97 | 31.00 | 30.70 | 30.40 |
-| `cos` | 24.47 | 31.00 | 30.54 | 30.45 |
-| `tan` | 20.24 | 31.00 | 29.85 | 29.75 |
-| `asin` | 19.47 | 31.00 | 29.93 | 29.75 |
-| `acos` | 24.97 | 31.00 | 30.86 | 30.65 |
-| `atan` | 29.93 | 31.00 | 30.88 | 30.78 |
-| `sinh` | 26.35 | 31.00 | 30.41 | 30.43 |
-| `cosh` | 29.33 | 31.00 | 30.45 | 30.47 |
-| `tanh` | 29.35 | 31.00 | 31.00 | 30.93 |
-| `acosh` | 30.76 | 31.00 | 31.00 | 31.00 |
-| `asinh` | 30.54 | 31.00 | 31.00 | 31.00 |
-| `atanh` | 25.35 | 31.00 | 30.47 | 30.38 |
-| `pow` | 28.67 | 31.00 | 30.02 | 30.07 |
-| `hypot` | 30.98 | 31.00 | 31.00 | 31.00 |
-| `fmod` | 31.00 | 31.00 | 31.00 | 31.00 |
-| `remainder` | 31.00 | 31.00 | 31.00 | 31.00 |
-| `copysign` | 31.00 | 31.00 | 31.00 | 31.00 |
-| `fmax` | 31.00 | 31.00 | 31.00 | 31.00 |
-| `fmin` | 31.00 | 31.00 | 31.00 | 31.00 |
-| `fdim` | 31.00 | 31.00 | 31.00 | 31.00 |
-| `fma` | 31.00 | 31.00 | 31.00 | 31.00 |
-| `ceil` | 31.00 | 31.00 | 31.00 | 31.00 |
-| `floor` | 31.00 | 31.00 | 31.00 | 31.00 |
-| `round` | 31.00 | 31.00 | 31.00 | 31.00 |
-| `trunc` | 31.00 | 31.00 | 31.00 | 31.00 |
-
-#### FF (float-float) — ceiling 14.00 digits
-
-| Op | Min | Max | Median | Mean |
-|---|---|---|---|---|
-| `add` | 13.96 | 14.00 | 14.00 | 14.00 |
-| `sub` | 8.81 | 14.00 | 14.00 | 13.96 |
-| `mul` | 13.81 | 14.00 | 14.00 | 14.00 |
-| `div` | 13.60 | 14.00 | 14.00 | 14.00 |
-| `sqrt` | 13.51 | 14.00 | 14.00 | 14.00 |
-| `abs` | 14.00 | 14.00 | 14.00 | 14.00 |
-| `exp` | 10.42 | 14.00 | 13.43 | 13.41 |
-| `log` | 13.92 | 14.00 | 14.00 | 14.00 |
-| `exp2` | 12.13 | 14.00 | 13.39 | 13.41 |
-| `exp10` | 12.18 | 14.00 | 13.37 | 13.40 |
-| `expm1` | 12.35 | 14.00 | 14.00 | 13.79 |
-| `log2` | 13.80 | 14.00 | 14.00 | 14.00 |
-| `log10` | 13.78 | 14.00 | 14.00 | 14.00 |
-| `log1p` | 13.92 | 14.00 | 14.00 | 14.00 |
-| `sin` | 8.74 | 14.00 | 13.82 | 13.72 |
-| `cos` | 8.16 | 14.00 | 13.80 | 13.72 |
-| `tan` | 12.86 | 14.00 | 14.00 | 13.95 |
-| `asin` | 12.21 | 14.00 | 13.97 | 13.84 |
-| `acos` | 9.10 | 14.00 | 14.00 | 13.93 |
-| `atan` | 13.70 | 14.00 | 14.00 | 14.00 |
-| `sinh` | 12.33 | 14.00 | 13.66 | 13.63 |
-| `cosh` | 12.53 | 14.00 | 13.68 | 13.65 |
-| `tanh` | 12.56 | 14.00 | 14.00 | 13.96 |
-| `acosh` | 13.99 | 14.00 | 14.00 | 14.00 |
-| `asinh` | 13.72 | 14.00 | 14.00 | 14.00 |
-| `atanh` | 12.64 | 14.00 | 14.00 | 13.92 |
-| `pow` | 11.91 | 14.00 | 13.29 | 13.31 |
-| `hypot` | 13.52 | 14.00 | 14.00 | 14.00 |
-| `fmod` | 6.10 | 14.00 | 13.72 | 13.50 |
-| `remainder` | 6.10 | 14.00 | 13.40 | 13.28 |
-| `copysign` | 14.00 | 14.00 | 14.00 | 14.00 |
-| `fmax` | 14.00 | 14.00 | 14.00 | 14.00 |
-| `fmin` | 14.00 | 14.00 | 14.00 | 14.00 |
-| `fdim` | 8.59 | 14.00 | 14.00 | 13.99 |
-| `fma` | 9.78 | 14.00 | 14.00 | 13.99 |
-| `ceil` | 14.00 | 14.00 | 14.00 | 14.00 |
-| `floor` | 14.00 | 14.00 | 14.00 | 14.00 |
-| `round` | 14.00 | 14.00 | 14.00 | 14.00 |
-| `trunc` | 14.00 | 14.00 | 14.00 | 14.00 |
-
-#### QF (quad-float) — ceiling 29.00 digits
-
-| Op | Min | Max | Median | Mean |
-|---|---|---|---|---|
-| `add` | 29.00 | 29.00 | 29.00 | 29.00 |
-| `sub` | 29.00 | 29.00 | 29.00 | 29.00 |
-| `mul` | 28.27 | 29.00 | 29.00 | 29.00 |
-| `div` | 27.65 | 29.00 | 29.00 | 28.99 |
-| `sqrt` | 28.09 | 29.00 | 29.00 | 29.00 |
-| `abs` | 29.00 | 29.00 | 29.00 | 29.00 |
-| `exp` | 10.42 | 29.00 | 27.95 | 26.03 |
-| `log` | 27.97 | 29.00 | 29.00 | 28.99 |
-| `exp2` | 14.92 | 29.00 | 27.97 | 26.83 |
-| `exp10` | 14.98 | 29.00 | 27.93 | 26.81 |
-| `expm1` | 26.32 | 29.00 | 29.00 | 28.54 |
-| `log2` | 27.96 | 29.00 | 29.00 | 28.99 |
-| `log10` | 27.97 | 29.00 | 29.00 | 28.99 |
-| `log1p` | 27.97 | 29.00 | 29.00 | 28.99 |
-| `sin` | 23.29 | 29.00 | 28.62 | 28.56 |
-| `cos` | 22.85 | 29.00 | 28.61 | 28.56 |
-| `tan` | 27.41 | 29.00 | 29.00 | 28.88 |
-| `asin` | 27.09 | 29.00 | 28.76 | 28.68 |
-| `acos` | 24.22 | 29.00 | 29.00 | 28.85 |
-| `atan` | 28.19 | 29.00 | 29.00 | 28.98 |
-| `sinh` | 26.39 | 29.00 | 28.19 | 28.21 |
-| `cosh` | 26.39 | 29.00 | 28.20 | 28.23 |
-| `tanh` | 26.55 | 29.00 | 29.00 | 28.87 |
-| `acosh` | 27.88 | 29.00 | 29.00 | 28.98 |
-| `asinh` | 27.70 | 29.00 | 29.00 | 28.96 |
-| `atanh` | 26.66 | 29.00 | 29.00 | 28.71 |
-| `pow` | 25.79 | 29.00 | 27.71 | 27.76 |
-| `hypot` | 28.12 | 29.00 | 29.00 | 29.00 |
-| `fmod` | 29.00 | 29.00 | 29.00 | 29.00 |
-| `remainder` | 29.00 | 29.00 | 29.00 | 29.00 |
-| `copysign` | 29.00 | 29.00 | 29.00 | 29.00 |
-| `fmax` | 29.00 | 29.00 | 29.00 | 29.00 |
-| `fmin` | 29.00 | 29.00 | 29.00 | 29.00 |
-| `fdim` | 29.00 | 29.00 | 29.00 | 29.00 |
-| `fma` | 24.65 | 29.00 | 29.00 | 28.99 |
-| `ceil` | 29.00 | 29.00 | 29.00 | 29.00 |
-| `floor` | 29.00 | 29.00 | 29.00 | 29.00 |
-| `round` | 29.00 | 29.00 | 29.00 | 29.00 |
-| `trunc` | 29.00 | 29.00 | 29.00 | 29.00 |
-
-The mean-gated regression versions of these measurements live in
-`dd_accuracy_test`, `ff_accuracy_test`, and `qf_accuracy_test`, which assert a
-per-operation floor rather than merely reporting numbers.
+Absolute gate (`ulps ≤ 8 × derived bound`) on every present arch: host, a100,
+and mi250 all report **0** points above bound. Open defects live only in
+`validation/sweep/open_defects.txt`.
 
 ## Section 3 — Repository layout
 
 ```
-third_party/include/
-    dd_math.hpp        DD (2×FP64) real type + math — Kokkos C++ port of DDFUN v04
-    dd_complex.hpp     DD complex layer (DoubleDoubleComplex)
-    ff_math.hpp        FF (2×FP32) real type + math — mechanical DD→FF translation
-    ff_complex.hpp     FF complex layer (FloatFloatComplex)
-    qf_math.hpp        QF (4×FP32) real type + math — port of QD 2.3.24 quad-double
-    qf_complex.hpp     QF complex layer (QuadFloatComplex)
-    tf_math.hpp        TF (3×FP32) real type + math — 3-limb reduction of the QF port
-    tf_complex.hpp     TF complex layer (TripleFloatComplex)
-
-patches/
-    README.md                      no patches -- records the Kokkos extension header
-                                   that was deleted with the demo oracle columns
-
-src/
-    demo_real.cpp          DD real-operation demo      -> kokkos_ep_demo
-    demo_complex.cpp       DD complex-operation demo   -> kokkos_ep_demo_complex
-    demo_ff_real.cpp       FF real-operation demo      -> kokkos_ep_demo_ff
-    demo_ff_complex.cpp    FF complex-operation demo   -> kokkos_ep_demo_ff_complex
-    demo_qf_real.cpp       QF real-operation demo      -> kokkos_ep_demo_qf
-    demo_qf_complex.cpp    QF complex-operation demo   -> kokkos_ep_demo_qf_complex
-    bench_cost.cpp         cost benchmark harness      -> kokkos_ep_bench_cost
-
-tests/                 39-target ctest suite covering all four backends
-docs/                  TEST_SUITE_PLAN.md, PORT_NOTES_QF.md
-scripts/               build helpers, coefficient generators, run-all scripts
-PORT_NOTES.md          port-specific fixes and design lessons
-LICENSE, NOTICE.md, LICENSES/   licensing — see Section 6
+include/xp/            header-only library (DD/FF/QF/TF real + complex)
+examples/standalone/   compensated reduction (host + CUDA/HIP usage examples)
+tests/                 65-target ctest suite (host halves, device halves, gates)
+validation/sweep/      committed baselines, open-defect register, grids
+docs/                  CORRECTNESS, DOMAINS, DEVICE_PRECISION, CONSUMING, …
+scripts/               xpm_build.sh, sweep_accuracy, domain generators, checks
+patches/               historical note only (no active Kokkos patches)
 ```
 
 ## Section 4 — Tests
 
-The suite is 39 ctest targets spanning all four backends. The eight
-`*_accuracy_test` targets that used to head this list are **retired** — they
-gated on a per-op MEAN, which cannot see a single point getting worse. The
-sweep and its two gates replaced them; see §"What this replaced" in
-`docs/CORRECTNESS.md`.
+**65 registered ctest targets**, asserted as a COUNT in CI (not assumed). MPFR,
+MPC, and GMP are a hard configure requirement — a missing `-dev` package is
+`FATAL_ERROR`, not four silently unregistered targets.
 
-- **The accuracy record** — `sweep_absolute_gate` (no point above its derived
-  bound that is not in the open-defect register) and `sweep_monotone_gate` (no
-  point worse than the committed baseline), plus `sweep_absolute_gate_selftest`
-  and `sweep_monotone_gate_selftest`, which poison each gate's input and
-  require it to fail through a named exit code.
-- **Reduction and oracle** — `pow_domain_test`, `exp_reduction_test`,
-  `trig_reduction_test`, `oracle_conv_test`, and the three compile-time poison
-  self-tests `exp_reduction_selftest`, `trig_reduction_selftest`,
-  `oracle_conv_selftest`. The trig/oracle four are registered only when MPFR is
-  present.
-- **Property / identity** — algebraic identities that must hold for the type:
-  `dd_property_test`, `ff_property_test`, `qf_property_test`,
-  `tf_property_test`.
-- **Invariant** — non-overlap of the component words in the multi-word
-  representation: `dd_invariant_test`, `ff_invariant_test`, `qf_nonoverlap_test`.
-- **Error-free transforms** — the `two_sum` / `two_product` primitives the
-  arithmetic is built on: `dd_eft_test`, `ff_eft_test`, `qf_eft_test`,
-  `tf_eft_test` (plus `tf_eft_test_contract_on`).
-- **FMA-contraction guards** — two postures each, one compiled with contraction
-  off and one with it on: `dd_fma_guard_test`, `ff_fma_guard_test`,
-  `qf_fma_guard_test`, `tf_fma_guard_test`, plus their `_contract_on` variants.
-- **End-to-end kernels** — cancellation-heavy kernels exercising the types in
-  realistic reductions: `dd_e2e_test`, `ff_cancellation_test`,
-  `qf_cancellation_test`, `tf_cancellation_test`.
-- **Foundational** — `hello_test`, `corpus_test`.
+- **Accuracy gates** — `sweep_absolute_gate`, `sweep_monotone_gate`, and their
+  `*_selftest` poisons (`docs/CORRECTNESS.md`).
+- **Device baselines** — `sweep_device_gate_{a100,mi250}` plus selftest; domain
+  freshness for host (`domains_fresh`) and device (`device_domains_fresh`).
+- **Property / invariant / EFT / FMA-contraction / cancellation** — per-backend
+  host and device halves (device launches go through
+  `tests/device_harness.hpp`, not Kokkos).
+- **Packaging** — `consumer_package` installs the tree and builds both a minimal
+  consumer and `examples/standalone/` against that prefix.
+- **Hygiene** — `device_tu_purity`, `build_provenance`, contraction-flag guards.
 
-All 39 targets pass on `main`. Four of them (the trig-reduction and
-oracle-conversion tests and their poison self-tests) are registered only
-when MPFR is present; CI installs libmpfr-dev and asserts the full count
-so a missing optional dependency cannot quietly shrink the suite.
-`consumer_package` is the odd one out: it tests the installed CMake package
-rather than the library, by building a separate project against it.
-
-Tests are exercised on the Serial Kokkos execution space; the type headers are
-`KOKKOS_INLINE_FUNCTION` throughout so they compile for device execution spaces
-(CUDA, HIP, SYCL, OpenMP-target), but device-space CI is not yet in place.
-
-Full test-suite design and gate rationale lives in `docs/TEST_SUITE_PLAN.md`;
-port-specific fixes and design lessons live in `PORT_NOTES.md`.
-
-Running the suite:
+On a GPU node use the two-tree wrapper (CMake has one `CXX` per project):
 
 ```bash
-cd build/tests && ctest
-echo "RC=$?"
+scripts/xpm_build.sh --arch {host|a100|mi250} --build-dir /tmp/b
+# /tmp/b/host    g++ — host-tagged tests
+# /tmp/b/device  serial / nvcc / hipcc — device-tagged tests
 ```
+
+`--arch host` still builds the device tree, with the harness's serial fallback,
+so device-tagged tests run without a GPU. Design notes:
+`docs/TEST_SUITE_PLAN.md`.
 
 ## Section 5 — Usage
 
-### Build
-
-With Kokkos already installed:
+### Build and install
 
 ```bash
-cmake -B build -DCMAKE_PREFIX_PATH=<kokkos-install-dir>
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/where/you/want/it
 cmake --build build -j$(nproc)
+cmake --install build
+ctest --test-dir build -j$(nproc)
 ```
 
-On the JLSE testbed maintained by CELS at Argonne National Lab, target hardware
-is an argument to `scripts/xpm_build.sh`, which loads the modules, picks the
-compiler, the Kokkos prefix and the FP-contraction spelling for that arch, and
-configures:
+GCC 13.3.0 and CMake 3.28.3 are what CI and the JLSE wrapper use. The library
+itself is C++17. On JLSE:
 
 ```bash
 scripts/xpm_build.sh --arch host  --build-dir /tmp/b_host
 scripts/xpm_build.sh --arch a100  --build-dir /tmp/b_a100
 scripts/xpm_build.sh --arch mi250 --build-dir /tmp/b_mi250
-scripts/xpm_build.sh --arch host --no-kokkos --build-dir /tmp/b_nok
 ```
 
-Read that script's header before comparing numbers across two arches: it states
-what is held identical (`-O` level, C++17, contraction off) and what is not
-(compiler, execution space). `--kokkos build` delegates to
-`scripts/build_with_kokkos.sh`, which still fetches and installs Kokkos from
-source and is now driven by its environment rather than by literals.
+Read that script's header before comparing numbers across arches: it states what
+is held identical (`-O` level, C++17, contraction off) and what is not
+(compiler, device backend). Every configure stamps `build-info.txt` into the
+build directory; `build_provenance` fails if it is missing or short a field.
 
-`scripts/xpm_build.sh` and `scripts/prepare.sh` are JLSE-specific — they
-hardcode JLSE module names and paths. Other Argonne resources (Polaris, Aurora,
-Improv) will need their own arch row; the rest of the build flow is portable.
+`scripts/check_standalone_no_kokkos.sh` compiles each `include/xp/` header with
+plain `g++ -std=c++17` against an include path containing **only** `include/`,
+then greps the preprocessed output for the token `Kokkos`.
 
-Every configure — the wrapper's or a bare `cmake -B build` — writes
-`build-info.txt` into the build directory recording the arch, git HEAD, compiler
-and version, Kokkos prefix, flags, `-O` level and a UTC timestamp. The
-`build_provenance` ctest target fails if it is missing or short a field.
+There is no CMake x86_64 gate. What is x86-bound is `__float128` as a *carrier*
+in `scripts/sweep_accuracy.cpp` (arithmetic from libgcc, `*f128` from glibc —
+not libquadmath). The installable library has no such dependency.
 
-Kokkos raises the C++ standard to C++20 through its exported interface. No
-`Kokkos_ENABLE_LIBQUADMATH=ON` is needed: any Kokkos ≥5.1 built at C++20 works,
-including one with libquadmath OFF.
-
-There is no CMake platform gate, and there never was — an earlier version of
-this paragraph said CMake enforced an x86_64 requirement and no such check
-exists anywhere in the tree. What is x86_64-specific is `__float128` itself,
-which `scripts/sweep_accuracy.cpp` and `src/bench_cost.cpp` still use as a
-carrier (`tests/CMakeLists.txt` and the CI x86 lanes are where that lands). The
-installable library, `include/xp/`, has no such dependency and compiles
-anywhere.
-
-### Templated kernel
-
-The backends share a type surface, so one templated kernel body serves all
-of them with no per-backend specialization:
+### Host example
 
 ```cpp
-#include <Kokkos_Core.hpp>
-#include "dd_math.hpp"
-#include "ff_math.hpp"
-#include "qf_math.hpp"
+#include <xp/dd_math.hpp>
+#include <vector>
 
-namespace ex = Kokkos::Experimental;
-
-// The backends do not expose a uniform `operator double`, so narrow at the
-// boundary with a small overload set — one per backend representation.
-inline double to_double(ex::DoubleDouble v) { return v.hi + v.lo; }
-inline double to_double(ex::FloatFloat  v) { return (double)v.hi + (double)v.lo; }
-inline double to_double(ex::QuadFloat   v) {
-  return (double)v.f0 + (double)v.f1 + (double)v.f2 + (double)v.f3;
-}
-
-// Templated kernel — same body for every extended-precision backend.
-template <class T>
-void reduce_sin_squared(int n, double& out) {
-  T sum(0.0);
-  Kokkos::parallel_reduce(
-    "reduce_sin_squared", n,
-    KOKKOS_LAMBDA(int i, T& acc) {
-      T x = T(static_cast<double>(i) * 1e-6);
-      T s = Kokkos::sin(x);
-      acc = acc + s * s;
-    },
-    sum);
-  // Narrow only at the boundary; keep the value as T for full-precision output.
-  out = to_double(sum);
-}
-
-int main() {
-  Kokkos::initialize();
-  {
-    double dd_out, ff_out, qf_out;
-    reduce_sin_squared<ex::DoubleDouble>(1000000, dd_out);
-    reduce_sin_squared<ex::FloatFloat>  (1000000, ff_out);
-    reduce_sin_squared<ex::QuadFloat>   (1000000, qf_out);
-  }
-  Kokkos::finalize();
-  return 0;
+xp::DoubleDouble compensated_sum(const std::vector<double>& x) {
+  xp::DoubleDouble s(0.0);
+  for (double v : x) s = s + xp::DoubleDouble(v);
+  return s;
 }
 ```
 
-Each backend provides `T(double)` construction, `operator+`, `operator*`, and a
-`Kokkos::`-namespace `sin` overload, which is what lets the kernel body stay
-identical across the three. Conversion back to `double` is the one place they
-differ: none of the three defines `operator double`, so the example narrows
-through explicit per-type accessors (`hi`/`lo` for DD and FF, `f0`–`f3` for QF).
+See `examples/standalone/compensated_reduction.cpp` for a full program that
+builds only against the installed package. Device variants of the same fold:
+`compensated_reduction_{cuda,hip}.cpp`.
 
 ## Section 6 — Licensing
 
 This repository is dual-licensed. Repository-default is Apache-2.0 (see
 `LICENSE`). The DDFUN-derived headers carry `LicenseRef-DHB-License`; the
-QD-derived QF headers carry `LicenseRef-LBNL-BSD-License`. Full mapping, license texts, and the plain-English explanation of
-the DHB-License §3 grant-back clause live in `NOTICE.md` and `LICENSES/`.
+QD-derived QF headers carry `LicenseRef-LBNL-BSD-License`. Full mapping, license
+texts, and the plain-English explanation of the DHB-License §3 grant-back clause
+live in `NOTICE.md` and `LICENSES/`.
 
 | File | License |
 |---|---|
-| `third_party/include/dd_math.hpp` | `LicenseRef-DHB-License` |
-| `third_party/include/dd_complex.hpp` | `LicenseRef-DHB-License` |
-| `third_party/include/ff_math.hpp` | `LicenseRef-DHB-License` |
-| `third_party/include/ff_complex.hpp` | `LicenseRef-DHB-License` |
-| `third_party/include/qf_math.hpp` | `LicenseRef-LBNL-BSD-License` |
-| `third_party/include/qf_complex.hpp` | `LicenseRef-LBNL-BSD-License` |
+| `include/xp/dd_math.hpp`, `dd_complex.hpp` | `LicenseRef-DHB-License` |
+| `include/xp/ff_math.hpp`, `ff_complex.hpp` | `LicenseRef-DHB-License` |
+| `include/xp/qf_math.hpp`, `qf_complex.hpp` | `LicenseRef-LBNL-BSD-License` |
+| `include/xp/tf_math.hpp`, `tf_complex.hpp` | `LicenseRef-LBNL-BSD-License` |
 | Everything else | `Apache-2.0` |
 
 ## Section 7 — References
@@ -528,11 +229,8 @@ the DHB-License §3 grant-back clause live in `NOTICE.md` and `LICENSES/`.
   <https://www.davidhbailey.com/dhbsoftware/ddfun-v04.tar.gz>
 - **QD 2.3.24** — Yozo Hida, Xiaoye S. Li, David H. Bailey (LBNL).
   <https://www.davidhbailey.com/dhbsoftware/qd-2.3.24.tar.gz>
-- **Kokkos** — <https://github.com/kokkos/kokkos>
-- **`Kokkos_QuadPrecisionMath.hpp`** — the Kokkos `__float128` header the demo
-  oracle used to route through, at
-  `kokkos/core/src/impl/Kokkos_QuadPrecisionMath.hpp` in upstream Kokkos. Nothing
-  in this repo includes it any more; see `patches/README.md`.
+- **Kokkos** — <https://github.com/kokkos/kokkos> (wrappers and demos will live
+  in **xpmath-kokkos**, not here)
 
 Repository owner: Reet Barik. DDFUN questions: David H. Bailey
 (<dhbailey@lbl.gov>).
