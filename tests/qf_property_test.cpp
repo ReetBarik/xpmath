@@ -153,7 +153,7 @@
 #include <string>
 #include <vector>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 
 // qf:: alias over the standalone core (matches qf_eft_test.cpp). This used to
 // read `namespace qf = Kokkos::Experimental;`; the C4 split unlinked Kokkos from
@@ -834,14 +834,14 @@ int main(int, char**) {
     // ------------------------------------------------------------------------
     std::printf("\n=== Summary ===\n");
     std::printf("  Group A: %zu identities, total failures=%ld\n", ga.size(), groupA_failures);
-    KOKKOS_EP_ASSERT(groupA_failures == 0,
+    XPMATH_ASSERT(groupA_failures == 0,
                      "a Group A bit-exact identity did not hold to the last bit");
 
     long groupB_failed = 0; for (const auto& r : gb) if (!r.pass) ++groupB_failed;
     std::printf("  Group B: %zu identities, mean below tolerance=%ld\n", gb.size(), groupB_failed);
-    KOKKOS_EP_ASSERT(groupB_failed == 0,
+    XPMATH_ASSERT(groupB_failed == 0,
                      "a Group B identity's MEAN digits fell below its ulp tolerance");
-    KOKKOS_EP_ASSERT(c_pass == c_total, "a Test C named-constant regression fell below its floor");
+    XPMATH_ASSERT(c_pass == c_total, "a Test C named-constant regression fell below its floor");
 
     std::printf("  Device: see qf_property_test_device (separate ctest target)\n");
 

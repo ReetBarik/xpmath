@@ -60,7 +60,7 @@
 #include <random>
 #include <vector>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 
 // qf:: alias over the standalone core, matching the host half. tests/
 // test_utils_device.hpp declares dd:: and ff:: but has no QF tag struct yet
@@ -323,12 +323,12 @@ int main(int, char**) {
         NamedResult E = run_device_parity();
         std::printf("  Test E device parity: %d passed, %d skipped, %d failed (of %d)\n\n",
                     E.passed, E.skipped, E.failed, E.total);
-        KOKKOS_EP_ASSERT(E.failed == 0, "device EFT parity mismatch vs host FP64 oracle");
+        XPMATH_ASSERT(E.failed == 0, "device EFT parity mismatch vs host FP64 oracle");
         // A nonzero vendor code is a TEST FAILURE, not a warning: a launch that
         // never ran leaves the output buffers at whatever the allocator returned,
         // and the comparison loop cannot tell that from a clean pass. Sticky
         // since process start, so a later good call cannot erase it.
-        KOKKOS_EP_ASSERT(xpt::last_error() == 0,
+        XPMATH_ASSERT(xpt::last_error() == 0,
                          "device harness reported a nonzero vendor error code");
 
         rc = ep_exit_code();

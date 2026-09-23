@@ -48,7 +48,7 @@
 #include <string>
 #include <vector>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 
 namespace tf = xp;
 
@@ -118,7 +118,7 @@ static void test_K1() {
   double mean_stable = n > 0 ? sum_stable / n : 0.0;
   bool ok = mean_stable >= kTol;
   std::printf("  K1 stable mean: %.2f [%s]\n", mean_stable, ok ? "PASS" : "FAIL");
-  KOKKOS_EP_ASSERT(ok, "K1 stable form below kTol");
+  XPMATH_ASSERT(ok, "K1 stable form below kTol");
 }
 
 // ============================================================================
@@ -158,7 +158,7 @@ static void test_K2() {
 
   bool ok = d_arith >= kTol;
   std::printf("  K2 arithmetic: %.2f [%s]\n", d_arith, ok ? "PASS" : "FAIL");
-  KOKKOS_EP_ASSERT(ok, "K2 arithmetic precision below kTol");
+  XPMATH_ASSERT(ok, "K2 arithmetic precision below kTol");
 }
 
 // ============================================================================
@@ -230,7 +230,7 @@ static void test_K4() {
 
   bool ok = d_arith >= kTol;
   std::printf("  K4 arithmetic: %.2f [%s]\n", d_arith, ok ? "PASS" : "FAIL");
-  KOKKOS_EP_ASSERT(ok, "K4 arithmetic precision below kTol");
+  XPMATH_ASSERT(ok, "K4 arithmetic precision below kTol");
 }
 
 // ============================================================================

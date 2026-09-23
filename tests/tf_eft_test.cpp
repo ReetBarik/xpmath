@@ -41,7 +41,7 @@
 #include <random>
 #include <vector>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 
 // ----------------------------------------------------------------------------
 // Oracle comparisons (FP64, provably exact). Calls the SHIPPED primitives.
@@ -515,50 +515,50 @@ int main(int, char**) {
         std::printf("[Test A] tf_two_sum bit-exactness\n");
         EftCount A1 = run_host_batches(Op::Sum, "A/twoSum");
         std::printf("  tf_two_sum: total tested=%ld, skipped=%ld, failures=%ld\n", A1.tested, A1.skipped, A1.failures);
-        KOKKOS_EP_ASSERT(A1.failures == 0, "tf_two_sum was not bit-exact");
+        XPMATH_ASSERT(A1.failures == 0, "tf_two_sum was not bit-exact");
         std::printf("[Test A'] tf_quick_two_sum bit-exactness (operands ordered |a|>=|b|)\n");
         EftCount A2 = run_host_batches(Op::QuickSum, "A/quickSum");
         std::printf("  tf_quick_two_sum: total tested=%ld, skipped=%ld, failures=%ld\n\n", A2.tested, A2.skipped, A2.failures);
-        KOKKOS_EP_ASSERT(A2.failures == 0, "tf_quick_two_sum was not bit-exact");
+        XPMATH_ASSERT(A2.failures == 0, "tf_quick_two_sum was not bit-exact");
 
         std::printf("[Test B] tf_two_prod (Dekker twoProduct) bit-exactness\n");
         EftCount B1 = run_host_batches(Op::Prod, "B/twoProd");
         std::printf("  tf_two_prod: total tested=%ld, skipped=%ld, failures=%ld\n", B1.tested, B1.skipped, B1.failures);
-        KOKKOS_EP_ASSERT(B1.failures == 0, "tf_two_prod was not bit-exact");
+        XPMATH_ASSERT(B1.failures == 0, "tf_two_prod was not bit-exact");
         std::printf("[Test B'] tf_two_sqr bit-exactness\n");
         EftCount B2 = run_host_batches(Op::Sqr, "B/twoSqr");
         std::printf("  tf_two_sqr: total tested=%ld, skipped=%ld, failures=%ld\n\n", B2.tested, B2.skipped, B2.failures);
-        KOKKOS_EP_ASSERT(B2.failures == 0, "tf_two_sqr was not bit-exact");
+        XPMATH_ASSERT(B2.failures == 0, "tf_two_sqr was not bit-exact");
 
         std::printf("[Test C] renorm_3 (len 4->3) + renorm (len 3->3): non-overlap + value-preservation\n");
         RenormResult C1 = test_renorm_3_bounded(1'000'000, 45678ULL);
         std::printf("    renorm_3 bounded (exact FP64): tested=%ld  non-overlap-fail=%ld  value-fail=%ld  (pair-skips=%ld)\n",
                     C1.tested, C1.overlap_fail, C1.value_fail, C1.skips);
-        KOKKOS_EP_ASSERT(C1.overlap_fail == 0, "renorm_3 produced an overlapping result");
-        KOKKOS_EP_ASSERT(C1.value_fail   == 0, "renorm_3 did not preserve value exactly");
+        XPMATH_ASSERT(C1.overlap_fail == 0, "renorm_3 produced an overlapping result");
+        XPMATH_ASSERT(C1.value_fail   == 0, "renorm_3 did not preserve value exactly");
 
         RenormResult C2 = test_renorm_bounded(1'000'000, 56789ULL);
         std::printf("    renorm   bounded (exact FP64): tested=%ld  non-overlap-fail=%ld  value-fail=%ld  (pair-skips=%ld)\n\n",
                     C2.tested, C2.overlap_fail, C2.value_fail, C2.skips);
-        KOKKOS_EP_ASSERT(C2.overlap_fail == 0, "renorm produced an overlapping result");
-        KOKKOS_EP_ASSERT(C2.value_fail   == 0, "renorm did not preserve value exactly");
+        XPMATH_ASSERT(C2.overlap_fail == 0, "renorm produced an overlapping result");
+        XPMATH_ASSERT(C2.value_fail   == 0, "renorm did not preserve value exactly");
 
         std::printf("[Test D] named hard cases\n");
         NamedResult D = run_named_cases();
         std::printf("  Test D named cases: %d passed, %d skipped, %d failed (of %d)\n\n",
                     D.passed, D.skipped, D.failed, D.total);
-        KOKKOS_EP_ASSERT(D.failed == 0, "a named EFT case failed");
+        XPMATH_ASSERT(D.failed == 0, "a named EFT case failed");
 
         std::printf("[Test E] device parity (%s)\n", xpt::where_name());
         NamedResult E = run_device_parity();
         std::printf("  Test E device parity: %d passed, %d skipped, %d failed (of %d)\n\n",
                     E.passed, E.skipped, E.failed, E.total);
-        KOKKOS_EP_ASSERT(E.failed == 0, "device EFT parity mismatch");
+        XPMATH_ASSERT(E.failed == 0, "device EFT parity mismatch");
         // A nonzero vendor code is a TEST FAILURE, not a warning. Without this a
         // launch that never ran would leave the output buffers untouched and the
         // comparison loop would happily report parity against whatever the
         // allocator handed back. Sticky since process start.
-        KOKKOS_EP_ASSERT(xpt::last_error() == 0,
+        XPMATH_ASSERT(xpt::last_error() == 0,
                          "device harness reported a nonzero vendor error code");
 
         rc = ep_exit_code();

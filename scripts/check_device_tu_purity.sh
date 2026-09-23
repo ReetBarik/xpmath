@@ -170,7 +170,7 @@ FILES=(
 # reach for first.
 LAUNCH_TOKENS='Kokkos::parallel_for|parallel_for_n|KOKKOS_LAMBDA'
 
-INCS=(-I"${REPO_ROOT}/include" -I"${REPO_ROOT}/tests" -I"${REPO_ROOT}/third_party/include")
+INCS=(-I"${REPO_ROOT}/include" -I"${REPO_ROOT}/tests")
 for extra in "$@"; do
   if [ -n "${extra}" ]; then
     INCS+=(-I"${extra}")

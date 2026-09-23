@@ -132,7 +132,7 @@
 #include <string>
 #include <vector>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 
 // dd:: alias comes from test_utils_device.hpp (namespace dd = xp).
 // FF types live in the SAME namespace; introduce an ff:: alias for readability.
@@ -868,14 +868,14 @@ int main(int, char**) {
     std::printf("  %-22s %12ld %12ld %10ld\n",
                 "TOTAL", total_tested, total_skipped, total_failures);
 
-    KOKKOS_EP_ASSERT(total_failures == 0,
+    XPMATH_ASSERT(total_failures == 0,
                      "one or more FF ops produced an overlapping (hi, lo) result");
-    KOKKOS_EP_ASSERT(c_pass == c_total, "a PORT_NOTES §4 named regression case failed");
+    XPMATH_ASSERT(c_pass == c_total, "a PORT_NOTES §4 named regression case failed");
     // A nonzero vendor code is a TEST FAILURE, not a warning: a launch that never
     // ran leaves the output buffers at whatever the allocator returned, and the
     // non-overlap predicate cannot tell that from a clean pass. Sticky since
     // process start, so a later good call cannot erase it.
-    KOKKOS_EP_ASSERT(xpt::last_error() == 0,
+    XPMATH_ASSERT(xpt::last_error() == 0,
                      "device harness reported a nonzero vendor error code");
 
     rc = ep_exit_code();

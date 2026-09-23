@@ -179,7 +179,10 @@ cmake -DCMAKE_BUILD_TYPE=Release \
 
 make -j"$(nproc)"
 
-echo "Executables:"
-echo "  $REPO_BUILD_DIR/kokkos_ep_demo"
-echo "  $REPO_BUILD_DIR/kokkos_ep_demo_complex"
+# CORE_PLAN C10: the eight kokkos_ep_demo* targets are gone (last at 158d618;
+# recover via git show for xpmath-kokkos K6). This tree is the C++ library;
+# smoke the install with examples/standalone/ or ctest under $REPO_BUILD_DIR.
+echo "Built under $REPO_BUILD_DIR (header-only library + tests; no demo targets)."
+echo "  examples/standalone/  # after cmake --install, find_package(xpmath)"
+echo "  ctest --test-dir $REPO_BUILD_DIR"
 cd ..

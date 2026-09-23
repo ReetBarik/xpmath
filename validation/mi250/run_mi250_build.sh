@@ -363,69 +363,17 @@ else
 fi
 
 # ---------------------------------------------- 5. execution space, resolved
-# The one thing a HIP build can silently get wrong: a Kokkos with both SERIAL
-# and HIP enabled will happily fall back to Serial as the default device, and
-# every "device" test then passes on the CPU. Ask the RUNTIME -- the config
-# header says what is ENABLED, only a running program says what was CHOSEN.
-#
-# Built as a separate throwaway CMake project rather than by running one of the
-# repo's own test binaries, because on this target there may not BE one; see
-# the header of kokkos_space_probe.cpp. Same Kokkos prefix, same compiler, same
-# flags as the arch row -- read back out of the recipe's own CMakeCache.txt so
-# they cannot drift from it.
+# CORE_PLAN C10: this repository no longer finds or links Kokkos. The S8c
+# throwaway probe (validation/mi250/kokkos_space_probe.cpp) last existed at `4c41fe8` on core/c10-release; recover with
+#   git show 4c41fe8:validation/mi250/kokkos_space_probe.cpp
+# Kokkos execution-space probes belong in xpmath-kokkos. Device evidence for
+# xpmath itself is the harness baselines (C7/C8), not a Kokkos runtime check.
 echo; echo "--- [5/6] execution space actually resolved by the runtime ---"
-rc_exec=1
-EXEC_LINE="(not determined)"
-if [ -f "$BUILD_DIR/CMakeCache.txt" ]; then
-  probe_cxx=$(sed -n 's/^CMAKE_CXX_COMPILER:[A-Z]*=//p'        "$BUILD_DIR/CMakeCache.txt" | head -1)
-  probe_pfx=$(sed -n 's/^CMAKE_PREFIX_PATH:[A-Z]*=//p'         "$BUILD_DIR/CMakeCache.txt" | head -1)
-  probe_flg=$(sed -n 's/^CMAKE_CXX_FLAGS:[A-Z]*=//p'           "$BUILD_DIR/CMakeCache.txt" | head -1)
-  probe_rel=$(sed -n 's/^CMAKE_CXX_FLAGS_RELEASE:[A-Z]*=//p'   "$BUILD_DIR/CMakeCache.txt" | head -1)
-  echo "  toolchain taken from the recipe's own CMakeCache.txt:"
-  echo "    CMAKE_CXX_COMPILER      = $probe_cxx"
-  echo "    CMAKE_PREFIX_PATH       = $probe_pfx"
-  echo "    CMAKE_CXX_FLAGS         = $probe_flg"
-  echo "    CMAKE_CXX_FLAGS_RELEASE = $probe_rel"
-
-  rm -rf "$PROBEDIR"; mkdir -p "$PROBEDIR/src"
-  cp "$REPO_ROOT/validation/mi250/kokkos_space_probe.cpp" "$PROBEDIR/src/"
-  cat > "$PROBEDIR/src/CMakeLists.txt" <<'PROBE_CMAKE'
-cmake_minimum_required(VERSION 3.16)
-project(kokkos_space_probe LANGUAGES CXX)
-find_package(Kokkos REQUIRED)
-add_executable(kokkos_space_probe kokkos_space_probe.cpp)
-target_link_libraries(kokkos_space_probe PRIVATE Kokkos::kokkos)
-PROBE_CMAKE
-  cmake -S "$PROBEDIR/src" -B "$PROBEDIR/build" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_CXX_COMPILER="$probe_cxx" \
-        -DCMAKE_PREFIX_PATH="$probe_pfx" \
-        -DCMAKE_CXX_FLAGS="$probe_flg" \
-        -DCMAKE_CXX_FLAGS_RELEASE="$probe_rel" > "$PROBEDIR/configure.log" 2>&1
-  rc_pc=$?
-  cmake --build "$PROBEDIR/build" -j4 >> "$PROBEDIR/configure.log" 2>&1
-  rc_pb=$?
-  echo "  probe configure: $rc_pc   probe build: $rc_pb"
-  if [ "$rc_pb" -ne 0 ]; then
-    echo "  probe did not build -- last 25 lines of $PROBEDIR/configure.log:"
-    tail -25 "$PROBEDIR/configure.log" | sed 's/^/    /'
-  else
-    PROBE_OUT=$("$PROBEDIR/build/kokkos_space_probe" 2>&1)
-    echo "$PROBE_OUT" | sed 's/^/    /'
-    echo
-    echo "  -- the lines that decide it --"
-    echo "$PROBE_OUT" | grep -E '^resolved-|^probe-kernel|^probe-verdict' | sed 's/^/    /'
-    EXEC_LINE=$(echo "$PROBE_OUT" | grep -m1 '^resolved-default-execution-space:')
-    if echo "$PROBE_OUT" | grep -q '^probe-verdict: HIP-EXECUTED'; then
-      echo "  => DEFAULT EXECUTION SPACE IS HIP, and a kernel really ran in it."
-      rc_exec=0
-    else
-      echo "  => NOT HIP, or the kernel returned wrong values. NOT device evidence."
-    fi
-  fi
-else
-  echo "  no CMakeCache.txt -- configure never completed; nothing to probe."
-fi
+rc_exec=0
+EXEC_LINE="(skipped: Kokkos probe removed in C10; see xpmath-kokkos)"
+echo "  SKIPPED — kokkos_space_probe.cpp was removed with the Kokkos-free"
+echo "  library extraction. Do not treat this historical campaign script as"
+echo "  device evidence for include/xp/; use docs/DEVICE_PRECISION.md."
 
 # The oracle's libquadmath is resolved through LD_LIBRARY_PATH with no RPATH,
 # so which one a binary picks up is a property of THIS shell, not of the build.

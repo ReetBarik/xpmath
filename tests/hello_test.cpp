@@ -17,7 +17,7 @@
 //
 // SPLIT IN CORE_PLAN C4 step 4 (chunk E), AND IT WAS THE MIRROR CHECK THAT
 // FOUND IT. C4 chunk A took this file off Kokkos -- its second half used to call
-// kokkos_ep::run_unary_op, which is Kokkos::View + parallel_for, and that one
+// a Kokkos View+parallel_for runner (run_unary_op), and that one
 // call was the whole reason it linked Kokkos -- and re-pointed the launch at
 // tests/device_harness.hpp. But it stayed MIXED: a TU including
 // tests/test_utils_host.hpp (binary128) that also launches a kernel is exactly
@@ -42,7 +42,7 @@
 
 #include <cstddef>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 
 int main() {
   int rc = 0;
@@ -70,7 +70,7 @@ int main() {
       }
     }
 
-    KOKKOS_EP_ASSERT(mism == 0, "DD round-trip to binary128 was not bit-exact");
+    XPMATH_ASSERT(mism == 0, "DD round-trip to binary128 was not bit-exact");
     std::printf("hello_test: DD round-trip identity  %d/%d passed\n", n - mism, n);
 
     rc = ep_exit_code();

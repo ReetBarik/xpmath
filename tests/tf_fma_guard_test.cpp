@@ -69,8 +69,8 @@
 //   tf_fma_guard_test              (xpm_add_device_eft_test             -> OFF)
 //   tf_fma_guard_test_contract_on  (xpm_add_device_eft_test_contract_on -> ON)
 // The only per-variant knobs are compile definitions the helpers set:
-//   KOKKOS_EP_CONTRACTION_MODE=0 (OFF) or =1 (ON)
-//   KOKKOS_EP_BASELINE_PATH=... (ON only, drift detection)
+//   XPMATH_CONTRACTION_MODE=0 (OFF) or =1 (ON)
+//   XPMATH_BASELINE_PATH=... (ON only, drift detection)
 
 // LAUNCH MECHANISM: tests/device_harness.hpp, not Kokkos (CORE_PLAN C4 step 3).
 // Nothing this test measures changed -- same primitives, same inputs, same
@@ -91,7 +91,7 @@
 #include <random>
 #include <vector>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 
 // TF types live in xp::
 namespace tf = xp;
@@ -155,7 +155,7 @@ inline bool prod_in_domain(float a, float b) {
 // ----------------------------------------------------------------------------
 // Three-way classification (ON reporter)
 // ----------------------------------------------------------------------------
-#if KOKKOS_EP_CONTRACTION_MODE == 1
+#if XPMATH_CONTRACTION_MODE == 1
 enum class Verdict { TRIVIAL, ERR_NONZERO_CORRECT, ERR_ZERO, ERR_NONZERO_WRONG };
 
 static Verdict classify_prod(float a, float b) {
@@ -190,7 +190,7 @@ struct EftCount {
   long tested = 0;
   long skipped = 0;
   long failures = 0;
-#if KOKKOS_EP_CONTRACTION_MODE == 1
+#if XPMATH_CONTRACTION_MODE == 1
   long trivial = 0;
   long correct = 0;
   long zero = 0;
@@ -224,7 +224,7 @@ inline void check_pair(Op op, float a, float b, EftCount& c) {
   if (!in_domain) { ++c.skipped; return; }
   ++c.tested;
 
-#if KOKKOS_EP_CONTRACTION_MODE == 0
+#if XPMATH_CONTRACTION_MODE == 0
   // OFF: gate on exact
   bool ok;
   switch (op) {
@@ -338,11 +338,11 @@ static EftCount run_device_parity() {
   const float* hqlo = q_lo.host();
 
   long sum_fail = 0;
-#if KOKKOS_EP_CONTRACTION_MODE == 0
+#if XPMATH_CONTRACTION_MODE == 0
   long prod_fail = 0, sqr_fail = 0;
 #endif
   long sum_skip = 0, prod_skip = 0, sqr_skip = 0;
-#if KOKKOS_EP_CONTRACTION_MODE == 1
+#if XPMATH_CONTRACTION_MODE == 1
   long prod_tri = 0, prod_cor = 0, prod_zero = 0, prod_wrong = 0;
   long sqr_tri = 0, sqr_cor = 0, sqr_zero = 0, sqr_wrong = 0;
 #endif
@@ -357,7 +357,7 @@ static EftCount run_device_parity() {
 
     // twoProd
     if (prod_in_domain(a, b)) {
-#if KOKKOS_EP_CONTRACTION_MODE == 0
+#if XPMATH_CONTRACTION_MODE == 0
       if ((double)hphi[i] + (double)hplo[i] != (double)a * (double)b) ++prod_fail;
 #else
       double exact = (double)a * (double)b;
@@ -372,7 +372,7 @@ static EftCount run_device_parity() {
 
     // twoSqr
     if (prod_in_domain(a, a)) {
-#if KOKKOS_EP_CONTRACTION_MODE == 0
+#if XPMATH_CONTRACTION_MODE == 0
       if ((double)hqhi[i] + (double)hqlo[i] != (double)a * (double)a) ++sqr_fail;
 #else
       double exact = (double)a * (double)a;
@@ -388,7 +388,7 @@ static EftCount run_device_parity() {
 
   R.tested = 3 * nd;
   R.skipped = (int)(sum_skip + prod_skip + sqr_skip);
-#if KOKKOS_EP_CONTRACTION_MODE == 0
+#if XPMATH_CONTRACTION_MODE == 0
   R.failures = (int)(sum_fail + prod_fail + sqr_fail);
 #else
   R.trivial = prod_tri + sqr_tri;
@@ -417,10 +417,10 @@ static EftCount run_device_parity() {
 // file is missing or unparseable, same warn-never-fail posture. Four backends,
 // one contract.
 // ----------------------------------------------------------------------------
-#if KOKKOS_EP_CONTRACTION_MODE == 1
-#  ifdef KOKKOS_EP_BASELINE_PATH
+#if XPMATH_CONTRACTION_MODE == 1
+#  ifdef XPMATH_BASELINE_PATH
 static void check_baseline(long observed) {
-  const char* path = KOKKOS_EP_BASELINE_PATH;
+  const char* path = XPMATH_BASELINE_PATH;
   std::ifstream f(path);
   if (!f) {
     std::printf("  baseline: no file at %s\n", path);
@@ -457,7 +457,7 @@ static void check_baseline(long observed) {
 int main(int, char**) {
   int rc = 0;
   {
-#if KOKKOS_EP_CONTRACTION_MODE == 0
+#if XPMATH_CONTRACTION_MODE == 0
     std::printf("=== tf_fma_guard_test: contraction OFF (gate on exact) ===\n");
 #else
     std::printf("=== tf_fma_guard_test_contract_on: contraction ON (report) ===\n");
@@ -469,14 +469,14 @@ int main(int, char**) {
     std::printf("[Control] tf_two_sum\n");
     EftCount sum_h = run_host_batches(Op::Sum, "Sum");
     std::printf("  Host: tested=%ld, skip=%ld, fail=%ld\n", sum_h.tested, sum_h.skipped, sum_h.failures);
-    KOKKOS_EP_ASSERT(sum_h.failures == 0, "tf_two_sum control failed");
+    XPMATH_ASSERT(sum_h.failures == 0, "tf_two_sum control failed");
 
     // twoProd
     std::printf("\n[Test] tf_two_prod\n");
     EftCount prod_h = run_host_batches(Op::Prod, "Prod");
-#if KOKKOS_EP_CONTRACTION_MODE == 0
+#if XPMATH_CONTRACTION_MODE == 0
     std::printf("  Host: tested=%ld, skip=%ld, fail=%ld\n", prod_h.tested, prod_h.skipped, prod_h.failures);
-    KOKKOS_EP_ASSERT(prod_h.failures == 0, "tf_two_prod OFF not bit-exact");
+    XPMATH_ASSERT(prod_h.failures == 0, "tf_two_prod OFF not bit-exact");
 #else
     std::printf("  Host: tested=%ld, trivial=%ld, correct=%ld, zero=%ld, wrong=%ld\n",
                 prod_h.tested, prod_h.trivial, prod_h.correct, prod_h.zero, prod_h.wrong);
@@ -485,9 +485,9 @@ int main(int, char**) {
     // twoSqr
     std::printf("\n[Test] tf_two_sqr\n");
     EftCount sqr_h = run_host_batches(Op::Sqr, "Sqr");
-#if KOKKOS_EP_CONTRACTION_MODE == 0
+#if XPMATH_CONTRACTION_MODE == 0
     std::printf("  Host: tested=%ld, skip=%ld, fail=%ld\n", sqr_h.tested, sqr_h.skipped, sqr_h.failures);
-    KOKKOS_EP_ASSERT(sqr_h.failures == 0, "tf_two_sqr OFF not bit-exact");
+    XPMATH_ASSERT(sqr_h.failures == 0, "tf_two_sqr OFF not bit-exact");
 #else
     std::printf("  Host: tested=%ld, trivial=%ld, correct=%ld, zero=%ld, wrong=%ld\n",
                 sqr_h.tested, sqr_h.trivial, sqr_h.correct, sqr_h.zero, sqr_h.wrong);
@@ -501,19 +501,19 @@ int main(int, char**) {
     // back, and "all zeros compared equal" is exactly how a dead device pass
     // looks from the comparison loop. Sticky since process start, so a later
     // clean call cannot erase an earlier failure.
-    KOKKOS_EP_ASSERT(xpt::last_error() == 0,
+    XPMATH_ASSERT(xpt::last_error() == 0,
                      "device harness reported a nonzero vendor error code");
-#if KOKKOS_EP_CONTRACTION_MODE == 0
+#if XPMATH_CONTRACTION_MODE == 0
     std::printf("  Device: tested=%ld, skip=%d, fail=%ld\n", dev.tested, dev.skipped, dev.failures);
-    KOKKOS_EP_ASSERT(dev.failures == 0, "device EFT parity mismatch");
+    XPMATH_ASSERT(dev.failures == 0, "device EFT parity mismatch");
 #else
     std::printf("  Device: tested=%ld, trivial=%ld, correct=%ld, zero=%ld, wrong=%ld\n",
                 dev.tested, dev.trivial, dev.correct, dev.zero, dev.wrong);
 #endif
 
-#if KOKKOS_EP_CONTRACTION_MODE == 0
+#if XPMATH_CONTRACTION_MODE == 0
     long F = prod_h.failures + sqr_h.failures + dev.failures;
-    KOKKOS_EP_ASSERT(F == 0, "OFF: at least one Dekker primitive broke");
+    XPMATH_ASSERT(F == 0, "OFF: at least one Dekker primitive broke");
     rc = ep_exit_code();
 #else
     // The drift counter is the ON-mode analogue of the OFF-mode failure count:
@@ -522,7 +522,7 @@ int main(int, char**) {
     const long F_drift = prod_h.zero + prod_h.wrong
                        + sqr_h.zero  + sqr_h.wrong
                        + dev.zero    + dev.wrong;
-#  ifdef KOKKOS_EP_BASELINE_PATH
+#  ifdef XPMATH_BASELINE_PATH
     check_baseline(F_drift);
 #  endif
     long W_total = prod_h.wrong + sqr_h.wrong + dev.wrong;
@@ -532,7 +532,7 @@ int main(int, char**) {
       std::printf("\nON target: ERR_NONZERO_WRONG == 0 -> PASS\n");
     }
     // ep_exit_code() is consulted on BOTH paths now. It used to be read only
-    // inside the W_total > 0 branch, so a failed KOKKOS_EP_ASSERT -- the twoSum
+    // inside the W_total > 0 branch, so a failed XPMATH_ASSERT -- the twoSum
     // control, and as of C4 the harness-error check -- could print ASSERT FAILED
     // and still exit 0 whenever W_total happened to be zero. An assertion whose
     // entire job is to fire on a silent device has to be able to reach rc.

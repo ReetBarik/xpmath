@@ -72,7 +72,7 @@
 #include <string>
 #include <vector>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 
 // TF types live in xp::; tf:: alias for consistency with qf:: pattern.
 namespace tf = xp;
@@ -413,7 +413,7 @@ int main() {
     run_group_a_add_comm(xs, A);
     run_group_a_mulpwr2(xs, A);
     std::printf("  Group A: %d passed, %d failed, %d skipped (of %d)\n", A.pass, A.fail, A.skip, A.total);
-    KOKKOS_EP_ASSERT(A.fail == 0, "Group A bit-exact identity failed");
+    XPMATH_ASSERT(A.fail == 0, "Group A bit-exact identity failed");
 
     std::printf("\n[Group B] Approximate identities (oracle-scored)\n");
     GroupBResult B_mul, B_sqrt, B_exp, B_pyth, B_hyp, B_inv;

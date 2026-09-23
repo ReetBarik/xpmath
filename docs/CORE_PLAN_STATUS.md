@@ -1648,3 +1648,105 @@ byte-identical output under 3.6 and 3.12.
 - Does not re-run A100 or MI250 produce jobs; it reads the committed baselines.
 - Does not close S8; the cross-vendor matrix remains S8's own measure.
 - Does not claim the gfx90a asm lint was re-run (C8 deferred it).
+
+---
+
+## CORE CLOSEOUT — the C++ library is the artifact; device is measured, not rumoured
+
+**This block covers an arc, not a sub-plan.** Ten sections (C0–C10) took a
+Kokkos-centric repository to a header-only C++17 library that finds and links
+no Kokkos, with host and device accuracy measured under one correctness
+contract. Read it as the answer to one question: after all of that, what is
+shipped, and what is still not?
+
+C10 itself lived on `core/c10-release` off `main` @ `158d618` (C9 merge). Its
+commits, in order: `81e6e7e` (demos / wrappers / `XPMATH_WITH_KOKKOS` removed;
+last at `158d618` for xpmath-kokkos K6), `63f06fc` (`examples/standalone/`),
+`c5f3385` (consumer builds the example from install), `21d2472` (rename sweep),
+`c0e87e0` (README + CLAUDE rewrite), `4c41fe8` (version 0.2.0),
+`27166cc` (remove leftover Kokkos space probe), and this closeout (`da676a4`).
+
+### What C10 shipped
+
+- **Kokkos-free repository.** `src/demo_*.cpp`, the nine demo `add_executable`
+  entries, `third_party/include/`, and `XPMATH_WITH_KOKKOS` are gone. The S8c
+  leftover `validation/mi250/kokkos_space_probe.cpp` (the only remaining
+  `#include <Kokkos_Core.hpp>` / `Kokkos::` call site outside `docs/`) is
+  removed; `run_mi250_build.sh` step 5 skips it. Every remaining `Kokkos`
+  string under `*.cpp` / `*.hpp` / `CMakeLists.txt` (outside `docs/`) is a
+  comment or a provenance/smoke string explaining that wrappers and demos live
+  in **xpmath-kokkos**.
+- **`examples/standalone/`** — compensated reduction via `find_package(xpmath)`
+  only, plus CUDA and HIP variants through `tests/device_harness.hpp` (usage
+  examples, not benchmarks). `consumer_package` builds and runs the host
+  example against an install prefix.
+- **Rename sweep.** Live identifiers are `XPMATH_*` / `xpmath`; the deprecated
+  `KOKKOS_EP_BUILD_TESTS` alias is dropped. Dead Kokkos runners removed from
+  `test_utils_host.hpp`.
+- **Docs.** `README.md` and `CLAUDE.md` describe the C++ artifact;
+  `docs/DOMAINS.md` and `docs/DEVICE_PRECISION.md` are the accuracy tables.
+- **Version bump intent / tag-after-merge.** `project(xpmath VERSION 0.2.0)`
+  lands on this branch; consuming blurb in `README.md` and `docs/CONSUMING.md`
+  ask for `find_package(xpmath 0.2)`. **Do not tag on the feature branch.**
+  Tag `v0.2.0` on `main` only after this PR merges, then push the tag.
+  **xpmath-kokkos K0 must not start until that tag exists on `main` and is
+  pushed.**
+
+### Device coverage honesty
+
+C7 and C8 committed baselines for **a100** and **mi250**. C9's
+`docs/DEVICE_PRECISION.md` has measured columns for both; absolute gate on
+host / a100 / mi250 is **0 above bound**. **There is no `NO BASELINE` arch to
+list** — both target arches that this arc attempted arrived with data.
+
+That is not the same as closing S8. **S8 remains PARTIAL** by S8's own
+four-vendor matrix measure (`docs/UPSTREAM_PLAN_STATUS.md` §S8 / STEP-2
+CLOSEOUT): B200 and Intel PVC were never attempted, and the original S8
+Kokkos-linked matrix cells are not the later harness baselines. C7/C8 narrowed
+device evidence without meeting S8's gate.
+
+### Open items that are Reet's call
+
+- **GitHub remote / working-directory rename** left alone (C10 item 4). The
+  project is `xpmath`; the clone path and remote name are not this arc's job.
+
+### Measured at closeout (C10 gates)
+
+On this host, `gcc/13.3.0` + `cmake/3.28.3`, dirty tree at `c0e87e0` plus the
+then-uncommitted version bump (now `4c41fe8`), against `/tmp/c10`:
+
+| check | result |
+|---|---|
+| `xpm_build.sh --arch host --build-dir /tmp/c10` | **PASS** — host 42/42, device 24/24 (merged 66/66) |
+| host ctest (`-j8 --timeout 1800`) | **42/42** passed (real ~708 s; `sweep_monotone_gate_selftest` ~707 s) |
+| device ctest (`-j8 --timeout 1800`) | **24/24** passed (real ~90 s) |
+| `scripts/check_standalone_no_kokkos.sh` | **PASS** — 62,394 preprocessed lines, 0 Kokkos hits |
+| Kokkos grep (cpp/hpp/CMakeLists, excl. `docs/` and URLs) | comments / provenance / smoke strings only — no `#include <Kokkos_*>`, no `Kokkos::` API calls after removing `validation/mi250/kokkos_space_probe.cpp` |
+
+`validation/mi250/run_mi250_build.sh` step 5 now skips the removed probe and
+points at xpmath-kokkos; the script remains as a historical campaign recipe
+(same discipline as STEP-2's vacuous libquadmath checks).
+
+### WHAT THIS ARC DOES NOT COVER
+
+- **`CUDAFP128Kokkos` is untouched.** That branch needs sm_100 and cannot merge
+  into `main`.
+- **No cost benchmark.** `docs/PERF_PLAN.md` stays parked; this tree has no
+  timing campaign.
+- **S8 stays PARTIAL.** See above. CORE does not claim the four-vendor
+  Kokkos-linked matrix is closed.
+- **GitHub / directory rename** — open item above; not done.
+- **Accuracy defects.** C7/C8/C9 report; fixing anything above bound would be a
+  separate arc. Absolute gates found none above the allowance, so
+  `validation/sweep/open_defects.txt` stays empty — that is a measured finding,
+  not a promise that future arches will match.
+
+### Directive for future xpmath-kokkos work
+
+Closing the remaining S8 cross-vendor gap belongs to the Kokkos layer
+repository once `v0.2.0` exists. Run the wrappers / demos / bit-identity suite
+on real Kokkos execution spaces (A100 / MI250 first; B200 / PVC when hardware
+exists). Accuracy verdicts stay in xpmath (`docs/CORRECTNESS.md`); xpmath-kokkos
+must not invent a second ulp / oracle matrix. The matrix that is still open is
+recorded in `docs/UPSTREAM_PLAN_STATUS.md` §S8 and the STEP-2 CLOSEOUT — CORE
+did not close it.

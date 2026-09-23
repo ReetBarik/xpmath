@@ -158,7 +158,7 @@
 #include <random>
 #include <vector>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 namespace qf = xp;
 
 // ----------------------------------------------------------------------------
@@ -717,41 +717,41 @@ int main(int, char**) {
         std::printf("[Test A] qf_two_sum bit-exactness\n");
         EftCount A1 = run_host_batches(Op::Sum, "A/twoSum");
         std::printf("  qf_two_sum: total tested=%ld, skipped=%ld, failures=%ld\n", A1.tested, A1.skipped, A1.failures);
-        KOKKOS_EP_ASSERT(A1.failures == 0, "qf_two_sum was not bit-exact for some finite input pair");
+        XPMATH_ASSERT(A1.failures == 0, "qf_two_sum was not bit-exact for some finite input pair");
         std::printf("[Test A'] qf_quick_two_sum bit-exactness (operands ordered |a|>=|b|)\n");
         EftCount A2 = run_host_batches(Op::QuickSum, "A/quickSum");
         std::printf("  qf_quick_two_sum: total tested=%ld, skipped=%ld, failures=%ld\n\n", A2.tested, A2.skipped, A2.failures);
-        KOKKOS_EP_ASSERT(A2.failures == 0, "qf_quick_two_sum was not bit-exact for some ordered pair");
+        XPMATH_ASSERT(A2.failures == 0, "qf_quick_two_sum was not bit-exact for some ordered pair");
 
         // -- Test B: qf_two_prod + qf_two_sqr -------------------------------
         std::printf("[Test B] qf_two_prod (Dekker twoProduct) bit-exactness\n");
         EftCount B1 = run_host_batches(Op::Prod, "B/twoProd");
         std::printf("  qf_two_prod: total tested=%ld, skipped=%ld, failures=%ld\n", B1.tested, B1.skipped, B1.failures);
-        KOKKOS_EP_ASSERT(B1.failures == 0, "qf_two_prod was not bit-exact for some in-domain pair");
+        XPMATH_ASSERT(B1.failures == 0, "qf_two_prod was not bit-exact for some in-domain pair");
         std::printf("[Test B'] qf_two_sqr bit-exactness\n");
         EftCount B2 = run_host_batches(Op::Sqr, "B/twoSqr");
         std::printf("  qf_two_sqr: total tested=%ld, skipped=%ld, failures=%ld\n\n", B2.tested, B2.skipped, B2.failures);
-        KOKKOS_EP_ASSERT(B2.failures == 0, "qf_two_sqr was not bit-exact for some in-domain input");
+        XPMATH_ASSERT(B2.failures == 0, "qf_two_sqr was not bit-exact for some in-domain input");
 
         // -- Test C: renorm_4 + renorm --------------------------------------
         std::printf("[Test C] renorm_4 (len 5->4) + renorm (len 4->4): non-overlap + value-preservation\n");
         RenormResult C1 = test_renorm_4_bounded(1'000'000, 45678ULL);
         std::printf("    renorm_4 bounded (exact FP64): tested=%ld  non-overlap-fail=%ld  value-fail=%ld  (pair-skips=%ld)\n",
                     C1.tested, C1.overlap_fail, C1.value_fail, C1.skips);
-        KOKKOS_EP_ASSERT(C1.overlap_fail == 0, "renorm_4 produced an overlapping (non-Priest) length-4 result");
-        KOKKOS_EP_ASSERT(C1.value_fail   == 0, "renorm_4 did not preserve value exactly on bounded-spread input");
+        XPMATH_ASSERT(C1.overlap_fail == 0, "renorm_4 produced an overlapping (non-Priest) length-4 result");
+        XPMATH_ASSERT(C1.value_fail   == 0, "renorm_4 did not preserve value exactly on bounded-spread input");
 
         RenormResult C2 = test_renorm_bounded(1'000'000, 56789ULL);
         std::printf("    renorm   bounded (exact FP64): tested=%ld  non-overlap-fail=%ld  value-fail=%ld  (pair-skips=%ld)\n",
                     C2.tested, C2.overlap_fail, C2.value_fail, C2.skips);
-        KOKKOS_EP_ASSERT(C2.overlap_fail == 0, "renorm produced an overlapping (non-Priest) length-4 result");
-        KOKKOS_EP_ASSERT(C2.value_fail   == 0, "renorm did not preserve value exactly on bounded-spread input");
+        XPMATH_ASSERT(C2.overlap_fail == 0, "renorm produced an overlapping (non-Priest) length-4 result");
+        XPMATH_ASSERT(C2.value_fail   == 0, "renorm did not preserve value exactly on bounded-spread input");
 
         RenormResult C3 = test_renorm_4_wide(1'000'000, 67890ULL);
         std::printf("    renorm_4 wide-spread (binary128, rel <= 2^-88): tested=%ld  non-overlap-fail=%ld  value-fail=%ld  (pair-skips=%ld)\n",
                     C3.tested, C3.overlap_fail, C3.value_fail, C3.skips);
-        KOKKOS_EP_ASSERT(C3.overlap_fail == 0, "renorm_4 produced an overlapping result on wide-spread input");
-        KOKKOS_EP_ASSERT(C3.value_fail   == 0, "renorm_4 exceeded the QF truncation threshold on wide-spread input");
+        XPMATH_ASSERT(C3.overlap_fail == 0, "renorm_4 produced an overlapping result on wide-spread input");
+        XPMATH_ASSERT(C3.value_fail   == 0, "renorm_4 exceeded the QF truncation threshold on wide-spread input");
         std::printf("\n");
 
         // -- Test D: named cases --------------------------------------------
@@ -759,7 +759,7 @@ int main(int, char**) {
         NamedResult D = run_named_cases();
         std::printf("  Test D named cases: %d passed, %d skipped, %d failed (of %d)\n\n",
                     D.passed, D.skipped, D.failed, D.total);
-        KOKKOS_EP_ASSERT(D.failed == 0, "a named EFT case failed");
+        XPMATH_ASSERT(D.failed == 0, "a named EFT case failed");
 
         // -- Test E: device parity — now its own target, qf_eft_test_device.
         // It runs the same primitives on the same seeds against the same FP64

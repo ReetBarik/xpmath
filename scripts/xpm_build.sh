@@ -6,8 +6,7 @@
 #
 #   scripts/xpm_build.sh --arch {host|a100|mi250} [--build-dir DIR]
 #                        [--only {host|device|both}]
-#                        [--kokkos {use-existing|build}] [--opt LEVEL]
-#                        [--no-kokkos] [--no-test]
+#                        [--opt LEVEL] [--no-test]
 #
 # Selecting a target is an ARGUMENT here, not an edit. Before this script the
 # only recipe was scripts/build_with_kokkos.sh, whose GPU was a literal on line
@@ -22,14 +21,19 @@
 # property this build can express in one tree: it is two configures, and this
 # script drives both.
 #
-#   <build-dir>/host    always g++, always -ffp-contract=off, always
-#                       XPMATH_WITH_KOKKOS=OFF, XPMATH_BUILD_DEVICE_TARGETS=OFF.
+#   <build-dir>/host    always g++, always -ffp-contract=off,
+#                       XPMATH_BUILD_DEVICE_TARGETS=OFF.
 #                       IDENTICAL for host, a100 and mi250.
-#   <build-dir>/device  the arch's compiler, contraction spelling and Kokkos
-#                       prefix from the data table below, with
-#                       XPMATH_BUILD_HOST_TARGETS=OFF. For --arch host this is
-#                       still g++ with the serial harness backend, which is what
-#                       makes the device-side tests runnable without a GPU.
+#   <build-dir>/device  the arch's compiler and contraction spelling from the
+#                       data table below, with XPMATH_BUILD_HOST_TARGETS=OFF.
+#                       For --arch host this is still g++ with the serial
+#                       harness backend, which is what makes the device-side
+#                       tests runnable without a GPU.
+#
+# CORE_PLAN C10: this repository no longer finds or links Kokkos. The eight
+# demos and third_party/include/ moved to xpmath-kokkos. Both trees are
+# Kokkos-free; --kokkos / --no-kokkos are removed. Device execution here is
+# tests/device_harness.hpp.
 #
 # THIS IS NOT A TIDINESS EXERCISE. It is the whole of what went wrong on A100 in
 # Cobalt job 1000938, where `--arch a100` set nvcc_wrapper project-wide and ALL
@@ -46,22 +50,7 @@
 #
 # All eleven are HOST-tagged targets (tests/CMakeLists.txt), so all eleven are
 # built by the host tree's g++ and none of them is ever shown to nvcc again.
-# The count of record was five; five was the sweep_accuracy cluster alone.
 #
-# THE HOST TREE IS KOKKOS-FREE, AND THAT IS WHAT MAKES IT IDENTICAL ACROSS
-# ARCHES. After CORE_PLAN C4 no test links Kokkos, and the eight demos -- the
-# only remaining Kokkos consumers, and the only consumers of
-# third_party/include/ -- are device-tagged. A host tree configured with the
-# a100 Kokkos prefix would therefore FIND a Kokkos that nothing in it links,
-# and would differ from the mi250 host tree in a way no compiled byte reflects.
-# Worse, it would make `--only host` impossible on a node without that arch's
-# Kokkos install. So the host tree passes XPMATH_WITH_KOKKOS=OFF on every arch
-# and the arch's prefix is only ever handed to the device tree.
-#
-# WHAT --no-kokkos NOW MEANS: it drops Kokkos from the DEVICE tree, which is the
-# only tree that had it. The eight demos are then not built and the device tree
-# is the Kokkos-free device harness alone. The host tree is unaffected because
-# it never had Kokkos to drop.
 #
 # ---------------------------------------------------------------------------
 # APPLES-TO-APPLES: WHAT IS HELD IDENTICAL, AND WHAT IS NOT
@@ -79,40 +68,31 @@
 #                   level, and CMakeCache.txt records it where build-info.txt
 #                   can read it back. BOTH TREES GET THE SAME LEVEL.
 #
-#   C++ standard    C++17 for THIS project, on every arch, in both trees. The
-#                   three Kokkos installs are all C++20 because Kokkos 5.1.0
-#                   hard-errors on 17 (KI-3), and Kokkos's
-#                   INTERFACE_COMPILE_FEATURES cxx_std_20 wins on any target
-#                   that links it -- which after C4 is the eight demos and
-#                   nothing else. The two numbers are deliberately different
-#                   and must stay different; see .github/workflows/ci.yml.
+#   C++ standard    C++17 for THIS project, on every arch, in both trees.
+#                   (Kokkos 5.1.0 requires C++20; that constraint belongs to
+#                   xpmath-kokkos after CORE_PLAN C10, not to this repository.)
 #
 #   FP contraction  OFF, on every arch and in both trees -- but spelled
 #                   differently, and with a different reach, per toolchain. See
 #                   the next block.
 #
 #   THE HOST TREE   held identical across all three arches, by construction:
-#                   same compiler, same flags, no Kokkos. That is the point of
-#                   splitting it out. An accuracy number measured under
-#                   `--arch mi250` comes out of the same host tree as one
-#                   measured under `--arch a100`.
+#                   same compiler, same flags. That is the point of splitting
+#                   it out. An accuracy number measured under `--arch mi250`
+#                   comes out of the same host tree as one measured under
+#                   `--arch a100`.
 #
 # NOT held identical, by construction:
 #
 #   compiler        DEVICE TREE ONLY: g++ (host), nvcc_wrapper wrapping
 #                   nvcc+g++ (a100), hipcc (mi250). There is no common compiler
 #                   for three vendors. The host tree is g++ everywhere.
-#   execution space Serial, Cuda, HIP.
+#   execution space Serial harness backend, Cuda, HIP (via device_harness.hpp).
 #   host oracle     NO LONGER A DIFFERENCE, and the row is kept to say so. It
 #                   used to read: libquadmath is present in the host and a100
-#                   Kokkos installs and ABSENT from the mi250 one, so the
-#                   oracle-scored tests runtime-SKIP on mi250. The B-arc removed
-#                   the last libquadmath call site from tests/ and the skip that
-#                   hid it; sweep_accuracy's oracle is MPFR/MPC and links no
-#                   libquadmath on any arch. Whether the Kokkos install has
-#                   libquadmath no longer changes which tests score -- and the
-#                   oracle-scored targets now live in a tree that has no Kokkos
-#                   install at all.
+#                   Kokkos installs and ABSENT from the mi250 one. The B-arc
+#                   removed the last libquadmath call site; sweep_accuracy's
+#                   oracle is MPFR/MPC and links no libquadmath on any arch.
 #   device build    a100 and mi250 additionally compile every device-tagged TU
 #                   through a device pass; host does not.
 #
@@ -214,18 +194,17 @@ scripts/xpm_build.sh — configure and build xpmath for a NAMED ARCHITECTURE,
 
   scripts/xpm_build.sh --arch {host|a100|mi250} [--build-dir DIR]
                        [--only {host|device|both}]
-                       [--kokkos {use-existing|build}] [--opt LEVEL]
-                       [--no-kokkos] [--no-test]
+                       [--opt LEVEL] [--no-test]
 
   --arch        host | a100 | mi250          (required)
   --build-dir   parent directory; the two trees are <dir>/host and <dir>/device
                                              (default: $REPO_ROOT/build)
   --only        host | device | both         (default: both)
-  --kokkos      use-existing | build         (default: use-existing)
   --opt         O0 O1 O2 O3 Os Og Ofast      (default: O3)
-  --no-kokkos   configure the DEVICE tree -DXPMATH_WITH_KOKKOS=OFF; the host
-                tree is Kokkos-free on every arch already
   --no-test     build only; do not run ctest and do not print a verdict
+
+  (--kokkos / --no-kokkos were removed in CORE_PLAN C10: this repository
+   no longer finds or links Kokkos.)
 EOF
 }
 
@@ -235,13 +214,13 @@ EOF
 # commented-out line somebody has to remember to uncomment.
 #
 # EVERY ROW HERE DESCRIBES THE DEVICE TREE. The host tree takes none of them:
-# it is g++ / -ffp-contract=off / no Kokkos on all three arches, which is the
-# constant the HOST_* values below spell out.
+# it is g++ / -ffp-contract=off on all three arches, which is the constant the
+# HOST_* values below spell out. After CORE_PLAN C10 neither tree finds Kokkos.
 # ---------------------------------------------------------------------------
 declare -A ARCH_DESC=(
-  [host]="x86_64 login/compute node, Kokkos Serial"
-  [a100]="NVIDIA A100 / sm_80, Kokkos CUDA"
-  [mi250]="AMD MI250X / gfx90a, Kokkos HIP"
+  [host]="x86_64 login/compute node, serial device_harness"
+  [a100]="NVIDIA A100 / sm_80, CUDA device_harness"
+  [mi250]="AMD MI250X / gfx90a, HIP device_harness"
 )
 declare -A ARCH_MODULES=(
   [host]="gcc/13.3.0 cmake/3.28.3"
@@ -258,42 +237,15 @@ declare -A ARCH_CXX=(
   [a100]="/home/rbarik/kokkos-src-5.1.0-cuda-sm80/bin/nvcc_wrapper"
   [mi250]="/soft/compilers/rocm/rocm-7.0.2/bin/hipcc"
 )
-declare -A ARCH_KOKKOS_PREFIX=(
-  [host]="$HOME/kokkos-install-quadmath"
-  [a100]="$HOME/kokkos-install-cuda-sm80-quadmath"
-  [mi250]="$HOME/xpm_device/kokkos-hip-gfx90a"
-)
-# The Kokkos_ARCH_* macro and backend, used only by --kokkos build. They are
-# stated for every arch anyway so the stamp can name the arch the prefix was
-# supposed to have been built for.
-declare -A ARCH_KOKKOS_ARCH=(
-  [host]="NONE"
-  [a100]="Kokkos_ARCH_AMPERE80"
-  [mi250]="Kokkos_ARCH_AMD_GFX90A"
-)
-declare -A ARCH_KOKKOS_BACKEND=(
-  [host]="serial"
-  [a100]="cuda"
-  [mi250]="hip"
-)
-declare -A ARCH_CUDA_ARCHITECTURES=(
-  [host]=""
-  [a100]="80"
-  [mi250]=""
-)
+# --offload-arch is load-bearing for mi250. After C4, sweep_device and the
+# other device TUs do not link Kokkos, so they do not inherit
+# Kokkos_HIP_ARCHITECTURES. Login-node hipcc then defaults to gfx906 (MI50).
+# MEASURED on the first 1001915 build: strings showed only gfx906. Pin it
+# here. Do NOT add -Xarch_device: that is a CUDA-clang spelling; hipcc warns
+# at every link (MEASURED, c9_hip_eft).
 declare -A ARCH_CONTRACT=(
   [host]="-ffp-contract=off"
   [a100]="--fmad=false"
-  # --offload-arch is load-bearing for C8. After C4, sweep_device and the
-  # other device TUs do not link Kokkos, so they do not inherit
-  # Kokkos_HIP_ARCHITECTURES=gfx90a. Login-node hipcc then defaults to
-  # gfx906 (MI50). MEASURED on the first 1001915 build: strings showed
-  # only gfx906. Pin it here, on the device-tree CMAKE_CXX_FLAGS, so a
-  # login-node --arch mi250 build cannot silently target the wrong ISA.
-  # Do NOT add -Xarch_device: that is a CUDA-clang spelling. hipcc
-  # accepts it as one unused argument and warns at every link
-  # (MEASURED, c9_hip_eft). The HIP device pass is pinned by the
-  # volatile EFT wrappers in include/xp/config.hpp, not by this flag.
   [mi250]="-ffp-contract=off --offload-arch=gfx90a"
 )
 
@@ -317,9 +269,7 @@ CTEST_TIMEOUT=1800
 ARCH=""
 BUILD_DIR=""
 ONLY="both"
-KOKKOS_MODE="use-existing"
 OPT="O3"
-WITH_KOKKOS=ON
 RUN_TESTS=1
 
 while [ $# -gt 0 ]; do
@@ -327,9 +277,9 @@ while [ $# -gt 0 ]; do
     --arch)       ARCH=${2:-};        shift 2 || die "--arch needs a value" ;;
     --build-dir)  BUILD_DIR=${2:-};   shift 2 || die "--build-dir needs a value" ;;
     --only)       ONLY=${2:-};        shift 2 || die "--only needs a value" ;;
-    --kokkos)     KOKKOS_MODE=${2:-}; shift 2 || die "--kokkos needs a value" ;;
     --opt)        OPT=${2:-};         shift 2 || die "--opt needs a value" ;;
-    --no-kokkos)  WITH_KOKKOS=OFF;    shift ;;
+    --kokkos|--no-kokkos)
+      die "$1 was removed in CORE_PLAN C10: this repository no longer finds or links Kokkos" ;;
     --no-test)    RUN_TESTS=0;        shift ;;
     -h|--help)    usage; exit 0 ;;
     *)            usage >&2; die "unknown argument: $1" ;;
@@ -341,10 +291,6 @@ done
 case "$ONLY" in
   host|device|both) ;;
   *) die "unknown --only '$ONLY' (host|device|both)" ;;
-esac
-case "$KOKKOS_MODE" in
-  use-existing|build) ;;
-  *) die "unknown --kokkos '$KOKKOS_MODE' (use-existing|build)" ;;
 esac
 OPT=${OPT#-}
 case "$OPT" in
@@ -365,7 +311,6 @@ esac
 DEV_CXX=${ARCH_CXX[$ARCH]}
 DEV_CC=${ARCH_CC[$ARCH]}
 DEV_CONTRACT=${ARCH_CONTRACT[$ARCH]}
-KOKKOS_PREFIX=${ARCH_KOKKOS_PREFIX[$ARCH]}
 
 # ---------------------------------------------------------------------------
 # Modules. This used to be the libquadmath-fingerprint trap: a binary RUN
@@ -410,43 +355,6 @@ if [ "$BUILD_DEVICE_TREE" = 1 ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Kokkos -- a DEVICE-TREE concern only, and resolved only when that tree is
-# being built. `--only host` on a node with no Kokkos install for this arch is
-# a supported and useful thing to do, and demanding the prefix anyway would
-# make it fail over a directory nothing in that tree reads.
-# ---------------------------------------------------------------------------
-if [ "$BUILD_DEVICE_TREE" != 1 ]; then
-  echo "xpm_build: --only $ONLY -- not resolving the ${ARCH} Kokkos prefix (device tree not built)"
-  KOKKOS_PREFIX=""
-elif [ "$WITH_KOKKOS" = OFF ]; then
-  # --no-kokkos drops the arch's Kokkos settings -- prefix, arch macro, backend
-  # -- and keeps its toolchain: the modules, the compiler and the contraction
-  # spelling are properties of the machine, not of whether Kokkos is linked.
-  # The arch name is still recorded in the stamp.
-  echo "xpm_build: XPMATH_WITH_KOKKOS=OFF -- ignoring the ${ARCH} Kokkos prefix"
-  KOKKOS_PREFIX=""
-elif [ "$KOKKOS_MODE" = build ]; then
-  # Delegate to the existing recipe, parameterized through its environment.
-  # KOKKOS_ONLY=1 stops it configuring the repo itself: this script owns the
-  # repo configure so that --opt, --build-dir and the stamp behave the same
-  # way in both --kokkos modes.
-  KOKKOS_INSTALL_ROOT=${KOKKOS_INSTALL_ROOT:-$HOME/kokkos-xpm-$ARCH}
-  echo "xpm_build: building Kokkos for $ARCH into $KOKKOS_INSTALL_ROOT"
-  KOKKOS_ARCH_FLAG=${ARCH_KOKKOS_ARCH[$ARCH]} \
-  KOKKOS_BACKEND=${ARCH_KOKKOS_BACKEND[$ARCH]} \
-  KOKKOS_CUDA_ARCHITECTURES=${ARCH_CUDA_ARCHITECTURES[$ARCH]} \
-  KOKKOS_CXX=${DEV_CXX} \
-  KOKKOS_ONLY=1 \
-    bash "$_self/build_with_kokkos.sh" "$KOKKOS_INSTALL_ROOT" \
-      || die "scripts/build_with_kokkos.sh failed for arch $ARCH"
-  KOKKOS_PREFIX=$KOKKOS_INSTALL_ROOT/kokkos/install/kokkos-5.1.0/Release
-  [ -d "$KOKKOS_PREFIX" ] || die "Kokkos build left no install at $KOKKOS_PREFIX"
-else
-  [ -d "$KOKKOS_PREFIX" ] \
-    || die "no Kokkos install at $KOKKOS_PREFIX (arch $ARCH). Pass --kokkos build, or --no-kokkos."
-fi
-
-# ---------------------------------------------------------------------------
 # Per-tree state. Every tree this script knows about gets a row in the summary,
 # including the ones it did not build, so "skipped" and "absent" never look the
 # same.
@@ -467,14 +375,14 @@ tree_dir() { echo "$BUILD_DIR/$1"; }
 build_tree() {
   local tree=$1
   local dir; dir=$(tree_dir "$tree")
-  local cxx cc contract prefix host_targets device_targets kokkos
+  local cxx cc contract host_targets device_targets
 
   if [ "$tree" = host ]; then
     cxx=$HOST_CXX; cc=$HOST_CC; contract=$HOST_CONTRACT
-    prefix=""; host_targets=ON; device_targets=OFF; kokkos=OFF
+    host_targets=ON; device_targets=OFF
   else
     cxx=$DEV_CXX; cc=$DEV_CC; contract=$DEV_CONTRACT
-    prefix=$KOKKOS_PREFIX; host_targets=OFF; device_targets=ON; kokkos=$WITH_KOKKOS
+    host_targets=OFF; device_targets=ON
   fi
 
   local args=(
@@ -486,13 +394,11 @@ build_tree() {
     -DCMAKE_CXX_COMPILER="$cxx"
     -DCMAKE_CXX_FLAGS="$contract"
     -DCMAKE_CXX_FLAGS_RELEASE="-$OPT -DNDEBUG"
-    -DXPMATH_WITH_KOKKOS="$kokkos"
     -DXPMATH_BUILD_HOST_TARGETS="$host_targets"
     -DXPMATH_BUILD_DEVICE_TARGETS="$device_targets"
     -DXPMATH_ARCH="$ARCH"
     -DXPMATH_OPT="$OPT"
   )
-  [ -n "$prefix" ] && args+=(-DCMAKE_PREFIX_PATH="$prefix")
 
   echo
   echo "==========================================================="
@@ -502,7 +408,6 @@ build_tree() {
   echo "   compiler    : $cxx"
   echo "   optimization: -$OPT"
   echo "   contraction : $contract"
-  echo "   kokkos      : $kokkos  ${prefix:-(none)}  [$KOKKOS_MODE]"
   echo "   targets     : HOST=$host_targets DEVICE=$device_targets"
   echo "==========================================================="
 

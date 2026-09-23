@@ -102,7 +102,7 @@
 #include <string>
 #include <vector>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 
 // ----------------------------------------------------------------------------
 // Bit-pattern helpers (probe_op.cpp / dd_eft_test.cpp hex format).
@@ -599,14 +599,14 @@ int main(int, char**) {
     // ------------------------------------------------------------------------
     std::printf("\n=== Summary ===\n");
     std::printf("  Group A: %zu identities, total failures=%ld\n", ga.size(), groupA_failures);
-    KOKKOS_EP_ASSERT(groupA_failures == 0,
+    XPMATH_ASSERT(groupA_failures == 0,
                      "a Group A bit-exact identity did not hold to the last bit");
 
     long groupB_failed = 0; for (const auto& r : gb) if (!r.pass) ++groupB_failed;
     std::printf("  Group B: %zu identities, mean below tolerance=%ld\n", gb.size(), groupB_failed);
-    KOKKOS_EP_ASSERT(groupB_failed == 0,
+    XPMATH_ASSERT(groupB_failed == 0,
                      "a Group B identity's MEAN digits fell below the -log10(N*u^2) tolerance");
-    KOKKOS_EP_ASSERT(c_pass == c_total, "a Test C named-constant regression fell below 30 digits");
+    XPMATH_ASSERT(c_pass == c_total, "a Test C named-constant regression fell below 30 digits");
 
     std::printf("  Device: see dd_property_test_device (separate ctest target)\n");
 

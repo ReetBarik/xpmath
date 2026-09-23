@@ -98,7 +98,7 @@
 #include <utility>
 #include <vector>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 
 // ----------------------------------------------------------------------------
 // Scalar fma, host+device. include/xp/config.hpp's detail:: dispatch covers the
@@ -368,7 +368,7 @@ int main(int, char**) {
             if (!sum_in_domain(pr.first, pr.second) || !prod_in_domain(pr.first, pr.second)) ++bad;
         std::printf("    generator self-check: %ld of %zu pairs out of domain (want 0)\n",
                     bad, banded.size());
-        KOKKOS_EP_ASSERT(bad == 0,
+        XPMATH_ASSERT(bad == 0,
                          "the exponent-banded generator produced an out-of-domain pair — "
                          "the batch would have measured less than it claims");
     }
@@ -402,18 +402,18 @@ int main(int, char**) {
                 sum_tested, sum_fail, prod_tested, prod_fail);
 
     // A zero tested count is a vacuous pass, so it is a failure.
-    KOKKOS_EP_ASSERT(sum_tested  > 0, "no twoSum pair was in domain — nothing was tested");
-    KOKKOS_EP_ASSERT(prod_tested > 0, "no twoProd pair was in domain — nothing was tested");
-    KOKKOS_EP_ASSERT(sum_fail  == 0,
+    XPMATH_ASSERT(sum_tested  > 0, "no twoSum pair was in domain — nothing was tested");
+    XPMATH_ASSERT(prod_tested > 0, "no twoProd pair was in domain — nothing was tested");
+    XPMATH_ASSERT(sum_fail  == 0,
                      "device Knuth twoSum disagreed with Dekker fast2sum on an in-domain pair");
-    KOKKOS_EP_ASSERT(prod_fail == 0,
+    XPMATH_ASSERT(prod_fail == 0,
                      "device Dekker twoProduct disagreed with the FMA twoProduct on an "
                      "in-domain pair");
     // A nonzero vendor code is a TEST FAILURE, not a warning: a launch that never
     // ran leaves the output buffers at whatever the allocator returned, and the
     // comparison loop cannot tell that from a clean pass. Sticky since process
     // start, so a later good call cannot erase it.
-    KOKKOS_EP_ASSERT(xpt::last_error() == 0,
+    XPMATH_ASSERT(xpt::last_error() == 0,
                      "device harness reported a nonzero vendor error code");
 
     rc = ep_exit_code();

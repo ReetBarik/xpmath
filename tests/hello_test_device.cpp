@@ -64,7 +64,7 @@
 #include <random>
 #include <vector>
 
-using namespace kokkos_ep;
+using namespace xpmath;
 
 // The functor xpt::parallel_for_n launches. A plain struct of raw device
 // pointers, not a lambda: the harness passes F by value into the kernel and
@@ -129,7 +129,7 @@ int main() {
     out_hi.from_device();
     out_lo.from_device();
 
-    KOKKOS_EP_ASSERT(xpt::last_error() == 0,
+    XPMATH_ASSERT(xpt::last_error() == 0,
                      "device harness reported a nonzero vendor error");
 
     int survived = 0;
@@ -145,10 +145,10 @@ int main() {
       }
     }
 
-    KOKKOS_EP_ASSERT(survived == 0,
+    XPMATH_ASSERT(survived == 0,
                      "poison survived the launch: the kernel or the copy-back "
                      "did not run");
-    KOKKOS_EP_ASSERT(mism == 0,
+    XPMATH_ASSERT(mism == 0,
                      "device identity did not return its input bit for bit");
     std::printf("hello_test_device: harness identity  %d/%d bit-exact\n",
                 n - mism, n);

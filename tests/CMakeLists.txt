@@ -3,7 +3,7 @@
 # ============================================================================
 # Registered from the top-level CMakeLists.txt via add_subdirectory(tests),
 # guarded by option XPMATH_BUILD_TESTS (default ON) and enable_testing().
-# (KOKKOS_EP_BUILD_TESTS is still accepted as a deprecated alias -- CORE_PLAN C4.)
+# The deprecated KOKKOS_EP_BUILD_TESTS alias was removed in CORE_PLAN C10 step 4.
 
 # --- Oracle availability: THERE IS NOTHING LEFT TO GATE ---------------------
 # This file used to open with a LIBQUADMATH probe. The __float128 oracle reached
@@ -77,27 +77,14 @@
 # reintroduce the dependency this section exists to remove, and a reader would
 # have no way to tell it was dead.
 #
-# ${THIRD_PARTY_INCLUDE} goes with them. It is still SET by the top-level
-# CMakeLists.txt, which is where the demos consume it; nothing under tests/
-# references it any more.
-#
-# THE WRAPPER LAYER IS STILL EXERCISED, AND THAT IS WHY THIS IS SAFE.
-# third_party/include/ is what lets existing Kokkos code compile unchanged, so
-# losing coverage of it would be a real loss rather than a bookkeeping one. It
-# is covered by the eight src/demo_*.cpp targets, every one of which includes
-# the wrappers and links Kokkos, and every one of which still builds in the
-# --arch host configuration. C10 moves those demos to the xpmath-kokkos
-# repository, and from then on the wrapper layer is that repository's to test --
-# which is the right home for it, because that is where the Kokkos dependency
-# will live.
+# ${THIRD_PARTY_INCLUDE} went with them. CORE_PLAN C10 deleted the eight demos
+# and third_party/include/ entirely -- they last existed at commit 158d618 and
+# move to xpmath-kokkos (K6). This repository no longer finds or links Kokkos.
 #
 # What IS gone as of C4, and is written down here rather than inferred: the
-# wrappers no longer get incidental coverage from the test suite. Before this
-# section, 26 test targets compiled third_party/include/*_math.hpp as a side
-# effect of linking Kokkos. None do now. The wrappers are true aliases
-# (`using DoubleDouble = xp::DoubleDouble`), so what that coverage actually
-# proved was that the alias header parses -- but it proved it on every build,
-# and now only the demos do.
+# wrappers no longer get incidental coverage from the test suite. Before C4,
+# 26 test targets compiled third_party/include/*_math.hpp as a side effect of
+# linking Kokkos. None do now. After C10 the wrappers are not in this tree.
 # ===========================================================================
 
 # ===========================================================================
@@ -276,14 +263,14 @@ endfunction()
 # (kokkos_ep_add_eft_test / kokkos_ep_add_eft_test_contract_on) is deleted with
 # the rest of the kokkos_ep_add_* family — see the block at the top of this file.
 # The four Kokkos-free helpers below carry the whole discipline unchanged: same
-# flags, same KOKKOS_EP_CONTRACTION_MODE, same <base>_baseline.txt derivation,
+# flags, same XPMATH_CONTRACTION_MODE, same <base>_baseline.txt derivation,
 # same GLOBAL manifest registration that the contraction guard reads.
 
 # --- Helpers: the two contraction postures, DEVICE lane --------------------
 # CORE_PLAN C4 step 3. THE CONTRACTION DISCIPLINE DOES NOT CHANGE WHEN THE
 # LAUNCH MECHANISM DOES. An EFT test migrated onto the C3 harness is still a
 # test of whether `a1*b1 - c11` stayed two rounded operations, so it is still
-# built with contraction OFF, still sets KOKKOS_EP_CONTRACTION_MODE, still gets
+# built with contraction OFF, still sets XPMATH_CONTRACTION_MODE, still gets
 # its _contract_on companion where it had one, and is still registered in the
 # two GLOBAL manifests the contraction guard reads. The only thing these drop
 # relative to the deleted kokkos_ep_add_eft_test is Kokkos.
@@ -315,7 +302,7 @@ function(xpm_add_device_eft_test name)
   if(CMAKE_CUDA_COMPILER)
     target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--fmad=false>)
   endif()
-  target_compile_definitions(${name} PRIVATE KOKKOS_EP_CONTRACTION_MODE=0)
+  target_compile_definitions(${name} PRIVATE XPMATH_CONTRACTION_MODE=0)
   set_property(GLOBAL APPEND PROPERTY XPMATH_EFT_OFF_TARGETS ${name})
 endfunction()
 
@@ -349,8 +336,8 @@ function(xpm_add_device_eft_test_contract_on name)
   # continuous across the migration rather than restarting from "no file".
   string(REGEX REPLACE "_test$" "" _base "${name}")
   target_compile_definitions(${tgt} PRIVATE
-    KOKKOS_EP_CONTRACTION_MODE=1
-    KOKKOS_EP_BASELINE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/${_base}_baseline.txt")
+    XPMATH_CONTRACTION_MODE=1
+    XPMATH_BASELINE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/${_base}_baseline.txt")
   set_property(GLOBAL APPEND PROPERTY XPMATH_EFT_ON_TARGETS ${tgt})
 endfunction()
 
@@ -372,7 +359,7 @@ endfunction()
 #
 # These two therefore delegate to xpm_add_host_test / mirror it, and are
 # otherwise byte-for-byte the device pair's logic: same flags, same
-# KOKKOS_EP_CONTRACTION_MODE, same <base>_baseline.txt derivation (so a split
+# XPMATH_CONTRACTION_MODE, same <base>_baseline.txt derivation (so a split
 # host half keeps reading the baseline it read before the split), same GLOBAL
 # manifest registration.
 function(xpm_add_host_eft_test name)
@@ -386,7 +373,7 @@ function(xpm_add_host_eft_test name)
   if(CMAKE_CXX_COMPILER_ID MATCHES "IntelLLVM|Intel")
     target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fp-model=precise>)
   endif()
-  target_compile_definitions(${name} PRIVATE KOKKOS_EP_CONTRACTION_MODE=0)
+  target_compile_definitions(${name} PRIVATE XPMATH_CONTRACTION_MODE=0)
   set_property(GLOBAL APPEND PROPERTY XPMATH_EFT_OFF_TARGETS ${name})
 endfunction()
 
@@ -412,8 +399,8 @@ function(xpm_add_host_eft_test_contract_on name)
 
   string(REGEX REPLACE "_test$" "" _base "${name}")
   target_compile_definitions(${tgt} PRIVATE
-    KOKKOS_EP_CONTRACTION_MODE=1
-    KOKKOS_EP_BASELINE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/${_base}_baseline.txt")
+    XPMATH_CONTRACTION_MODE=1
+    XPMATH_BASELINE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/${_base}_baseline.txt")
   set_property(GLOBAL APPEND PROPERTY XPMATH_EFT_ON_TARGETS ${tgt})
 endfunction()
 
@@ -597,7 +584,7 @@ xpm_add_device_eft_test(qf_eft_test_device)
 # one printf STRING LITERAL was not, and was reworded. What changed here is the
 # launch surface (Kokkos -> tests/device_harness.hpp) and one more thing: the ON
 # reporter's exit code now folds in ep_exit_code(), because the migration puts a
-# KOKKOS_EP_ASSERT on the path BOTH postures take and the old expression would
+# XPMATH_ASSERT on the path BOTH postures take and the old expression would
 # have printed ASSERT FAILED and still exited 0.
 xpm_add_device_eft_test(qf_fma_guard_test)              # -> qf_fma_guard_test              (OFF, gates)
 xpm_add_device_eft_test_contract_on(qf_fma_guard_test)  # -> qf_fma_guard_test_contract_on  (ON, reports)
@@ -1413,14 +1400,15 @@ add_test(NAME consumer_package
                  -DXPMATH_GENERATOR=${CMAKE_GENERATOR}
                  -DXPMATH_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                  "-DXPMATH_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
-                 -DXPMATH_KOKKOS_DIR=${Kokkos_DIR}
                  -P "${CMAKE_SOURCE_DIR}/tests/consumer/run_consumer_test.cmake")
 set_tests_properties(consumer_package PROPERTIES
                      LABELS packaging
                      TIMEOUT 600)
 # HOST: the nested configure it drives is an ordinary host CMake build
-# (XPMATH_WITH_KOKKOS=OFF, XPMATH_BUILD_TESTS=OFF), and the package it checks is
-# the header-only export, which has no side.
+# (XPMATH_BUILD_TESTS=OFF), and the package it checks is the header-only
+# export. CORE_PLAN C10: no Kokkos_DIR to forward -- this repository does not
+# find Kokkos. The same install prefix also builds examples/standalone/, so
+# the published usage example cannot rot while packaging stays green.
 xpm_tag_test(host consumer_package)
 
 add_test(NAME domains_fresh

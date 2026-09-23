@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Consumer smoke test driver: install xpmath, then build a SEPARATE project
+# Consumer smoke test driver: install xpmath, then build SEPARATE projects
 # against the installed package.
 #
 # A PACKAGING TEST NOBODY HAS SEEN FAIL IS A PACKAGING TEST NOBODY HAS TESTED.
-# Same contract as validation/*_selftest.sh: the clean case must PASS, and the
+# Same contract as validation/*_selftest.sh: the clean cases must PASS, and the
 # poisoned cases must FAIL. Here the "poisons" are the two ways an export can
 # be wrong while looking right:
 #
@@ -15,14 +15,22 @@
 #      reading the SOURCE tree through some leaked absolute path, and the
 #      install proves nothing.
 #
+# Two clean consumers share the same install prefix:
+#   - tests/consumer/          — packaging smoke (all installed headers)
+#   - examples/standalone/     — the published usage example (host only)
+# Both must configure, build, and run. The example is not in the main build, so
+# without this step it can rot while the suite stays green.
+#
 #   tests/consumer/run_consumer_test.sh <install-prefix> [build-dir]
 #
-# Exits 0 only if the clean build passes AND both poisons fail.
+# Exits 0 only if both clean builds pass AND both poisons fail.
 set -u
 
 prefix="${1:?usage: run_consumer_test.sh <install-prefix> [build-dir]}"
 work="${2:-${TMPDIR:-/tmp}/xpmath_consumer.$$}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# examples/standalone lives next to tests/, not under tests/consumer/.
+example_src="$(cd "${here}/../../examples/standalone" && pwd)"
 
 fail=0
 mkdir -p "${work}"
@@ -42,6 +50,24 @@ else
   echo "  clean: FAIL  <-- the installed package is not consumable"
   tail -30 "${work}/clean.cfg.log" "${work}/clean.build.log" \
            "${work}/clean.run.log" 2>/dev/null | sed 's/^/    /'
+  fail=1
+fi
+
+# --- 1b. clean: examples/standalone against the same install ----------------
+# CORE_PLAN C10: the published example is outside the main build. Building it
+# here is what keeps its CMakeLists and source from drifting off find_package.
+banner "clean standalone example must PASS"
+if cmake -S "${example_src}" -B "${work}/example" \
+        -DCMAKE_PREFIX_PATH="${prefix}" \
+        -DCMAKE_BUILD_TYPE=Release > "${work}/example.cfg.log" 2>&1 \
+   && cmake --build "${work}/example" > "${work}/example.build.log" 2>&1 \
+   && "${work}/example/compensated_reduction" > "${work}/example.run.log" 2>&1; then
+  sed 's/^/    /' "${work}/example.run.log"
+  echo "  standalone example: PASS"
+else
+  echo "  standalone example: FAIL  <-- examples/standalone does not consume the install"
+  tail -30 "${work}/example.cfg.log" "${work}/example.build.log" \
+           "${work}/example.run.log" 2>/dev/null | sed 's/^/    /'
   fail=1
 fi
 

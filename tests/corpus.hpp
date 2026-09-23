@@ -47,7 +47,7 @@
 #include <utility>
 #include <vector>
 
-namespace kokkos_ep {
+namespace xpmath {
 namespace corpus {
 
 // ----------------------------------------------------------------------------
@@ -408,4 +408,4 @@ std::vector<std::pair<T, T>> binary(CorpusFlags flags = {}) {
 }
 
 }  // namespace corpus
-}  // namespace kokkos_ep
+}  // namespace xpmath
