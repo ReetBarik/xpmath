@@ -1663,8 +1663,8 @@ C10 itself lived on `core/c10-release` off `main` @ `158d618` (C9 merge). Its
 commits, in order: `81e6e7e` (demos / wrappers / `XPMATH_WITH_KOKKOS` removed;
 last at `158d618` for xpmath-kokkos K6), `63f06fc` (`examples/standalone/`),
 `c5f3385` (consumer builds the example from install), `21d2472` (rename sweep),
-`c0e87e0` (README + CLAUDE rewrite), the `0.2.0` version bump, removal of the
-leftover `validation/mi250/kokkos_space_probe.cpp`, and this closeout.
+`c0e87e0` (README + CLAUDE rewrite), `4c41fe8` (version 0.2.0),
+`27166cc` (remove leftover Kokkos space probe), and this closeout (`da676a4`).
 
 ### What C10 shipped
 
@@ -1712,8 +1712,8 @@ device evidence without meeting S8's gate.
 
 ### Measured at closeout (C10 gates)
 
-On this host, `gcc/13.3.0` + `cmake/3.28.3`, dirty tree carrying the version
-bump (later committed), against `/tmp/c10`:
+On this host, `gcc/13.3.0` + `cmake/3.28.3`, dirty tree at `c0e87e0` plus the
+then-uncommitted version bump (now `4c41fe8`), against `/tmp/c10`:
 
 | check | result |
 |---|---|

@@ -364,9 +364,8 @@ fi
 
 # ---------------------------------------------- 5. execution space, resolved
 # CORE_PLAN C10: this repository no longer finds or links Kokkos. The S8c
-# throwaway probe (validation/mi250/kokkos_space_probe.cpp) last existed just
-# before the C10 leftover-cleanup commit on core/c10-release; recover with
-#   git show <parent>:validation/mi250/kokkos_space_probe.cpp
+# throwaway probe (validation/mi250/kokkos_space_probe.cpp) last existed at `4c41fe8` on core/c10-release; recover with
+#   git show 4c41fe8:validation/mi250/kokkos_space_probe.cpp
 # Kokkos execution-space probes belong in xpmath-kokkos. Device evidence for
 # xpmath itself is the harness baselines (C7/C8), not a Kokkos runtime check.
 echo; echo "--- [5/6] execution space actually resolved by the runtime ---"
