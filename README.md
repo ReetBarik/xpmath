@@ -9,7 +9,7 @@ Kokkos.
 ## Using xpmath in your own project
 
 ```cmake
-find_package(xpmath 0.1 REQUIRED)
+find_package(xpmath 0.2 REQUIRED)
 target_link_libraries(my_app PRIVATE xpmath::xpmath)
 ```
 

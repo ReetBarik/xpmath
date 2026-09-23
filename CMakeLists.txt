@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.16)
 # find_package(). The repository directory keeps its historical name; nothing
 # in the build depended on the old project() name (verified: no reference to
 # PROJECT_NAME or CMAKE_PROJECT_NAME anywhere in the tree).
-project(xpmath VERSION 0.1.0 LANGUAGES CXX)
+project(xpmath VERSION 0.2.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -158,8 +158,8 @@ configure_package_config_file(
 
 # SameMajorVersion with a major version of 0: under CMake's rules every 0.x is
 # then incompatible with every other 0.x. That is the honest setting for a
-# library whose API has never been consumed by anyone -- find_package(xpmath 0.1)
-# passes, find_package(xpmath 0.2) fails, and no compatibility is promised that
+# library whose API has never been consumed by anyone -- find_package(xpmath 0.2)
+# passes, find_package(xpmath 0.3) fails, and no compatibility is promised that
 # this project has not earned.
 write_basic_package_version_file(
   "${CMAKE_CURRENT_BINARY_DIR}/xpmathConfigVersion.cmake"

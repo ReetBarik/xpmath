@@ -62,7 +62,7 @@ compiler is the failure this exists to prevent: on A100 job `1000938`
 ## Use it from another project
 
 ```cmake
-find_package(xpmath 0.1 REQUIRED)
+find_package(xpmath 0.2 REQUIRED)
 target_link_libraries(my_app PRIVATE xpmath::xpmath)
 ```
 
@@ -94,9 +94,9 @@ the types are annotated `XPMATH_INLINE_FUNCTION` and run on device).
 
 ## Versioning
 
-`0.1.0`, exported with `COMPATIBILITY SameMajorVersion`. Because the major
+`0.2.0`, exported with `COMPATIBILITY SameMajorVersion`. Because the major
 version is 0, CMake treats **every 0.x as incompatible with every other 0.x** —
-`find_package(xpmath 0.1)` succeeds and `find_package(xpmath 0.2)` fails. That
+`find_package(xpmath 0.2)` succeeds and `find_package(xpmath 0.3)` fails. That
 is deliberate: the API has never been consumed by anyone outside this repo, and
 promising compatibility it has not earned would be worse than making the break
 explicit.
