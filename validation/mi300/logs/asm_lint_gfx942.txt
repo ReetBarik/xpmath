@@ -1,0 +1,13 @@
+== /tmp/c12_mi300_asm/sweep_device-hip-amdgcn-amd-amdhsa-gfx942.s
+  TIER1 ok     no callee scavenges s[30:31] for a relaxed branch
+  TIER2 WARN   26 site(s) in 3 callee(s) -- one register-allocation decision from tier 1
+  TIER3 FATAL  callee(s) exceed the 131068 B branch reach:
+       253930 B  _ZN2xp5atanhENS_16QuadFloatComplexE
+       253770 B  _ZN2xp4atanENS_16QuadFloatComplexE
+       232480 B  _ZN2xp8sinhcoshENS_9QuadFloatERS0_S1_
+  TIER3 WARN   callee(s) over the 98304 B drift gate (the estimator runs
+               ~10% low, so this gate -- not the reach -- is the real line):
+       108339 B  _ZN2xp6sincosENS_9QuadFloatERS0_S1_
+  TIER4 ok     no function calls itself
+  tier4 note   252 kernel descriptor(s) with a bounded stack
+  summary      65 callees (largest 253930 B, _ZN2xp5atanhENS_16QuadFloatComplexE), 252 kernels (exempt, largest 121550 B)

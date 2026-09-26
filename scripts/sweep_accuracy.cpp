@@ -4516,7 +4516,7 @@ int main(int argc, char** argv) {
   // `where` defaults to "host": every baseline written without an explicit
   // --where carries the producer label, matching CORE_PLAN C6 ("when
   // --score-results is absent, where is host"). Pass --where explicitly to
-  // override (e.g. a100 / mi250 when scoring device results).
+  // override. Accepted tokens: host, a100, mi250, b200, mi300.
   std::string score_results_path, where_label = "host";
   int dump_point = -1;
   bool dump_terms = false;
@@ -4629,6 +4629,21 @@ int main(int argc, char** argv) {
     else { std::fprintf(stderr, "Unknown argument: %s\n", s.c_str()); usage(argv[0]); return 2; }
   }
   (void)out_set;
+
+  // Known producer labels. Open-ended strings used to be accepted; C11/C12 pin
+  // the set so a typo (--where mi30) cannot silently write a baseline nobody
+  // will find. host / a100 / mi250 from C6–C8; b200 / mi300 from C11 / C12.
+  {
+    const char* known[] = {"host", "a100", "mi250", "b200", "mi300", nullptr};
+    bool ok = false;
+    for (int i = 0; known[i]; ++i) if (where_label == known[i]) { ok = true; break; }
+    if (!ok) {
+      std::fprintf(stderr,
+                   "--where '%s' is not a known token (host|a100|mi250|b200|mi300)\n",
+                   where_label.c_str());
+      return 2;
+    }
+  }
 
   const std::vector<GridPoint> rgrid = build_real_grid();
   const std::vector<GridPoint> cgrid = build_complex_grid();

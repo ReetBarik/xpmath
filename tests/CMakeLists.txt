@@ -1236,8 +1236,9 @@ xpm_tag_test(host sweep_monotone_gate_selftest sweep_absolute_gate_selftest)
 # so it IS in CI -- the thing GitHub cannot do is re-produce the limbs, and
 # those are the committed artifact.
 #
-# C7 landed the a100 arm; C8 lands mi250. Both re-score committed raw limbs
-# (no GPU). Count tripwires: host 40 -> 41, device 24 unchanged, union 63 -> 64.
+# C7 landed the a100 arm; C8 lands mi250; C12 lands mi300. C11's b200 arm is
+# added when that baseline is scored (job may still be queued). All re-score
+# committed raw limbs (no GPU).
 #
 # Raw paths are job-of-record files. A baseline without its raw is a
 # configure error -- the gate cannot run.
@@ -1245,15 +1246,17 @@ set(_xp_dev_raw_a100
     "${CMAKE_SOURCE_DIR}/validation/a100/logs/1001685_raw.csv.gz")
 set(_xp_dev_raw_mi250
     "${CMAKE_SOURCE_DIR}/validation/mi250/logs/1001915_raw.csv.gz")
-foreach(_xp_arch IN ITEMS a100 mi250)
+set(_xp_dev_raw_mi300
+    "${CMAKE_SOURCE_DIR}/validation/mi300/logs/1004487_raw.csv.gz")
+foreach(_xp_arch IN ITEMS a100 mi250 mi300)
   set(_xp_dev_base
       "${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline_${_xp_arch}.csv.gz")
   if(EXISTS "${_xp_dev_base}")
     set(_xp_dev_raw "${_xp_dev_raw_${_xp_arch}}")
     if(NOT EXISTS "${_xp_dev_raw}")
       message(FATAL_ERROR
-        "C7/C8: ${_xp_dev_base} exists, but the raw limbs it was scored from "
-        "(${_xp_dev_raw}) do not. The gate re-scores those limbs; without "
+        "C7/C8/C12: ${_xp_dev_base} exists, but the raw limbs it was scored "
+        "from (${_xp_dev_raw}) do not. The gate re-scores those limbs; without "
         "them it cannot run.")
     endif()
     add_test(NAME sweep_device_gate_${_xp_arch}
@@ -1468,6 +1471,9 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline_a100.csv.gz")
 endif()
 if(EXISTS "${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline_mi250.csv.gz")
   set_tests_properties(sweep_device_gate_mi250 PROPERTIES TIMEOUT 600)
+endif()
+if(EXISTS "${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline_mi300.csv.gz")
+  set_tests_properties(sweep_device_gate_mi300 PROPERTIES TIMEOUT 600)
 endif()
 # Nine compiles of sweep_accuracy.cpp, four at a time.
 set_tests_properties(oracle_conv_selftest PROPERTIES TIMEOUT 600)
