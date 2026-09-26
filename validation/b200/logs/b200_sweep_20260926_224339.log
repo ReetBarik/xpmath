@@ -1,0 +1,851 @@
+===========================================================
+ B200 device sweep (C11)
+ date      : 2026-09-26T22:43:39+00:00
+ host      : blackwell00
+ repo      : /home/rbarik/kokkos-extended-precision-demo
+ commit    : 6a2209d
+ build dir : /home/rbarik/kokkos-extended-precision-demo/build-b200-sweep
+ raw out   : /home/rbarik/kokkos-extended-precision-demo/validation/b200/logs/sweep_b200_raw.csv
+ scored out: /home/rbarik/kokkos-extended-precision-demo/validation/b200/logs/sweep_b200_scored.csv
+ log       : /home/rbarik/kokkos-extended-precision-demo/validation/b200/logs/b200_sweep_20260926_224339.log
+ cobalt    : 1004484
+===========================================================
+  module load gcc/13.3.0
+  module load cmake/3.28.3
+  module load cuda/12.9.1
+
+--- provenance ---
+  hostname : blackwell00
+    Sat Sep 26 22:43:39 2026       
+    +-----------------------------------------------------------------------------------------+
+    | NVIDIA-SMI 610.43.02              KMD Version: 610.43.02     CUDA UMD Version: 13.3     |
+    +-----------------------------------------+------------------------+----------------------+
+    | GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+    | Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+    |                                         |                        |               MIG M. |
+    |=========================================+========================+======================|
+    |   0  NVIDIA B200                    Off |   00000000:17:00.0 Off |                    0 |
+    | N/A   25C    P0            143W / 1000W |       0MiB / 183359MiB |      0%      Default |
+    |                                         |                        |             Disabled |
+    +-----------------------------------------+------------------------+----------------------+
+    |   1  NVIDIA B200                    Off |   00000000:3D:00.0 Off |                    0 |
+    | N/A   30C    P0            148W / 1000W |       0MiB / 183359MiB |      0%      Default |
+    |                                         |                        |             Disabled |
+    +-----------------------------------------+------------------------+----------------------+
+    |   2  NVIDIA B200                    Off |   00000000:5F:00.0 Off |                    0 |
+    | N/A   31C    P0            142W / 1000W |       0MiB / 183359MiB |      0%      Default |
+    |                                         |                        |             Disabled |
+    +-----------------------------------------+------------------------+----------------------+
+    nvcc: NVIDIA (R) Cuda compiler driver
+    Copyright (c) 2005-2025 NVIDIA Corporation
+    Built on Tue_May_27_02:21:03_PDT_2025
+    Cuda compilation tools, release 12.9, V12.9.86
+    Build cuda_12.9.r12.9/compiler.36037853_0
+    g++ (GCC) 13.3.0
+
+--- [1/3] build (xpm_build.sh --arch b200 --no-test) ---
+  module load gcc/13.3.0
+  module load cmake/3.28.3
+  module load cuda/12.9.1
+
+===========================================================
+ xpm_build : HOST TREE
+   arch        : b200  (NVIDIA B200 / sm_100, CUDA device_harness (JLSE gpu_b200 / blackwell00))
+   build dir   : /home/rbarik/kokkos-extended-precision-demo/build-b200-sweep/host
+   compiler    : g++
+   optimization: -O3
+   contraction : -ffp-contract=off
+   targets     : HOST=ON DEVICE=OFF
+===========================================================
+-- The CXX compiler identification is GNU 13.3.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /soft/compilers/gcc/13.3.0/x86_64-suse-linux/bin/g++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- build provenance: /home/rbarik/kokkos-extended-precision-demo/build-b200-sweep/host/build-info.txt (arch=b200, tree=host)
+-- contraction guard: 3 OFF targets, 1 ON targets (expected 3/1)
+-- MPFR found: /usr/lib64/libmpfr.so
+-- MPC  found: /usr/lib64/libmpc.so -- the oracle is available for BOTH real and complex ops
+-- C5 side tags: 43 tests registered = 43 host + 0 device (HOST_TARGETS=ON, DEVICE_TARGETS=OFF)
+-- Configuring done (0.7s)
+-- Generating done (0.6s)
+CMake Warning:
+  Manually-specified variables were not used by the project:
+
+    CMAKE_C_COMPILER
+
+
+-- Build files have been written to: /home/rbarik/kokkos-extended-precision-demo/build-b200-sweep/host
+[  5%] Building CXX object tests/CMakeFiles/tf_cancellation_test.dir/tf_cancellation_test.cpp.o
+[  9%] Building CXX object tests/CMakeFiles/corpus_test.dir/corpus_test.cpp.o
+[  9%] Building CXX object tests/CMakeFiles/hello_test.dir/hello_test.cpp.o
+[ 11%] Building CXX object tests/CMakeFiles/dd_e2e_test.dir/dd_e2e_test.cpp.o
+[ 16%] Building CXX object tests/CMakeFiles/ff_cancellation_test.dir/ff_cancellation_test.cpp.o
+[ 16%] Building CXX object tests/CMakeFiles/dd_property_test.dir/dd_property_test.cpp.o
+[ 16%] Building CXX object tests/CMakeFiles/tf_property_test.dir/tf_property_test.cpp.o
+[ 25%] Building CXX object tests/CMakeFiles/dd_fma_guard_test.dir/dd_fma_guard_test.cpp.o
+[ 25%] Building CXX object tests/CMakeFiles/dd_no_kokkos_smoke.dir/standalone/dd_no_kokkos_smoke.cpp.o
+[ 25%] Building CXX object tests/CMakeFiles/dd_fma_guard_test_contract_on.dir/dd_fma_guard_test.cpp.o
+[ 25%] Building CXX object tests/CMakeFiles/qf_property_test.dir/qf_property_test.cpp.o
+[ 25%] Building CXX object tests/CMakeFiles/ff_property_test.dir/ff_property_test.cpp.o
+[ 25%] Building CXX object tests/CMakeFiles/dd_eft_test.dir/dd_eft_test.cpp.o
+[ 25%] Building CXX object tests/CMakeFiles/qf_cancellation_test.dir/qf_cancellation_test.cpp.o
+[ 33%] Building CXX object tests/CMakeFiles/qf_nonoverlap_test.dir/qf_nonoverlap_test.cpp.o
+[ 38%] Building CXX object tests/CMakeFiles/tf_no_kokkos_smoke.dir/standalone/tf_no_kokkos_smoke.cpp.o
+[ 42%] Building CXX object tests/CMakeFiles/sweep_accuracy.dir/__/scripts/sweep_accuracy.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/trig_reduction_test.dir/trig_reduction_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_complex_no_kokkos_smoke.dir/standalone/qf_complex_no_kokkos_smoke.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_no_kokkos_smoke.dir/standalone/qf_no_kokkos_smoke.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/pow_domain_test.dir/pow_domain_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/exp_reduction_test.dir/exp_reduction_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/ff_no_kokkos_smoke.dir/standalone/ff_no_kokkos_smoke.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/tf_complex_no_kokkos_smoke.dir/standalone/tf_complex_no_kokkos_smoke.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/dd_complex_no_kokkos_smoke.dir/standalone/dd_complex_no_kokkos_smoke.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_eft_test.dir/qf_eft_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/ff_complex_no_kokkos_smoke.dir/standalone/ff_complex_no_kokkos_smoke.cpp.o
+[ 51%] Linking CXX executable exp_reduction_test
+[ 51%] Built target exp_reduction_test
+[ 53%] Linking CXX executable trig_reduction_test
+[ 55%] Linking CXX executable hello_test
+[ 55%] Built target trig_reduction_test
+[ 55%] Built target hello_test
+[ 57%] Linking CXX executable dd_fma_guard_test
+[ 59%] Linking CXX executable dd_fma_guard_test_contract_on
+[ 59%] Built target dd_fma_guard_test
+[ 61%] Linking CXX executable dd_eft_test
+[ 61%] Built target dd_fma_guard_test_contract_on
+[ 62%] Linking CXX executable ff_cancellation_test
+[ 62%] Built target dd_eft_test
+[ 64%] Linking CXX executable qf_eft_test
+[ 64%] Built target ff_cancellation_test
+[ 64%] Built target qf_eft_test
+[ 66%] Linking CXX executable dd_e2e_test
+[ 68%] Linking CXX executable ff_no_kokkos_smoke
+[ 70%] Linking CXX executable dd_no_kokkos_smoke
+[ 72%] Linking CXX executable tf_complex_no_kokkos_smoke
+[ 72%] Built target dd_e2e_test
+[ 74%] Linking CXX executable tf_no_kokkos_smoke
+[ 74%] Built target ff_no_kokkos_smoke
+[ 74%] Built target dd_no_kokkos_smoke
+[ 74%] Built target tf_complex_no_kokkos_smoke
+[ 74%] Built target tf_no_kokkos_smoke
+[ 75%] Linking CXX executable qf_complex_no_kokkos_smoke
+[ 77%] Linking CXX executable qf_no_kokkos_smoke
+[ 77%] Built target qf_complex_no_kokkos_smoke
+[ 81%] Linking CXX executable tf_cancellation_test
+[ 81%] Linking CXX executable pow_domain_test
+[ 81%] Built target qf_no_kokkos_smoke
+[ 83%] Linking CXX executable dd_complex_no_kokkos_smoke
+[ 87%] Linking CXX executable ff_complex_no_kokkos_smoke
+[ 87%] Linking CXX executable qf_cancellation_test
+[ 87%] Built target tf_cancellation_test
+[ 87%] Built target pow_domain_test
+[ 87%] Built target dd_complex_no_kokkos_smoke
+[ 87%] Built target ff_complex_no_kokkos_smoke
+[ 87%] Built target qf_cancellation_test
+[ 88%] Linking CXX executable tf_property_test
+[ 90%] Linking CXX executable corpus_test
+[ 90%] Built target tf_property_test
+[ 90%] Built target corpus_test
+[ 92%] Linking CXX executable dd_property_test
+[ 92%] Built target dd_property_test
+[ 94%] Linking CXX executable qf_property_test
+[ 96%] Linking CXX executable ff_property_test
+[ 96%] Built target qf_property_test
+[ 96%] Built target ff_property_test
+[ 98%] Linking CXX executable qf_nonoverlap_test
+[ 98%] Built target qf_nonoverlap_test
+[100%] Linking CXX executable sweep_accuracy
+[100%] Built target sweep_accuracy
+
+===========================================================
+ xpm_build : DEVICE TREE
+   arch        : b200  (NVIDIA B200 / sm_100, CUDA device_harness (JLSE gpu_b200 / blackwell00))
+   build dir   : /home/rbarik/kokkos-extended-precision-demo/build-b200-sweep/device
+   compiler    : /home/rbarik/kokkos-src-5.1.0-cuda-sm80/bin/nvcc_wrapper
+   optimization: -O3
+   contraction : --fmad=false -arch=sm_100
+   targets     : HOST=OFF DEVICE=ON
+===========================================================
+-- The CXX compiler identification is GNU 13.3.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /home/rbarik/kokkos-src-5.1.0-cuda-sm80/bin/nvcc_wrapper - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- build provenance: /home/rbarik/kokkos-extended-precision-demo/build-b200-sweep/device/build-info.txt (arch=b200, tree=device)
+-- contraction guard: 8 OFF targets, 5 ON targets (expected 8/5)
+-- C5 side tags: 24 tests registered = 0 host + 24 device (HOST_TARGETS=OFF, DEVICE_TARGETS=ON)
+-- Configuring done (2.4s)
+-- Generating done (0.5s)
+CMake Warning:
+  Manually-specified variables were not used by the project:
+
+    CMAKE_C_COMPILER
+
+
+-- Build files have been written to: /home/rbarik/kokkos-extended-precision-demo/build-b200-sweep/device
+[  2%] Building CXX object tests/CMakeFiles/dd_invariant_test.dir/dd_invariant_test.cpp.o
+[  9%] Building CXX object tests/CMakeFiles/hello_test_device.dir/hello_test_device.cpp.o
+[ 11%] Building CXX object tests/CMakeFiles/tf_eft_test.dir/tf_eft_test.cpp.o
+[ 11%] Building CXX object tests/CMakeFiles/ff_invariant_test.dir/ff_invariant_test.cpp.o
+[ 15%] Building CXX object tests/CMakeFiles/tf_eft_test_contract_on.dir/tf_eft_test.cpp.o
+[ 18%] Building CXX object tests/CMakeFiles/tf_fma_guard_test_contract_on.dir/tf_fma_guard_test.cpp.o
+[ 18%] Building CXX object tests/CMakeFiles/ff_eft_test.dir/ff_eft_test.cpp.o
+[ 31%] Building CXX object tests/CMakeFiles/qf_eft_test_device.dir/qf_eft_test_device.cpp.o
+[ 36%] Building CXX object tests/CMakeFiles/dd_fma_guard_test_device.dir/dd_fma_guard_test_device.cpp.o
+[ 31%] Building CXX object tests/CMakeFiles/ff_fma_guard_test_contract_on.dir/ff_fma_guard_test.cpp.o
+[ 31%] Building CXX object tests/CMakeFiles/ff_property_test_device.dir/ff_property_test_device.cpp.o
+[ 31%] Building CXX object tests/CMakeFiles/tf_fma_guard_test.dir/tf_fma_guard_test.cpp.o
+[ 31%] Building CXX object tests/CMakeFiles/dd_property_test_device.dir/dd_property_test_device.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/sweep_device.dir/__/scripts/sweep_device.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_property_test_device.dir/qf_property_test_device.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_fma_guard_test.dir/qf_fma_guard_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/dd_fma_guard_test_device_contract_on.dir/dd_fma_guard_test_device.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_nonoverlap_test_device.dir/qf_nonoverlap_test_device.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/device_harness_test.dir/device_harness_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_fma_guard_test_contract_on.dir/qf_fma_guard_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/ff_fma_guard_test.dir/ff_fma_guard_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/dd_eft_test_device.dir/dd_eft_test_device.cpp.o
+[ 52%] Linking CXX executable device_harness_test
+[ 52%] Built target device_harness_test
+[ 54%] Linking CXX executable hello_test_device
+[ 56%] Linking CXX executable qf_eft_test_device
+[ 56%] Built target hello_test_device
+[ 56%] Built target qf_eft_test_device
+[ 59%] Linking CXX executable dd_eft_test_device
+[ 61%] Linking CXX executable ff_eft_test
+[ 63%] Linking CXX executable dd_fma_guard_test_device
+[ 63%] Built target dd_eft_test_device
+[ 63%] Built target ff_eft_test
+[ 65%] Linking CXX executable ff_fma_guard_test_contract_on
+[ 68%] Linking CXX executable dd_fma_guard_test_device_contract_on
+[ 70%] Linking CXX executable ff_fma_guard_test
+[ 72%] Linking CXX executable tf_fma_guard_test_contract_on
+[ 75%] Linking CXX executable tf_fma_guard_test
+[ 75%] Built target dd_fma_guard_test_device
+[ 75%] Built target ff_fma_guard_test_contract_on
+[ 77%] Linking CXX executable tf_eft_test
+[ 77%] Built target dd_fma_guard_test_device_contract_on
+[ 79%] Linking CXX executable tf_eft_test_contract_on
+[ 79%] Built target ff_fma_guard_test
+[ 79%] Built target tf_fma_guard_test
+[ 79%] Built target tf_fma_guard_test_contract_on
+[ 79%] Built target tf_eft_test
+[ 81%] Linking CXX executable qf_fma_guard_test
+[ 81%] Built target tf_eft_test_contract_on
+[ 84%] Linking CXX executable dd_property_test_device
+[ 86%] Linking CXX executable qf_fma_guard_test_contract_on
+[ 86%] Built target qf_fma_guard_test
+[ 88%] Linking CXX executable ff_property_test_device
+[ 88%] Built target dd_property_test_device
+[ 88%] Built target qf_fma_guard_test_contract_on
+[ 88%] Built target ff_property_test_device
+[ 90%] Linking CXX executable qf_nonoverlap_test_device
+[ 93%] Linking CXX executable qf_property_test_device
+[ 93%] Built target qf_nonoverlap_test_device
+[ 93%] Built target qf_property_test_device
+[ 95%] Linking CXX executable dd_invariant_test
+[ 97%] Linking CXX executable ff_invariant_test
+[ 97%] Built target dd_invariant_test
+[ 97%] Built target ff_invariant_test
+[100%] Linking CXX executable sweep_device
+[100%] Built target sweep_device
+
+--- build-info.txt (host tree) ---
+# xpmath build provenance -- written by CMakeLists.txt at configure time.
+# Regenerated on every configure. Do not edit; do not commit.
+arch: b200
+tree: host
+git-head: 6a2209d32bddd64ebc628144aca8cbe4abc4ffdb
+compiler: /soft/compilers/gcc/13.3.0/x86_64-suse-linux/bin/g++
+compiler-id: GNU
+compiler-version: 13.3.0
+kokkos: OFF
+kokkos-prefix: (none: Kokkos lives in xpmath-kokkos)
+cxx-standard: 17
+cxx-standard-raised: (none: no target in this tree links Kokkos)
+build-type: Release
+opt-level: O3
+cxx-flags: -ffp-contract=off -fext-numeric-literals -O3 -DNDEBUG
+timestamp-utc: 2026-09-26T22:43:40Z
+
+--- build-info.txt (device tree) ---
+# xpmath build provenance -- written by CMakeLists.txt at configure time.
+# Regenerated on every configure. Do not edit; do not commit.
+arch: b200
+tree: device
+git-head: 6a2209d32bddd64ebc628144aca8cbe4abc4ffdb
+compiler: /home/rbarik/kokkos-src-5.1.0-cuda-sm80/bin/nvcc_wrapper
+compiler-id: GNU
+compiler-version: 13.3.0
+kokkos: OFF
+kokkos-prefix: (none: Kokkos lives in xpmath-kokkos)
+cxx-standard: 17
+cxx-standard-raised: (none: no target in this tree links Kokkos)
+build-type: Release
+opt-level: O3
+cxx-flags: --fmad=false -arch=sm_100 -fext-numeric-literals -O3 -DNDEBUG
+timestamp-utc: 2026-09-26T22:43:54Z
+
+===========================================================
+ xpm_build MERGED VERDICT -- arch b200, --only both
+   build dir : /home/rbarik/kokkos-extended-precision-demo/build-b200-sweep
+-----------------------------------------------------------
+   tree     tests  passed  failed  result           note
+   host         0       0       0  BUILT            built
+   device       0       0       0  BUILT            built
+-----------------------------------------------------------
+   TOTAL        0       0       0
+-----------------------------------------------------------
+ --no-test: NO VERDICT WAS TAKEN. The table above reports the build only.
+ RESULT: BUILT -- every requested tree configured and built.
+         ctest --test-dir /home/rbarik/kokkos-extended-precision-demo/build-b200-sweep/host
+         ctest --test-dir /home/rbarik/kokkos-extended-precision-demo/build-b200-sweep/device
+===========================================================
+
+--- [2/3] sweep_device on this GPU ---
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/b200/logs/sweep_b200_raw.csv
+
+--- [3/3] host score --where b200 ---
+  no committed b200 baseline yet; scoring only
+sweep_accuracy xp-sweep-2
+  grid: 1700 real points x 39 ops, 1780 complex points x 24 ops, 4 backends
+  rows: 436080   seed: 12345
+  loaded 436080 device result rows from /home/rbarik/kokkos-extended-precision-demo/validation/b200/logs/sweep_b200_raw.csv
+
+  be  kind op            mean      min      cap  defects   exempt        n
+  --- ---- --------- -------- -------- -------- -------- -------- --------
+  DD  real add          31.00    31.00    31.00        0        4     1700
+  FF  real add          13.15     0.00    14.00        0       34     1700
+  QF  real add          28.89     0.00    29.00        0       12     1700
+  TF  real add          21.62     0.00    21.70        0       12     1700
+  DD  real sub          31.00    31.00    31.00        0        3     1700
+  FF  real sub          13.17     0.00    14.00        0       37     1700
+  QF  real sub          28.88     0.00    29.00        0       11     1700
+  TF  real sub          21.61     0.00    21.70        0       11     1700
+  DD  real mul          30.95     0.00    31.00        0        6     1700
+  FF  real mul          13.74     0.00    14.00        0       27     1700
+  QF  real mul          28.28     0.00    29.00        0       27     1700
+  TF  real mul          21.24     0.00    21.70        0       27     1700
+  DD  real div          30.95     0.00    31.00        0        6     1700
+  FF  real div          13.88     0.00    14.00        0       14     1700
+  QF  real div          28.52     0.00    29.00        0       14     1700
+  TF  real div          21.42     0.00    21.70        0       14     1700
+  DD  real sqrt         30.98    16.17    31.00        0        2     1700
+  FF  real sqrt         13.92     0.00    14.00        0       12     1700
+  QF  real sqrt         28.83     0.00    29.00        0       12     1700
+  TF  real sqrt         21.57     0.00    21.70        0       12     1700
+  DD  real abs          31.00    31.00    31.00        0        6     1700
+  FF  real abs          13.92     0.00    14.00        0       12     1700
+  QF  real abs          28.83     0.00    29.00        0       12     1700
+  TF  real abs          21.57     0.00    21.70        0       12     1700
+  DD  real exp          30.89     0.00    31.00        0      150     1700
+  FF  real exp           7.92     0.00    14.00        0      864     1700
+  QF  real exp          16.02     0.00    29.00        0      865     1700
+  TF  real exp          12.16     0.00    21.70        0      865     1700
+  DD  real log          30.93     0.00    31.00        0       10     1700
+  FF  real log          13.81     0.00    14.00        0       42     1700
+  QF  real log          28.71     0.00    29.00        0       20     1700
+  TF  real log          21.50     0.00    21.70        0       20     1700
+  DD  real exp2         30.93     0.00    31.00        0      148     1700
+  FF  real exp2          8.89     0.00    14.00        0      728     1700
+  QF  real exp2         17.83     0.00    29.00        0      733     1700
+  TF  real exp2         13.59     0.00    21.70        0      733     1700
+  DD  real exp10        30.44     0.00    31.00        0      163     1700
+  FF  real exp10         6.64     0.00    14.00        0     1035     1700
+  QF  real exp10        13.58     0.00    29.00        0     1035     1700
+  TF  real exp10        10.24     0.00    21.70        0     1035     1700
+  DD  real expm1        29.63     0.00    31.00        0       81     1700
+  FF  real expm1        10.34     0.00    14.00        0      447     1700
+  QF  real expm1        22.60     0.00    29.00        0      447     1700
+  TF  real expm1        16.98     0.00    21.70        0      447     1700
+  DD  real log2         30.93     0.00    31.00        0       10     1700
+  FF  real log2         13.81     0.00    14.00        0       42     1700
+  QF  real log2         28.71     0.00    29.00        0       20     1700
+  TF  real log2         21.50     0.00    21.70        0       20     1700
+  DD  real log10        30.93     0.00    31.00        0       10     1700
+  FF  real log10        13.81     0.00    14.00        0       42     1700
+  QF  real log10        28.71     0.00    29.00        0       20     1700
+  TF  real log10        21.50     0.00    21.70        0       20     1700
+  DD  real log1p        30.89     0.00    31.00        0       13     1700
+  FF  real log1p        13.86     0.00    14.00        0      130     1700
+  QF  real log1p        28.57     0.00    29.00        0       34     1700
+  TF  real log1p        21.50     0.00    21.70        0       76     1700
+  DD  real sin          30.89     0.00    31.00        0       68     1700
+  FF  real sin           6.85     0.00    14.00        0     1196     1700
+  QF  real sin          28.79     0.00    29.00        0      136     1700
+  TF  real sin          21.57     0.00    21.70        0      164     1700
+  DD  real cos          30.90     0.00    31.00        0       62     1700
+  FF  real cos          13.34     0.00    14.00        0      146     1700
+  QF  real cos          28.88     0.00    29.00        0      122     1700
+  TF  real cos          21.64     0.00    21.70        0      122     1700
+  DD  real tan          30.89     0.00    31.00        0       70     1700
+  FF  real tan           6.72     0.00    14.00        0     1220     1700
+  QF  real tan          28.79     0.00    29.00        0      136     1700
+  TF  real tan          21.57     0.00    21.70        0      164     1700
+  DD  real asin         31.00    31.00    31.00        0       20     1700
+  FF  real asin         13.91     0.00    14.00        0      166     1700
+  QF  real asin         28.79     0.00    29.00        0       44     1700
+  TF  real asin         21.55     0.00    21.70        0      100     1700
+  DD  real acos         31.00    31.00    31.00        0        8     1700
+  FF  real acos         13.96     8.09    14.00        0       27     1700
+  QF  real acos         28.97    23.08    29.00        0       18     1700
+  TF  real acos         21.66    15.83    21.70        0       18     1700
+  DD  real atan         31.00    31.00    31.00        0       62     1700
+  FF  real atan         13.92     0.00    14.00        0      192     1700
+  QF  real atan         28.83     0.00    29.00        0      136     1700
+  TF  real atan         21.57     0.00    21.70        0      164     1700
+  DD  real sinh         30.89     0.00    31.00        0      156     1700
+  FF  real sinh          7.84     0.00    14.00        0      882     1700
+  QF  real sinh         16.44     0.00    29.00        0      882     1700
+  TF  real sinh         12.29     0.00    21.70        0      882     1700
+  DD  real cosh         30.89     0.00    31.00        0      150     1700
+  FF  real cosh          7.88     0.00    14.00        0      880     1700
+  QF  real cosh         16.50     0.00    29.00        0      880     1700
+  TF  real cosh         12.34     0.00    21.70        0      880     1700
+  DD  real tanh         31.00    31.00    31.00        0        6     1700
+  FF  real tanh         13.97     0.00    14.00        0       12     1700
+  QF  real tanh         28.93     0.00    29.00        0       12     1700
+  TF  real tanh         21.65     0.00    21.70        0       12     1700
+  DD  real acosh        30.89    24.46    31.00        0       68     1700
+  FF  real acosh        13.78     0.00    14.00        0       81     1700
+  QF  real acosh        28.73     0.00    29.00        0       74     1700
+  TF  real acosh        21.45     0.00    21.70        0       74     1700
+  DD  real asinh        30.96     0.00    31.00        0        6     1700
+  FF  real asinh        13.92     0.00    14.00        0       12     1700
+  QF  real asinh        28.80     0.00    29.00        0       12     1700
+  TF  real asinh        21.56     0.00    21.70        0       12     1700
+  DD  real atanh        31.00    31.00    31.00        0       14     1700
+  FF  real atanh        13.88     0.00    14.00        0       20     1700
+  QF  real atanh        28.80     0.00    29.00        0       20     1700
+  TF  real atanh        21.56     0.00    21.70        0       20     1700
+  DD  real pow          31.00    30.50    31.00        0        4     1700
+  FF  real pow          13.81     0.00    14.00        0       10     1700
+  QF  real pow          26.77     0.00    29.00        0       10     1700
+  TF  real pow          20.64     0.00    21.70        0       10     1700
+  DD  real hypot        31.00    31.00    31.00        0       10     1700
+  FF  real hypot        13.95     0.00    14.00        0      650     1700
+  QF  real hypot        28.85     0.00    29.00        0      518     1700
+  TF  real hypot        21.61     0.00    21.70        0      518     1700
+  DD  real fmod         31.00    31.00    31.00        0       59     1700
+  FF  real fmod          9.34     0.00    14.00        0      443     1700
+  QF  real fmod         28.70     0.00    29.00        0      222     1700
+  TF  real fmod         21.48     0.00    21.70        0      274     1700
+  DD  real remainder    31.00    31.00    31.00        0       60     1700
+  FF  real remainder     8.85     0.00    14.00        0      493     1700
+  QF  real remainder    28.65     0.00    29.00        0      236     1700
+  TF  real remainder    21.44     0.00    21.70        0      296     1700
+  DD  real copysign     31.00    31.00    31.00        0        6     1700
+  FF  real copysign     13.92     0.00    14.00        0       12     1700
+  QF  real copysign     28.83     0.00    29.00        0       12     1700
+  TF  real copysign     21.57     0.00    21.70        0       12     1700
+  DD  real fmax         31.00    31.00    31.00        0        3     1700
+  FF  real fmax         13.95     0.00    14.00        0       10     1700
+  QF  real fmax         28.84     0.00    29.00        0       10     1700
+  TF  real fmax         21.60     0.00    21.70        0       10     1700
+  DD  real fmin         31.00    31.00    31.00        0        5     1700
+  FF  real fmin         13.96     0.00    14.00        0       12     1700
+  QF  real fmin         28.88     0.00    29.00        0       12     1700
+  TF  real fmin         21.62     0.00    21.70        0       12     1700
+  DD  real fdim         31.00    31.00    31.00        0      870     1700
+  FF  real fdim         13.67     0.00    14.00        0      885     1700
+  QF  real fdim         28.95     0.00    29.00        0      875     1700
+  TF  real fdim         21.66     0.00    21.70        0      875     1700
+  DD  real fma          31.00    31.00    31.00        0        4     1700
+  FF  real fma          12.94     0.00    14.00        0       65     1700
+  QF  real fma          28.54     0.00    29.00        0       26     1700
+  TF  real fma          21.39     0.00    21.70        0       26     1700
+  DD  real ceil         31.00    31.00    31.00        0      101     1700
+  FF  real ceil         13.93     0.00    14.00        0      109     1700
+  QF  real ceil         28.86     0.00    29.00        0      109     1700
+  TF  real ceil         21.60     0.00    21.70        0      109     1700
+  DD  real floor        31.00    31.00    31.00        0      101     1700
+  FF  real floor        13.93     0.00    14.00        0      109     1700
+  QF  real floor        28.86     0.00    29.00        0      109     1700
+  TF  real floor        21.60     0.00    21.70        0      109     1700
+  DD  real round        31.00    31.00    31.00        0      146     1700
+  FF  real round        13.95     0.00    14.00        0      152     1700
+  QF  real round        28.90     0.00    29.00        0      152     1700
+  TF  real round        21.62     0.00    21.70        0      152     1700
+  DD  real trunc        31.00    31.00    31.00        0      200     1700
+  FF  real trunc        13.95     0.00    14.00        0      206     1700
+  QF  real trunc        28.90     0.00    29.00        0      206     1700
+  TF  real trunc        21.62     0.00    21.70        0      206     1700
+  DD  cplx add          31.00    31.00    31.00        0        1     1780
+  FF  cplx add          13.27     0.00    14.00        0       39     1780
+  QF  cplx add          28.92     2.81    29.00        0       11     1780
+  TF  cplx add          21.65     2.81    21.70        0       11     1780
+  DD  cplx sub          31.00    31.00    31.00        0        0     1780
+  FF  cplx sub          13.23     0.00    14.00        0       40     1780
+  QF  cplx sub          28.91     0.70    29.00        0        6     1780
+  TF  cplx sub          21.64     0.70    21.70        0        6     1780
+  DD  cplx mul          31.00    31.00    31.00        0        4     1780
+  FF  cplx mul          13.63     0.00    14.00        0      146     1780
+  QF  cplx mul          27.02     0.00    29.00        0      146     1780
+  TF  cplx mul          20.83     0.00    21.70        0      146     1780
+  DD  cplx div          30.97     0.00    31.00        0       45     1780
+  FF  cplx div          12.51     0.00    14.00        0      322     1780
+  QF  cplx div          26.49     0.00    29.00        0      226     1780
+  TF  cplx div          20.38     0.00    21.70        0      282     1780
+  DD  cplx abs          31.00    31.00    31.00        0        2     1780
+  FF  cplx abs          14.00    14.00    14.00        0      313     1780
+  QF  cplx abs          29.00    28.62    29.00        0      309     1780
+  TF  cplx abs          21.70    21.32    21.70        0      309     1780
+  DD  cplx conj         31.00    31.00    31.00        0        2     1780
+  FF  cplx conj         14.00    14.00    14.00        0        2     1780
+  QF  cplx conj         29.00    29.00    29.00        0        2     1780
+  TF  cplx conj         21.70    21.70    21.70        0        2     1780
+  DD  cplx sqrt         31.00    31.00    31.00        0        2     1780
+  FF  cplx sqrt         14.00    13.95    14.00        0        2     1780
+  QF  cplx sqrt         28.10    14.72    29.00        0        2     1780
+  TF  cplx sqrt         21.48    14.72    21.70        0        2     1780
+  DD  cplx exp          29.94     0.00    31.00        0      112     1780
+  FF  cplx exp          12.48     0.00    14.00        0      178     1780
+  QF  cplx exp          24.92     0.00    29.00        0      244     1780
+  TF  cplx exp          19.11     0.00    21.70        0      244     1780
+  DD  cplx log          28.99     0.00    31.00        0        7     1780
+  FF  cplx log          12.41     0.00    14.00        0       51     1780
+  QF  cplx log          26.02     0.00    29.00        0       25     1780
+  TF  cplx log          19.52     0.00    21.70        0       27     1780
+  DD  cplx log10        28.99     0.00    31.00        0        7     1780
+  FF  cplx log10        12.41     0.00    14.00        0       51     1780
+  QF  cplx log10        25.73     0.00    29.00        0       25     1780
+  TF  cplx log10        19.45     0.00    21.70        0       27     1780
+  DD  cplx sin          30.48     0.00    31.00        0       62     1780
+  FF  cplx sin          13.76     0.00    14.00        0       62     1780
+  QF  cplx sin          26.76     0.00    29.00        0       62     1780
+  TF  cplx sin          20.93     0.00    21.70        0       62     1780
+  DD  cplx cos          30.48     0.00    31.00        0       60     1780
+  FF  cplx cos          13.76     0.00    14.00        0       60     1780
+  QF  cplx cos          26.74     0.00    29.00        0       60     1780
+  TF  cplx cos          20.93     0.00    21.70        0       60     1780
+  DD  cplx tan          30.79     0.00    31.00        0        2     1780
+  FF  cplx tan          13.80     0.00    14.00        0        2     1780
+  QF  cplx tan          26.45     0.00    29.00        0        2     1780
+  TF  cplx tan          20.84     0.00    21.70        0        2     1780
+  DD  cplx asin         31.00    31.00    31.00        0        2     1780
+  FF  cplx asin         13.95     8.48    14.00        0      168     1780
+  QF  cplx asin         27.98    14.09    29.00        0       54     1780
+  TF  cplx asin         21.44    14.09    21.70        0       82     1780
+  DD  cplx acos         31.00    31.00    31.00        0        5     1780
+  FF  cplx acos         13.93     8.26    14.00        0      155     1780
+  QF  cplx acos         28.31    13.85    29.00        0       69     1780
+  TF  cplx acos         21.52    13.85    21.70        0       85     1780
+  DD  cplx atan         31.00    31.00    31.00        0        8     1780
+  FF  cplx atan         13.99    11.27    14.00        0      118     1780
+  QF  cplx atan         28.00    11.27    29.00        0       26     1780
+  TF  cplx atan         21.40    11.27    21.70        0       68     1780
+  DD  cplx sinh         29.55     0.00    31.00        0      114     1780
+  FF  cplx sinh         12.31     0.00    14.00        0      246     1780
+  QF  cplx sinh         23.98     0.00    29.00        0      246     1780
+  TF  cplx sinh         18.74     0.00    21.70        0      246     1780
+  DD  cplx cosh         29.55     0.00    31.00        0      112     1780
+  FF  cplx cosh         12.31     0.00    14.00        0      244     1780
+  QF  cplx cosh         23.96     0.00    29.00        0      244     1780
+  TF  cplx cosh         18.73     0.00    21.70        0      244     1780
+  DD  cplx tanh         30.79     0.00    31.00        0        2     1780
+  FF  cplx tanh         12.83     0.00    14.00        0        2     1780
+  QF  cplx tanh         24.81     0.00    29.00        0        2     1780
+  TF  cplx tanh         19.42     0.00    21.70        0        2     1780
+  DD  cplx asinh        31.00    30.57    31.00        0        2     1780
+  FF  cplx asinh        13.99    13.28    14.00        0      168     1780
+  QF  cplx asinh        27.66    13.39    29.00        0       54     1780
+  TF  cplx asinh        21.35    13.39    21.70        0       82     1780
+  DD  cplx acosh        31.00    31.00    31.00        0        5     1780
+  FF  cplx acosh        13.93     8.26    14.00        0      155     1780
+  QF  cplx acosh        28.29    13.85    29.00        0       69     1780
+  TF  cplx acosh        21.50    13.85    21.70        0       85     1780
+  DD  cplx atanh        31.00    30.86    31.00        0       11     1780
+  FF  cplx atanh        13.93     9.24    14.00        0      121     1780
+  QF  cplx atanh        28.31    13.51    29.00        0       29     1780
+  TF  cplx atanh        21.52    13.51    21.70        0       71     1780
+  DD  cplx pow          30.70     0.00    31.00        0        2     1780
+  FF  cplx pow          13.34     0.00    14.00        0        4     1780
+  QF  cplx pow          27.70     0.00    29.00        0        4     1780
+  TF  cplx pow          20.92     0.00    21.70        0        4     1780
+  DD  cplx polar        31.00    31.00    31.00        0       76     1780
+  FF  cplx polar        13.89     6.45    14.00        0       76     1780
+  QF  cplx polar        28.20    13.11    29.00        0       76     1780
+  TF  cplx polar        21.49    13.11    21.70        0       76     1780
+
+  (backend, op) cells            : 252
+  ... with mean below their cap  : 211
+  ... containing a DEFECT        : 0   (0 point(s) total)
+
+  defect = measured ulp error above the derived bound (x8.0 allowance);
+           `min` is a digit score and reads 0.00 for an exact answer at a
+           tiny |ref| too, so read `defects`, not `min`, for the verdict.
+
+=== ULP GATE  (measured <= 8.0 x (out_floor + kappa*in_delta), worst point per region) ===
+be   k  op             scored   ungated unscorable   worst ulps     expected     ratio
+DD   r  add              1696         0          0            0            0         0
+FF   r  add              1666         0          6        1.381        2.043     0.676
+QF   r  add              1688         0          6        0.127            2    0.0635
+TF   r  add              1688         0          6       0.3176            2     0.159
+DD   r  sub              1697         0          0            0            0         0
+FF   r  sub              1663         0          6        1.843            2     0.922
+QF   r  sub              1689         0          6      0.09929            2    0.0496
+TF   r  sub              1689         0          6       0.2449            2     0.122
+DD   r  mul              1694         0          0            0            0         0
+FF   r  mul              1673         0          6        3.002            3         1
+QF   r  mul              1673         0          6    4.375e+10    2.072e+10      2.11
+TF   r  mul              1673         0          6         2607         1237      2.11
+DD   r  div              1694         0          0       0.4824            3     0.161
+FF   r  div              1686         0          6        3.939            3      1.31
+QF   r  div              1686         0          6        6.744            3      2.25
+TF   r  div              1686         0          6        5.404            3       1.8
+DD   r  sqrt             1698         0          0       0.7955          1.5      0.53
+FF   r  sqrt             1688         0          6        1.064          1.5      0.71
+QF   r  sqrt             1688         0          6        1.226          1.5     0.818
+TF   r  sqrt             1688         0          6        1.188          1.5     0.792
+DD   r  abs              1694         0          0            0            0         0
+FF   r  abs              1688         0          6            0            0         0
+QF   r  abs              1688         0          6            0            0         0
+TF   r  abs              1688         0          6            0            0         0
+DD   r  exp              1550         0         72         1.21          192    0.0063
+FF   r  exp               836         0         72    1.582e+10    5.387e+11    0.0294
+QF   r  exp               835         0         72    5.025e+05    4.804e+07    0.0105
+TF   r  exp               835         0         72    1.476e+05    9.503e+06    0.0155
+DD   r  log              1690         0          2       0.5718        91.23   0.00627
+FF   r  log              1658         0         12       0.4389        16.24     0.027
+QF   r  log              1680         0         12       0.7357        184.2   0.00399
+TF   r  log              1680         0         12       0.2106        32.88    0.0064
+DD   r  exp2             1552         0         72       0.9888        197.7     0.005
+FF   r  exp2              972         0         75    1.192e+07    4.252e+08     0.028
+QF   r  exp2              967         0         75    1.475e+14    1.301e+16    0.0113
+TF   r  exp2              967         0         75    8.795e+06    3.879e+08    0.0227
+DD   r  exp10            1537         0         73    1.319e+16    1.929e+18   0.00684
+FF   r  exp10             665         0         73    7.054e+06    3.156e+08    0.0223
+QF   r  exp10             665         0         73    1.376e+15    1.851e+17   0.00743
+TF   r  exp10             665         0         73    8.201e+07    5.518e+09    0.0149
+DD   r  expm1            1619         0         72        2.536        182.4    0.0139
+FF   r  expm1            1253         0         72        1.699        45.72    0.0372
+QF   r  expm1            1253         0         72        130.6    1.427e+04   0.00915
+TF   r  expm1            1253         0         72       0.9794        103.7   0.00944
+DD   r  log2             1690         0          2        1.795        64.18     0.028
+FF   r  log2             1658         0         12        1.957        22.99    0.0851
+QF   r  log2             1680         0         12       0.8929        86.63    0.0103
+TF   r  log2             1680         0         12        1.556        45.38    0.0343
+DD   r  log10            1690         0          2        3.466        64.96    0.0533
+FF   r  log10            1658         0         12        2.413        22.35     0.108
+QF   r  log10            1680         0         12         1.91         86.5    0.0221
+TF   r  log10            1680         0         12        2.058        45.17    0.0456
+DD   r  log1p            1687         0          4        3.982        330.3    0.0121
+FF   r  log1p            1570         0          7        3.406        75.92    0.0449
+QF   r  log1p            1666         0          7        2.663        339.3   0.00785
+TF   r  log1p            1624         0          7        1.614        248.9   0.00648
+DD   r  sin              1632         0          0        1.346        40.86    0.0329
+FF   r  sin               504         0          6        3.148        46.94    0.0671
+QF   r  sin              1564         0          6       0.4919        54.55   0.00902
+TF   r  sin              1536         0          6       0.4212           36    0.0117
+DD   r  cos              1638         0          0        2.473        63.63    0.0389
+FF   r  cos              1554         0          6         3.52        34.02     0.103
+QF   r  cos              1578         0          6       0.9758        78.79    0.0124
+TF   r  cos              1578         0          6       0.5932        34.02    0.0174
+DD   r  tan              1630         0          0        4.184        103.5    0.0404
+FF   r  tan               480         0          6        4.022        54.87    0.0733
+QF   r  tan              1564         0          6        2.803        103.5    0.0271
+TF   r  tan              1536         0          6         2.54        54.91    0.0463
+DD   r  asin             1680         0          0        2.401        69.06    0.0348
+FF   r  asin             1534         0          0        2.297        37.18    0.0618
+QF   r  asin             1656         0          0       0.4975        65.13   0.00764
+TF   r  asin             1600         0          0        0.823        32.42    0.0254
+DD   r  acos             1692         0          0        1.032        20.44    0.0505
+FF   r  acos             1673         0          0       0.7248        10.44    0.0694
+QF   r  acos             1682         0          0       0.7555        44.55     0.017
+TF   r  acos             1682         0          0       0.1986        10.66    0.0186
+DD   r  atan             1638         0          0      0.07958            1    0.0796
+FF   r  atan             1508         0          0        5.163        32.25      0.16
+QF   r  atan             1564         0          0         1.92        80.16    0.0239
+TF   r  atan             1536         0          0        1.559        24.15    0.0645
+DD   r  sinh             1544         0        144         2.34          212     0.011
+FF   r  sinh              818         0        144         1.87        49.88    0.0375
+QF   r  sinh              818         0        144        2.853        547.2   0.00521
+TF   r  sinh              818         0        144       0.9919          106   0.00936
+DD   r  cosh             1550         0        144        1.488        176.7   0.00842
+FF   r  cosh              820         0        144        1.495        44.19    0.0338
+QF   r  cosh              820         0        144        2.846        547.2    0.0052
+TF   r  cosh              820         0        144        0.796        88.37   0.00901
+DD   r  tanh             1694         0          0        2.588        161.4     0.016
+FF   r  tanh             1688         0          0        3.915           32     0.122
+QF   r  tanh             1688         0          0        2.363        130.7    0.0181
+TF   r  tanh             1688         0          0        3.112        64.07    0.0486
+DD   r  acosh            1632         0          0        1.451        2.267      0.64
+FF   r  acosh            1619         0          6       0.8909        1.016     0.877
+QF   r  acosh            1626         0          6        0.431        1.558     0.277
+TF   r  acosh            1626         0          6       0.4044        1.405     0.288
+DD   r  asinh            1694         0          0        1.947        1.997     0.975
+FF   r  asinh            1688         0          6          3.6        1.962      1.83
+QF   r  asinh            1688         0          6        2.823            2      1.41
+TF   r  asinh            1688         0          6        1.633            2     0.817
+DD   r  atanh            1686         0          8         3.66        2.074      1.76
+FF   r  atanh            1680         0          8        2.461        2.074      1.19
+QF   r  atanh            1680         0          8        1.458        2.201     0.663
+TF   r  atanh            1680         0          8        1.084        2.423     0.447
+DD   r  pow              1696         0          0        1.168        151.5   0.00771
+FF   r  pow              1690         0          9        4.079          150    0.0272
+QF   r  pow              1690         0          6        83.04         6650    0.0125
+TF   r  pow              1690         0          9    1.662e+05    1.103e+07    0.0151
+DD   r  hypot            1690         0          0       0.7324            2     0.366
+FF   r  hypot            1050         0          6        1.064            2     0.532
+QF   r  hypot            1182         0          6        1.286            2     0.643
+TF   r  hypot            1182         0          6        1.725            2     0.862
+DD   r  fmod             1641         0          0            0            0         0
+FF   r  fmod             1257         0          6       0.3425        16.14    0.0212
+QF   r  fmod             1478         0          6            0            0         0
+TF   r  fmod             1426         0          6            0            0         0
+DD   r  remainder        1640         0          0            0            0         0
+FF   r  remainder        1207         0          6       0.1948         45.3    0.0043
+QF   r  remainder        1464         0          6            0            0         0
+TF   r  remainder        1404         0          6            0            0         0
+DD   r  copysign         1694         0          0            0            0         0
+FF   r  copysign         1688         0          6            0            0         0
+QF   r  copysign         1688         0          6            0            0         0
+TF   r  copysign         1688         0          6            0            0         0
+DD   r  fmax             1697         0          0            0            0         0
+FF   r  fmax             1690         0          4            0            0         0
+QF   r  fmax             1690         0          4            0            0         0
+TF   r  fmax             1690         0          4            0            0         0
+DD   r  fmin             1695         0          0            0            0         0
+FF   r  fmin             1688         0          3            0            0         0
+QF   r  fmin             1688         0          3            0            0         0
+TF   r  fmin             1688         0          3            0            0         0
+DD   r  fdim              830         0          0            0            0         0
+FF   r  fdim              815         0          3        1.074            2     0.537
+QF   r  fdim              825         0          3      0.09282            2    0.0464
+TF   r  fdim              825         0          3       0.2374            2     0.119
+DD   r  fma              1696         0          0       0.4789            2     0.239
+FF   r  fma              1635         0         12       0.4546        2.001     0.227
+QF   r  fma              1674         0         12        17.39        31.59     0.551
+TF   r  fma              1674         0         12           79        171.7      0.46
+DD   r  ceil             1599         0          0            0            0         0
+FF   r  ceil             1591         0          6            0            0         0
+QF   r  ceil             1591         0          6            0            0         0
+TF   r  ceil             1591         0          6            0            0         0
+DD   r  floor            1599         0          0            0            0         0
+FF   r  floor            1591         0          6            0            0         0
+QF   r  floor            1591         0          6            0            0         0
+TF   r  floor            1591         0          6            0            0         0
+DD   r  round            1554         0          0            0            0         0
+FF   r  round            1548         0          6            0            0         0
+QF   r  round            1548         0          6            0            0         0
+TF   r  round            1548         0          6            0            0         0
+DD   r  trunc            1500         0          0            0            0         0
+FF   r  trunc            1494         0          6            0            0         0
+QF   r  trunc            1494         0          6            0            0         0
+TF   r  trunc            1494         0          6            0            0         0
+DD   c  add              1779         0          1            0            0         0
+FF   c  add              1741         0          1       0.8718            2     0.436
+QF   c  add              1769         0          1    5.329e+15    4.274e+16     0.125
+TF   c  add              1769         0          1    3.176e+08    2.548e+09     0.125
+DD   c  sub              1780         0          0            0            0         0
+FF   c  sub              1740         0          0        1.048        2.183      0.48
+QF   c  sub              1774         0          0    2.384e+23    2.861e+24    0.0833
+TF   c  sub              1774         0          0       0.1762            2    0.0881
+DD   c  mul              1776         0          4       0.8835        3.387     0.261
+FF   c  mul              1634         0          4      5.5e+05    3.944e+05      1.39
+QF   c  mul              1634         0          4     2.09e+10     1.11e+10      1.88
+TF   c  mul              1634         0          4         1246        663.7      1.88
+DD   c  div              1735         0          4        2.749            3     0.916
+FF   c  div              1458         0          4        2.364        3.001     0.788
+QF   c  div              1554         0          4        2.494            3     0.831
+TF   c  div              1498         0          4         1.91            3     0.637
+DD   c  abs              1778         0          2        1.702            2     0.851
+FF   c  abs              1467         0          2       0.7843            2     0.392
+QF   c  abs              1471         0          2        1.913            2     0.957
+TF   c  abs              1471         0          2         2.26            2      1.13
+DD   c  conj             1778         0          2            0            0         0
+FF   c  conj             1778         0          2       0.3746            2     0.187
+QF   c  conj             1778         0          2            0            0         0
+TF   c  conj             1778         0          2            0            0         0
+DD   c  sqrt             1778         0          2        2.067        1.588       1.3
+FF   c  sqrt             1778         0          2        1.963        1.588      1.24
+QF   c  sqrt             1778         0          2    5.551e+12    5.551e+12         1
+TF   c  sqrt             1778         0          2        1.518          1.5      1.01
+DD   c  exp              1668         0         79          1.5        64.01    0.0234
+FF   c  exp              1602         0         83    9.878e+12    1.696e+14    0.0582
+QF   c  exp              1536         0         83       0.7881        101.6   0.00775
+TF   c  exp              1536         0         83       0.3289        54.19   0.00607
+DD   c  log              1773         0          7        7.939        446.8    0.0178
+FF   c  log              1729         0          7        2.759        44.55    0.0619
+QF   c  log              1755         0          7        2.737        158.1    0.0173
+TF   c  log              1753         0          7        3.323        79.07     0.042
+DD   c  log10            1773         0          7        3.226        72.17    0.0447
+FF   c  log10            1729         0          7        1.491        20.97    0.0711
+QF   c  log10            1755         0          7        2.801        158.1    0.0177
+TF   c  log10            1753         0          7        3.281        79.07    0.0415
+DD   c  sin              1718         0         32        3.129        139.3    0.0225
+FF   c  sin              1718         0         32        2.093        28.89    0.0724
+QF   c  sin              1718         0         32        1.282          159   0.00807
+TF   c  sin              1718         0         32        3.821        84.29    0.0453
+DD   c  cos              1720         0         30        2.461           64    0.0385
+FF   c  cos              1720         0         30        3.471        40.92    0.0848
+QF   c  cos              1720         0         30       0.7182        85.43   0.00841
+TF   c  cos              1720         0         30        3.234        69.68    0.0464
+DD   c  tan              1778         0          2        2.901        73.38    0.0395
+FF   c  tan              1778         0          2        3.066        28.02     0.109
+QF   c  tan              1778         0          2        3.386        149.6    0.0226
+TF   c  tan              1778         0          2        5.568        74.81    0.0744
+DD   c  asin             1778         0          2         3.28          156     0.021
+FF   c  asin             1612         0          2        2.697         36.7    0.0735
+QF   c  asin             1726         0          2        2.116        149.7    0.0141
+TF   c  asin             1698         0          2        2.083        72.56    0.0287
+DD   c  acos             1775         0          5         2.82        99.29    0.0284
+FF   c  acos             1625         0          5        1.918        24.84    0.0772
+QF   c  acos             1711         0          5        2.714        192.7    0.0141
+TF   c  acos             1695         0          5         2.52        96.36    0.0262
+DD   c  atan             1772         0          8        3.277        214.6    0.0153
+FF   c  atan             1662         0          8        4.652        53.64    0.0867
+QF   c  atan             1754         0          8        6.839        214.6    0.0319
+TF   c  atan             1712         0          8        5.373        107.3    0.0501
+DD   c  sinh             1666         0         85        2.664          116     0.023
+FF   c  sinh             1534         0         93        2.096        28.89    0.0726
+QF   c  sinh             1534         0         93        0.904        111.4   0.00812
+TF   c  sinh             1534         0         93         3.74        84.29    0.0444
+DD   c  cosh             1668         0         83        2.272        85.43    0.0266
+FF   c  cosh             1536         0         91         3.68        44.02    0.0836
+QF   c  cosh             1536         0         91       0.8145        133.9   0.00608
+TF   c  cosh             1536         0         91        3.224        69.68    0.0463
+DD   c  tanh             1778         0          2        2.901        73.38    0.0395
+FF   c  tanh             1778         0          2        3.361        24.82     0.135
+QF   c  tanh             1778         0          2        2.324        99.33    0.0234
+TF   c  tanh             1778         0          2        3.264        49.65    0.0657
+DD   c  asinh            1778         0          2        3.978        211.1    0.0188
+FF   c  asinh            1612         0          2        2.713        36.56    0.0742
+QF   c  asinh            1726         0          2        1.779        151.8    0.0117
+TF   c  asinh            1698         0          2        3.111         75.9     0.041
+DD   c  acosh            1775         0          5        5.919        64.01    0.0925
+FF   c  acosh            1625         0          5        4.754        17.01     0.279
+QF   c  acosh            1711         0          5        3.307        64.04    0.0516
+TF   c  acosh            1695         0          5        3.354           32     0.105
+DD   c  atanh            1769         0         11        11.22        702.3     0.016
+FF   c  atanh            1659         0         11        1.787        31.35     0.057
+QF   c  atanh            1751         0         11        1.759        144.2    0.0122
+TF   c  atanh            1709         0         11        2.735         62.7    0.0436
+DD   c  pow              1778         0          2        2.047        64.91    0.0315
+FF   c  pow              1776         0          2        196.6         1500     0.131
+QF   c  pow              1776         0          2    7.269e+08     1.92e+10    0.0379
+TF   c  pow              1776         0          2    1.055e+08    1.611e+09    0.0655
+DD   c  polar            1704         0         76        2.166        181.2     0.012
+FF   c  polar            1704         0         76        1.658           48    0.0345
+QF   c  polar            1704         0         76    2.639e+06    2.132e+08    0.0124
+TF   c  polar            1704         0         76    1.476e+06    6.353e+07    0.0232
+
+--- failures by region (worst point in each) ---------------------
+  none
+  be   k  op          region          point       digits   measured u   expected u     ratio verdict
+
+  above bound   : 0 point(s) in 0 (backend,op) cells
+  unresolved    : 0 point(s) — the format cannot carry the question, the answer, or the work
+
+RESULT: PASS — absolute gate (no register given)
+wrote /home/rbarik/kokkos-extended-precision-demo/validation/b200/logs/sweep_b200_scored.csv  (436080 rows)
+
+scorer exit: 0
+raw    : /home/rbarik/kokkos-extended-precision-demo/validation/b200/logs/sweep_b200_raw.csv
+scored : /home/rbarik/kokkos-extended-precision-demo/validation/b200/logs/sweep_b200_scored.csv
+log    : /home/rbarik/kokkos-extended-precision-demo/validation/b200/logs/b200_sweep_20260926_224339.log

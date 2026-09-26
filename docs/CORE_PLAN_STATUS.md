@@ -1875,9 +1875,96 @@ Do not gate on matching the MI250 bits — they matched anyway.
 
 ### What C12 does NOT cover
 
-- **B200 baseline.** Queued as 1004484; not scored here. No C11 STATUS.
-- **C13.** `docs/DEVICE_PRECISION.md` does not yet have `b200` / `mi300`
-  columns. That is C13, after both baselines exist.
+- **B200 baseline.** Queued here as 1004484 and scored in the C11 block
+  below. This section did not wait for it.
+- **C13.** `docs/DEVICE_PRECISION.md` still has no `b200` / `mi300` columns.
+  Both baselines now exist; C13 is the section that adds them.
 - **TIER3 FATAL callees.** Reported, not fixed.
 - **`include/xp/` numerics.** Untouched. `CUDAFP128Kokkos` untouched.
 - **`open_defects.txt`.** Still empty — 0 above bound on MI300.
+
+---
+
+## C11 — B200 device sweep, on hardware
+
+**Branch:** `core/c12-mi300-sweep` (shared with C12; the arch row, `where`
+token, and run script landed in `6a2209d`). **Job:** Cobalt **1004484**,
+queued while `blackwell00` was allocated, ran later the same day.
+
+**Outcome.** B200 baseline committed. Absolute gate against the derived bound
+exits 0. `cuda/12.9.1` was accepted on the node (nvcc 12.9.86); the GPU is
+NVIDIA B200. Suite count: **66 → 67** (`sweep_device_gate_b200`); host tree
+**43 → 44**. This closes the queued-job note in the C12 block. C13 can now
+add both columns. `open_defects.txt` stays empty — 0 above bound.
+
+### Measurement
+
+| | |
+|---|---|
+| Cobalt job ID | **1004484** |
+| Node | `blackwell00` / `gpu_b200` |
+| GPU | NVIDIA B200 (nvidia-smi; three devices on the node) |
+| Modules | `gcc/13.3.0` `cmake/3.28.3` `cuda/12.9.1` |
+| Architecture flag | `sm_100` (`-arch=sm_100` on the a100 `nvcc_wrapper`; `--fmad=false`) |
+| Producer | `sweep_device` exit 0, `where=cuda`, 436,080 rows |
+| Absolute gate | **PASS** — 0 points above `8 ×` derived bound |
+| Fingerprint | `44f18a4a959f6c29` |
+| Coverage | **252 / 252** cells (63 ops × 4 backends); 0 missing cells. States: S 397,409 / U 33,879 / N 4,792 (N matches host; A100's N was 8,299) |
+| Raw | `validation/b200/logs/1004484_raw.csv.gz` |
+| Baseline | `validation/sweep/sweep_baseline_b200.csv.gz` |
+| Logs | `validation/b200/logs/` |
+
+Login-node re-score of the committed raw is **byte-identical** to the job's
+scored CSV (data rows). Re-score from the committed `.gz` is byte-identical
+again. Monotone comparison of the raw against the committed b200 baseline:
+0 decreased / 0 increased / 436,080 unchanged / 0 state moved — PASS.
+
+### Against the A100 baseline (the generation claim; not a gate)
+
+Same identity key, same `kNoiseFactor = 10^0.1` floors the monotone gate uses.
+
+| | |
+|---|---|
+| rows | 436,080 both sides, identical keys |
+| differ at all | **3,511** |
+| differ beyond monotone noise | **0** |
+| state changed (scored ↔ unresolved) | **3,507**, all `N → S` |
+
+The 3,507 state moves are the A100 FTZ cells coming back: **DD complex
+`atan`** 1,772 and **DD complex `atanh`** 1,735. A100 marked them unresolved
+(`N`); B200 scores them (`S`), which is what the host record does. Four
+further points in those same two ops (grid points 704 and 705) stay `N` on
+both sides; only the digit column moves (`0.00` → `31.00`) while ulps stay
+the unscorable sentinel. They are inside the 3,511 and are not a noise-floor
+crossing. No jointly-scored point moved past the 0.1-digit floor. A
+difference from A100 is a result, not a failure.
+
+### Against the host baseline (informational; not a gate)
+
+| | |
+|---|---|
+| rows | 436,080 both sides, identical keys |
+| differ at all | **3,681** |
+| differ beyond monotone noise | **2,396** (1,247 worse / 1,149 better among jointly-`S`) |
+| state changed (scored ↔ unresolved) | **0** |
+
+Absolute gate remains 0 above bound. Vendor libm is allowed to move.
+
+### Gate
+
+| check | result |
+|---|---|
+| `sweep_device` exit 0 / 436080 rows | **PASS** |
+| host scorer completes, absolute gate 0 | **PASS** |
+| committed `.gz` re-scores byte-identically | **PASS** |
+| monotone against own baseline | **PASS** (0 changed) |
+
+Do not gate on matching the A100 bits.
+
+### What C11 does NOT cover
+
+- **C13.** Both baselines exist. The `b200` / `mi300` columns in
+  `docs/DEVICE_PRECISION.md` are still C13's job.
+- **`include/xp/` numerics.** Untouched. No defect from this sweep was fixed.
+- **`CUDAFP128Kokkos`.** Untouched. `sm_100` here is only the architecture
+  flag for the portable backends.

@@ -212,9 +212,10 @@ jobs:
       # tests/CMakeLists.txt has no if(XPMATH_WITH_KOKKOS) block left to move a
       # target across.
       #
-      # So the two lanes now register the SAME 66 targets (C4's 61 plus C7's
+      # So the two lanes now register the SAME 67 targets (C4's 61 plus C7's
       # a100 gate and selftest plus C8's mi250 gate plus C9's
-      # device_domains_fresh plus C12's mi300 gate). MEASURED on the C4 chunk-E
+      # device_domains_fresh plus C11's b200 gate plus C12's mi300 gate).
+      # MEASURED on the C4 chunk-E
       # gate run the two `ctest -N` name lists were identical as sets at 61; the
       # identity claim is the same, the count moved. If these two numbers ever
       # diverge, something re-introduced a Kokkos-conditional target -- fix that,
@@ -222,7 +223,7 @@ jobs:
       - name: Assert the Kokkos-free suite is the expected size
         run: |
           set -euo pipefail
-          expected=66
+          expected=67
           actual=$(ctest --test-dir build-nokokkos -N | awk '/^Total Tests: /{print $3}')
           echo "registered without Kokkos: ${actual} (expected ${expected})"
           if [ "${actual}" != "${expected}" ]; then
@@ -243,12 +244,12 @@ jobs:
       #
       # NOTHING ELSE IN CI CHECKS THAT. The step above counts the union; a target
       # tagged BOTH sides, or a target that quietly stopped being registered in
-      # one, leaves the union at 66 and is invisible there. The configure-side
+      # one, leaves the union at 67 and is invisible there. The configure-side
       # assertion in tests/CMakeLists.txt catches an UNTAGGED test, not a
       # double-tagged one. This step is the missing half, and it costs two
       # configures and no build.
       #
-      # 43 + 24 = 67, and the union is 66. The one deliberate overlap is
+      # 44 + 24 = 68, and the union is 67. The one deliberate overlap is
       # build_provenance, which is registered in EVERY tree with a computed tag:
       # a `--only device` tree is what C7 and C8 configure on a compute node, and
       # that tree's logs are the artifacts whose provenance is hardest to
@@ -256,6 +257,7 @@ jobs:
       # a second target joining it is a failure and not a rounding error.
       # C9 added device_domains_fresh to the host tree (64 → 65 suite, 41 → 42
       # host). C12 added sweep_device_gate_mi300 (65 → 66 suite, 42 → 43 host).
+      # C11 added sweep_device_gate_b200 (66 → 67 suite, 43 → 44 host).
       #
       # Kokkos is OFF here, which is why this lives in this lane: the partition
       # is a property of the two options, the runner has no Kokkos, and the
@@ -282,8 +284,8 @@ jobs:
             echo "::error::a tree registered ZERO tests (host=${h} device=${d} suite=${a})"
             exit 1
           fi
-          if [ "${h}" != "43" ] || [ "${d}" != "24" ] || [ "${a}" != "66" ]; then
-            echo "::error::expected host 43 / device 24 / suite 66, got ${h} / ${d} / ${a}"
+          if [ "${h}" != "44" ] || [ "${d}" != "24" ] || [ "${a}" != "67" ]; then
+            echo "::error::expected host 44 / device 24 / suite 67, got ${h} / ${d} / ${a}"
             exit 1
           fi
           overlap=$(comm -12 /tmp/host.names /tmp/device.names)
@@ -296,7 +298,7 @@ jobs:
             echo "::error::host union device is not the full suite -- a target is in neither tree."
             exit 1
           fi
-          echo "partition exact: 43 + 24 - 1 shared (build_provenance) = 66"
+          echo "partition exact: 44 + 24 - 1 shared (build_provenance) = 67"
 
       - name: ctest
         run: ctest --test-dir build-nokokkos -j4 --timeout 1800 --output-on-failure
@@ -598,12 +600,13 @@ jobs:
       - name: Assert the full suite is registered
         run: |
           set -euo pipefail
-          # 65 -> 66 in CORE_PLAN C12: sweep_device_gate_mi300. C9 added
+          # 66 -> 67 in CORE_PLAN C11: sweep_device_gate_b200. C12 added
+          # sweep_device_gate_mi300 (65 -> 66). C9 added
           # device_domains_fresh; C8 added sweep_device_gate_mi250; C7 added the
           # a100 gate and the shared device-gate selftest. The Kokkos-free lane
           # above now asserts this SAME number; see the comment there for why
           # the two converged and what a future divergence means.
-          expected=66
+          expected=67
           actual=$(ctest --test-dir build -N | awk '/^Total Tests: /{print $3}')
           echo "registered targets: ${actual} (expected ${expected})"
           if [ "${actual}" != "${expected}" ]; then
