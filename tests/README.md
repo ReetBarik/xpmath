@@ -1,7 +1,7 @@
 # `tests/` — the ctest suite
 
-**65 registered targets, with Kokkos or without it — the same 65 either way.**
-The count is asserted in CI (`.github/workflows/ci.yml`, `expected=65` in *both*
+**67 registered targets, with Kokkos or without it — the same 67 either way.**
+The count is asserted in CI (`.github/workflows/ci.yml`, `expected=67` in *both*
 lanes), not assumed. That is how this lane once ran 34 targets while reporting
 31. Four targets used to sit behind `if(XPMATH_MPFR_FOUND)`, so a runner missing
 a `-dev` package lost coverage and stayed green; that guard is gone — MPFR/MPC
@@ -19,9 +19,9 @@ name lists are not merely the same length, they are identical as sets.
 52 → 61 is not nine new tests. C4 split nine mixed translation units (eight
 named in the plan, plus `hello_test`) into a host half and a device half, and
 each half registers as its own target. C7–C9 then added the device gates and
-`device_domains_fresh` (61 → 65). The Kokkos wrapper layer in
-`third_party/include/` is still exercised — by the eight `src/demo_*.cpp`
-targets, until C10 moves them to the `xpmath-kokkos` repo.
+`device_domains_fresh` (61 → 65). C12 added `sweep_device_gate_mi300`
+(65 → 66). C11 added `sweep_device_gate_b200` (66 → 67). The Kokkos wrapper
+layer moved to xpmath-kokkos with C10.
 
 `device_harness_test` is the self-test for `tests/device_harness.hpp`, the
 Kokkos-free CUDA/HIP/serial launch harness C3 added for C4–C8 to measure
@@ -74,7 +74,7 @@ scores them. That is C6's shape — **one scorer, two producers** — and the
 producer issues no verdict, holds no oracle and computes no ulps, because
 `docs/CORRECTNESS.md` permits exactly one scorer.
 
-It registers **no `add_test()`**, so the 65 above is unchanged by the producer
+It registers **no `add_test()`**, so the 67 above is unchanged by the producer
 itself; the device *gates* that consume it are C7 (`sweep_device_gate_a100`)
 and C8 (`sweep_device_gate_mi250`). Do not "fix" the count on account of this
 target.

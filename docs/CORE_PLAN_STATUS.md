@@ -1750,3 +1750,221 @@ exists). Accuracy verdicts stay in xpmath (`docs/CORRECTNESS.md`); xpmath-kokkos
 must not invent a second ulp / oracle matrix. The matrix that is still open is
 recorded in `docs/UPSTREAM_PLAN_STATUS.md` §S8 and the STEP-2 CLOSEOUT — CORE
 did not close it.
+
+---
+
+## C12 — MI300 device sweep, on hardware (with C11 submit-only half)
+
+**Branch:** `core/c12-mi300-sweep`. **Base:** `main` @ `669aa69` / tag `v0.2.0`
+(PR #37 / C10 merge). The `v0.2.0` tag was not moved.
+
+**Outcome.** MI300 baseline committed. Absolute gate against the derived bound
+exits 0. Asm lint recorded (tiers 1–4) before qsub; no new mitigation invented.
+B200 job queued only — **baseline not scored yet**. Suite count: **65 → 66**
+(`sweep_device_gate_mi300`); host tree **42 → 43**.
+
+### Shared prerequisites (also carry the C11 submit-only half)
+
+1. `scripts/xpm_build.sh` gains `--arch mi300` (hipcc, `-ffp-contract=off`,
+   `--offload-arch=gfx942`) and `--arch b200` (same `nvcc_wrapper` as a100,
+   `--fmad=false`, `-arch=sm_100`). Modules: `rocm/7.0.2` (mi300),
+   `cuda/12.9.1` (b200 — login-node nvcc 12.9.86 advertises `sm_100`; Cobalt
+   queue `gpu_b200` / node `blackwell00`).
+2. `sweep_accuracy --where` accepts the token set
+   `host|a100|mi250|b200|mi300` (unknown tokens exit 2). No second scorer.
+3. `validation/b200/run_b200_sweep.sh` written and **qsub'd** as Cobalt
+   **1004484** (queued behind the allocated B200). Script left in place; not
+   rewritten after qsub.
+4. `validation/mi300/run_mi300_sweep.sh` written. Offload arch confirmed on
+   `amdgpu00` via `rocminfo`: **Name `gfx942`** (Marketing Name reports
+   "AMD Radeon Graphics"; expected name matched).
+
+### C11 submit-only — B200 not scored in this session
+
+| | |
+|---|---|
+| Cobalt job ID | **1004484** |
+| Script | `validation/b200/run_b200_sweep.sh` |
+| Queue | `gpu_b200` |
+| State at C12 close | **queued** (blackwell00 allocated to another user) |
+| Baseline | **not scored yet** — follow-up scores job 1004484 with `--where b200`, commits `validation/sweep/sweep_baseline_b200.csv.gz` and `validation/b200/logs/`, then appends a C11 STATUS block. C13 waits for both baselines. |
+
+No C11 STATUS block is appended here.
+
+### C12 — MI300 measurement
+
+| | |
+|---|---|
+| Cobalt job ID | **1004487** |
+| Node | `amdgpu00` / `gpu_amd_mi300x` |
+| Modules | `gcc/13.3.0` `cmake/3.28.3` `rocm/7.0.2` |
+| Offload arch | `gfx942` (rocminfo Name; matches expected) |
+| Producer | `sweep_device` exit 0, `where=hip`, 436,080 rows |
+| Absolute gate | **PASS** — 0 points above `8 ×` derived bound |
+| Fingerprint | `44f18a4a959f6c29` |
+| Coverage | **252 / 252** cells (63 ops × 4 backends); 0 missing cells. States: S 397,409 / U 33,879 / N 4,792 |
+| Raw | `validation/mi300/logs/1004487_raw.csv.gz` |
+| Baseline | `validation/sweep/sweep_baseline_mi300.csv.gz` |
+| Logs | `validation/mi300/logs/` (cobalt droppings, sweep log, asm lint) |
+
+Login-node re-score of the committed raw is **byte-identical** to the job's
+scored CSV (data rows). Re-score from the committed `.gz` is byte-identical
+again. Monotone comparison of the raw against the committed mi300 baseline:
+0 decreased / 0 increased / 436,080 unchanged / 0 state moved — PASS.
+
+### Asm lint (before qsub; recorded, not gated clean)
+
+`scripts/xpm_lint_device_asm.sh` over a `--save-temps=obj` compile of
+`scripts/sweep_device.cpp` with `--offload-arch=gfx942` (same flags as the
+device tree). Output: `validation/mi300/logs/asm_lint_gfx942.txt`.
+
+| tier | result |
+|---|---|
+| **1** | **ok** — no callee scavenges `s[30:31]` for a relaxed branch |
+| **2** | **WARN** — 26 site(s) in 3 callee(s) |
+| **3** | **FATAL** — callees exceed 131,068 B reach: `xp::atanh(QuadFloatComplex)` 253930 B, `xp::atan(QuadFloatComplex)` 253770 B, `xp::sinhcosh(QuadFloat)` 232480 B; WARN on `xp::sincos(QuadFloat)` 108339 B |
+| **4** | **ok** — no function calls itself; 252 kernel descriptors with bounded stack |
+
+TD-1 (branch-relaxation scavenging) and TD-2 (recursive device stack) were
+gfx90a findings. On gfx942: TIER1/TIER4 are clean (no live scavenging, no
+self-calls). TIER3 FATAL means three callees are large enough that a future
+relaxation *could* scavenge — unprovable, not observed. The producer completed
+with exit 0 over the full grid (no exit 124 / 134). **No new mitigation** was
+invented in this section; existing `XPMATH_NOINLINE_FUNCTION` / de-recursion
+stand. Widening the mitigation for the TIER3 callees is a separate change.
+
+### Against the MI250 baseline (informational; not a gate)
+
+Same identity key, same `kNoiseFactor = 10^0.1` floors the monotone gate uses.
+
+| | |
+|---|---|
+| rows | 436,080 both sides, identical keys |
+| differ at all | **0** |
+| differ beyond monotone noise | **0** |
+| state changed (scored ↔ unresolved) | **0** |
+
+Scored data rows are **byte-identical** to `sweep_baseline_mi250.csv.gz`
+aside from the leading `where` label (`mi300` vs `mi250`). A generation
+delta on this grid, under ROCm 7.0.2, is not present.
+
+### Against the host baseline (informational; not a gate)
+
+| | |
+|---|---|
+| rows | 436,080 both sides, identical keys |
+| differ at all | **12,645** |
+| differ beyond monotone noise | **8,725** (4,784 worse / 3,941 better among jointly-`S`) |
+| state changed (scored ↔ unresolved) | **0** |
+
+These are the same host↔device counts the MI250 record carries under the same
+comparison. Absolute gate remains 0 above bound. A difference from host is a
+result (vendor libm / device rounding), not a failure.
+
+### Gate
+
+| check | result |
+|---|---|
+| `sweep_device` exit 0 / 436080 rows | **PASS** |
+| host scorer completes, absolute gate 0 | **PASS** |
+| committed `.gz` re-scores byte-identically | **PASS** |
+| monotone against own baseline | **PASS** (0 changed) |
+| asm lint recorded | **yes** (tiers above; exit 1 from TIER3 FATAL, recorded) |
+
+Do not gate on matching the MI250 bits — they matched anyway.
+
+### What C12 does NOT cover
+
+- **B200 baseline.** Queued here as 1004484 and scored in the C11 block
+  below. This section did not wait for it.
+- **C13.** `docs/DEVICE_PRECISION.md` still has no `b200` / `mi300` columns.
+  Both baselines now exist; C13 is the section that adds them.
+- **TIER3 FATAL callees.** Reported, not fixed.
+- **`include/xp/` numerics.** Untouched. `CUDAFP128Kokkos` untouched.
+- **`open_defects.txt`.** Still empty — 0 above bound on MI300.
+
+---
+
+## C11 — B200 device sweep, on hardware
+
+**Branch:** `core/c12-mi300-sweep` (shared with C12; the arch row, `where`
+token, and run script landed in `6a2209d`). **Job:** Cobalt **1004484**,
+queued while `blackwell00` was allocated, ran later the same day.
+
+**Outcome.** B200 baseline committed. Absolute gate against the derived bound
+exits 0. `cuda/12.9.1` was accepted on the node (nvcc 12.9.86); the GPU is
+NVIDIA B200. Suite count: **66 → 67** (`sweep_device_gate_b200`); host tree
+**43 → 44**. This closes the queued-job note in the C12 block. C13 can now
+add both columns. `open_defects.txt` stays empty — 0 above bound.
+
+### Measurement
+
+| | |
+|---|---|
+| Cobalt job ID | **1004484** |
+| Node | `blackwell00` / `gpu_b200` |
+| GPU | NVIDIA B200 (nvidia-smi; three devices on the node) |
+| Modules | `gcc/13.3.0` `cmake/3.28.3` `cuda/12.9.1` |
+| Architecture flag | `sm_100` (`-arch=sm_100` on the a100 `nvcc_wrapper`; `--fmad=false`) |
+| Producer | `sweep_device` exit 0, `where=cuda`, 436,080 rows |
+| Absolute gate | **PASS** — 0 points above `8 ×` derived bound |
+| Fingerprint | `44f18a4a959f6c29` |
+| Coverage | **252 / 252** cells (63 ops × 4 backends); 0 missing cells. States: S 397,409 / U 33,879 / N 4,792 (N matches host; A100's N was 8,299) |
+| Raw | `validation/b200/logs/1004484_raw.csv.gz` |
+| Baseline | `validation/sweep/sweep_baseline_b200.csv.gz` |
+| Logs | `validation/b200/logs/` |
+
+Login-node re-score of the committed raw is **byte-identical** to the job's
+scored CSV (data rows). Re-score from the committed `.gz` is byte-identical
+again. Monotone comparison of the raw against the committed b200 baseline:
+0 decreased / 0 increased / 436,080 unchanged / 0 state moved — PASS.
+
+### Against the A100 baseline (the generation claim; not a gate)
+
+Same identity key, same `kNoiseFactor = 10^0.1` floors the monotone gate uses.
+
+| | |
+|---|---|
+| rows | 436,080 both sides, identical keys |
+| differ at all | **3,511** |
+| differ beyond monotone noise | **0** |
+| state changed (scored ↔ unresolved) | **3,507**, all `N → S` |
+
+The 3,507 state moves are the A100 FTZ cells coming back: **DD complex
+`atan`** 1,772 and **DD complex `atanh`** 1,735. A100 marked them unresolved
+(`N`); B200 scores them (`S`), which is what the host record does. Four
+further points in those same two ops (grid points 704 and 705) stay `N` on
+both sides; only the digit column moves (`0.00` → `31.00`) while ulps stay
+the unscorable sentinel. They are inside the 3,511 and are not a noise-floor
+crossing. No jointly-scored point moved past the 0.1-digit floor. A
+difference from A100 is a result, not a failure.
+
+### Against the host baseline (informational; not a gate)
+
+| | |
+|---|---|
+| rows | 436,080 both sides, identical keys |
+| differ at all | **3,681** |
+| differ beyond monotone noise | **2,396** (1,247 worse / 1,149 better among jointly-`S`) |
+| state changed (scored ↔ unresolved) | **0** |
+
+Absolute gate remains 0 above bound. Vendor libm is allowed to move.
+
+### Gate
+
+| check | result |
+|---|---|
+| `sweep_device` exit 0 / 436080 rows | **PASS** |
+| host scorer completes, absolute gate 0 | **PASS** |
+| committed `.gz` re-scores byte-identically | **PASS** |
+| monotone against own baseline | **PASS** (0 changed) |
+
+Do not gate on matching the A100 bits.
+
+### What C11 does NOT cover
+
+- **C13.** Both baselines exist. The `b200` / `mi300` columns in
+  `docs/DEVICE_PRECISION.md` are still C13's job.
+- **`include/xp/` numerics.** Untouched. No defect from this sweep was fixed.
+- **`CUDAFP128Kokkos`.** Untouched. `sm_100` here is only the architecture
+  flag for the portable backends.

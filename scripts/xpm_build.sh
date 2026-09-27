@@ -4,7 +4,7 @@
 #                        as TWO TREES, and return ONE verdict over both
 # ===========================================================================
 #
-#   scripts/xpm_build.sh --arch {host|a100|mi250} [--build-dir DIR]
+#   scripts/xpm_build.sh --arch {host|a100|mi250|b200|mi300} [--build-dir DIR]
 #                        [--only {host|device|both}]
 #                        [--opt LEVEL] [--no-test]
 #
@@ -23,7 +23,7 @@
 #
 #   <build-dir>/host    always g++, always -ffp-contract=off,
 #                       XPMATH_BUILD_DEVICE_TARGETS=OFF.
-#                       IDENTICAL for host, a100 and mi250.
+#                       IDENTICAL for host, a100, mi250, b200 and mi300.
 #   <build-dir>/device  the arch's compiler and contraction spelling from the
 #                       data table below, with XPMATH_BUILD_HOST_TARGETS=OFF.
 #                       For --arch host this is still g++ with the serial
@@ -59,7 +59,7 @@
 # that the things which move a floating-point result are the same. State them,
 # do not assume them.
 #
-# HELD IDENTICAL across host, a100 and mi250:
+# HELD IDENTICAL across host, a100, mi250, b200 and mi300:
 #
 #   -O level        --opt, default O3, reaching the compiler as
 #                   CMAKE_BUILD_TYPE=Release plus CMAKE_CXX_FLAGS_RELEASE
@@ -76,25 +76,26 @@
 #                   differently, and with a different reach, per toolchain. See
 #                   the next block.
 #
-#   THE HOST TREE   held identical across all three arches, by construction:
+#   THE HOST TREE   held identical across all five arches, by construction:
 #                   same compiler, same flags. That is the point of splitting
 #                   it out. An accuracy number measured under `--arch mi250`
 #                   comes out of the same host tree as one measured under
-#                   `--arch a100`.
+#                   `--arch a100` (or b200 / mi300).
 #
 # NOT held identical, by construction:
 #
 #   compiler        DEVICE TREE ONLY: g++ (host), nvcc_wrapper wrapping
-#                   nvcc+g++ (a100), hipcc (mi250). There is no common compiler
-#                   for three vendors. The host tree is g++ everywhere.
+#                   nvcc+g++ (a100 / b200), hipcc (mi250 / mi300). There is no
+#                   common compiler for three vendors. The host tree is g++
+#                   everywhere.
 #   execution space Serial harness backend, Cuda, HIP (via device_harness.hpp).
 #   host oracle     NO LONGER A DIFFERENCE, and the row is kept to say so. It
 #                   used to read: libquadmath is present in the host and a100
 #                   Kokkos installs and ABSENT from the mi250 one. The B-arc
 #                   removed the last libquadmath call site; sweep_accuracy's
 #                   oracle is MPFR/MPC and links no libquadmath on any arch.
-#   device build    a100 and mi250 additionally compile every device-tagged TU
-#                   through a device pass; host does not.
+#   device build    a100, mi250, b200 and mi300 additionally compile every
+#                   device-tagged TU through a device pass; host does not.
 #
 # ---------------------------------------------------------------------------
 # FP CONTRACTION, SPELLED OUT
@@ -107,10 +108,13 @@
 #   device tree, host   -ffp-contract=off given to g++   as a CMAKE_CXX_FLAGS entry.
 #   device tree, mi250  -ffp-contract=off given to hipcc as a CMAKE_CXX_FLAGS entry.
 #          hipcc is clang, so the one spelling covers its host AND device pass.
+#          mi300 is the same spelling; only --offload-arch changes (gfx942).
 #   device tree, a100   --fmad=false given to nvcc_wrapper as a CMAKE_CXX_FLAGS
 #          entry, which forwards it to nvcc and so reaches the DEVICE pass. The
 #          host pass of the same TU is g++ and is covered by
 #          tests/CMakeLists.txt's per-target -ffp-contract=off on the EFT targets.
+#          b200 is the same --fmad=false, with -arch=sm_100 pinned (the wrapper's
+#          default_arch is still sm_80).
 #
 # WHICH TARGETS GET IT: all of them, in both trees. This is a whole-build
 # CMAKE_CXX_FLAGS entry, not a per-target option, because the apples-to-apples
@@ -192,11 +196,11 @@ usage() {
 scripts/xpm_build.sh — configure and build xpmath for a NAMED ARCHITECTURE,
                        as TWO TREES, and return ONE verdict over both
 
-  scripts/xpm_build.sh --arch {host|a100|mi250} [--build-dir DIR]
+  scripts/xpm_build.sh --arch {host|a100|mi250|b200|mi300} [--build-dir DIR]
                        [--only {host|device|both}]
                        [--opt LEVEL] [--no-test]
 
-  --arch        host | a100 | mi250          (required)
+  --arch        host | a100 | mi250 | b200 | mi300   (required)
   --build-dir   parent directory; the two trees are <dir>/host and <dir>/device
                                              (default: $REPO_ROOT/build)
   --only        host | device | both         (default: both)
@@ -214,39 +218,59 @@ EOF
 # commented-out line somebody has to remember to uncomment.
 #
 # EVERY ROW HERE DESCRIBES THE DEVICE TREE. The host tree takes none of them:
-# it is g++ / -ffp-contract=off on all three arches, which is the constant the
+# it is g++ / -ffp-contract=off on all five arches, which is the constant the
 # HOST_* values below spell out. After CORE_PLAN C10 neither tree finds Kokkos.
 # ---------------------------------------------------------------------------
 declare -A ARCH_DESC=(
   [host]="x86_64 login/compute node, serial device_harness"
   [a100]="NVIDIA A100 / sm_80, CUDA device_harness"
   [mi250]="AMD MI250X / gfx90a, HIP device_harness"
+  [b200]="NVIDIA B200 / sm_100, CUDA device_harness (JLSE gpu_b200 / blackwell00)"
+  [mi300]="AMD MI300X / gfx942, HIP device_harness (JLSE gpu_amd_mi300x)"
 )
 declare -A ARCH_MODULES=(
   [host]="gcc/13.3.0 cmake/3.28.3"
   [a100]="gcc/13.3.0 cmake/3.28.3 cuda/12.9.1"
   [mi250]="gcc/13.3.0 cmake/3.28.3 rocm/7.0.2"
+  # b200: cuda/12.9.1 advertises sm_100 on the login node (nvcc 12.9.86).
+  # Cobalt queue is gpu_b200. Do not silently bump to cuda/13.x unless the
+  # B200 node rejects 12.9.1 — record the measured module in the run script
+  # header / STATUS if that happens.
+  [b200]="gcc/13.3.0 cmake/3.28.3 cuda/12.9.1"
+  [mi300]="gcc/13.3.0 cmake/3.28.3 rocm/7.0.2"
 )
 declare -A ARCH_CC=(
   [host]="gcc"
   [a100]="gcc"
   [mi250]="gcc"
+  [b200]="gcc"
+  [mi300]="gcc"
 )
 declare -A ARCH_CXX=(
   [host]="g++"
   [a100]="/home/rbarik/kokkos-src-5.1.0-cuda-sm80/bin/nvcc_wrapper"
   [mi250]="/soft/compilers/rocm/rocm-7.0.2/bin/hipcc"
+  # Same nvcc_wrapper as a100; -arch=sm_100 is pinned in ARCH_CONTRACT because
+  # the wrapper's default_arch is still sm_80.
+  [b200]="/home/rbarik/kokkos-src-5.1.0-cuda-sm80/bin/nvcc_wrapper"
+  [mi300]="/soft/compilers/rocm/rocm-7.0.2/bin/hipcc"
 )
-# --offload-arch is load-bearing for mi250. After C4, sweep_device and the
-# other device TUs do not link Kokkos, so they do not inherit
+# --offload-arch is load-bearing for mi250 / mi300. After C4, sweep_device and
+# the other device TUs do not link Kokkos, so they do not inherit
 # Kokkos_HIP_ARCHITECTURES. Login-node hipcc then defaults to gfx906 (MI50).
 # MEASURED on the first 1001915 build: strings showed only gfx906. Pin it
 # here. Do NOT add -Xarch_device: that is a CUDA-clang spelling; hipcc warns
 # at every link (MEASURED, c9_hip_eft).
+# mi300: expected Name gfx942 (MI300X). Confirm with rocminfo on the node; if
+# the node reports a different name, use that name and record both.
+# b200: -arch=sm_100 is load-bearing for the same reason — without it the
+# wrapper defaults to sm_80 and the binary will not run on Blackwell.
 declare -A ARCH_CONTRACT=(
   [host]="-ffp-contract=off"
   [a100]="--fmad=false"
   [mi250]="-ffp-contract=off --offload-arch=gfx90a"
+  [b200]="--fmad=false -arch=sm_100"
+  [mi300]="-ffp-contract=off --offload-arch=gfx942"
 )
 
 # The host tree, as constants rather than as a fourth table row -- there is no
@@ -287,7 +311,7 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$ARCH" ] || { usage >&2; die "--arch is required"; }
-[ -n "${ARCH_DESC[$ARCH]+set}" ] || die "unknown --arch '$ARCH' (host|a100|mi250)"
+[ -n "${ARCH_DESC[$ARCH]+set}" ] || die "unknown --arch '$ARCH' (host|a100|mi250|b200|mi300)"
 case "$ONLY" in
   host|device|both) ;;
   *) die "unknown --only '$ONLY' (host|device|both)" ;;

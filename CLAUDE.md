@@ -32,7 +32,7 @@ Validation: **one** measurement — error in ulps against an **MPFR/MPC oracle a
 bound derived from the format and the condition number, and **two** ctest gates
 (`sweep_absolute_gate`, `sweep_monotone_gate`), each with a self-test that
 poisons its input and must fail. Read **docs/CORRECTNESS.md** before adding
-anything that judges correctness. **65 ctest targets** in a single-tree
+anything that judges correctness. **67 ctest targets** in a single-tree
 configure — asserted by CI as a COUNT. Host vs device halves are selected by
 `XPMATH_BUILD_HOST_TARGETS` / `XPMATH_BUILD_DEVICE_TARGETS` (both default ON);
 `scripts/xpm_build.sh` drives two trees when the arch needs a device compiler.
