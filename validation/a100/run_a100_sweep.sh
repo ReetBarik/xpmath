@@ -18,9 +18,9 @@
 #        sweep_accuracy --score-results <raw> --where a100 --out <scored>
 #      and, if the committed baseline exists, monotone-compare against it.
 #
-# Job 1001685 (2026-09-18, gpu06, interactive) is the run of record. It did
-# steps 2 and 3 by hand after a login-node build; this script is the
-# submit-able form of that recipe.
+# Job 1004542 (2026-09-27, gpu07) is the run of record. It replaced 1001685
+# after DD complex atan/atanh stopped returning NaN on sm_80. 1001685 remains
+# the pre-fix raw. This script is the submit-able form of that recipe.
 #
 # SUBMIT — script mode:
 #     qsub -A pepper_hep -n 1 -t 360 -q gpu_a100 --mode script \

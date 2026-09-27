@@ -26,7 +26,7 @@ baselines by `scripts/gen_domains.py --device-precision` and gated by
 
 Arch coverage (an absent arch is a named gap, never a missing column):
 
-- a100: PRESENT — 436080 rows, where=`a100`, job Cobalt 1001685 (docs/CORE_PLAN_STATUS.md §C7)
+- a100: PRESENT — 436080 rows, where=`a100`, job Cobalt 1004542 (see the A100 re-measure in docs/CORE_PLAN_STATUS.md)
 - mi250: PRESENT — 436080 rows, where=`mi250`, job Cobalt 1001915 (docs/CORE_PLAN_STATUS.md §C8)
 
 Absolute gate (`ulps ≤ 8 × derived bound`) on every present arch:

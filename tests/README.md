@@ -85,7 +85,7 @@ target.
 |---|---|
 | `sweep_absolute_gate` | No point is above its derived bound unless it is listed in `validation/sweep/open_defects.txt`. Checked in both directions: an unlisted point above bound fails, and a listed point no longer above bound also fails. |
 | `sweep_monotone_gate` | No point is worse than `validation/sweep/sweep_baseline.csv.gz`. |
-| `sweep_device_gate_a100` | Re-scores the committed A100 raw limbs (`validation/a100/logs/1001685_raw.csv.gz`) and monotone-compares against `validation/sweep/sweep_baseline_a100.csv.gz`. Host test; no GPU. |
+| `sweep_device_gate_a100` | Re-scores the committed A100 raw limbs (`validation/a100/logs/1004542_raw.csv.gz`) and monotone-compares against `validation/sweep/sweep_baseline_a100.csv.gz`. Host test; no GPU. |
 | `sweep_device_gate_mi250` | Re-scores the committed MI250X raw limbs (`validation/mi250/logs/1001915_raw.csv.gz`) and monotone-compares against `validation/sweep/sweep_baseline_mi250.csv.gz`. Host test; no GPU. |
 | `sweep_absolute_gate_selftest` | Poisons the register — an entry deleted, a bogus entry added, the register emptied — and requires the absolute gate to fail each time. |
 | `sweep_monotone_gate_selftest` | Poisons the baseline and requires the monotone gate to fail through a **named exit code**: 1 regression, 2 coverage removed, 3 record drift, 5 improvement drift, 6 coverage growth. Also requires it to pass clean input. |

@@ -120,7 +120,7 @@ case "$mode" in
 monotone|device)
   if [ "$mode" = device ]; then
     echo "=== sweep_device_gate_a100 self-test ==============================="
-    raw="$root/validation/a100/logs/1001685_raw.csv.gz"
+    raw="$root/validation/a100/logs/1004542_raw.csv.gz"
     base="$root/validation/sweep/sweep_baseline_a100.csv.gz"
     [ -f "$raw" ] || { echo "selftest: missing $raw" >&2; exit 2; }
     [ -f "$base" ] || { echo "selftest: missing $base" >&2; exit 2; }

@@ -71,8 +71,8 @@ ARCH_META = {
     "a100": {
         "path": BASELINE_A100,
         "label": "a100",
-        "job": "Cobalt 1001685",
-        "status_ptr": "docs/CORE_PLAN_STATUS.md §C7",
+        "job": "Cobalt 1004542",
+        "status_ptr": "see the A100 re-measure in docs/CORE_PLAN_STATUS.md",
         "no_baseline": "NO BASELINE — see C7 STATUS",
     },
     "mi250": {
@@ -795,22 +795,35 @@ def emit_device_precision(grid, host, a100, mi250):
         w("| %s | %s | %s | %s | %s |" % (be, floor, fmt_f(h), fmt_f(a), fmt_f(m)))
     w("")
     w("On every present arch the measured `abs` floor matches the host. FTZ did")
-    w("**not** raise the trusted band for `abs`. The FTZ signal that *does*")
-    w("appear is scorability, not the floor:")
+    w("**not** raise the trusted band for `abs`.")
     w("")
+    sn_present = []
     if a100 is not None:
         c = compare_arch(host["rows"], a100["rows"], grid)
-        sn = c["state_pairs"].get(("S", "N"), 0)
-        w("- A100: **%d** points move `S → N` (host scored them; A100 marks them" % sn)
-        w("  unscorable). They concentrate in DD complex `atan` and `atanh` — see")
-        w("  the C7 STATUS block. That is why A100 has its own baseline rather than")
-        w("  sharing the host monotone gate.")
+        sn_a = c["state_pairs"].get(("S", "N"), 0)
+        sn_present.append(sn_a)
+    else:
+        sn_a = None
+    if mi250 is not None:
+        c = compare_arch(host["rows"], mi250["rows"], grid)
+        sn_m = c["state_pairs"].get(("S", "N"), 0)
+        sn_present.append(sn_m)
+    else:
+        sn_m = None
+    if any(sn_present):
+        w("The remaining FTZ signal is scorability, not the floor: a host-scored")
+        w("point the device marks unscored.")
+        w("")
+    if a100 is not None:
+        if sn_a:
+            w("- A100: **%d** points move `S → N` (host scored them; A100 marks them" % sn_a)
+            w("  unscorable).")
+        else:
+            w("- A100: **0** points move `S → N`.")
     else:
         w("- A100: %s" % ARCH_META["a100"]["no_baseline"])
     if mi250 is not None:
-        c = compare_arch(host["rows"], mi250["rows"], grid)
-        sn = c["state_pairs"].get(("S", "N"), 0)
-        w("- MI250: **%d** `S → N` moves." % sn)
+        w("- MI250: **%d** `S → N` moves." % sn_m)
     else:
         w("- MI250: %s" % ARCH_META["mi250"]["no_baseline"])
     w("")

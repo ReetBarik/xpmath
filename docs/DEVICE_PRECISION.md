@@ -25,7 +25,7 @@ measured column for each.
 | arch | baseline | status |
 |---|---|---|
 | host | `validation/sweep/sweep_baseline.csv.gz` | PRESENT — 436080 rows, where=`host` |
-| a100 | `sweep_baseline_a100.csv.gz` | PRESENT — 436080 rows, where=`a100`, Cobalt 1001685 (docs/CORE_PLAN_STATUS.md §C7) |
+| a100 | `sweep_baseline_a100.csv.gz` | PRESENT — 436080 rows, where=`a100`, Cobalt 1004542 (see the A100 re-measure in docs/CORE_PLAN_STATUS.md) |
 | mi250 | `sweep_baseline_mi250.csv.gz` | PRESENT — 436080 rows, where=`mi250`, Cobalt 1001915 (docs/CORE_PLAN_STATUS.md §C8) |
 
 Absolute gate (`ulps ≤ 8 × derived bound`), scored points above it:
@@ -47,12 +47,8 @@ that floor; "differ at all" is any ulps/digits/state change.
 
 | arch | identical | differ at all | worse beyond noise | better beyond noise | state moved | above bound |
 |---|---:|---:|---:|---:|---:|---:|
-| a100 | 428956 | 7124 | 1221 | 1130 | 3507 | 0 |
+| a100 | 432399 | 3681 | 1247 | 1149 | 0 | 0 |
 | mi250 | 423435 | 12645 | 4784 | 3941 | 0 | 0 |
-
-A100 state transitions (host → a100):
-
-- `S → N`: 3507
 
 MI250: **0** state transitions. Every point keeps the host verdict
 letter; the 12k+ ulp moves below stay inside `S`/`U`/`N` as scored
@@ -82,13 +78,9 @@ Measured floor here is the smallest |x| at which real `abs` still reaches
 | FF | 2.0e-31 | 1e-30 | 1e-30 | 1e-30 |
 
 On every present arch the measured `abs` floor matches the host. FTZ did
-**not** raise the trusted band for `abs`. The FTZ signal that *does*
-appear is scorability, not the floor:
+**not** raise the trusted band for `abs`.
 
-- A100: **3507** points move `S → N` (host scored them; A100 marks them
-  unscorable). They concentrate in DD complex `atan` and `atanh` — see
-  the C7 STATUS block. That is why A100 has its own baseline rather than
-  sharing the host monotone gate.
+- A100: **0** points move `S → N`.
 - MI250: **0** `S → N` moves.
 
 ### 2. FMA contraction
@@ -115,7 +107,7 @@ is not FTZ and not arithmetic lands here.
 
 | arch | libm-family points that differ | of | worse beyond noise | better beyond noise |
 |---|---:|---:|---:|---:|
-| a100 | 7124 | 270640 | 1221 | 1130 |
+| a100 | 3681 | 270640 | 1247 | 1149 |
 | mi250 | 12645 | 270640 | 4784 | 3941 |
 
 The per-op table below names the cells. Inverse trig, inverse hyperbolic,
@@ -428,7 +420,7 @@ top of `scripts/gen_domains.py`.
 | QF | `acos` | 0.1107 | 0.1102 | 0.1069 | -0.000537 | -0.00379 | 1710/1780 | 1370/1780 | VENDOR_LIBM |
 | TF | `acos` | 0.1311 | 0.1316 | 0.1319 | 0.00045 | 0.000721 | 1720/1780 | 1437/1780 | VENDOR_LIBM |
 | FF | `acos` | 4265 | 4265 | 4265 | 0.003153 | 0.01749 | 1741/1780 | 1431/1780 | VENDOR_LIBM |
-| DD | `atan` | 0.2581 | 0 | 0.262 | -0.258 | 0.003955 | 6/1780 | 1728/1780 | FTZ |
+| DD | `atan` | 0.2581 | 0.2618 | 0.262 | 0.003783 | 0.003955 | 1732/1780 | 1728/1780 | VENDOR_LIBM |
 | QF | `atan` | 0.0631 | 0.06473 | 0.06438 | 0.001632 | 0.001286 | 1598/1780 | 1536/1780 | VENDOR_LIBM |
 | TF | `atan` | 0.09385 | 0.09026 | 0.09023 | -0.00359 | -0.00362 | 1626/1780 | 1587/1780 | VENDOR_LIBM |
 | FF | `atan` | 0.2847 | 0.301 | 0.3009 | 0.01631 | 0.0162 | 1652/1780 | 1593/1780 | VENDOR_LIBM |
@@ -440,7 +432,7 @@ top of `scripts/gen_domains.py`.
 | QF | `acosh` | 0.2048 | 0.2055 | 0.2017 | 0.000763 | -0.00304 | 1672/1780 | 1043/1780 | VENDOR_LIBM |
 | TF | `acosh` | 0.2211 | 0.2201 | 0.2219 | -0.00102 | 0.0008 | 1685/1780 | 1309/1780 | VENDOR_LIBM |
 | FF | `acosh` | 4266 | 4266 | 4266 | 0.00647 | 0.01184 | 1689/1780 | 1214/1780 | VENDOR_LIBM |
-| DD | `atanh` | 0.2924 | 1.687 | 0.2964 | 1.394 | 0.004029 | 35/1780 | 1751/1780 | FTZ |
+| DD | `atanh` | 0.2924 | 0.2964 | 0.2964 | 0.004052 | 0.004029 | 1752/1780 | 1751/1780 | VENDOR_LIBM |
 | QF | `atanh` | 0.06688 | 0.06707 | 0.06687 | 0.000196 | -6.98e-06 | 1729/1780 | 1658/1780 | VENDOR_LIBM |
 | TF | `atanh` | 0.09253 | 0.09284 | 0.09283 | 0.000302 | 0.000299 | 1742/1780 | 1699/1780 | VENDOR_LIBM |
 | FF | `atanh` | 943.6 | 943.6 | 943.6 | 0.001454 | 8.74e-05 | 1752/1780 | 1699/1780 | VENDOR_LIBM |
@@ -451,8 +443,8 @@ top of `scripts/gen_domains.py`.
 |---|---:|
 | match | 170 |
 | FMA | 0 |
-| FTZ | 2 |
-| VENDOR_LIBM | 80 |
+| FTZ | 0 |
+| VENDOR_LIBM | 82 |
 | UNATTRIBUTED | 0 |
 | NO BASELINE | 0 |
 | **total** | **252** |

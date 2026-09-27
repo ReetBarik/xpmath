@@ -1968,3 +1968,94 @@ Do not gate on matching the A100 bits.
 - **`include/xp/` numerics.** Untouched. No defect from this sweep was fixed.
 - **`CUDAFP128Kokkos`.** Untouched. `sm_100` here is only the architecture
   flag for the portable backends.
+
+---
+
+## A100 DD complex atan/atanh — the 3,507 `N` rows
+
+**Branch:** `core/a100-dd-atan-nan`, rebased onto `main` after the MI300 and
+B200 baselines merged. **Job:** Cobalt **1004542**, `gpu07` / `gpu_a100`.
+
+**Outcome.** A fix landed. The 3,507 points are state `S`. Absolute gate is
+0 above bound. `open_defects.txt` stays empty. A100 was re-baselined from
+`validation/a100/logs/1004542_raw.csv.gz`; the device gate reads that file.
+Host, MI250, and MI300 were not re-run: the change is under `__CUDACC__`, so
+those compilers still inline `log1p`. B200 was not re-baselined. Cobalt
+**1004541** on `blackwell00` ran the repaired function on ten inputs (the
+series, the `log(1+a)` fallback, the two-log arm, a large `|z|`, the branch
+cut, and the two zeros). All 40 component limb pairs match
+`validation/b200/logs/1004484_raw.csv.gz`.
+
+### Limb census (committed raw, before the fix)
+
+DD uses limb0/limb1 (real hi/lo) and limb4/limb5 (imag hi/lo), `%016llx`.
+Compared `validation/a100/logs/1001685_raw.csv.gz` with
+`validation/b200/logs/1004484_raw.csv.gz` on the 3,507 ids whose state is
+`N` on A100 and `S` on B200.
+
+| | of 3,507 |
+|---|---:|
+| quiet NaN in exactly one component | 3,507 |
+| NaN in real only | 1,735 — all `atanh` |
+| NaN in imag only | 1,772 — all `atan` |
+| NaN in both | 0 |
+| Inf in a leading word | 0 |
+| finite but still unscorable | 0 |
+
+The NaN is the canonical quiet NaN `7ff8000000000000` with a `+0` low word.
+The other component matches the B200 limb. For `atan` that other component
+is the `atan2` arm; for `atanh` it is the `atan2` arm with the axes swapped.
+The NaN is always the `log1p` arm. Point 0 (`1e-8 + 0i`) is in this set:
+A100 `atan` real is the finite `1e-8` B200 returns, and the imaginary word
+is the quiet NaN. The value is not a flushed subnormal. The C9 FTZ label
+does not describe these limbs.
+
+The four points that stay `N` on both arches (atan/atanh, grid points 704
+and 705, input `0` and `0 - 0i`) are the same quiet NaN on A100 and `+0`
+(with the sign of zero kept on `atanh` 705's imaginary word) on B200. They
+are not part of the 3,507. The other fifteen rows that stay `N` on both
+are infinities at the poles, identical on both arches.
+
+### Cause
+
+`xp::log1p` for `|a| < 1/4` is a series and does not call libdevice.
+`xp_log_hypot2` and the `log1p` arm of `atan` / `atanh` inline that series.
+On sm_80, nvcc 12.9.1 `-O3 --fmad=false` emits a literal
+`0x7ff8000000000000` as an operand of the inlined series, and the arm
+returns NaN. The same series as its own device function, and a straight-line
+copy in the caller, are finite. A runtime-input probe of the repaired
+function (series, the `log(1+a)` fallback, the two-log arm, a large `|z|`,
+and the branch cut) matches the committed B200 limbs, including points 704
+and 705. Not an FTZ/DAZ of an intermediate: f64 subnormals survive on this
+A100 (`0x1p-1074` rounds to itself), and point 0's true value is `~1e-8`.
+
+### Fix
+
+`DoubleDouble log1p` is `XPMATH_NOINLINE_FUNCTION` under `__CUDACC__` only.
+After that, the A100 PTX for the sweep has no `7ff8000000000000` literal,
+and `log1p` is a separate `.func`.
+
+### Re-measure (Cobalt 1004542)
+
+| | |
+|---|---|
+| Node | `gpu07`, NVIDIA A100-PCIE-40GB |
+| Modules | `gcc/13.3.0` `cmake/3.28.3` `cuda/12.9.1` |
+| `sweep_device` | exit 0, `last_error()==0`, 436,080 rows |
+| Absolute gate | **PASS**, 0 above bound |
+| Fingerprint | `44f18a4a959f6c29` |
+| Raw | `validation/a100/logs/1004542_raw.csv.gz` |
+| Baseline | `validation/sweep/sweep_baseline_a100.csv.gz` |
+
+Against the previous A100 baseline, the scored file differs in exactly:
+
+| | |
+|---|---:|
+| `N → S`, DD complex `atan` | 1,772 |
+| `N → S`, DD complex `atanh` | 1,735 |
+| digit column only, state stays `N` | 4 (atan/atanh points 704 and 705: `0.00` → `31.00`, ulps stay `-1`) |
+| any other ulps, digit, bound, or state change | 0 |
+
+Points 704 and 705 stay `N` because the reference modulus is 0, which the
+scorer leaves unscorable. The result is now the zero B200 already returned,
+so the digit column matches B200. They are not part of the 3,507.
