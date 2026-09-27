@@ -1973,17 +1973,18 @@ Do not gate on matching the A100 bits.
 
 ## A100 DD complex atan/atanh — the 3,507 `N` rows
 
-**Branch:** `core/a100-dd-atan-nan`, cut from `core/c12-mi300-sweep` @
-`6209a96` (PR 39 still open; `main` has no B200 baseline). **Job:** Cobalt
-**1004542**, `gpu07` / `gpu_a100`.
+**Branch:** `core/a100-dd-atan-nan`, rebased onto `main` after the MI300 and
+B200 baselines merged. **Job:** Cobalt **1004542**, `gpu07` / `gpu_a100`.
 
 **Outcome.** A fix landed. The 3,507 points are state `S`. Absolute gate is
-0 above bound. `open_defects.txt` stays empty. A100 was re-baselined. Host,
-MI250, and MI300 were not: the change is under `__CUDACC__`, so those
-compilers still inline `log1p`. B200 was not re-baselined: `blackwell00` was
-allocated, and every A100 row that was already finite is byte-identical to
-the previous A100 baseline, so the noinline body did not move a correct
-result.
+0 above bound. `open_defects.txt` stays empty. A100 was re-baselined from
+`validation/a100/logs/1004542_raw.csv.gz`; the device gate reads that file.
+Host, MI250, and MI300 were not re-run: the change is under `__CUDACC__`, so
+those compilers still inline `log1p`. B200 was not re-baselined. Cobalt
+**1004541** on `blackwell00` ran the repaired function on ten inputs (the
+series, the `log(1+a)` fallback, the two-log arm, a large `|z|`, the branch
+cut, and the two zeros). All 40 component limb pairs match
+`validation/b200/logs/1004484_raw.csv.gz`.
 
 ### Limb census (committed raw, before the fix)
 

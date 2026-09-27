@@ -1242,7 +1242,7 @@ xpm_tag_test(host sweep_monotone_gate_selftest sweep_absolute_gate_selftest)
 # Raw paths are job-of-record files. A baseline without its raw is a
 # configure error -- the gate cannot run.
 set(_xp_dev_raw_a100
-    "${CMAKE_SOURCE_DIR}/validation/a100/logs/1001685_raw.csv.gz")
+    "${CMAKE_SOURCE_DIR}/validation/a100/logs/1004542_raw.csv.gz")
 set(_xp_dev_raw_mi250
     "${CMAKE_SOURCE_DIR}/validation/mi250/logs/1001915_raw.csv.gz")
 set(_xp_dev_raw_b200
