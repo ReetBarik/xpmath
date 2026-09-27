@@ -830,7 +830,20 @@ XPMATH_INLINE_FUNCTION DoubleDouble log10(DoubleDouble a) {
 // through to log(0) = -inf; large a falls through unchanged. Same body in all
 // four backends, with the threshold fixed at 1/4 and only the convergence
 // epsilon retyped.
+//
+// CUDA / sm_80: this definition is noinline. Inlined into xp_log_hypot2 and
+// into the DD complex atan/atanh imag-or-real log1p arm, nvcc 12.9.1 -O3
+// --fmad=false emits a literal quiet NaN (0x7ff8000000000000) as an operand
+// of the |a| < 1/4 series and the whole arm comes back NaN. The same series
+// compiled as its own device function, and a straight-line copy of the body
+// in the caller, are finite and match the host. The guard is __CUDACC__
+// only: host g++ and hipcc keep the inline definition, and on the A100
+// re-measure every row that was already finite is unchanged.
+#if defined(__CUDACC__)
+XPMATH_NOINLINE_FUNCTION DoubleDouble log1p(DoubleDouble a) {
+#else
 XPMATH_INLINE_FUNCTION DoubleDouble log1p(DoubleDouble a) {
+#endif
     if (detail::fabs(a.hi) < 0.25) {
         DoubleDouble t   = divide(a, add(DoubleDouble(2.0), a));
         DoubleDouble t2  = multiply(t, t);
