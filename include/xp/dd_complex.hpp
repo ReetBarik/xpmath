@@ -139,7 +139,7 @@ XPMATH_INLINE_FUNCTION void dd_cross_accum(double* e, double w) {
         w = err;
         if (w == 0.0) return;
     }
-    e[4] += w;
+    e[4] = detail::eft_add(e[4], w);
 }
 
 XPMATH_INLINE_FUNCTION DoubleDouble dd_cross(DoubleDouble a, DoubleDouble b,
@@ -173,9 +173,9 @@ XPMATH_INLINE_FUNCTION DoubleDouble dd_cross(DoubleDouble a, DoubleDouble b,
     }
     e[0] = s;
     // Fold the tail ascending, then one quick_two_sum into the two stored words.
-    const double t  = ((e[4] + e[3]) + e[2]) + e[1];
-    const double hi = e[0] + t;
-    return DoubleDouble(hi, t - (hi - e[0]));
+    const double t  = detail::eft_add(detail::eft_add(detail::eft_add(e[4], e[3]), e[2]), e[1]);
+    const double hi = detail::eft_add(e[0], t);
+    return DoubleDouble(hi, detail::eft_sub(t, detail::eft_sub(hi, e[0])));
 }
 
 } // namespace detail
@@ -263,8 +263,10 @@ struct DoubleDoubleComplex {
         if (recalc) {
             const double inf = HUGE_VAL;
             return DoubleDoubleComplex(
-                DoubleDouble(inf * (nar * nbr - nai * nbi)),
-                DoubleDouble(inf * (nar * nbi + nai * nbr)));
+                DoubleDouble(detail::eft_mul(inf, detail::eft_sub(
+                    detail::eft_mul(nar, nbr), detail::eft_mul(nai, nbi)))),
+                DoubleDouble(detail::eft_mul(inf, detail::eft_add(
+                    detail::eft_mul(nar, nbi), detail::eft_mul(nai, nbr)))));
         }
 
         const double S = 0x1p-513, U = 0x1p513;    // exact, and U*U is not

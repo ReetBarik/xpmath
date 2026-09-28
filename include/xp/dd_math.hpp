@@ -390,23 +390,36 @@ XPMATH_INLINE_FUNCTION DoubleDouble dd_divide_core(DoubleDouble a, DoubleDouble 
         a  = DoubleDouble(a.hi * sn, a.lo * sn);
         s1 = s1 * sn;   // exact, and identical to recomputing (a.hi*sn) / b.hi
     }
-    double cona = s1 * split, conb = b.hi * split;
-    double a1  = cona - (cona - s1), b1 = conb - (conb - b.hi);
-    double a2  = s1 - a1,            b2 = b.hi - b1;
-    double c11 = s1 * b.hi;
-    double c21 = (((a1*b1 - c11) + a1*b2) + a2*b1) + a2*b2;
-    double c2  = s1 * b.lo;
-    double t1  = c11 + c2;
-    double e   = t1 - c11;
-    double t2  = ((c2 - e) + (c11 - (t1 - e))) + c21;
-    double t12 = t1 + t2;
-    double t22 = t2 - (t12 - t1);
-    double t11 = a.hi - t12;
-    e = t11 - a.hi;
-    double t21 = ((-t12 - e) + (a.hi - (t11 - e))) + a.lo - t22;
-    double s2  = (t11 + t21) / b.hi;
-    double hi  = s1 + s2;
-    double lo  = s2 - (hi - s1);
+    double a1, a2, b1, b2;
+    detail::eft_split(s1, split, a1, a2);
+    detail::eft_split(b.hi, split, b1, b2);
+    double c11 = detail::eft_mul(s1, b.hi);
+    double c21 = detail::eft_add(detail::eft_add(detail::eft_add(
+                     detail::eft_sub(detail::eft_mul(a1, b1), c11),
+                     detail::eft_mul(a1, b2)),
+                     detail::eft_mul(a2, b1)),
+                     detail::eft_mul(a2, b2));
+    double c2  = detail::eft_mul(s1, b.lo);
+    double t1  = detail::eft_add(c11, c2);
+    double e   = detail::eft_sub(t1, c11);
+    double t2  = detail::eft_add(
+                     detail::eft_add(detail::eft_sub(c2, e),
+                                     detail::eft_sub(c11, detail::eft_sub(t1, e))),
+                     c21);
+    double t12 = detail::eft_add(t1, t2);
+    double t22 = detail::eft_sub(t2, detail::eft_sub(t12, t1));
+    double t11 = detail::eft_sub(a.hi, t12);
+    e = detail::eft_sub(t11, a.hi);
+    double t21 = detail::eft_sub(
+                     detail::eft_add(
+                         detail::eft_add(
+                             detail::eft_sub(-t12, e),
+                             detail::eft_sub(a.hi, detail::eft_sub(t11, e))),
+                         a.lo),
+                     t22);
+    double s2  = detail::eft_add(t11, t21) / b.hi;
+    double hi  = detail::eft_add(s1, s2);
+    double lo  = detail::eft_sub(s2, detail::eft_sub(hi, s1));
     // KI-19: unscale — recover a/b from (a·sn)/(b·sd) by multiplying by sd and
     // by un, as two separate exact powers of two.  Both are 1.0 on the
     // non-hazard path, where `hi * 1.0 * 1.0 == hi` bit-for-bit.
@@ -437,14 +450,21 @@ XPMATH_INLINE_FUNCTION DoubleDouble multiply_scalar(DoubleDouble a, double b) {
     double a1, a2, b1, b2;                                          // KI-30
     dd_split(a.hi, a1, a2);
     dd_split(b,    b1, b2);
-    double c11  = a.hi * b;
-    double c21  = (((a1*b1 - c11) + a1*b2) + a2*b1) + a2*b2;
-    double c2   = a.lo * b;
-    double t1   = c11 + c2;
-    double e    = t1 - c11;
-    double t2   = ((c2 - e) + (c11 - (t1 - e))) + c21;
-    double hi   = t1 + t2;
-    double lo   = t2 - (hi - t1);
+    double c11  = detail::eft_mul(a.hi, b);
+    double c21  = detail::eft_add(detail::eft_add(detail::eft_add(
+                      detail::eft_sub(detail::eft_mul(a1, b1), c11),
+                      detail::eft_mul(a1, b2)),
+                      detail::eft_mul(a2, b1)),
+                      detail::eft_mul(a2, b2));
+    double c2   = detail::eft_mul(a.lo, b);
+    double t1   = detail::eft_add(c11, c2);
+    double e    = detail::eft_sub(t1, c11);
+    double t2   = detail::eft_add(
+                      detail::eft_add(detail::eft_sub(c2, e),
+                                      detail::eft_sub(c11, detail::eft_sub(t1, e))),
+                      c21);
+    double hi   = detail::eft_add(t1, t2);
+    double lo   = detail::eft_sub(t2, detail::eft_sub(hi, t1));
     return DoubleDouble(hi, lo);
 }
 
@@ -464,17 +484,27 @@ XPMATH_INLINE_FUNCTION DoubleDouble divide_scalar(DoubleDouble a, double b) {
         a  = DoubleDouble(a.hi * sn, a.lo * sn);
         t1 = t1 * sn;
     }
-    double cona = t1 * split, conb = b * split;
-    double a1  = cona - (cona - t1), b1 = conb - (conb - b);
-    double a2  = t1 - a1,            b2 = b - b1;
-    double t12 = t1 * b;
-    double t22 = (((a1*b1 - t12) + a1*b2) + a2*b1) + a2*b2;
-    double t11 = a.hi - t12;
-    double e   = t11 - a.hi;
-    double t21 = ((-t12 - e) + (a.hi - (t11 - e))) + a.lo - t22;
-    double t2  = (t11 + t21) / b;
-    double hi  = t1 + t2;
-    double lo  = t2 - (hi - t1);
+    double a1, a2, b1, b2;
+    detail::eft_split(t1, split, a1, a2);
+    detail::eft_split(b, split, b1, b2);
+    double t12 = detail::eft_mul(t1, b);
+    double t22 = detail::eft_add(detail::eft_add(detail::eft_add(
+                     detail::eft_sub(detail::eft_mul(a1, b1), t12),
+                     detail::eft_mul(a1, b2)),
+                     detail::eft_mul(a2, b1)),
+                     detail::eft_mul(a2, b2));
+    double t11 = detail::eft_sub(a.hi, t12);
+    double e   = detail::eft_sub(t11, a.hi);
+    double t21 = detail::eft_sub(
+                     detail::eft_add(
+                         detail::eft_add(
+                             detail::eft_sub(-t12, e),
+                             detail::eft_sub(a.hi, detail::eft_sub(t11, e))),
+                         a.lo),
+                     t22);
+    double t2  = detail::eft_add(t11, t21) / b;
+    double hi  = detail::eft_add(t1, t2);
+    double lo  = detail::eft_sub(t2, detail::eft_sub(hi, t1));
     // KI-31.  Unscale, exactly as divide() does.  This return used to be a bare
     // `DoubleDouble(hi, lo)`: the KI-19 guard above scaled the DIVISOR by
     // sd = 2^-64 and the numerator by sn, but the result was never scaled back,
@@ -601,7 +631,9 @@ XPMATH_INLINE_FUNCTION DoubleDouble pow_int(DoubleDouble a, int n) {
     if (nn == 0) return DoubleDouble(1.0);
     if (nn == 1) return (n > 0) ? a : divide(DoubleDouble(1.0), a);
     if (nn == 2) { DoubleDouble r = multiply(a,a); return (n>0) ? r : divide(DoubleDouble(1.0),r); }
-    int mn = (int)(cl2 * detail::log((double)nn) + 1.0 + 1.0e-14);
+    int mn = (int)(detail::eft_add(
+                 detail::eft_add(detail::eft_mul(cl2, detail::log((double)nn)), 1.0),
+                 1.0e-14));
     DoubleDouble s0 = a, s2 = DoubleDouble(1.0);
     int kn = nn;
     for (int j = 1; j <= mn; ++j) {
@@ -1817,7 +1849,7 @@ XPMATH_INLINE_FUNCTION DoubleDouble pow(DoubleDouble a, DoubleDouble b) {
     // le is the residual of ln(a); its contribution to the product is le*b.
     // b.hi alone suffices: |le| <= |ln a|*2^-106 and the b.lo cross term lands
     // at 2^-159 relative, far below the fold's own 2^-107.5.
-    return detail::dd_exp_ext(p, e1 + le * b.hi);
+    return detail::dd_exp_ext(p, detail::eft_add(e1, detail::eft_mul(le, b.hi)));
 }
 
 // hypot(a, b) = sqrt(a^2 + b^2), SCALED.  KI-8.
@@ -1967,7 +1999,8 @@ XPMATH_INLINE_FUNCTION DoubleDouble dd_fmod_abs(DoubleDouble A, DoubleDouble B,
 }  // namespace detail
 
 XPMATH_INLINE_FUNCTION DoubleDouble fmod(DoubleDouble a, DoubleDouble b) {
-    const double nan_hi = a.hi - a.hi + (b.hi - b.hi);  // NaN iff either is
+    const double nan_hi = detail::eft_add(detail::eft_sub(a.hi, a.hi),
+                                           detail::eft_sub(b.hi, b.hi));  // NaN iff either is
     if (a.hi != a.hi || b.hi != b.hi) return DoubleDouble(nan_hi);
     if (b.hi == 0.0) { XPMATH_PRINTF("DDFMOD: zero modulus\n");
                        return DoubleDouble(0.0 / 0.0); }
@@ -1982,7 +2015,8 @@ XPMATH_INLINE_FUNCTION DoubleDouble fmod(DoubleDouble a, DoubleDouble b) {
 }
 
 XPMATH_INLINE_FUNCTION DoubleDouble remainder(DoubleDouble a, DoubleDouble b) {
-    const double nan_hi = a.hi - a.hi + (b.hi - b.hi);
+    const double nan_hi = detail::eft_add(detail::eft_sub(a.hi, a.hi),
+                                           detail::eft_sub(b.hi, b.hi));
     if (a.hi != a.hi || b.hi != b.hi) return DoubleDouble(nan_hi);
     if (b.hi == 0.0) { XPMATH_PRINTF("DDREMAINDER: zero modulus\n");
                        return DoubleDouble(0.0 / 0.0); }
@@ -2263,7 +2297,7 @@ XPMATH_INLINE_FUNCTION DoubleDouble fma(DoubleDouble a, DoubleDouble b, DoubleDo
     dd_expansion_compress(e, m, d, 3);
     double t, s = dd_quick_two_sum(d[1], d[2], t);
     double lo, hi = dd_quick_two_sum(d[0], s, lo);
-    lo += t;
+    lo = detail::eft_add(lo, t);
     hi = dd_quick_two_sum(hi, lo, lo);
     return DoubleDouble(hi, lo);
 }
@@ -2330,7 +2364,8 @@ XPMATH_INLINE_FUNCTION DoubleDouble erfc_asymptotic_sum(DoubleDouble az, DoubleD
     DoubleDouble term = divide(DoubleDouble(1.0), az), sum = term;
     double prev_mag = detail::fabs(term.hi);
     for (int k = 1; k <= 100; ++k) {
-        DoubleDouble next = divide(multiply_scalar(term, -(2.0*k - 1.0)), two_z2);
+        DoubleDouble next = divide(multiply_scalar(term,
+            -(detail::eft_sub(detail::eft_mul(2.0, (double)k), 1.0))), two_z2);
         double mag = detail::fabs(next.hi);
         if (mag > prev_mag) break;                 // smallest term reached -> stop
         sum = add(sum, next);
@@ -2411,7 +2446,8 @@ XPMATH_INLINE_FUNCTION DoubleDouble erf(DoubleDouble z) {
         DoubleDouble two_z2 = multiply_scalar(z2, 2.0);
         DoubleDouble term = az, sum = az;
         for (int k = 1; k <= 200; ++k) {
-            term = divide_scalar(multiply(term, two_z2), 2.0*k + 1.0);
+            term = divide_scalar(multiply(term, two_z2),
+                                 detail::eft_add(detail::eft_mul(2.0, (double)k), 1.0));
             DoubleDouble sumnew = add(sum, term);
             if (detail::fabs(term.hi) <= eps * detail::fabs(sumnew.hi)) { sum = sumnew; break; }
             sum = sumnew;

@@ -98,7 +98,7 @@ XPMATH_INLINE_FUNCTION void tf_cross_accum(float* e, float w) {
         w = err;
         if (w == 0.0f) return;
     }
-    e[5] += w;
+    e[5] = detail::eft_add(e[5], w);
 }
 
 XPMATH_INLINE_FUNCTION TripleFloat tf_cross(TripleFloat a, TripleFloat b,
@@ -123,8 +123,8 @@ XPMATH_INLINE_FUNCTION TripleFloat tf_cross(TripleFloat a, TripleFloat b,
                 tf_cross_accum(e,  p);  tf_cross_accum(e, -q);
                 tf_cross_accum(e, ep);  tf_cross_accum(e, -eq);
             } else {
-                tf_cross_accum(e,  aw[i] * bw[j]);
-                tf_cross_accum(e, -cw[i] * dw[j]);
+                tf_cross_accum(e,  detail::eft_mul(aw[i], bw[j]));
+                tf_cross_accum(e,  detail::eft_mul(-cw[i], dw[j]));
             }
         }
     }
@@ -139,7 +139,7 @@ XPMATH_INLINE_FUNCTION TripleFloat tf_cross(TripleFloat a, TripleFloat b,
         e[i + 1] = er;
     }
     e[0] = s;
-    e[3] = (e[5] + e[4]) + e[3];
+    e[3] = detail::eft_add(detail::eft_add(e[5], e[4]), e[3]);
     renorm_3(e[0], e[1], e[2], e[3]);
     return TripleFloat(e[0], e[1], e[2]);
 }
@@ -207,8 +207,10 @@ struct TripleFloatComplex {
         if (recalc) {
             const float inf = HUGE_VALF;
             return TripleFloatComplex(
-                TripleFloat(inf * (nar * nbr - nai * nbi)),
-                TripleFloat(inf * (nar * nbi + nai * nbr)));
+                TripleFloat(detail::eft_mul(inf, detail::eft_sub(
+                    detail::eft_mul(nar, nbr), detail::eft_mul(nai, nbi)))),
+                TripleFloat(detail::eft_mul(inf, detail::eft_add(
+                    detail::eft_mul(nar, nbi), detail::eft_mul(nai, nbr)))));
         }
 
         const float S = 0x1p-65f, U = 0x1p65f;
@@ -510,7 +512,10 @@ XPMATH_NOINLINE_FUNCTION TripleFloatComplex exp(TripleFloatComplex z) {
 }
 
 // log(z) = log|z| + i·arg(z).  qf_complex.hpp:257-260 / ff_complex.hpp:191-194 / dd_complex.hpp:186-190.
-XPMATH_INLINE_FUNCTION TripleFloatComplex log(TripleFloatComplex z) {
+// Not inline. On sm_100, pasting this body into its callers makes nvcc/ptxas
+// underestimate the __local__ frame (TD-4); cudaLimitStackSize cannot enlarge
+// that frame. Same mark as exp above.
+XPMATH_NOINLINE_FUNCTION TripleFloatComplex log(TripleFloatComplex z) {
     TripleFloat modulus = abs(z);
     TripleFloat argument = atan2(z.im, z.re);
     return TripleFloatComplex(log(modulus), argument);

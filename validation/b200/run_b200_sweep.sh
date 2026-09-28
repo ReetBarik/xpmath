@@ -6,8 +6,7 @@
 #
 # WHAT IT DOES
 #   1. Build both trees through scripts/xpm_build.sh --arch b200 --no-test.
-#      Host tree: g++, sweep_accuracy. Device tree: nvcc_wrapper, -arch=sm_100,
-#      --fmad=false.
+#      Host tree: g++, sweep_accuracy. Device tree: nvcc_wrapper, -arch=sm_100.
 #   2. Run <build>/device/tests/sweep_device --out <raw.csv> on the GPU.
 #      last_error() != 0 is a hard fail; the CSV must not be scored.
 #   3. Score on the host binary:

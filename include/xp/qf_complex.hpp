@@ -115,7 +115,7 @@ XPMATH_INLINE_FUNCTION void qf_cross_accum(float* e, float w) {
         w = err;
         if (w == 0.0f) return;
     }
-    e[6] += w;
+    e[6] = detail::eft_add(e[6], w);
 }
 
 XPMATH_INLINE_FUNCTION QuadFloat qf_cross(QuadFloat a, QuadFloat b,
@@ -147,8 +147,8 @@ XPMATH_INLINE_FUNCTION QuadFloat qf_cross(QuadFloat a, QuadFloat b,
                 qf_cross_accum(e,  p);  qf_cross_accum(e, -q);
                 qf_cross_accum(e, ep);  qf_cross_accum(e, -eq);
             } else {
-                qf_cross_accum(e,  aw[i] * bw[j]);
-                qf_cross_accum(e, -cw[i] * dw[j]);
+                qf_cross_accum(e,  detail::eft_mul(aw[i], bw[j]));
+                qf_cross_accum(e,  detail::eft_mul(-cw[i], dw[j]));
             }
         }
     }
@@ -163,7 +163,7 @@ XPMATH_INLINE_FUNCTION QuadFloat qf_cross(QuadFloat a, QuadFloat b,
         e[i + 1] = er;
     }
     e[0] = s;
-    e[4] = (e[6] + e[5]) + e[4];
+    e[4] = detail::eft_add(detail::eft_add(e[6], e[5]), e[4]);
     renorm_4(e[0], e[1], e[2], e[3], e[4]);
     return QuadFloat(e[0], e[1], e[2], e[3]);
 }
@@ -232,8 +232,10 @@ struct QuadFloatComplex {
         if (recalc) {
             const float inf = HUGE_VALF;
             return QuadFloatComplex(
-                QuadFloat(inf * (nar * nbr - nai * nbi)),
-                QuadFloat(inf * (nar * nbi + nai * nbr)));
+                QuadFloat(detail::eft_mul(inf, detail::eft_sub(
+                    detail::eft_mul(nar, nbr), detail::eft_mul(nai, nbi)))),
+                QuadFloat(detail::eft_mul(inf, detail::eft_add(
+                    detail::eft_mul(nar, nbi), detail::eft_mul(nai, nbr)))));
         }
 
         const float S = 0x1p-65f, U = 0x1p65f;
