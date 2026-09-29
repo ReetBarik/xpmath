@@ -225,7 +225,7 @@ XPMATH_INLINE_FUNCTION void qf_three_sum2(float& a, float& b, float& c) {
     float t1, t2, t3;
     t1 = qf_two_sum(a, b, t2);
     a  = qf_two_sum(c, t1, t3);
-    b  = t2 + t3;
+    b  = detail::eft_add(t2, t3);
 }
 
 // ============================================================
@@ -284,7 +284,7 @@ XPMATH_INLINE_FUNCTION void renorm_4(float& c0, float& c1, float& c2,
         if (s2 != 0.0f) {
             s2 = qf_quick_two_sum(s2, c3, s3);
             if (s3 != 0.0f)
-                s3 += c4;
+                s3 = detail::eft_add(s3, c4);
             else
                 s2 = qf_quick_two_sum(s2, c4, s3);
         } else {
@@ -329,9 +329,9 @@ struct QuadFloat {
     // bits, so two words suffice; the remaining words fall to 0 after the split.
     XPMATH_INLINE_FUNCTION QuadFloat(double x) {
         double r = x;
-        float  c0 = (float)r; r -= (double)c0;
-        float  c1 = (float)r; r -= (double)c1;
-        float  c2 = (float)r; r -= (double)c2;
+        float  c0 = (float)r; r = detail::eft_sub(r, (double)c0);
+        float  c1 = (float)r; r = detail::eft_sub(r, (double)c1);
+        float  c2 = (float)r; r = detail::eft_sub(r, (double)c2);
         float  c3 = (float)r;
         f0 = c0; f1 = c1; f2 = c2; f3 = c3;
     }
@@ -486,8 +486,8 @@ XPMATH_INLINE_FUNCTION QuadFloat ieee_add(QuadFloat a, QuadFloat b) {
         s = qf_quick_three_accum(u, v, t);
         if (s != 0.0f) x[k++] = s;
     }
-    for (k = i; k < 4; k++) x[3] += a[k];
-    for (k = j; k < 4; k++) x[3] += b[k];
+    for (k = i; k < 4; k++) x[3] = detail::eft_add(x[3], a[k]);
+    for (k = j; k < 4; k++) x[3] = detail::eft_add(x[3], b[k]);
 
     renorm(x[0], x[1], x[2], x[3]);
     return QuadFloat(x[0], x[1], x[2], x[3]);
@@ -526,7 +526,7 @@ XPMATH_INLINE_FUNCTION QuadFloat sloppy_add(QuadFloat a, QuadFloat b) {
     s1 = qf_two_sum(s1, t0, t0);
     qf_three_sum(s2, t0, t1);
     qf_three_sum2(s3, t0, t2);
-    t0 = t0 + t1 + t3;
+    t0 = detail::eft_add(detail::eft_add(t0, t1), t3);
 
     renorm_4(s0, s1, s2, s3, t0);
     return QuadFloat(s0, s1, s2, s3);
@@ -556,14 +556,14 @@ XPMATH_INLINE_FUNCTION QuadFloat multiply_scalar(QuadFloat a, float b) {
     p0 = qf_two_prod(a.f0, b, q0);
     p1 = qf_two_prod(a.f1, b, q1);
     p2 = qf_two_prod(a.f2, b, q2);
-    p3 = a.f3 * b;
+    p3 = detail::eft_mul(a.f3, b);
 
     s0 = p0;
     s1 = qf_two_sum(q0, p1, s2);
     qf_three_sum(s2, q1, p2);
     qf_three_sum2(q1, q2, p3);
     s3 = q1;
-    s4 = q2 + p2;
+    s4 = detail::eft_add(q2, p2);
 
     renorm_4(s0, s1, s2, s3, s4);
     return QuadFloat(s0, s1, s2, s3);
@@ -603,12 +603,23 @@ XPMATH_NOINLINE_FUNCTION QuadFloat multiply(QuadFloat a, QuadFloat b) {
     qf_three_sum(p3, p4, p5);
     s0 = qf_two_sum(p2, p3, t0);
     s1 = qf_two_sum(q1, p4, t1);
-    s2 = q2 + p5;
+    s2 = detail::eft_add(q2, p5);
     s1 = qf_two_sum(s1, t0, t0);
-    s2 += (t0 + t1);
+    s2 = detail::eft_add(s2, detail::eft_add(t0, t1));
 
     // O(u^3) terms: the nine remaining cross-products, folded in scalar.
-    s1 += a.f0*b.f3 + a.f1*b.f2 + a.f2*b.f1 + a.f3*b.f0 + q0 + q3 + q4 + q5;
+    // The original expression is
+    //   s1 += a.f0*b.f3 + a.f1*b.f2 + a.f2*b.f1 + a.f3*b.f0 + q0 + q3 + q4 + q5
+    // which adds the sum of those terms to s1 once. Folding each term into
+    // s1 drops contributions below ulp(s1)/2 before they can accumulate.
+    const float tail = detail::eft_add(detail::eft_add(detail::eft_add(detail::eft_add(
+                           detail::eft_add(detail::eft_add(detail::eft_add(
+                               detail::eft_mul(a.f0, b.f3),
+                               detail::eft_mul(a.f1, b.f2)),
+                               detail::eft_mul(a.f2, b.f1)),
+                               detail::eft_mul(a.f3, b.f0)),
+                           q0), q3), q4), q5);
+    s1 = detail::eft_add(s1, tail);
     renorm_4(p0, p1, s0, s1, s2);
     return QuadFloat(p0, p1, s0, s1);
 }
@@ -631,8 +642,8 @@ XPMATH_INLINE_FUNCTION QuadFloat sqr(QuadFloat a) {
     float t0, t1;
 
     p0 = qf_two_sqr(a.f0, q0);
-    p1 = qf_two_prod(2.0f * a.f0, a.f1, q1);
-    p2 = qf_two_prod(2.0f * a.f0, a.f2, q2);
+    p1 = qf_two_prod(detail::eft_mul(2.0f, a.f0), a.f1, q1);
+    p2 = qf_two_prod(detail::eft_mul(2.0f, a.f0), a.f2, q2);
     p3 = qf_two_sqr(a.f1, q3);
 
     p1 = qf_two_sum(q0, p1, q0);
@@ -644,23 +655,23 @@ XPMATH_INLINE_FUNCTION QuadFloat sqr(QuadFloat a) {
     s1 = qf_two_sum(q1, p3, t1);
 
     s1 = qf_two_sum(s1, t0, t0);
-    t0 += t1;
+    t0 = detail::eft_add(t0, t1);
 
     s1 = qf_quick_two_sum(s1, t0, t0);
     p2 = qf_quick_two_sum(s0, s1, t1);
     p3 = qf_quick_two_sum(t1, t0, q0);
 
-    p4 = 2.0f * a.f0 * a.f3;
-    p5 = 2.0f * a.f1 * a.f2;
+    p4 = detail::eft_mul(detail::eft_mul(2.0f, a.f0), a.f3);
+    p5 = detail::eft_mul(detail::eft_mul(2.0f, a.f1), a.f2);
 
     p4 = qf_two_sum(p4, p5, p5);
     q2 = qf_two_sum(q2, q3, q3);
 
     t0 = qf_two_sum(p4, q2, t1);
-    t1 = t1 + p5 + q3;
+    t1 = detail::eft_add(detail::eft_add(t1, p5), q3);
 
     p3 = qf_two_sum(p3, t0, p4);
-    p4 = p4 + q0 + t1;
+    p4 = detail::eft_add(detail::eft_add(p4, q0), t1);
 
     renorm_4(p0, p1, p2, p3, p4);
     return QuadFloat(p0, p1, p2, p3);
@@ -870,7 +881,7 @@ XPMATH_NOINLINE_FUNCTION QuadFloat sqrt(QuadFloat a) {
         QuadFloat y    = multiply(half, add(x, divide(a, x)));
         QuadFloat diff = subtract(x, y);
         x = y;
-        float e = detail::fabs(((diff.f3 + diff.f2) + diff.f1) + diff.f0);
+        float e = detail::fabs(detail::eft_add(detail::eft_add(detail::eft_add(diff.f3, diff.f2), diff.f1), diff.f0));
         if (e < detail::fabs(x.f0) * eps)
             return x;
     }
@@ -928,7 +939,7 @@ XPMATH_NOINLINE_FUNCTION QuadFloat sqrt(QuadFloat a) {
 // wrong and the new one is right, and on no input is the new value wrong.
 XPMATH_INLINE_FUNCTION float qf_nint(float d) {
     float r = detail::rint(d);
-    if (d - r == 0.5f) r += 1.0f;
+    if (detail::eft_sub(d, r) == 0.5f) r = detail::eft_add(r, 1.0f);
     if (r == 0.0f && d != 0.0f) r = 0.0f;   // (-0.5, 0) -> +0, as QD gave
     return r;
 }
@@ -948,13 +959,13 @@ XPMATH_INLINE_FUNCTION QuadFloat round_to_nearest_int(QuadFloat a) {
             if (x2 == a.f2) {
                 x3 = qf_nint(a.f3);
             } else {
-                if (detail::fabs(x2 - a.f2) == 0.5f && a.f3 < 0.0f) x2 -= 1.0f;
+                if (detail::fabs(detail::eft_sub(x2, a.f2)) == 0.5f && a.f3 < 0.0f) x2 = detail::eft_sub(x2, 1.0f);
             }
         } else {
-            if (detail::fabs(x1 - a.f1) == 0.5f && a.f2 < 0.0f) x1 -= 1.0f;
+            if (detail::fabs(detail::eft_sub(x1, a.f1)) == 0.5f && a.f2 < 0.0f) x1 = detail::eft_sub(x1, 1.0f);
         }
     } else {
-        if (detail::fabs(x0 - a.f0) == 0.5f && a.f1 < 0.0f) x0 -= 1.0f;
+        if (detail::fabs(detail::eft_sub(x0, a.f0)) == 0.5f && a.f1 < 0.0f) x0 = detail::eft_sub(x0, 1.0f);
     }
 
     renorm(x0, x1, x2, x3);
@@ -1941,7 +1952,7 @@ XPMATH_INLINE_FUNCTION QuadFloat qf_fmod_abs(QuadFloat A, QuadFloat B,
 }  // namespace detail
 
 XPMATH_INLINE_FUNCTION QuadFloat fmod(QuadFloat a, QuadFloat b) {
-    if (a.f0 != a.f0 || b.f0 != b.f0) return QuadFloat(a.f0 + b.f0);
+    if (a.f0 != a.f0 || b.f0 != b.f0) return QuadFloat(detail::eft_add(a.f0, b.f0));
     if (b.f0 == 0.0f) { XPMATH_PRINTF("QFFMOD: zero modulus\n");
                         return QuadFloat(0.0f / 0.0f); }
     if (!detail::isfinite(a.f0)) { XPMATH_PRINTF("QFFMOD: infinite dividend\n");
@@ -1955,7 +1966,7 @@ XPMATH_INLINE_FUNCTION QuadFloat fmod(QuadFloat a, QuadFloat b) {
 }
 
 XPMATH_INLINE_FUNCTION QuadFloat remainder(QuadFloat a, QuadFloat b) {
-    if (a.f0 != a.f0 || b.f0 != b.f0) return QuadFloat(a.f0 + b.f0);
+    if (a.f0 != a.f0 || b.f0 != b.f0) return QuadFloat(detail::eft_add(a.f0, b.f0));
     if (b.f0 == 0.0f) { XPMATH_PRINTF("QFREMAINDER: zero modulus\n");
                         return QuadFloat(0.0f / 0.0f); }
     if (!detail::isfinite(a.f0)) { XPMATH_PRINTF("QFREMAINDER: infinite dividend\n");

@@ -202,7 +202,7 @@ XPMATH_INLINE_FUNCTION void tf_three_sum2(float& a, float& b, float& c) {
     float t1, t2, t3;
     t1 = tf_two_sum(a, b, t2);
     a  = tf_two_sum(c, t1, t3);
-    b  = t2 + t3;
+    b  = detail::eft_add(t2, t3);
 }
 
 // quick_three_accum: add c to the two-word pair (a, b). If the sum does not
@@ -279,7 +279,7 @@ XPMATH_INLINE_FUNCTION void renorm_3(float& c0, float& c1, float& c2, float& c3)
     if (s1 != 0.0f) {
         s1 = tf_quick_two_sum(s1, c2, s2);
         if (s2 != 0.0f) {
-            s2 += c3;  // Absorb the last component
+            s2 = detail::eft_add(s2, c3);  // Absorb the last component
         } else {
             s1 = tf_quick_two_sum(s1, c3, s2);
         }
@@ -310,8 +310,8 @@ struct TripleFloat {
     // 53 bits, so two words suffice; f2 falls to 0 after the split.
     XPMATH_INLINE_FUNCTION TripleFloat(double x) {
         double r = x;
-        float  c0 = (float)r; r -= (double)c0;
-        float  c1 = (float)r; r -= (double)c1;
+        float  c0 = (float)r; r = detail::eft_sub(r, (double)c0);
+        float  c1 = (float)r; r = detail::eft_sub(r, (double)c1);
         float  c2 = (float)r;
         f0 = c0; f1 = c1; f2 = c2;
     }
@@ -448,7 +448,7 @@ XPMATH_INLINE_FUNCTION TripleFloat sloppy_add(TripleFloat a, TripleFloat b) {
 
     s1 = tf_two_sum(s1, t0, t0);   // s1: u^1, t0: u^2
     tf_three_sum2(s2, t0, t1);     // s2: u^2, t0: u^3   (QD: three_sum2(s3,t0,t2))
-    t0 = t0 + t2;                  // u^3 carry (QD: t0 = t0 + t1 + t3)
+    t0 = detail::eft_add(t0, t2);  // u^3 carry (QD: t0 = t0 + t1 + t3)
 
     renorm_3(s0, s1, s2, t0);
     return TripleFloat(s0, s1, s2);
@@ -498,8 +498,8 @@ XPMATH_INLINE_FUNCTION TripleFloat ieee_add(TripleFloat a, TripleFloat b) {
     }
 
     // Add the rest.
-    for (k = i; k < 3; k++) x[2] += a[k];
-    for (k = j; k < 3; k++) x[2] += b[k];
+    for (k = i; k < 3; k++) x[2] = detail::eft_add(x[2], a[k]);
+    for (k = j; k < 3; k++) x[2] = detail::eft_add(x[2], b[k]);
 
     renorm(x[0], x[1], x[2]);
     return TripleFloat(x[0], x[1], x[2]);
@@ -556,13 +556,20 @@ XPMATH_NOINLINE_FUNCTION TripleFloat multiply(TripleFloat a, TripleFloat b) {
     tf_three_sum(p3, p4, p5);
     s0 = tf_two_sum(p2, p3, t0);
     s1 = tf_two_sum(q1, p4, t1);
-    s2 = q2 + p5;
+    s2 = detail::eft_add(q2, p5);
     s1 = tf_two_sum(s1, t0, t0);
-    s2 += (t0 + t1);
+    s2 = detail::eft_add(s2, detail::eft_add(t0, t1));
 
     // O(u^3) terms, plus the u^4 remainder s2 folded in (renorm_3 takes four
     // words, so there is no fifth slot for it as there is at k=4).
-    s1 += a.f1*b.f2 + a.f2*b.f1 + q0 + q3 + q4 + q5 + s2;
+    // Original: s1 += a.f1*b.f2 + a.f2*b.f1 + q0 + q3 + q4 + q5 + s2,
+    // i.e. one add of the whole sum into s1.
+    const float tail = detail::eft_add(detail::eft_add(detail::eft_add(detail::eft_add(
+                           detail::eft_add(detail::eft_add(
+                               detail::eft_mul(a.f1, b.f2),
+                               detail::eft_mul(a.f2, b.f1)),
+                           q0), q3), q4), q5), s2);
+    s1 = detail::eft_add(s1, tail);
     renorm_3(p0, p1, s0, s1);
     return TripleFloat(p0, p1, s0);
 }
@@ -586,7 +593,7 @@ XPMATH_INLINE_FUNCTION TripleFloat multiply_scalar(TripleFloat a, float b) {
 
     p0 = tf_two_prod(a.f0, b, q0);   // p0: u^0, q0: u^1
     p1 = tf_two_prod(a.f1, b, q1);   // p1: u^1, q1: u^2
-    p2 = a.f2 * b;                   // p2: u^2  (QD's plain last-word product)
+    p2 = detail::eft_mul(a.f2, b);   // p2: u^2  (QD's plain last-word product)
 
     s0 = p0;
     s1 = tf_two_sum(q0, p1, s2);     // s1: u^1, s2: u^2
@@ -617,8 +624,8 @@ XPMATH_INLINE_FUNCTION TripleFloat sqr(TripleFloat a) {
     float t0, t1;
 
     p0 = tf_two_sqr(a.f0, q0);
-    p1 = tf_two_prod(2.0f * a.f0, a.f1, q1);
-    p2 = tf_two_prod(2.0f * a.f0, a.f2, q2);
+    p1 = tf_two_prod(detail::eft_mul(2.0f, a.f0), a.f1, q1);
+    p2 = tf_two_prod(detail::eft_mul(2.0f, a.f0), a.f2, q2);
     p3 = tf_two_sqr(a.f1, q3);
 
     p1 = tf_two_sum(q0, p1, q0);
@@ -630,22 +637,22 @@ XPMATH_INLINE_FUNCTION TripleFloat sqr(TripleFloat a) {
     s1 = tf_two_sum(q1, p3, t1);
 
     s1 = tf_two_sum(s1, t0, t0);
-    t0 += t1;
+    t0 = detail::eft_add(t0, t1);
 
     s1 = tf_quick_two_sum(s1, t0, t0);
     p2 = tf_quick_two_sum(s0, s1, t1);
     p3 = tf_quick_two_sum(t1, t0, q0);
 
-    p4 = 2.0f * a.f1 * a.f2;   // k=3: QD's p4 = 2*a0*a3 has no counterpart
+    p4 = detail::eft_mul(detail::eft_mul(2.0f, a.f1), a.f2);   // k=3: QD's p4 = 2*a0*a3 has no counterpart
     q2 = tf_two_sum(q2, q3, q3);
 
     t0 = tf_two_sum(p4, q2, t1);
-    t1 = t1 + q3;              // QD: t1 + p5 + q3; p5 = 2*a1*a2 is now p4
+    t1 = detail::eft_add(t1, q3);  // QD: t1 + p5 + q3; p5 = 2*a1*a2 is now p4
 
     p3 = tf_two_sum(p3, t0, p4);
-    p4 = p4 + q0 + t1;
+    p4 = detail::eft_add(detail::eft_add(p4, q0), t1);
 
-    p3 += p4;                  // fold QD's u^4 renorm word (no fifth slot at k=3)
+    p3 = detail::eft_add(p3, p4);  // fold QD's u^4 renorm word (no fifth slot at k=3)
     renorm_3(p0, p1, p2, p3);
     return TripleFloat(p0, p1, p2);
 }
@@ -791,7 +798,7 @@ XPMATH_NOINLINE_FUNCTION TripleFloat sqrt(TripleFloat a) {
 // docs/KNOWN_ISSUES.md, KI-2 resolution.
 XPMATH_INLINE_FUNCTION float tf_nint(float d) {
     float r = detail::rint(d);
-    if (d - r == 0.5f) r += 1.0f;
+    if (detail::eft_sub(d, r) == 0.5f) r = detail::eft_add(r, 1.0f);
     if (r == 0.0f && d != 0.0f) r = 0.0f;   // (-0.5, 0) -> +0, as QD gave
     return r;
 }
@@ -811,12 +818,12 @@ XPMATH_INLINE_FUNCTION TripleFloat round_to_nearest_int(TripleFloat a) {
         if (f1 == a.f1) {
             f2 = tf_nint(a.f2);
         } else {
-            if (detail::fabs(f1 - a.f1) == 0.5f && a.f2 < 0.0f)
-                f1 -= 1.0f;
+            if (detail::fabs(detail::eft_sub(f1, a.f1)) == 0.5f && a.f2 < 0.0f)
+                f1 = detail::eft_sub(f1, 1.0f);
         }
     } else {
-        if (detail::fabs(f0 - a.f0) == 0.5f && a.f1 < 0.0f)
-            f0 -= 1.0f;
+        if (detail::fabs(detail::eft_sub(f0, a.f0)) == 0.5f && a.f1 < 0.0f)
+            f0 = detail::eft_sub(f0, 1.0f);
     }
 
     renorm(f0, f1, f2);
@@ -891,7 +898,7 @@ XPMATH_NOINLINE_FUNCTION TripleFloat exp(TripleFloat a) {
     // stays deep inside the series' convergence radius, and the same m is used
     // for the scale-back, so the result is unchanged. Converting it would
     // perturb the reduction on a large set of inputs to buy nothing.
-    float m = detail::floor(a.f0 * k_inv_log2 + 0.5f);
+    float m = detail::floor(detail::eft_add(detail::eft_mul(a.f0, k_inv_log2), 0.5f));
 
     // KI-42: Cody-Waite range reduction; see dd_math.hpp's exp for the
     // derivation and ff_math.hpp's for the FP32 width. `multiply_scalar(k_log2,
@@ -1008,7 +1015,7 @@ XPMATH_INLINE_FUNCTION TripleFloat pow(TripleFloat a, TripleFloat b) {
     const TripleFloat lp = detail::tf_log_ext(a, le);
     float e1;
     const TripleFloat p = detail::tf_mul_ext(lp, b, e1);
-    return detail::tf_exp_ext(p, e1 + le * b.f0);
+    return detail::tf_exp_ext(p, detail::eft_add(e1, detail::eft_mul(le, b.f0)));
 }
 
 // sin/cos: joint computation via Payne-Hanek reduction mod π/2, divide-by-k
@@ -1670,11 +1677,15 @@ XPMATH_NOINLINE_FUNCTION TripleFloat log1p(TripleFloat a) {
     return log(add(a, TripleFloat(1.0f)));
 }
 
-XPMATH_INLINE_FUNCTION TripleFloat log10(TripleFloat a) {
+// Not inline. On sm_100 the sweep finished and these answers were destroyed
+// (TD-4, silent form). Same mark as TripleFloatComplex::log10.
+XPMATH_NOINLINE_FUNCTION TripleFloat log10(TripleFloat a) {
     return divide(log(a), TripleFloat_log10());
 }
 
-XPMATH_INLINE_FUNCTION TripleFloat log2(TripleFloat a) {
+// Not inline. On sm_100 the sweep finished and these answers were destroyed
+// (TD-4, silent form). Same mark as TripleFloatComplex::log10.
+XPMATH_NOINLINE_FUNCTION TripleFloat log2(TripleFloat a) {
     return divide(log(a), TripleFloat_log2());
 }
 
@@ -1782,7 +1793,7 @@ XPMATH_INLINE_FUNCTION TripleFloat tf_fmod_abs(TripleFloat A, TripleFloat B,
 }  // namespace detail
 
 XPMATH_INLINE_FUNCTION TripleFloat fmod(TripleFloat a, TripleFloat b) {
-    if (a.f0 != a.f0 || b.f0 != b.f0) return TripleFloat(a.f0 + b.f0);
+    if (a.f0 != a.f0 || b.f0 != b.f0) return TripleFloat(detail::eft_add(a.f0, b.f0));
     if (b.f0 == 0.0f) { XPMATH_PRINTF("TFFMOD: zero modulus\n");
                         return TripleFloat(0.0f / 0.0f); }
     if (!detail::isfinite(a.f0)) { XPMATH_PRINTF("TFFMOD: infinite dividend\n");
@@ -1800,7 +1811,7 @@ XPMATH_INLINE_FUNCTION TripleFloat fmod(TripleFloat a, TripleFloat b) {
 // and scored correctly only because fmod itself carried drem's nint; each now
 // has its own QD body.
 XPMATH_INLINE_FUNCTION TripleFloat remainder(TripleFloat a, TripleFloat b) {
-    if (a.f0 != a.f0 || b.f0 != b.f0) return TripleFloat(a.f0 + b.f0);
+    if (a.f0 != a.f0 || b.f0 != b.f0) return TripleFloat(detail::eft_add(a.f0, b.f0));
     if (b.f0 == 0.0f) { XPMATH_PRINTF("TFREMAINDER: zero modulus\n");
                         return TripleFloat(0.0f / 0.0f); }
     if (!detail::isfinite(a.f0)) { XPMATH_PRINTF("TFREMAINDER: infinite dividend\n");
@@ -1936,7 +1947,7 @@ XPMATH_INLINE_FUNCTION TripleFloat tf_exp_ext(TripleFloat a, float resid) {
     const float k_inv_log2 = 1.44269504088896341f;
     if (a.f0 < -104.0f) return TripleFloat(0.0f);
     if (a.f0 >  88.722839f) { XPMATH_PRINTF("TFEXP: overflow\n"); return TripleFloat(HUGE_VALF); }
-    const float m = detail::floor(a.f0 * k_inv_log2 + 0.5f);
+    const float m = detail::floor(detail::eft_add(detail::eft_mul(a.f0, k_inv_log2), 0.5f));
     const float kLn2_1 =  0x1.62e4p-1f;
     const float kLn2_2 =  0x1.7f7ep-20f;
     const float kLn2_3 = -0x1.c61p-37f;

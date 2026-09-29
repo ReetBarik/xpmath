@@ -72,9 +72,11 @@
 #                   (Kokkos 5.1.0 requires C++20; that constraint belongs to
 #                   xpmath-kokkos after CORE_PLAN C10, not to this repository.)
 #
-#   FP contraction  OFF, on every arch and in both trees -- but spelled
-#                   differently, and with a different reach, per toolchain. See
-#                   the next block.
+#   FP contraction  OFF for every g++ / host compile and every AMD device
+#                   compile. NVIDIA device add/sub/mul inside eft_add,
+#                   eft_sub and eft_mul are add.rn / sub.rn / mul.rn in
+#                   include/xp/config.hpp, so the a100 and b200 device trees
+#                   do not pass --fmad=false. See the next block.
 #
 #   THE HOST TREE   held identical across all five arches, by construction:
 #                   same compiler, same flags. That is the point of splitting
@@ -109,35 +111,27 @@
 #   device tree, mi250  -ffp-contract=off given to hipcc as a CMAKE_CXX_FLAGS entry.
 #          hipcc is clang, so the one spelling covers its host AND device pass.
 #          mi300 is the same spelling; only --offload-arch changes (gfx942).
-#   device tree, a100   --fmad=false given to nvcc_wrapper as a CMAKE_CXX_FLAGS
-#          entry, which forwards it to nvcc and so reaches the DEVICE pass. The
-#          host pass of the same TU is g++ and is covered by
-#          tests/CMakeLists.txt's per-target -ffp-contract=off on the EFT targets.
-#          b200 is the same --fmad=false, with -arch=sm_100 pinned (the wrapper's
+#   device tree, a100   no --fmad flag. nvcc's default is --fmad=true. The
+#          three EFT helpers in include/xp/config.hpp emit add.rn / sub.rn /
+#          mul.rn (.f64 and .f32) on the CUDA device pass, so those three
+#          operations stay rounded even when the rest of the TU contracts.
+#          The host pass of the same TU is g++ and is covered by
+#          tests/CMakeLists.txt's per-target -ffp-contract=off on the EFT
+#          targets. The wrapper's default_arch stays sm_80.
+#          b200 is the same, with -arch=sm_100 pinned (the wrapper's
 #          default_arch is still sm_80).
 #
-# WHICH TARGETS GET IT: all of them, in both trees. This is a whole-build
-# CMAKE_CXX_FLAGS entry, not a per-target option, because the apples-to-apples
-# claim is about the build, not about eight test targets. tests/CMakeLists.txt
-# keeps its per-target flags unchanged; per-target options are appended AFTER
-# CMAKE_CXX_FLAGS, so the `*_contract_on` reporters still override the host-side
-# flag and still report what contraction collapses.
-#
-# RECORDED, NOT FIXED HERE -- the nvcc per-target guard has never engaged.
-# tests/CMakeLists.txt guards its `--fmad=false` / `--fmad=true` with
-# $<COMPILE_LANGUAGE:CUDA>. The top-level CMakeLists.txt declares
-# `project(xpmath ... LANGUAGES CXX)`, so under nvcc_wrapper-as-CXX every TU is
-# CXX and that genex never evaluates true. Measured, not inferred: the S1
-# STATUS block (docs/UPSTREAM_PLAN_STATUS.md, finding (e)) counted ZERO
-# occurrences of `--fmad` across the whole A100 build, against a prediction of
-# zero. Two consequences on a100, both of which follow from that measurement:
-#   * the `--fmad=false` in the a100 block below is the ONLY thing switching
-#     device contraction off, and
-#   * the `_contract_on` reporters do NOT get `--fmad=true` on their device
-#     pass, so on a100 they are host-contracted and device-uncontracted.
-# Fixing that means enabling CUDA as a project language, which changes how
-# every TU is compiled. It is out of scope here and is deliberately left as a
-# recorded defect rather than a silent one.
+# WHICH TARGETS GET THE FLAG: the host tree of every arch, the host arch's
+# device tree, and both AMD device trees. That is a whole-build
+# CMAKE_CXX_FLAGS entry, not a per-target option. The NVIDIA device trees do
+# not pass --fmad=false, and tests/CMakeLists.txt does not pass it either.
+# The three helpers in include/xp/config.hpp are the protection: eft_add /
+# eft_sub / eft_mul on the CUDA device pass are add.rn / sub.rn / mul.rn, so
+# those three operations stay rounded while nvcc's default --fmad=true stays
+# on for every other operation. The `*_contract_on` reporters still override
+# the host-side -ffp-contract flag and still report what contraction collapses
+# on the host pass. Their device pass is nvcc's default, which is already
+# --fmad=true.
 #
 # ---------------------------------------------------------------------------
 # THE MERGED VERDICT, AND WHY IT IS WRITTEN THE WAY IT IS
@@ -267,9 +261,9 @@ declare -A ARCH_CXX=(
 # wrapper defaults to sm_80 and the binary will not run on Blackwell.
 declare -A ARCH_CONTRACT=(
   [host]="-ffp-contract=off"
-  [a100]="--fmad=false"
+  [a100]=""
   [mi250]="-ffp-contract=off --offload-arch=gfx90a"
-  [b200]="--fmad=false -arch=sm_100"
+  [b200]="-arch=sm_100"
   [mi300]="-ffp-contract=off --offload-arch=gfx942"
 )
 

@@ -81,7 +81,7 @@ XPMATH_INLINE_FUNCTION void ff_cross_accum(float* e, float w) {
         w = err;
         if (w == 0.0f) return;
     }
-    e[4] += w;
+    e[4] = detail::eft_add(e[4], w);
 }
 
 XPMATH_INLINE_FUNCTION FloatFloat ff_cross(FloatFloat a, FloatFloat b,
@@ -110,9 +110,9 @@ XPMATH_INLINE_FUNCTION FloatFloat ff_cross(FloatFloat a, FloatFloat b,
         e[i + 1] = er;
     }
     e[0] = s;
-    const float t  = ((e[4] + e[3]) + e[2]) + e[1];
-    const float hi = e[0] + t;
-    return FloatFloat(hi, t - (hi - e[0]));
+    const float t  = detail::eft_add(detail::eft_add(detail::eft_add(e[4], e[3]), e[2]), e[1]);
+    const float hi = detail::eft_add(e[0], t);
+    return FloatFloat(hi, detail::eft_sub(t, detail::eft_sub(hi, e[0])));
 }
 
 } // namespace detail
@@ -174,8 +174,10 @@ struct FloatFloatComplex {
         if (recalc) {
             const float inf = HUGE_VALF;
             return FloatFloatComplex(
-                FloatFloat(inf * (nar * nbr - nai * nbi)),
-                FloatFloat(inf * (nar * nbi + nai * nbr)));
+                FloatFloat(detail::eft_mul(inf, detail::eft_sub(
+                    detail::eft_mul(nar, nbr), detail::eft_mul(nai, nbi)))),
+                FloatFloat(detail::eft_mul(inf, detail::eft_add(
+                    detail::eft_mul(nar, nbi), detail::eft_mul(nai, nbr)))));
         }
 
         const float S = 0x1p-65f, U = 0x1p65f;

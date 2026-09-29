@@ -242,7 +242,7 @@ XPMATH_INLINE_FUNCTION void xp_ph_push(S* e, int& m, S t, int cap) {
     // dropping means a future caller that does overflow loses precision
     // instead of losing the expansion's largest term outright.
     if (m < cap) e[m++] = q;
-    else         e[cap - 1] += q;
+    else         e[cap - 1] = eft_add(e[cap - 1], q);
 }
 
 // Repack so every component is full-width, then emit the leading `n` in
@@ -333,7 +333,7 @@ XPMATH_NOINLINE_FUNCTION int xp_ph_reduce(const S* w, int nw, int guard, int nta
         for (int t = 0; t < P::kInDigits; ++t) {
             u    = detail::ldexp(u, cb);         // exact
             d[t] = detail::rint(u);
-            u    = u - d[t];                     // exact
+            u    = eft_sub(u, d[t]);             // exact
         }
 
         for (int t = 0; t < P::kInDigits; ++t) {
@@ -343,11 +343,11 @@ XPMATH_NOINLINE_FUNCTION int xp_ph_reduce(const S* w, int nw, int guard, int nta
                 const int k = jmin + a - tt - 2;
                 if (k < 0) continue;
                 if (k >= ntab) break;
-                const S pr = d[t] * P::table(k);            // exact
+                const S pr = eft_mul(d[t], P::table(k));    // exact
                 const S ph = detail::rint(detail::ldexp(pr, -cb));
-                const S pl = pr - detail::ldexp(ph, cb);    // exact
-                if (a > 0) A[a - 1] += ph;   // a==0: weight >= 4, an exact
-                A[a] += pl;                  //   multiple of 4; drop it
+                const S pl = eft_sub(pr, detail::ldexp(ph, cb));  // exact
+                if (a > 0) A[a - 1] = eft_add(A[a - 1], ph);  // a==0: weight >= 4, an exact
+                A[a] = eft_add(A[a], pl);                     //   multiple of 4; drop it
             }
         }
     }
@@ -355,8 +355,8 @@ XPMATH_NOINLINE_FUNCTION int xp_ph_reduce(const S* w, int nw, int guard, int nta
     // ---- carry, so every entry is a cb-bit signed digit --------------------
     for (int a = nacc - 1; a > 0; --a) {
         const S c = detail::rint(detail::ldexp(A[a], -cb));
-        A[a] -= detail::ldexp(c, cb);
-        A[a - 1] += c;
+        A[a] = eft_sub(A[a], detail::ldexp(c, cb));
+        A[a - 1] = eft_add(A[a - 1], c);
     }
 
     // ---- reduce the top position mod 4 ------------------------------------
@@ -365,7 +365,7 @@ XPMATH_NOINLINE_FUNCTION int xp_ph_reduce(const S* w, int nw, int guard, int nta
     {
         const int mb = 2 - w0;                   // in [1, cb]
         const S   q  = detail::rint(detail::ldexp(A[0], -mb));
-        A[0] -= detail::ldexp(q, mb);
+        A[0] = eft_sub(A[0], detail::ldexp(q, mb));
     }
 
     // ---- 4. n0 = rint(V), then f = V - n0 ---------------------------------
@@ -373,17 +373,17 @@ XPMATH_NOINLINE_FUNCTION int xp_ph_reduce(const S* w, int nw, int guard, int nta
     // that to a tie are the ones where either choice is equally good: (n, f)
     // and (n+1, f-1) denote the same angle, and because n0 is subtracted back
     // out of the digits below, whichever rint picks stays self-consistent.
-    S v = detail::ldexp(A[0], w0)
-        + detail::ldexp(A[1], w0 - cb)
-        + detail::ldexp(A[2], w0 - 2 * cb);
+    S v = eft_add(eft_add(detail::ldexp(A[0], w0),
+                          detail::ldexp(A[1], w0 - cb)),
+                  detail::ldexp(A[2], w0 - 2 * cb));
     const S n0 = detail::rint(v);
     if (n0 != S(0)) {
         // Subtract at position 1, where n0 * 2^(cb-w0) is still an exact
         // integer (position 0 would need n0/2 when w0 == 1).
-        A[1] -= detail::ldexp(n0, cb - w0);
+        A[1] = eft_sub(A[1], detail::ldexp(n0, cb - w0));
         const S c = detail::rint(detail::ldexp(A[1], -cb));
-        A[1] -= detail::ldexp(c, cb);
-        A[0] += c;
+        A[1] = eft_sub(A[1], detail::ldexp(c, cb));
+        A[0] = eft_add(A[0], c);
     }
 
     // ---- canonicalize the digits to one sign ------------------------------
@@ -396,12 +396,12 @@ XPMATH_NOINLINE_FUNCTION int xp_ph_reduce(const S* w, int nw, int guard, int nta
     // turns the cancellation into leading ZEROS, which is what the scan needs.
     const S base = detail::ldexp(S(1), cb);
     for (int a = nacc - 1; a > 0; --a)
-        if (A[a] < S(0)) { A[a] += base; A[a - 1] -= S(1); }
+        if (A[a] < S(0)) { A[a] = eft_add(A[a], base); A[a - 1] = eft_sub(A[a - 1], S(1)); }
     S sgn = S(1);
     if (A[0] < S(0)) {
         for (int a = 0; a < nacc; ++a) A[a] = -A[a];
         for (int a = nacc - 1; a > 0; --a)
-            if (A[a] < S(0)) { A[a] += base; A[a - 1] -= S(1); }
+            if (A[a] < S(0)) { A[a] = eft_add(A[a], base); A[a - 1] = eft_sub(A[a - 1], S(1)); }
         sgn = S(-1);
     }
 

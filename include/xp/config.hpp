@@ -303,19 +303,24 @@ using std::sqrt;
 #endif
 
 // ============================================================
-// 5. Error-free transforms — HIP device must not reassociate them
+// 5. Error-free transforms — device must not reassociate them
 // ============================================================
 // Knuth TwoSum / Dekker TwoProd are sequences of IEEE rounded ops whose
-// residuals are the rounding error. hipcc/gfx90a (ROCm 7.0.2) reassociates
-// those residuals on the device pass even when CMAKE_CXX_FLAGS carries
-// -ffp-contract=off: that flag reaches the host clang, not the AMDGPU
-// backend. CUDA is fine because --fmad=false is a device flag. Host g++
-// is fine because -ffp-contract=off is the flag it honours.
+// residuals are the rounding error. Fusing a multiply with an add erases
+// that residual.
 //
-// hipcc's -ffp-contract=off reaches the host clang, not AMDGPU; CUDA
-// --fmad=false is a device flag. Volatile forces each rounded op to
-// hit the pipe on the HIP device pass. Host / CUDA / SYCL keep the
-// bare operators so those records stay bit-identical.
+// HIP: hipcc/gfx90a (ROCm 7.0.2) reassociates those residuals on the
+// device pass even when CMAKE_CXX_FLAGS carries -ffp-contract=off: that
+// flag reaches the host clang, not the AMDGPU backend. Volatile forces
+// each rounded op to hit the pipe under __HIP_DEVICE_COMPILE__. That
+// path stays as it is.
+//
+// CUDA: a bare + / - / * is contracted under nvcc's default --fmad=true.
+// On the device pass (__CUDA_ARCH__) these three helpers emit add.rn /
+// sub.rn / mul.rn, .f64 and .f32, so the rounding does not depend on
+// nvcc honouring volatile and --fmad=true cannot fuse them. The host
+// pass, and every non-CUDA compile, keeps the bare operators. Host g++
+// is covered by -ffp-contract=off.
 //
 // The C8 first-produce 61,116-above-bound table was NOT this. That was
 // unsequenced Rng::logunif (g++ vs hipcc argument order) — see
@@ -328,10 +333,29 @@ XPMATH_INLINE_FUNCTION T eft_add(T a, T b) {
     volatile T va = a;
     volatile T vb = b;
     return va + vb;
+#elif defined(__CUDA_ARCH__)
+    static_assert(sizeof(T) == 0,
+                  "CUDA eft_add is specialized for float and double");
+    return a + b;
 #else
     return a + b;
 #endif
 }
+
+#if defined(__CUDA_ARCH__)
+template <>
+XPMATH_INLINE_FUNCTION double eft_add(double a, double b) {
+    double r;
+    asm("add.rn.f64 %0, %1, %2;" : "=d"(r) : "d"(a), "d"(b));
+    return r;
+}
+template <>
+XPMATH_INLINE_FUNCTION float eft_add(float a, float b) {
+    float r;
+    asm("add.rn.f32 %0, %1, %2;" : "=f"(r) : "f"(a), "f"(b));
+    return r;
+}
+#endif
 
 template <class T>
 XPMATH_INLINE_FUNCTION T eft_sub(T a, T b) {
@@ -339,10 +363,29 @@ XPMATH_INLINE_FUNCTION T eft_sub(T a, T b) {
     volatile T va = a;
     volatile T vb = b;
     return va - vb;
+#elif defined(__CUDA_ARCH__)
+    static_assert(sizeof(T) == 0,
+                  "CUDA eft_sub is specialized for float and double");
+    return a - b;
 #else
     return a - b;
 #endif
 }
+
+#if defined(__CUDA_ARCH__)
+template <>
+XPMATH_INLINE_FUNCTION double eft_sub(double a, double b) {
+    double r;
+    asm("sub.rn.f64 %0, %1, %2;" : "=d"(r) : "d"(a), "d"(b));
+    return r;
+}
+template <>
+XPMATH_INLINE_FUNCTION float eft_sub(float a, float b) {
+    float r;
+    asm("sub.rn.f32 %0, %1, %2;" : "=f"(r) : "f"(a), "f"(b));
+    return r;
+}
+#endif
 
 template <class T>
 XPMATH_INLINE_FUNCTION T eft_mul(T a, T b) {
@@ -350,10 +393,29 @@ XPMATH_INLINE_FUNCTION T eft_mul(T a, T b) {
     volatile T va = a;
     volatile T vb = b;
     return va * vb;
+#elif defined(__CUDA_ARCH__)
+    static_assert(sizeof(T) == 0,
+                  "CUDA eft_mul is specialized for float and double");
+    return a * b;
 #else
     return a * b;
 #endif
 }
+
+#if defined(__CUDA_ARCH__)
+template <>
+XPMATH_INLINE_FUNCTION double eft_mul(double a, double b) {
+    double r;
+    asm("mul.rn.f64 %0, %1, %2;" : "=d"(r) : "d"(a), "d"(b));
+    return r;
+}
+template <>
+XPMATH_INLINE_FUNCTION float eft_mul(float a, float b) {
+    float r;
+    asm("mul.rn.f32 %0, %1, %2;" : "=f"(r) : "f"(a), "f"(b));
+    return r;
+}
+#endif
 
 // Knuth TwoSum. No |a|>=|b| assumption.
 template <class T>

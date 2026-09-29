@@ -115,7 +115,7 @@ XPMATH_INLINE_FUNCTION void qf_cross_accum(float* e, float w) {
         w = err;
         if (w == 0.0f) return;
     }
-    e[6] += w;
+    e[6] = detail::eft_add(e[6], w);
 }
 
 XPMATH_INLINE_FUNCTION QuadFloat qf_cross(QuadFloat a, QuadFloat b,
@@ -147,8 +147,8 @@ XPMATH_INLINE_FUNCTION QuadFloat qf_cross(QuadFloat a, QuadFloat b,
                 qf_cross_accum(e,  p);  qf_cross_accum(e, -q);
                 qf_cross_accum(e, ep);  qf_cross_accum(e, -eq);
             } else {
-                qf_cross_accum(e,  aw[i] * bw[j]);
-                qf_cross_accum(e, -cw[i] * dw[j]);
+                qf_cross_accum(e,  detail::eft_mul(aw[i], bw[j]));
+                qf_cross_accum(e,  detail::eft_mul(-cw[i], dw[j]));
             }
         }
     }
@@ -163,7 +163,7 @@ XPMATH_INLINE_FUNCTION QuadFloat qf_cross(QuadFloat a, QuadFloat b,
         e[i + 1] = er;
     }
     e[0] = s;
-    e[4] = (e[6] + e[5]) + e[4];
+    e[4] = detail::eft_add(detail::eft_add(e[6], e[5]), e[4]);
     renorm_4(e[0], e[1], e[2], e[3], e[4]);
     return QuadFloat(e[0], e[1], e[2], e[3]);
 }
@@ -232,8 +232,10 @@ struct QuadFloatComplex {
         if (recalc) {
             const float inf = HUGE_VALF;
             return QuadFloatComplex(
-                QuadFloat(inf * (nar * nbr - nai * nbi)),
-                QuadFloat(inf * (nar * nbi + nai * nbr)));
+                QuadFloat(detail::eft_mul(inf, detail::eft_sub(
+                    detail::eft_mul(nar, nbr), detail::eft_mul(nai, nbi)))),
+                QuadFloat(detail::eft_mul(inf, detail::eft_add(
+                    detail::eft_mul(nar, nbi), detail::eft_mul(nai, nbr)))));
         }
 
         const float S = 0x1p-65f, U = 0x1p65f;
@@ -587,7 +589,9 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex log1p(QuadFloatComplex w) {
                                atan2(w.im, add(QuadFloat(1.0f), w.re)));
 }
 
-XPMATH_INLINE_FUNCTION QuadFloatComplex log10(QuadFloatComplex z) {
+// Not inline. On sm_100 the sweep finished and these answers were destroyed
+// (TD-4, silent form). Same mark as TripleFloatComplex::log10.
+XPMATH_NOINLINE_FUNCTION QuadFloatComplex log10(QuadFloatComplex z) {
     QuadFloatComplex lg = log(z);
     QuadFloat ln10 = QuadFloat_log10();
     return QuadFloatComplex(divide(lg.re, ln10), divide(lg.im, ln10));
@@ -920,7 +924,9 @@ XPMATH_INLINE_FUNCTION QuadFloat xp_asin_real_mag(QuadFloat x, QuadFloat y) {
 XPMATH_INLINE_FUNCTION QuadFloat xp_abs_word(QuadFloat v) {
     return (v.f0 < 0.0f) ? negate(v) : v;
 }
-XPMATH_INLINE_FUNCTION QuadFloatComplex asin(QuadFloatComplex z) {
+// Not inline. On sm_100 the sweep finished and these answers were destroyed
+// (TD-4, silent form). Same mark as TripleFloatComplex::log10.
+XPMATH_NOINLINE_FUNCTION QuadFloatComplex asin(QuadFloatComplex z) {
     // Both components from the Hull/Fairgrove/Tang r-s-a parametrisation, on the
     // first-quadrant magnitudes, with the signs put back by copysign so a signed
     // zero on either cut picks the C99 Annex G side. Re asin is odd in x and Im
@@ -1004,7 +1010,9 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex asin(QuadFloatComplex z) {
 // z=2+0i -> -1.3170i; z=2-0i -> +1.3170i; z=-2+0i -> pi-1.3170i;
 // z=-2-0i -> pi+1.3170i. Now checked mechanically, on all four backends and
 // including the sign of every zero component, by scripts/probe_acos_branch.cpp.
-XPMATH_INLINE_FUNCTION QuadFloatComplex acos(QuadFloatComplex z) {
+// Not inline. On sm_100 the sweep finished and these answers were destroyed
+// (TD-4, silent form). Same mark as TripleFloatComplex::log10.
+XPMATH_NOINLINE_FUNCTION QuadFloatComplex acos(QuadFloatComplex z) {
     QuadFloat leg = xp_asin_real_leg(xp_abs_word(z.re), xp_abs_word(z.im));
     if (leg.f0 == 0.0f) leg = QuadFloat(0.0f);   // never -0; see SIGNED ZEROS above
     return QuadFloatComplex(atan2(leg, z.re), negate(asin(z).im));
