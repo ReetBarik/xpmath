@@ -94,7 +94,7 @@ the types are annotated `XPMATH_INLINE_FUNCTION` and run on device).
 
 ## Versioning
 
-`0.2.0`, exported with `COMPATIBILITY SameMajorVersion`. Because the major
+`0.2.1`, exported with `COMPATIBILITY SameMajorVersion`. Because the major
 version is 0, CMake treats **every 0.x as incompatible with every other 0.x** —
 `find_package(xpmath 0.2)` succeeds and `find_package(xpmath 0.3)` fails. That
 is deliberate: the API has never been consumed by anyone outside this repo, and
