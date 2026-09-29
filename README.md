@@ -178,9 +178,12 @@ scripts/xpm_build.sh --arch mi250 --build-dir /tmp/b_mi250
 ```
 
 Read that script's header before comparing numbers across arches: it states what
-is held identical (`-O` level, C++17, contraction off) and what is not
-(compiler, device backend). Every configure stamps `build-info.txt` into the
-build directory; `build_provenance` fails if it is missing or short a field.
+is held identical (`-O` level, C++17) and what is not (compiler, device
+backend). Host and AMD builds pass `-ffp-contract=off`. NVIDIA device builds do
+not pass `--fmad=false`. `eft_add`, `eft_sub`, and `eft_mul` stay rounded in
+the helpers: `volatile` on the host and on AMD, `add.rn` / `sub.rn` / `mul.rn`
+on CUDA. Every configure stamps `build-info.txt` into the build directory;
+`build_provenance` fails if it is missing or short a field.
 
 `scripts/check_standalone_no_kokkos.sh` compiles each `include/xp/` header with
 plain `g++ -std=c++17` against an include path containing **only** `include/`,

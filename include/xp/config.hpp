@@ -312,15 +312,18 @@ using std::sqrt;
 // HIP: hipcc/gfx90a (ROCm 7.0.2) reassociates those residuals on the
 // device pass even when CMAKE_CXX_FLAGS carries -ffp-contract=off: that
 // flag reaches the host clang, not the AMDGPU backend. Volatile forces
-// each rounded op to hit the pipe under __HIP_DEVICE_COMPILE__. That
-// path stays as it is.
+// each rounded op to hit the pipe under __HIP_DEVICE_COMPILE__.
+//
+// Host: g++ 13.3 -O3 -ffp-contract=fast and -ffast-math both fuse the
+// inlined product a*b - c into one vfmsub, which zeroes the residual.
+// The same volatile store/reload keeps it a separate mul and sub. The
+// repository still passes -ffp-contract=off; the volatile is what holds
+// when a user's translation unit does not.
 //
 // CUDA: a bare + / - / * is contracted under nvcc's default --fmad=true.
 // On the device pass (__CUDA_ARCH__) these three helpers emit add.rn /
 // sub.rn / mul.rn, .f64 and .f32, so the rounding does not depend on
-// nvcc honouring volatile and --fmad=true cannot fuse them. The host
-// pass, and every non-CUDA compile, keeps the bare operators. Host g++
-// is covered by -ffp-contract=off.
+// nvcc honouring volatile and --fmad=true cannot fuse them.
 //
 // The C8 first-produce 61,116-above-bound table was NOT this. That was
 // unsequenced Rng::logunif (g++ vs hipcc argument order) — see
@@ -329,16 +332,14 @@ using std::sqrt;
 // stay so a future HIP bump cannot reassociate TwoSum/TwoProd.
 template <class T>
 XPMATH_INLINE_FUNCTION T eft_add(T a, T b) {
-#if defined(__HIP_DEVICE_COMPILE__)
-    volatile T va = a;
-    volatile T vb = b;
-    return va + vb;
-#elif defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
     static_assert(sizeof(T) == 0,
                   "CUDA eft_add is specialized for float and double");
     return a + b;
 #else
-    return a + b;
+    volatile T va = a;
+    volatile T vb = b;
+    return va + vb;
 #endif
 }
 
@@ -359,16 +360,14 @@ XPMATH_INLINE_FUNCTION float eft_add(float a, float b) {
 
 template <class T>
 XPMATH_INLINE_FUNCTION T eft_sub(T a, T b) {
-#if defined(__HIP_DEVICE_COMPILE__)
-    volatile T va = a;
-    volatile T vb = b;
-    return va - vb;
-#elif defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
     static_assert(sizeof(T) == 0,
                   "CUDA eft_sub is specialized for float and double");
     return a - b;
 #else
-    return a - b;
+    volatile T va = a;
+    volatile T vb = b;
+    return va - vb;
 #endif
 }
 
@@ -389,16 +388,14 @@ XPMATH_INLINE_FUNCTION float eft_sub(float a, float b) {
 
 template <class T>
 XPMATH_INLINE_FUNCTION T eft_mul(T a, T b) {
-#if defined(__HIP_DEVICE_COMPILE__)
-    volatile T va = a;
-    volatile T vb = b;
-    return va * vb;
-#elif defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
     static_assert(sizeof(T) == 0,
                   "CUDA eft_mul is specialized for float and double");
     return a * b;
 #else
-    return a * b;
+    volatile T va = a;
+    volatile T vb = b;
+    return va * vb;
 #endif
 }
 
