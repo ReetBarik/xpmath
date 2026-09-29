@@ -589,7 +589,9 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex log1p(QuadFloatComplex w) {
                                atan2(w.im, add(QuadFloat(1.0f), w.re)));
 }
 
-XPMATH_INLINE_FUNCTION QuadFloatComplex log10(QuadFloatComplex z) {
+// Not inline. On sm_100 the sweep finished and these answers were destroyed
+// (TD-4, silent form). Same mark as TripleFloatComplex::log10.
+XPMATH_NOINLINE_FUNCTION QuadFloatComplex log10(QuadFloatComplex z) {
     QuadFloatComplex lg = log(z);
     QuadFloat ln10 = QuadFloat_log10();
     return QuadFloatComplex(divide(lg.re, ln10), divide(lg.im, ln10));
@@ -922,7 +924,9 @@ XPMATH_INLINE_FUNCTION QuadFloat xp_asin_real_mag(QuadFloat x, QuadFloat y) {
 XPMATH_INLINE_FUNCTION QuadFloat xp_abs_word(QuadFloat v) {
     return (v.f0 < 0.0f) ? negate(v) : v;
 }
-XPMATH_INLINE_FUNCTION QuadFloatComplex asin(QuadFloatComplex z) {
+// Not inline. On sm_100 the sweep finished and these answers were destroyed
+// (TD-4, silent form). Same mark as TripleFloatComplex::log10.
+XPMATH_NOINLINE_FUNCTION QuadFloatComplex asin(QuadFloatComplex z) {
     // Both components from the Hull/Fairgrove/Tang r-s-a parametrisation, on the
     // first-quadrant magnitudes, with the signs put back by copysign so a signed
     // zero on either cut picks the C99 Annex G side. Re asin is odd in x and Im
@@ -1006,7 +1010,9 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex asin(QuadFloatComplex z) {
 // z=2+0i -> -1.3170i; z=2-0i -> +1.3170i; z=-2+0i -> pi-1.3170i;
 // z=-2-0i -> pi+1.3170i. Now checked mechanically, on all four backends and
 // including the sign of every zero component, by scripts/probe_acos_branch.cpp.
-XPMATH_INLINE_FUNCTION QuadFloatComplex acos(QuadFloatComplex z) {
+// Not inline. On sm_100 the sweep finished and these answers were destroyed
+// (TD-4, silent form). Same mark as TripleFloatComplex::log10.
+XPMATH_NOINLINE_FUNCTION QuadFloatComplex acos(QuadFloatComplex z) {
     QuadFloat leg = xp_asin_real_leg(xp_abs_word(z.re), xp_abs_word(z.im));
     if (leg.f0 == 0.0f) leg = QuadFloat(0.0f);   // never -0; see SIGNED ZEROS above
     return QuadFloatComplex(atan2(leg, z.re), negate(asin(z).im));

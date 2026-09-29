@@ -1677,11 +1677,15 @@ XPMATH_NOINLINE_FUNCTION TripleFloat log1p(TripleFloat a) {
     return log(add(a, TripleFloat(1.0f)));
 }
 
-XPMATH_INLINE_FUNCTION TripleFloat log10(TripleFloat a) {
+// Not inline. On sm_100 the sweep finished and these answers were destroyed
+// (TD-4, silent form). Same mark as TripleFloatComplex::log10.
+XPMATH_NOINLINE_FUNCTION TripleFloat log10(TripleFloat a) {
     return divide(log(a), TripleFloat_log10());
 }
 
-XPMATH_INLINE_FUNCTION TripleFloat log2(TripleFloat a) {
+// Not inline. On sm_100 the sweep finished and these answers were destroyed
+// (TD-4, silent form). Same mark as TripleFloatComplex::log10.
+XPMATH_NOINLINE_FUNCTION TripleFloat log2(TripleFloat a) {
     return divide(log(a), TripleFloat_log2());
 }
 

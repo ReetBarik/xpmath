@@ -124,31 +124,14 @@
 # WHICH TARGETS GET THE FLAG: the host tree of every arch, the host arch's
 # device tree, and both AMD device trees. That is a whole-build
 # CMAKE_CXX_FLAGS entry, not a per-target option. The NVIDIA device trees do
-# not pass --fmad=false; the three helpers in include/xp/config.hpp are the
-# protection. tests/CMakeLists.txt keeps its per-target flags unchanged;
-# per-target options are appended AFTER CMAKE_CXX_FLAGS, so the
-# `*_contract_on` reporters still override the host-side flag and still
-# report what contraction collapses.
-#
-# RECORDED, NOT FIXED HERE -- the nvcc per-target guard has never engaged.
-# tests/CMakeLists.txt guards its `--fmad=false` / `--fmad=true` with
-# $<COMPILE_LANGUAGE:CUDA>. The top-level CMakeLists.txt declares
-# `project(xpmath ... LANGUAGES CXX)`, so under nvcc_wrapper-as-CXX every TU is
-# CXX and that genex never evaluates true. Measured, not inferred: the S1
-# STATUS block (docs/UPSTREAM_PLAN_STATUS.md, finding (e)) counted ZERO
-# occurrences of `--fmad` across the whole A100 build, against a prediction of
-# zero. Two consequences:
-#   * eft_add / eft_sub / eft_mul on the CUDA device pass are the rn
-#     instructions in include/xp/config.hpp. The a100 and b200 rows below
-#     do not pass --fmad=false, so nvcc's default --fmad=true stays on for
-#     every other operation.
-#   * the `_contract_on` reporters do NOT get an explicit `--fmad=true` on
-#     their device pass, because the genex never evaluates true. That gap
-#     is recorded, not fixed here. The device pass is at nvcc's default,
-#     which is already --fmad=true.
-# Fixing that means enabling CUDA as a project language, which changes how
-# every TU is compiled. It is out of scope here and is deliberately left as a
-# recorded defect rather than a silent one.
+# not pass --fmad=false, and tests/CMakeLists.txt does not pass it either.
+# The three helpers in include/xp/config.hpp are the protection: eft_add /
+# eft_sub / eft_mul on the CUDA device pass are add.rn / sub.rn / mul.rn, so
+# those three operations stay rounded while nvcc's default --fmad=true stays
+# on for every other operation. The `*_contract_on` reporters still override
+# the host-side -ffp-contract flag and still report what contraction collapses
+# on the host pass. Their device pass is nvcc's default, which is already
+# --fmad=true.
 #
 # ---------------------------------------------------------------------------
 # THE MERGED VERDICT, AND WHY IT IS WRITTEN THE WAY IT IS

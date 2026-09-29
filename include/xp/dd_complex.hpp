@@ -463,7 +463,10 @@ XPMATH_INLINE_FUNCTION DoubleDoubleComplex exp(DoubleDoubleComplex z) {
     return DoubleDoubleComplex(multiply(er, c), multiply(er, s));
 }
 
-XPMATH_INLINE_FUNCTION DoubleDoubleComplex log(DoubleDoubleComplex z) {
+// Not inline. On sm_100, pasting this body into the sweep kernel makes
+// nvcc/ptxas underestimate the __local__ frame (TD-4). Same mark as
+// TripleFloatComplex::log.
+XPMATH_NOINLINE_FUNCTION DoubleDoubleComplex log(DoubleDoubleComplex z) {
     DoubleDouble modulus = abs(z);
     DoubleDouble arg     = atan2(z.im, z.re); // atan2(im, re)
     return DoubleDoubleComplex(log(modulus), arg);
@@ -503,7 +506,9 @@ XPMATH_INLINE_FUNCTION DoubleDoubleComplex log1p(DoubleDoubleComplex w) {
                                atan2(w.im, add(DoubleDouble(1.0), w.re)));
 }
 
-XPMATH_INLINE_FUNCTION DoubleDoubleComplex log10(DoubleDoubleComplex z) {
+// Not inline. Calls noinline log and two divides; pasting that into the
+// sweep kernel is the same sm_100 frame bug as TripleFloatComplex::log10.
+XPMATH_NOINLINE_FUNCTION DoubleDoubleComplex log10(DoubleDoubleComplex z) {
     DoubleDoubleComplex lg = log(z);
     DoubleDouble ln10 = DoubleDouble_log10();
     return DoubleDoubleComplex(divide(lg.re, ln10), divide(lg.im, ln10));

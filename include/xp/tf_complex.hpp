@@ -556,7 +556,10 @@ XPMATH_INLINE_FUNCTION TripleFloatComplex log1p(TripleFloatComplex w) {
                                atan2(w.im, add(TripleFloat(1.0f), w.re)));
 }
 
-XPMATH_INLINE_FUNCTION TripleFloatComplex log10(TripleFloatComplex z) {
+// Not inline. On sm_100, pasting this body (noinline log plus two noinline
+// divides) into its callers makes nvcc/ptxas underestimate the __local__ frame
+// (TD-4); cudaLimitStackSize cannot enlarge that frame. Same mark as log above.
+XPMATH_NOINLINE_FUNCTION TripleFloatComplex log10(TripleFloatComplex z) {
     TripleFloatComplex lg = log(z);
     TripleFloat ln10 = TripleFloat_log10();
     return TripleFloatComplex(divide(lg.re, ln10), divide(lg.im, ln10));
@@ -1241,7 +1244,9 @@ XPMATH_INLINE_FUNCTION TripleFloatComplex asinh(TripleFloatComplex z) {
 // sqrt((z-1)/2)). See dd_complex.hpp:346-357 for the full rationale. The old
 // log(z + sqrt(z*z - 1)) form was on the wrong sqrt sheet throughout
 // Re(z) < 0, and overflowed above |z| ~ 1.8e19 where z*z leaves FP32 range.
-XPMATH_INLINE_FUNCTION TripleFloatComplex acosh(TripleFloatComplex z) {
+// Not inline. On sm_100 this body faulted in its own kernel (TD-4).
+// cudaLimitStackSize cannot enlarge the frame ptxas sizes statically.
+XPMATH_NOINLINE_FUNCTION TripleFloatComplex acosh(TripleFloatComplex z) {
     // acosh IS acos, rotated.  acosh(z) = +-i acos(z), and i(A + iB) = -B + iA,
     // so Re acosh = -Im acos = |Im asin| and Im acosh = Re acos.  Both halves
     // are taken from the acos reformulation; nothing here is a formula of its

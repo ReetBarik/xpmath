@@ -295,13 +295,9 @@ function(xpm_add_device_eft_test name)
   if(CMAKE_CXX_COMPILER_ID MATCHES "IntelLLVM|Intel")
     target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fp-model=precise>)
   endif()
-  # Keyed on CMAKE_CUDA_COMPILER rather than Kokkos_ENABLE_CUDA: these targets
-  # do not link Kokkos, so whether Kokkos was built with CUDA says nothing about
-  # how they compile. A no-op today (no source here is CUDA-language yet) and
-  # the line C5 needs when one is.
-  if(CMAKE_CUDA_COMPILER)
-    target_compile_options(${name} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--fmad=false>)
-  endif()
+  # No --fmad=false. On CUDA the EFT helpers in include/xp/config.hpp emit
+  # add.rn / sub.rn / mul.rn, so the device pass does not need the flag.
+  # The host pass of the same TU is covered by -ffp-contract=off above.
   target_compile_definitions(${name} PRIVATE XPMATH_CONTRACTION_MODE=0)
   set_property(GLOBAL APPEND PROPERTY XPMATH_EFT_OFF_TARGETS ${name})
 endfunction()
@@ -327,9 +323,8 @@ function(xpm_add_device_eft_test_contract_on name)
   if(CMAKE_CXX_COMPILER_ID MATCHES "IntelLLVM|Intel")
     target_compile_options(${tgt} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fp-model=fast>)
   endif()
-  if(CMAKE_CUDA_COMPILER)
-    target_compile_options(${tgt} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--fmad=true>)
-  endif()
+  # No --fmad=true. nvcc's default is already that, and this project compiles
+  # through nvcc_wrapper as CXX, so a COMPILE_LANGUAGE:CUDA genex never fired.
 
   # Same baseline-path derivation as the Kokkos helper, so a migrated test keeps
   # reading the same <base>_baseline.txt it read before and drift detection is
