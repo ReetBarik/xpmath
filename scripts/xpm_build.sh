@@ -73,9 +73,10 @@
 #                   xpmath-kokkos after CORE_PLAN C10, not to this repository.)
 #
 #   FP contraction  OFF for every g++ / host compile and every AMD device
-#                   compile. NVIDIA device add/sub/mul inside eft_add,
-#                   eft_sub and eft_mul are add.rn / sub.rn / mul.rn in
-#                   include/xp/config.hpp, so the a100 and b200 device trees
+#                   compile. eft_add / eft_sub / eft_mul are volatile on the
+#                   host and on AMD, and add.rn / sub.rn / mul.rn on the CUDA
+#                   device pass, so a user's -ffp-contract=fast or --fmad=true
+#                   cannot fuse those three. The a100 and b200 device trees
 #                   do not pass --fmad=false. See the next block.
 #
 #   THE HOST TREE   held identical across all five arches, by construction:
@@ -115,9 +116,9 @@
 #          three EFT helpers in include/xp/config.hpp emit add.rn / sub.rn /
 #          mul.rn (.f64 and .f32) on the CUDA device pass, so those three
 #          operations stay rounded even when the rest of the TU contracts.
-#          The host pass of the same TU is g++ and is covered by
-#          tests/CMakeLists.txt's per-target -ffp-contract=off on the EFT
-#          targets. The wrapper's default_arch stays sm_80.
+#          The host pass of the same TU is g++. Those three helpers are
+#          volatile there, so -ffp-contract=fast cannot fuse them either.
+#          The wrapper's default_arch stays sm_80.
 #          b200 is the same, with -arch=sm_100 pinned (the wrapper's
 #          default_arch is still sm_80).
 #

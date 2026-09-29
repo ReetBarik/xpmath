@@ -85,8 +85,11 @@ On every present arch the measured `abs` floor matches the host. FTZ did
 
 ### 2. FMA contraction
 
-Every arch builds with `-ffp-contract=off` / `--fmad=false`, so Dekker
-TwoSum / TwoProd sequences must not collapse into an FMA. Confirmation is
+Host and AMD builds pass `-ffp-contract=off`. NVIDIA device builds do not
+pass `--fmad=false`. `eft_add`, `eft_sub`, and `eft_mul` stay rounded in
+the helpers: `volatile` on the host and on AMD, `add.rn` / `sub.rn` /
+`mul.rn` on CUDA, so Dekker TwoSum / TwoProd must not collapse into an
+FMA. Confirmation is
 from the results, not from the flags: count of bit-identical points in the
 arithmetic / selection / rounding family
 (`add sub mul div fma abs copysign fmax fmin fdim hypot ceil floor round

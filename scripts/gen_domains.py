@@ -831,8 +831,11 @@ def emit_device_precision(grid, host, a100, mi250):
     # 2. FMA
     w("### 2. FMA contraction")
     w("")
-    w("Every arch builds with `-ffp-contract=off` / `--fmad=false`, so Dekker")
-    w("TwoSum / TwoProd sequences must not collapse into an FMA. Confirmation is")
+    w("Host and AMD builds pass `-ffp-contract=off`. NVIDIA device builds do not")
+    w("pass `--fmad=false`. `eft_add`, `eft_sub`, and `eft_mul` stay rounded in")
+    w("the helpers: `volatile` on the host and on AMD, `add.rn` / `sub.rn` /")
+    w("`mul.rn` on CUDA, so Dekker TwoSum / TwoProd must not collapse into an")
+    w("FMA. Confirmation is")
     w("from the results, not from the flags: count of bit-identical points in the")
     w("arithmetic / selection / rounding family")
     w("(`add sub mul div fma abs copysign fmax fmin fdim hypot ceil floor round")
