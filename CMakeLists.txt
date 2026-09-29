@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.16)
 # find_package(). The repository directory keeps its historical name; nothing
 # in the build depended on the old project() name (verified: no reference to
 # PROJECT_NAME or CMAKE_PROJECT_NAME anywhere in the tree).
-project(xpmath VERSION 0.2.0 LANGUAGES CXX)
+project(xpmath VERSION 0.2.1 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
