@@ -236,12 +236,21 @@ endfunction()
 
 # --- WHY EVERY EFT TEST BELOW IS BUILT WITH CONTRACTION OFF ----------------
 # Error-free-transform tests (Layer 1: T1.1 DD, T2.1 FF, T3.1 QF) validate that
-# twoSum/twoProd produce an EXACT (result, error) pair. The Dekker twoProduct in
-# dd_math.hpp's multiply relies on `a1*b1 - c11` being two distinct rounded
-# operations; if the compiler contracts that into a single FMA the error term
-# collapses to zero and the EFT silently breaks — and the test would validate a
-# transform the shipped binary does not perform. So EFT test targets MUST be
-# compiled with contraction OFF.
+# twoSum/twoProd produce an EXACT (result, error) pair. FF/QF/TF's Dekker
+# twoProduct relies on `a1*b1 - c11` being two distinct rounded operations; if
+# the compiler contracts that into a single FMA the error term collapses to
+# zero and the EFT silently breaks — and the test would validate a transform
+# the shipped binary does not perform. DD's production `two_prod`
+# (dd_math.hpp) is no longer Dekker-based — it computes its residual with an
+# EXPLICIT fma() call through the volatile-guarded detail::eft_mul/eft_fma
+# primitives in config.hpp — but the same hazard applies one level down: an
+# aggressive compiler can still reassociate that already-explicit sequence
+# (observed on gfx90a even at -ffp-contract=off for the sibling EFT
+# primitives; see config.hpp:305-332), so DD's EFT/guard tests still need
+# contraction OFF, now to protect the FMA call rather than to stop one being
+# synthesized. In every case the test would otherwise validate a transform the
+# shipped binary does not perform. So EFT test targets MUST be compiled with
+# contraction OFF.
 #
 # This is applied PER TARGET (target_compile_options), not as a global build flag:
 # only the EFT tests need it; the demos and other test layers should build with
@@ -253,11 +262,12 @@ endfunction()
 # one-liners and cost nothing, but are not the tested path.
 #
 # The ON-posture companions build the SAME source into a SEPARATE executable
-# (<name>_contract_on) with contraction forced on, so the Dekker sequence is
+# (<name>_contract_on) with contraction forced on, so the sequence under test
+# (Dekker's splitting for FF/QF/TF, the explicit fma() call for DD) is
 # exercised under the posture the OFF helper protects against. Whether that
-# produces the same (compiler didn't contract) or different (it did) results, the
-# outcome is RECORDED rather than gated — the ON test is a reporter. See the
-# dd_fma_guard_test.cpp header.
+# produces the same (compiler didn't reassociate) or different (it did)
+# results, the outcome is RECORDED rather than gated — the ON test is a
+# reporter. See the dd_fma_guard_test.cpp header.
 #
 # CORE_PLAN C4 step 5: the Kokkos-linked pair that used to stand here
 # (kokkos_ep_add_eft_test / kokkos_ep_add_eft_test_contract_on) is deleted with
@@ -444,9 +454,15 @@ xpm_add_host_test(tf_property_test)
 # registrations said.
 xpm_add_host_test(dd_property_test)
 xpm_add_host_test(ff_property_test)
-# dd_eft_test and dd_fma_guard_test use the EFT pair: both call the Dekker
-# sequence `a1*b1 - c11` directly on the host, so contraction OFF is as load-
-# bearing here as it was before the split. dd_fma_guard_test keeps its
+# dd_eft_test and dd_fma_guard_test use the EFT pair, but for two different
+# reasons now. dd_eft_test's own local two_prod_dekker mirror still calls the
+# Dekker sequence `a1*b1 - c11` directly on the host, so contraction OFF is as
+# load-bearing there as it was before the split. dd_fma_guard_test was
+# re-purposed when DD's production two_prod moved off Dekker splitting onto an
+# FMA-based TwoProduct: it now calls PRODUCTION xp::two_prod directly and
+# checks it against the __float128 oracle, so contraction OFF here protects
+# the explicit fma() call inside detail::eft_fma from reassociation, not a
+# Dekker sequence from being fused into one. dd_fma_guard_test keeps its
 # _contract_on companion and, via the <base>_baseline.txt derivation, keeps
 # reading tests/dd_fma_guard_baseline.txt -- drift detection is continuous
 # across the split rather than restarting from "no file".
@@ -534,10 +550,14 @@ xpm_add_device_eft_test_contract_on(tf_fma_guard_test)  # -> tf_fma_guard_test_c
 #
 # The property pair uses the plain device helper (identities are contraction
 # agnostic). The EFT pair uses the contraction-OFF helper, and
-# dd_fma_guard_test_device additionally gets its _contract_on companion: the
-# question that test asks -- "did the compiler fuse the Dekker sequence" -- is
-# meaningless without both postures, and it is a per-compilation question, so
-# the device half needs its own pair rather than inheriting the host half's.
+# dd_fma_guard_test_device additionally gets its _contract_on companion.
+# dd_fma_guard_test_device was re-purposed alongside its host sibling when DD's
+# production two_prod moved off Dekker splitting onto an FMA-based TwoProduct:
+# the question it now asks is "did the compiler reassociate production
+# two_prod's guarded fma() call" rather than "did the compiler fuse the Dekker
+# sequence" -- still meaningless without both postures, and still a
+# per-compilation question, so the device half needs its own pair rather than
+# inheriting the host half's.
 xpm_add_device_test(dd_property_test_device)
 xpm_add_device_test(ff_property_test_device)
 xpm_add_device_eft_test(dd_eft_test_device)
