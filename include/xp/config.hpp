@@ -414,6 +414,40 @@ XPMATH_INLINE_FUNCTION float eft_mul(float a, float b) {
 }
 #endif
 
+// Fused multiply-add, correctly rounded: fl(a*b+c) with only one rounding.
+// Used to recover the TwoProduct residual (a*b - p) in 2 ops instead of
+// Dekker/Veltkamp splitting's ~15; see the eft_add/eft_sub/eft_mul
+// commentary above for why volatile/PTX is needed at all. The host generic
+// branch also covers HIP, matching eft_add/eft_sub/eft_mul's shape.
+template <class T>
+XPMATH_INLINE_FUNCTION T eft_fma(T a, T b, T c) {
+#if defined(__CUDA_ARCH__)
+    static_assert(sizeof(T) == 0,
+                  "CUDA eft_fma is specialized for float and double");
+    return a;
+#else
+    volatile T va = a;
+    volatile T vb = b;
+    volatile T vc = c;
+    return std::fma(va, vb, vc);
+#endif
+}
+
+#if defined(__CUDA_ARCH__)
+template <>
+XPMATH_INLINE_FUNCTION double eft_fma(double a, double b, double c) {
+    double r;
+    asm("fma.rn.f64 %0, %1, %2, %3;" : "=d"(r) : "d"(a), "d"(b), "d"(c));
+    return r;
+}
+template <>
+XPMATH_INLINE_FUNCTION float eft_fma(float a, float b, float c) {
+    float r;
+    asm("fma.rn.f32 %0, %1, %2, %3;" : "=f"(r) : "f"(a), "f"(b), "f"(c));
+    return r;
+}
+#endif
+
 // Knuth TwoSum. No |a|>=|b| assumption.
 template <class T>
 XPMATH_INLINE_FUNCTION T eft_two_sum(T a, T b, T& err) {
