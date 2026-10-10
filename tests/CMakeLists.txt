@@ -236,25 +236,28 @@ endfunction()
 
 # --- WHY EVERY EFT TEST BELOW IS BUILT WITH CONTRACTION OFF ----------------
 # Error-free-transform tests (Layer 1: T1.1 DD, T2.1 FF, T3.1 QF) validate that
-# twoSum/twoProd produce an EXACT (result, error) pair. QF/TF's Dekker
-# twoProduct relies on `a1*b1 - c11` being two distinct rounded operations; if
-# the compiler contracts that into a single FMA the error term collapses to
-# zero and the EFT silently breaks — and the test would validate a transform
-# the shipped binary does not perform. DD's and FF's production `two_prod`
-# (dd_math.hpp, ff_math.hpp) are no longer Dekker-based — each now computes
-# its residual with an EXPLICIT fma()/fmaf() call (DD through the
-# volatile-guarded detail::eft_mul/eft_fma primitives in config.hpp) — but the
-# same hazard applies one level down: an aggressive compiler can still
-# reassociate that already-explicit sequence (observed on gfx90a even at
-# -ffp-contract=off for the sibling EFT primitives; see config.hpp:305-332),
-# so DD's and FF's EFT/guard tests still need contraction OFF, now to protect
-# the FMA call rather than to stop one being synthesized. Each backend's own
-# local EFT-test mirror (dd_eft_test's two_prod_dekker, ff_eft_test's
-# two_prod_dekker) is kept as an independent historical implementation and
-# still exercises the original Dekker sequence under the same contraction-OFF
-# discipline, regardless of what production now does. In every case the test
-# would otherwise validate a transform the shipped binary does not perform.
-# So EFT test targets MUST be compiled with contraction OFF.
+# twoSum/twoProd produce an EXACT (result, error) pair. TF's Dekker twoProduct
+# relies on `a1*b1 - c11` being two distinct rounded operations; if the
+# compiler contracts that into a single FMA the error term collapses to zero
+# and the EFT silently breaks — and the test would validate a transform the
+# shipped binary does not perform. DD's, FF's and QF's production `two_prod`
+# (dd_math.hpp, ff_math.hpp, qf_math.hpp's qf_two_prod/qf_two_sqr) are no
+# longer Dekker-based — each now computes its residual with an EXPLICIT
+# fma()/fmaf() call through the volatile-guarded detail::eft_mul/eft_fma
+# primitives in config.hpp — but the same hazard applies one level down: an
+# aggressive compiler can still reassociate that already-explicit sequence
+# (observed on gfx90a even at -ffp-contract=off for the sibling EFT
+# primitives; see config.hpp:305-332), so DD's, FF's and QF's EFT/guard tests
+# still need contraction OFF, now to protect the FMA call rather than to stop
+# one being synthesized. DD's and FF's own local EFT-test mirror (dd_eft_test's
+# two_prod_dekker, ff_eft_test's two_prod_dekker) is kept as an independent
+# historical implementation and still exercises the original Dekker sequence
+# under the same contraction-OFF discipline, regardless of what production now
+# does; QF's EFT/guard tests never had such a mirror and call shipped
+# qf_two_prod/qf_two_sqr directly, so for QF the OFF posture protects the
+# measurement of production itself. In every case the test would otherwise
+# validate a transform the shipped binary does not perform. So EFT test
+# targets MUST be compiled with contraction OFF.
 #
 # This is applied PER TARGET (target_compile_options), not as a global build flag:
 # only the EFT tests need it; the demos and other test layers should build with
@@ -267,7 +270,7 @@ endfunction()
 #
 # The ON-posture companions build the SAME source into a SEPARATE executable
 # (<name>_contract_on) with contraction forced on, so the sequence under test
-# (Dekker's splitting for QF/TF, the explicit fma()/fmaf() call for DD and FF) is
+# (Dekker's splitting for TF, the explicit fma()/fmaf() call for DD, FF and QF) is
 # exercised under the posture the OFF helper protects against. Whether that
 # produces the same (compiler didn't reassociate) or different (it did)
 # results, the outcome is RECORDED rather than gated — the ON test is a
@@ -489,8 +492,12 @@ xpm_add_host_test(qf_nonoverlap_test)
 # truncation check is a genuine binary128 host assertion. It is split now: this
 # half keeps Tests A-D including that check, and moves from
 # xpm_add_device_eft_test to the HOST EFT helper. The contraction-OFF posture
-# travels with it -- Tests A/B call the Dekker sequence `a1*b1 - c11` directly on
-# the host, so the flag is as load-bearing here as before the split.
+# travels with it -- Tests A/B call qf_two_prod/qf_two_sqr's FMA-based
+# TwoProduct directly on the host (QF's own FMA migration, chunk D; qf_two_prod
+# no longer Dekker-splits; qf_eft_test never had a local mirror to retire, see
+# that file's own header), so the flag is defense in depth here for the same
+# reason it is on dd_fma_guard_test's/ff_fma_guard_test's direct calls to
+# production.
 xpm_add_host_eft_test(qf_eft_test)
 
 # --- DEVICE TESTS THAT LINK NO KOKKOS --------------------------------------
@@ -588,8 +595,10 @@ xpm_add_device_eft_test_contract_on(ff_fma_guard_test)  # -> ff_fma_guard_test_c
 # The property and non-overlap halves use the plain device helper -- neither the
 # bit-exact identities nor a per-word add/compare has anything to contract, which
 # is what their pre-split plain registrations said. qf_eft_test_device uses the
-# contraction-OFF helper: it calls qf_two_prod's Dekker sequence in a kernel, so
-# the flag is exactly as load-bearing on this half as on the host one.
+# contraction-OFF helper: it calls qf_two_prod's FMA-based TwoProduct in a kernel
+# (QF's own FMA migration, chunk D; qf_two_prod no longer Dekker-splits), and the
+# OFF flag is defense in depth there for the same reason it is on the host half --
+# see qf_eft_test.cpp's "WHY -ffp-contract=off IS REQUIRED".
 xpm_add_device_test(qf_property_test_device)
 xpm_add_device_test(qf_nonoverlap_test_device)
 xpm_add_device_eft_test(qf_eft_test_device)
@@ -795,16 +804,19 @@ endif()
 # this test calls the SHIPPED qf_math.hpp primitives (qf_two_prod / qf_two_sqr)
 # directly, so it characterizes GCC's contraction of the shipped source itself (cf.
 # T3.1 qf_eft_test, which established the same direct-call posture under
-# contraction-OFF). Unlike FF's shipped two_prod, QF's qf_two_prod/qf_two_sqr are
-# still Dekker-based (QF's own FMA migration is a later chunk, not yet done) — this
-# test currently guards a Dekker sequence's contraction hazard, not an FMA one.
-# Also guards qf_two_sqr (a second Dekker sequence, no FF analogue). FP64 oracle
-# (exact, no
-# type wider than a machine word), so it runs on any target, not x86_64 only --
-# and that is also why C4 chunk D migrated it WHOLE onto the C3 harness instead
-# of splitting it, exactly as chunk C did with the FF guard. Both postures are
-# registered in the Kokkos-free device block above; the reasoning is written
-# there and in the file's own header.
+# contraction-OFF). QF's own FMA migration (chunk D of the same core/cuda-eft-rn
+# work that moved DD and FF) retired qf_two_prod's/qf_two_sqr's Dekker splitting
+# onto the same FMA-based TwoProduct shape (p = fl(a*b), e = fma(a,b,-p)); this
+# test now guards THAT primitive's contraction hazard, not a Dekker sequence's —
+# specifically, whether detail::eft_mul's/detail::eft_fma's volatile guards (see
+# qf_fma_guard_test.cpp's header) hold under -ffp-contract=fast. Also guards
+# qf_two_sqr (a second FMA-based instance, no FF analogue, since FF has no
+# separate two_sqr). FP64 oracle (exact, no type wider than a machine word), so
+# it runs on any target, not x86_64 only -- and that is also why C4 chunk D
+# migrated it WHOLE onto the C3 harness instead of splitting it, exactly as
+# chunk C did with the FF guard. Both postures are registered in the Kokkos-free
+# device block above; the reasoning is written there and in the file's own
+# header.
 
 # T3.6 end-to-end cancellation kernels for QF: __float128-oracle-scored, host-side.
 # QF analogue of dd_e2e_test (T1.6) / ff_cancellation_test (T2.6). Plain helper —
@@ -813,8 +825,9 @@ endif()
 # adjacency to contract; K1's naive form sqrt(x²+1)-x has a mul-then-sub adjacency
 # an FMA *could* contract, but K1_naive is REPORTED, never gated, so a
 # contraction-induced shift in its (already low-digit) result cannot flip a
-# pass/fail. The Dekker-twoProduct contraction hazard the EFT helper guards is on no
-# gated path here (it is covered by qf_fma_guard_test, T3.5). So this test mirrors
+# pass/fail. The TwoProduct contraction hazard the EFT helper guards (Dekker's
+# splitting, historically; the FMA-based shape since QF's own migration, chunk D)
+# is on no gated path here (it is covered by qf_fma_guard_test, T3.5). So this test mirrors
 # dd_e2e_test / ff_cancellation_test registration exactly (no EFT helper).
 # (qf_cancellation_test itself moved to the Kokkos-free block above in C4.)
 
@@ -905,8 +918,8 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/contraction_manifest.txt" "${_xp_manifes
 #
 # THE TOTALS GREW, from 10/6 to 11/6, and no target quietly acquired a flag. The
 # one new OFF entry is qf_eft_test_device, the device half of the ninth mixed TU.
-# Both halves call qf_two_prod's Dekker sequence -- the host one on the host, the
-# device one in a kernel -- so both are still EFT tests and both must stay
+# Both halves call qf_two_prod's FMA-based TwoProduct -- the host one on the
+# host, the device one in a kernel -- so both are still EFT tests and both must stay
 # guarded; a split that guarded only one half would be exactly the silent failure
 # this gate exists to catch. qf_fma_guard_test was NOT split (it migrated whole;
 # see its registration) so it still contributes 1 OFF + 1 ON, from the

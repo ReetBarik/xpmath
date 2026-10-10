@@ -47,13 +47,23 @@
 //
 // FP32 PRIMITIVE COVERAGE CROSS-REFERENCE
 // ---------------------------------------
-// twoSum/twoProd FP32 primitive coverage also lives in tests/ff_eft_test.cpp
-// (T2.1, commit 4e025b0): FF's twoSum is bit-identical to qf_two_sum and FF's
-// Dekker twoProduct uses the SAME 8193.0f splitter as qf_two_prod. We do NOT
-// skip them here — qf_math.hpp defines its own separately-compiled copies
-// (QD by-reference form, inline.h:35-99), so re-exercising them against the
-// shipped QF symbols guards against a QF-side copy drifting from FF's. We ADD
-// qf_two_sqr (the squaring EFT, no FF-EFT-test analogue) and the renorm family.
+// twoSum FP32 primitive coverage also lives in tests/ff_eft_test.cpp (T2.1):
+// FF's production two_sum is bit-identical to qf_two_sum (same Knuth EFT, same
+// word width) — that stays true after the FMA migration, since twoSum was
+// never Dekker-based to begin with. twoProd is a different story: as of the
+// FMA migration (branch core/cuda-eft-rn), BOTH FF's production xp::two_prod
+// and QF's production qf_two_prod compute the same FMA-based TwoProduct
+// (p = fl(a*b), e = fma(a,b,-p)) independently at their own word widths — they
+// no longer share a Veltkamp splitter (the 8193.0f splitter is gone from both
+// headers; see "WHY -ffp-contract=off" below). ff_eft_test.cpp keeps its own
+// `two_prod_dekker` as a deliberately-retained, no-longer-a-mirror-of-production
+// historical implementation (see that file's "WHY THIS NO LONGER TESTS A LOCAL
+// DEKKER MIRROR"); that local mirror is not what this cross-reference is about.
+// We do NOT skip twoSum/twoProd here even so — qf_math.hpp defines its own
+// separately-compiled copies (QD by-reference form, inline.h:35-99), so
+// re-exercising them against the shipped QF symbols guards against a QF-side
+// copy drifting from FF's. We ADD qf_two_sqr (the squaring EFT, no FF-EFT-test
+// analogue) and the renorm family.
 //
 // WHY GROUND TRUTH IS PLAIN FP64 FOR twoSum/twoProd (PROVABLE, NO QUADMATH)
 // ------------------------------------------------------------------------
@@ -97,15 +107,31 @@
 // block). Observed max rel there ~1.6e-30 (~2^-99). That second block used to
 // run only under KOKKOS_EP_HAVE_QUADMATH; it runs unconditionally now.
 //
-// WHY -ffp-contract=off IS REQUIRED (DEKKER SPLITTER CORRECTNESS)
-// --------------------------------------------------------------
-// qf_two_prod / qf_two_sqr use Dekker splitting (splitter 8193.0f = 2^13+1),
-// NOT an FMA-based twoProd. The error term hinges on `a1*b1 - p` being TWO
-// distinct rounded operations. If the compiler contracts that into a single
-// fused multiply-add, the "error" collapses to zero and the EFT silently breaks.
-// This TU is compiled with -ffp-contract=off (host) / --fmad=false (CUDA) by the
-// kokkos_ep_add_eft_test() helper in tests/CMakeLists.txt. (T3.5 later builds the
-// contraction-on reporter mirror; T3.1 only needs the OFF posture.)
+// WHY -ffp-contract=off IS REQUIRED (EVEN THOUGH THE EFT IS NOW FMA-BASED)
+// -------------------------------------------------------------------------
+// qf_two_prod / qf_two_sqr no longer split (see "DOMAIN WIDENING" note on the
+// skip predicates below); they compute the FMA-based TwoProduct directly:
+//     p = fl(a*b);  e = fma(a, b, -p);
+// This is NOT the "a rogue contraction corrupts a Dekker splitter" hazard T3.1
+// was originally written to guard against — there is no splitter left to
+// corrupt. The hazard here runs the OTHER direction: `detail::eft_mul` and
+// `detail::eft_fma` (include/xp/config.hpp) hold `p` in a `volatile` temporary
+// specifically so an aggressively contracting compiler cannot fuse the error
+// term's `fma(a,b,-p)` back across the already-rounded `p`, which would compute
+// a DIFFERENT (wrong) residual than the one this EFT's bit-exactness proof
+// assumes. The volatile guard is believed sufficient on its own — T3.5's
+// qf_fma_guard_test.cpp is the dedicated contraction-ON reporter and, as of
+// this migration, reports the error term uncorrupted under -ffp-contract=fast
+// (see that file's three-way classification). This TU is still built with
+// -ffp-contract=off (host) / --fmad=false (CUDA) via the
+// kokkos_ep_add_eft_test() helper in tests/CMakeLists.txt anyway, as defense in
+// depth: T3.1's job is to certify the EFT's bit-exactness claim under the same
+// posture every other OFF-built TU in this suite assumes, not to re-litigate
+// contraction-safety (T3.5's job). Also unlike ff_eft_test.cpp / dd_eft_test.cpp
+// — which measure a LOCAL Dekker mirror whose own correctness depends on the
+// OFF posture — qf_eft_test.cpp calls the SHIPPED qf_two_prod/qf_two_sqr
+// directly: there is no mirror here, so the OFF posture protects the
+// measurement of production itself.
 //
 // Cross-reference: docs/TEST_SUITE_PLAN.md, Phase 3, "T3.1: EFT unit tests for
 // QF"; QD 2.3.24 qd/include/qd/inline.h (twoSum/twoProd/two_sqr) and
@@ -114,8 +140,8 @@
 //
 // TEST STRUCTURE
 //   Test A — qf_two_sum + qf_quick_two_sum bit-exactness (FP64 oracle)
-//   Test B — qf_two_prod + qf_two_sqr bit-exactness (FP64 oracle; splitter-
-//            overflow and under/overflow regimes skipped)
+//   Test B — qf_two_prod + qf_two_sqr bit-exactness (FP64 oracle; under/
+//            overflow regimes skipped)
 //   Test C — renorm_4 (len 5->4) + renorm (len 4->4): Priest non-overlap
 //            invariant |f_{i+1}| <= 1/2 ulp(f_i) (oracle-independent) + exact FP64
 //            value-preservation (ordered 53-bit-source input) + binary128
@@ -192,9 +218,14 @@ inline bool sqr_is_exact(float a) {
 // ----------------------------------------------------------------------------
 // Skip predicates — the "no overflow / no underflow" domain each EFT is proven
 // over. A pair outside the domain is not a failure; it is simply out of scope
-// for a bit-exactness claim, so it is skipped. Ported verbatim from T2.1's
-// ff_eft_test (the FP32 arithmetic is identical). See that file for the full
-// derivation of split_safe_max and the underflow floor.
+// for a bit-exactness claim, so it is skipped. The splitter-overflow exclusion
+// this file used to carry (split_safe_max) is GONE: qf_two_prod/qf_two_sqr no
+// longer split (see "WHY -ffp-contract=off" above), so there is no splitter
+// left to overflow — see tests/qf_fma_guard_test.cpp's "DOMAIN WIDENING vs. the
+// pre-migration version of this file" for the full derivation of why removing
+// it is sound. What remains below is the underflow/overflow floor on the TRUE
+// product, ported verbatim from T2.1's ff_eft_test (the FP32 arithmetic is
+// identical).
 // ----------------------------------------------------------------------------
 
 // twoSum domain: finite a, b whose FP32 sum does not overflow. (No underflow
@@ -204,25 +235,17 @@ inline bool sum_in_domain(float a, float b) {
     return std::isfinite(a + b);
 }
 
-// Splitter-overflow bound, DERIVED from qf_two_prod's body:
-// the first FP32 op is `cona = a * split` with split = 8193.0f. That overflows to
-// +inf once |a| * 8193 > FLT_MAX, i.e. |a| >= FLT_MAX / 8193 (~2^114.9998); then
-// `cona - (cona - a)` becomes inf - inf = NaN and the error term is poisoned. We
-// reject |x| >= this for EITHER operand regardless of the other — even x*0 splits
-// x first. (This is the QD _QD_SPLIT_THRESH branch, inline.h:66-83, deliberately
-// NOT ported to qf_math.hpp — see PORT_NOTES_QF.md.)
-inline float split_safe_max() {
-    return std::numeric_limits<float>::max() / 8193.0f;   // ~2^114.9998
-}
-
 // twoProd/twoSqr domain: finite normal-or-zero operands with the TRUE product
 // comfortably inside the normal range (so both p and its error term e are
-// representable without underflow). Dekker's twoProduct is exact only absent
-// underflow (Dekker 1971; Muller et al., "Handbook of Floating-Point
-// Arithmetic", §4.4). The underflow/overflow predicate is evaluated on the EXACT
-// (double) product, not the rounded FP32 product (which would flush to 0 in the
-// underflow regime and let underflowing pairs masquerade as in-domain).
-// Subnormal OPERANDS are excluded — splitting a subnormal is itself lossy.
+// representable without underflow). The FMA-based TwoProduct is exact only
+// absent underflow/overflow of the true product (Boldo & Muller; Muller et
+// al., "Handbook of Floating-Point Arithmetic", §4.4 — the same precondition a
+// Dekker-split TwoProduct has). The underflow/overflow predicate is evaluated
+// on the EXACT (double) product, not the rounded FP32 product (which would
+// flush to 0 in the underflow regime and let underflowing pairs masquerade as
+// in-domain). Subnormal OPERANDS are excluded — an exact FMA residual against
+// a subnormal operand is itself a separate, narrower guarantee this predicate
+// does not attempt to certify.
 //   Threshold FLT_MIN * 2^24 = 2^-102 keeps the error term e >= ~2^-126 (normal).
 inline bool prod_in_domain(float a, float b) {
     if (!std::isfinite(a) || !std::isfinite(b)) return false;
@@ -231,14 +254,12 @@ inline bool prod_in_domain(float a, float b) {
         return x == 0.0f || std::fabs(x) >= fmin;           // reject subnormals
     };
     if (!normal_or_zero(a) || !normal_or_zero(b)) return false;
-    const float ssm = split_safe_max();
-    if (std::fabs(a) >= ssm || std::fabs(b) >= ssm) return false;  // splitter overflow
     if (a == 0.0f || b == 0.0f) return true;                       // exact product 0
     double tp  = (double)a * (double)b;                            // exact (48 <= 53)
     double mag = tp < 0.0 ? -tp : tp;
     const double hi_lim = (double)std::numeric_limits<float>::max();
     const double lo_lim = std::ldexp(1.0, -102);
-    if (mag > hi_lim) return false;   // product (and a1*b1) would overflow FP32
+    if (mag > hi_lim) return false;   // product (and p) would overflow FP32
     if (mag < lo_lim) return false;   // error term would fall into FP32 subnormals
     return true;
 }
@@ -301,8 +322,8 @@ inline void check_pair(Op op, float a, float b, EftCount& c, int& samples_left) 
 // Broad-range bound, per op (FP32's exponent range is ~6x narrower than FP64's).
 // twoSum: the SUM must stay finite -> 1e30 (~2^99.6, well below FLT_MAX ~3.4e38).
 // twoProd/twoSqr: the PRODUCT must stay in FP32's NORMAL range -> 1e18 (~2^59.8)
-// keeps |a*b| <= 1e36 < FLT_MAX and each operand below the splitter bound. Same
-// FP32-forced split T2.1 documented (a single range gives vacuous product
+// keeps |a*b| <= 1e36 < FLT_MAX, comfortably inside the normal-product domain.
+// Same FP32-forced split T2.1 documented (a single range gives vacuous product
 // coverage: at 1e30, products ~1e60 overflow and are all domain-skipped).
 inline float broad_bound(Op op) { return (op == Op::Sum || op == Op::QuickSum) ? 1e30f : 1e18f; }
 
@@ -604,7 +625,7 @@ static NamedResult run_named_cases() {
     auto case_prod = [&](const char* name, float a, float b) {
         ++R.total;
         if (!prod_in_domain(a, b)) { ++R.skipped;
-            std::printf("    qf_two_prod %-28s : SKIP (out of Dekker domain)\n", name); return; }
+            std::printf("    qf_two_prod %-28s : SKIP (out of TwoProduct domain)\n", name); return; }
         bool ok = prod_is_exact(a, b);
         std::printf("    qf_two_prod %-28s : %s\n", name, ok ? "PASS" : "FAIL");
         if (ok) ++R.passed; else { ++R.failed; print_fail_prod("qf_two_prod", a, b); }
@@ -663,7 +684,7 @@ static NamedResult run_named_cases() {
         auto case_sqr = [&](const char* name, float a) {
             ++R.total;
             if (!prod_in_domain(a, a)) { ++R.skipped;
-                std::printf("    qf_two_sqr  %-28s : SKIP (out of Dekker domain)\n", name); return; }
+                std::printf("    qf_two_sqr  %-28s : SKIP (out of TwoProduct domain)\n", name); return; }
             bool ok = sqr_is_exact(a);
             std::printf("    qf_two_sqr  %-28s : %s\n", name, ok ? "PASS" : "FAIL");
             if (ok) ++R.passed; else { ++R.failed; print_fail_prod("qf_two_sqr", a, a); }
@@ -711,7 +732,7 @@ int main(int, char**) {
     {
         std::printf("=== qf_eft_test (T3.1): EFT bit-exactness for QF twoSum / twoProd / twoSqr / renorm ===\n");
         std::printf("Oracle: FP64 (exact for twoSum/twoProd/twoSqr and ordered-53-bit-source renorm value-preservation)\n");
-        std::printf("Splitter: 8193.0f = 2^13 + 1 (qf_math.hpp `qf_two_prod`); primitives called directly from qf_math.hpp\n\n");
+        std::printf("TwoProduct: FMA-based (p = fl(a*b), e = fma(a,b,-p)); primitives called directly from qf_math.hpp\n\n");
 
         // -- Test A: qf_two_sum + qf_quick_two_sum --------------------------
         std::printf("[Test A] qf_two_sum bit-exactness\n");
@@ -724,7 +745,7 @@ int main(int, char**) {
         XPMATH_ASSERT(A2.failures == 0, "qf_quick_two_sum was not bit-exact for some ordered pair");
 
         // -- Test B: qf_two_prod + qf_two_sqr -------------------------------
-        std::printf("[Test B] qf_two_prod (Dekker twoProduct) bit-exactness\n");
+        std::printf("[Test B] qf_two_prod (FMA-based twoProduct) bit-exactness\n");
         EftCount B1 = run_host_batches(Op::Prod, "B/twoProd");
         std::printf("  qf_two_prod: total tested=%ld, skipped=%ld, failures=%ld\n", B1.tested, B1.skipped, B1.failures);
         XPMATH_ASSERT(B1.failures == 0, "qf_two_prod was not bit-exact for some in-domain pair");
