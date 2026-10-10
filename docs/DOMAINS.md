@@ -125,7 +125,7 @@ comparing FF against DD to page between two distant sections.
 | `mul` | DD | 31.00 | 30.95 | 1e-30 .. 5e+255 | 100% | below 1e-323: 4.89 | 4 | UNRESOLVED |
 | `mul` | QF | 29.00 | 28.28 | 1e-10 .. 3e+20 | 96% | below 1e-16: 13.67; above 1e+21: 0.00 | 41 | UNRESOLVED |
 | `mul` | TF | 21.70 | 21.24 | 3e-14 .. 3e+20 | 97% | below 3e-18: 10.59; above 1e+21: 0.00 | 36 | UNRESOLVED |
-| `mul` | FF | 14.00 | 13.74 | 1e-17 .. 3e+20 | 98% | below 3e-20: 6.70; above 1e+21: 0.00 | 31 | UNRESOLVED |
+| `mul` | FF | 14.00 | 13.75 | 1e-17 .. 3e+20 | 98% | below 3e-20: 6.70; above 1e+21: 0.00 | 30 | UNRESOLVED |
 | `div` | DD | 31.00 | 30.95 | 1e-30 .. 5e+255 | 100% | below 1e-323: 14.55 | 4 | UNRESOLVED |
 | `div` | QF | 29.00 | 28.52 | 1e-06 .. 1e+24 | 97% | below 1e-21: 11.81; above 3e+24: 0.00 | 23 | UNRESOLVED |
 | `div` | TF | 21.70 | 21.42 | 1e-12 .. 1e+24 | 98% | below 1e-22: 9.81; above 3e+24: 0.00 | 18 | UNRESOLVED |
@@ -164,7 +164,7 @@ for each cell that has any:
 
 - `add` — FF 109 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
 - `sub` — FF 94 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
-- `mul` — DD 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); QF 41 pts (log sweep, |x| = 10^e); TF 36 pts (log sweep, |x| = 10^e); FF 31 pts (log sweep, |x| = 10^e)
+- `mul` — DD 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); QF 41 pts (log sweep, |x| = 10^e); TF 36 pts (log sweep, |x| = 10^e); FF 30 pts (log sweep, |x| = 10^e)
 - `div` — DD 4 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi); QF 23 pts (log sweep, |x| = 10^e); TF 18 pts (log sweep, |x| = 10^e)
 - `fma` — QF 25 pts (log sweep, |x| = 10^e); TF 25 pts (log sweep, |x| = 10^e); FF 135 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
 - `fdim` — FF 39 pts (within 2 ulp of 0, +-1, +-pi/2 or a multiple of pi)
@@ -360,7 +360,7 @@ for each cell that has any:
 | `mul` | DD | 31.00 | 31.00 | 0 .. 1e+15 | 100% | -- | 0 | UNRESOLVED |
 | `mul` | QF | 29.00 | 27.02 | 100 .. 1e+08 | 84% | below 10: 13.55 | 76 | UNRESOLVED |
 | `mul` | TF | 21.70 | 20.83 | 100 .. 1e+08 | 92% | below 10: 10.62; above 1e+08: 7.52 | 63 | UNRESOLVED |
-| `mul` | FF | 14.00 | 13.63 | 10 .. 1e+08 | 96% | below 10: 0.36; above 1e+08: 0.00 | 45 | UNRESOLVED |
+| `mul` | FF | 14.00 | 13.64 | 10 .. 1e+08 | 96% | below 10: 0.36; above 1e+08: 0.00 | 45 | UNRESOLVED |
 | `div` | DD | 31.00 | 30.97 | 1 .. 1e+08 | 100% | below 1: 0.00; above 1e+09: 0.00 | 2 | UNRESOLVED |
 | `div` | QF | 29.00 | 26.49 | 100 .. 1e+08 | 80% | below 100: 12.64; above 1e+09: 0.00 | 108 | UNRESOLVED |
 | `div` | TF | 21.70 | 20.38 | 2 .. 2.236 | 87% | below 2: 2.89; above 10: 10.73 | 78 | UNRESOLVED |

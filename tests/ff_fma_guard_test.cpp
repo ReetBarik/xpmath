@@ -4,44 +4,92 @@
 //
 // WHAT THIS TEST IS AND WHY IT EXISTS
 // -----------------------------------
-// FF's `multiply` computes the exact product error term via Dekker's twoProduct
-// (splitter 8193.0f = 2^13 + 1, in `multiply` / the standalone `two_prod`). The
-// error term
+// FF's production `two_prod` (include/xp/ff_math.hpp, backing `multiply`,
+// `multiply_scalar`, `ff_divide_core`, `divide_scalar`) computes the exact
+// product error term via an FMA-based TwoProduct, not Dekker/Veltkamp
+// splitting:
 //
-//     e = (((a1*b1 - p) + a1*b2) + a2*b1) + a2*b2
+//     p = fl(a*b);  e = fma(a, b, -p);
 //
-// is only correct if each `x*y - z` is TWO distinct rounded operations. If the
-// compiler CONTRACTS `a1*b1 - p` into a single fused multiply-add, the rounding
-// that Dekker's algebra depends on never happens and the "error" term is wrong —
-// silently, exactly as at FP64 (the hazard is width-independent; only the
-// splitter and the mantissa change). T2.1's ff_eft_test builds under
-// -ffp-contract=off / --fmad=false so its OWN results are trustworthy; that is a
-// *defensive* posture protecting one test. T2.5 is the *positive* test of that
-// posture: build the very same Dekker twoProduct under BOTH contraction settings
-// and cross-check against a contraction-immune FP64 oracle.
+// This is correct provided (a) `p` is the correctly-rounded product and
+// (b) the single rounding inside `fma` is the ONLY rounding — i.e. the
+// compiler is not allowed to further reassociate the already-explicit `fma`
+// call, and the volatile guards inside `detail::eft_mul`/`detail::eft_fma`
+// (include/xp/config.hpp) are not allowed to be optimized away. Those guards
+// exist precisely because aggressive compilers (gfx90a under ROCm 7.0.2 even
+// with -ffp-contract=off; g++ 13.3 under -ffp-contract=fast/-ffast-math) have
+// been observed to fuse or fold adjacent rounded ops that look, to a
+// real-number-algebra optimizer, like they cancel to zero. T2.1's ff_eft_test
+// builds under -ffp-contract=off / --fmad=false so its OWN results are
+// trustworthy; that is a *defensive* posture protecting one test. T2.5 is the
+// *positive* test of that posture: build the SAME shipped `two_prod` under
+// BOTH contraction settings and cross-check it against a reference built a
+// structurally different way.
 //
-//   * contraction-OFF build  -> the error terms must be EXACT (F == 0). This is a
-//                               stronger restatement of what T2.1 already asserts,
+//   * contraction-OFF build  -> `two_prod` must be bit-exact against the
+//                               FP64 oracle (F == 0). This is a stronger
+//                               restatement of what T2.1 already asserts,
 //                               and it FAIL-GATES (XPMATH_ASSERT).
-//   * contraction-ON  build  -> the compiler is ALLOWED to contract. Two outcomes,
+//   * contraction-ON  build  -> the compiler is ALLOWED to contract/
+//                               reassociate more aggressively. Two outcomes,
 //                               both informative, neither a failure:
-//                                 (a) F == 0  — the compiler did NOT contract this
-//                                     sequence (e.g. GCC at -O3 -ffp-contract=fast
-//                                     on a non-FMA ISA target). Our safety posture
-//                                     is belt+suspenders on this toolchain.
-//                                 (b) F  > 0  — the compiler DID contract. The
-//                                     -ffp-contract=off posture in ff_math.hpp's
-//                                     build is REQUIRED, and this count is the
-//                                     evidence.
-//                               The ON variant therefore REPORTS, it does not gate
-//                               (always exits 0). A *change* in F between builds is
-//                               the regression signal (see baseline mechanism).
+//                                 (a) F == 0  — the shipped guards held even
+//                                     under the more permissive posture.
+//                                 (b) F  > 0  — something upstream of the
+//                                     volatile guards broke; the
+//                                     -ffp-contract=off posture in
+//                                     ff_math.hpp's build is REQUIRED, and
+//                                     this count is the evidence.
+//                               The ON variant therefore REPORTS, it does not
+//                               gate (always exits 0). A *change* in F between
+//                               builds is the regression signal (see baseline
+//                               mechanism).
 //
 // This is the FF analogue of tests/dd_fma_guard_test.cpp (T1.5). Every design
 // decision T1.5 locked in carries over verbatim — single-source/two-targets, a
 // contraction-immune oracle, a twoSum CONTROL, host+device passes, OFF gates /
 // ON reports with a committed baseline. The ONE material difference is the oracle
 // (see next block), inherited from ff_eft_test's divergence from dd_eft_test.
+//
+// WHY THIS NO LONGER TESTS A LOCAL DEKKER MIRROR
+// -----------------------------------------------
+// Before the FMA-based TwoProduct migration, this file duplicated
+// ff_math.hpp's Dekker splitting sequence locally (mirror-and-comment,
+// matching T2.1's ff_eft_test.cpp) because the thing under contraction
+// scrutiny — `a1*b1 - c11` (and the a1*b2/a2*b1/a2*b2 terms) — was buried
+// inside `multiply`'s longer renormalization sequence and needed isolating.
+// `two_prod` is now two lines with no hidden algebra to duplicate, so this
+// file calls the PRODUCTION function directly (`xp::two_prod`, forward-
+// declared and defined in ff_math.hpp, already included below) rather than
+// re-deriving it, on BOTH the host pass and the device kernel. That is
+// strictly stronger: it exercises the actual translation unit, actual
+// inlining, and actual NOINLINE/volatile annotations the shipped binary
+// uses, not a hand-copied stand-in that could silently drift from them.
+//
+// ff_math.hpp's historical Dekker twoProduct implementation is NOT deleted —
+// it still exists as `two_prod_dekker` in tests/ff_eft_test.cpp (T2.1), kept
+// there as an independent, second exact algorithm for the same mathematical
+// transform, cross-checked against the same FP64 oracle. It has no further
+// role here once it stopped being what `multiply`/`two_prod` ship.
+//
+// DOMAIN WIDENING vs. the pre-migration version of this file
+// ------------------------------------------------------------
+// The old Dekker-based domain predicate excluded |operand| >= split_safe_max
+// (~4.1533e34 = FLT_MAX/8193, ~2^114.9998) because SPLITTING an operand that
+// large overflows the splitter itself — a hazard specific to Veltkamp
+// splitting that does not exist for FMA-based `two_prod` (it never splits).
+// That exclusion is removed below. What remains — rejecting subnormal
+// operands and bounding the TRUE product away from FP32's overflow/underflow
+// edges — is NOT splitter-specific: it is the IEEE-754 "exact FMA residual"
+// precondition (Boldo & Muller), the same requirement an FMA-based
+// TwoProduct has that a Dekker one does. It stays. Removing the operand-
+// level exclusion admits corner-case corpus entries between ~2^115 and
+// FLT_MAX (e.g. `finite_specials<float>()`'s maxT, `powers_of_two<float>()`'s
+// upper end) into the shared input list for the first time, which is exactly
+// the band that exercises `sum_oracle_faithful` below — see its comment for
+// why that guard, already present in this file since T2.5, needs no further
+// extension to cover it (it is a general exactness check, not a threshold
+// tied to the old splitter bound).
 //
 // A SINGLE SOURCE, TWO TARGETS
 // ----------------------------
@@ -94,8 +142,9 @@
 // immune for the same headroom reason: binary128 add/sub/mul are libgcc soft-float
 // CALLS (__addtf3 and friends), which a compiler cannot fuse at all.)
 //
-// SCOPE (docs/TEST_SUITE_PLAN.md T2.5, layer 5): the Dekker twoProduct ONLY — the
-// one FF primitive where contraction is a documented hazard. twoSum is built from
+// SCOPE (docs/TEST_SUITE_PLAN.md T2.5, layer 5): production `two_prod` only —
+// the one FF primitive where (now FMA-based, formerly splitter-based)
+// contraction/reassociation is a documented hazard. twoSum is built from
 // adds/subtracts with no mul-then-± adjacency, so it is contraction-immune; it is
 // included below purely as a labeled CONTROL (it must stay exact under both
 // postures). ff_math.hpp is NOT modified (rule 4). Higher-level ops (log/sin/…)
@@ -163,19 +212,12 @@ static const char* kPostureName = "ON  (-ffp-contract=fast / --fmad=true)";
 #endif
 
 // ----------------------------------------------------------------------------
-// EFT primitives, COPIED VERBATIM from tests/ff_eft_test.cpp (T2.1).
+// twoSum, COPIED VERBATIM from tests/ff_eft_test.cpp (T2.1). CONTROL: all
+// +/-, no mul-then-± adjacency, so no compiler can contract it; it must stay
+// exact under both postures regardless of what happens to two_prod.
 // ----------------------------------------------------------------------------
-// Tests are standalone: we duplicate rather than #include ff_eft_test.cpp. The
-// duplication is intentional and self-documenting — it is the exact sequence from
-// ff_math.hpp's `multiply` (lines 193-207) / `two_prod` (266-274), the thing
-// under contraction scrutiny. If this ever drifts from ff_eft_test.cpp's copy,
-// that is itself a bug worth catching.
-
 struct TwoOut { float hi; float lo; };
 
-// twoSum (Knuth) — mirrors the transform embedded in `add`,
-// with a.lo == b.lo == 0. CONTROL: all +/-, no mul-then-± adjacency, so no
-// compiler can contract it; it must stay exact under both postures.
 XPMATH_INLINE_FUNCTION TwoOut two_sum(float a, float b) {
     float s   = a + b;
     float e   = s - a;
@@ -183,34 +225,14 @@ XPMATH_INLINE_FUNCTION TwoOut two_sum(float a, float b) {
     return TwoOut{ s, err };
 }
 
-// Dekker twoProduct — mirrors `multiply` / the standalone `two_prod`,
-// with a.lo == b.lo == 0. Splitter 8193.0f = 2^13 + 1.
-// THE PRIMITIVE UNDER TEST: `a1*b1 - p` (and the a1*b2 / a2*b1 / a2*b2 terms) are
-// the mul-then-± pairs a compiler may fuse into an FMA, which would break the EFT.
-XPMATH_INLINE_FUNCTION TwoOut two_prod_dekker(float a, float b) {
-    const float split = 8193.0f;             // 2^13 + 1
-    float cona = a * split, conb = b * split;
-    float a1 = cona - (cona - a), b1 = conb - (conb - b);
-    float a2 = a - a1,            b2 = b - b1;
-    float p  = a * b;                                             // fl(a*b)
-    float e  = (((a1 * b1 - p) + a1 * b2) + a2 * b1) + a2 * b2;   // exact error
-    return TwoOut{ p, e };
-}
-
 // ----------------------------------------------------------------------------
-// twoProduct domain predicate, COPIED from ff_eft_test.cpp (T2.1). A pair outside
-// Dekker's proven domain (subnormal operands, splitter overflow, product over/
-// underflow) is skipped, not counted — see the precondition note in T2.1. FP32's
-// exponent range is ~6x narrower than FP64's, so these bounds are much tighter
-// than dd_fma_guard_test's FP64 versions.
+// twoProduct domain predicate. See the "DOMAIN WIDENING" header note: the
+// splitter-overflow exclusion is gone (two_prod never splits); what remains is
+// the FMA-residual-exactness precondition, which applies regardless of how
+// the residual is computed. FP32's exponent range is ~6x narrower than
+// FP64's, so these bounds are much tighter than dd_fma_guard_test's FP64
+// versions.
 // ----------------------------------------------------------------------------
-
-// Splitter-overflow bound: `cona = a * 8193.0f` overflows to +inf once
-// |a| >= FLT_MAX / 8193 (~2^114.9998), poisoning `cona - (cona - a)` = inf-inf =
-// NaN. This is PORT_NOTES §4a's `exp` splitter-overflow mechanism.
-inline float split_safe_max() {
-    return std::numeric_limits<float>::max() / 8193.0f;   // ~2^114.9998
-}
 
 inline bool prod_in_domain(float a, float b) {
     if (!std::isfinite(a) || !std::isfinite(b)) return false;
@@ -219,8 +241,6 @@ inline bool prod_in_domain(float a, float b) {
         return x == 0.0f || std::fabs(x) >= fmin;          // reject subnormals
     };
     if (!normal_or_zero(a) || !normal_or_zero(b)) return false;
-    const float ssm = split_safe_max();
-    if (std::fabs(a) >= ssm || std::fabs(b) >= ssm) return false;  // splitter overflow
     if (a == 0.0f || b == 0.0f) return true;                       // exact product 0
     // Exact product magnitude in FP64 (a*b is exact there: 48 <= 53).
     double tp  = (double)a * (double)b;
@@ -261,6 +281,18 @@ inline bool prod_in_domain(float a, float b) {
 // the oracle cannot witness — never a pair where FP32 twoSum is actually wrong.
 // twoProduct needs no such guard: its exact product is always <= 48 bits, so the
 // FP64 oracle is unconditionally faithful (confirmed empirically — 0 mismatches).
+//
+// FMA MIGRATION NOTE: removing the splitter-overflow exclusion from
+// prod_in_domain (see "DOMAIN WIDENING" in the file header) admits a wider
+// band of operand magnitudes (up to FLT_MAX, not just up to ~2^115) into the
+// shared input list, which is exactly the kind of wide-exponent-gap pair this
+// predicate exists to catch. No change to this predicate was needed: it is
+// derived purely from (a, b) themselves, not from any splitter-specific
+// threshold, so it already generalizes to the widened domain. Re-verified
+// empirically after the widening: of the 110675 pairs the widened domain now
+// admits, this predicate excludes 524 (leaving 110151 for the twoSum
+// control); twoProduct's 110675 are unaffected (no analogous exclusion
+// applies to it) and all remain exact under contraction-off (0 mismatches).
 // ----------------------------------------------------------------------------
 inline bool sum_oracle_faithful(float a, float b) {
     if (!std::isfinite(a) || !std::isfinite(b)) return false;
@@ -307,11 +339,15 @@ inline void print_mismatch(const char* which, const char* where,
 
 // ----------------------------------------------------------------------------
 // Input corpus: 10^5 random in-domain pairs + the corner-case corpus cross-
-// product. Range [-1e18f, 1e18f] keeps every product splitter- and underflow-safe
-// (|a| << FLT_MAX/8193 ~ 4.15e34; |a*b| <= 1e36 < FLT_MAX). This is ff_eft_test's
+// product. Range [-1e18f, 1e18f] keeps every product comfortably underflow-safe
+// and well inside FP32's normal range (|a*b| <= 1e36 < FLT_MAX); FMA-based
+// two_prod has no splitter to overflow, so this range is chosen purely for
+// product-magnitude safety now, not splitter safety. This is ff_eft_test's
 // twoProduct broad range, NOT DD's 1e100: at 1e100 an FP32 product overflows and
 // essentially every pair would be domain-skipped (the vacuous-coverage trap FP32's
-// narrow exponent range sets). Deterministic seed.
+// narrow exponent range sets). The corpus cross-product below (not this random
+// range) is what reaches the wider operand magnitudes the domain widening now
+// admits (see "DOMAIN WIDENING" in the file header). Deterministic seed.
 // ----------------------------------------------------------------------------
 static std::vector<std::pair<float,float>> build_inputs() {
     std::vector<std::pair<float,float>> pairs;
@@ -336,13 +372,14 @@ static std::vector<std::pair<float,float>> build_inputs() {
 
 struct GuardCount { long tested = 0; long mismatches = 0; };
 
-// Host pass: recompute two_prod_dekker directly on the host (governed by the CXX
-// -ffp-contract flag), compare bit-exactly to the oracle reference.
+// Host pass: recompute production xp::two_prod directly on the host (governed
+// by the CXX -ffp-contract flag), compare bit-exactly to the oracle reference.
 static GuardCount run_host_pass(const std::vector<std::pair<float,float>>& in,
                                 const std::vector<TwoOut>& ref, int& samples_left) {
     GuardCount c;
     for (size_t i = 0; i < in.size(); ++i) {
-        TwoOut got = two_prod_dekker(in[i].first, in[i].second);
+        xp::FloatFloat got_ff = xp::two_prod(in[i].first, in[i].second);
+        TwoOut got{ got_ff.hi, got_ff.lo };
         ++c.tested;
         if (got.hi != ref[i].hi || got.lo != ref[i].lo) {
             ++c.mismatches;
@@ -355,11 +392,11 @@ static GuardCount run_host_pass(const std::vector<std::pair<float,float>>& in,
     return c;
 }
 
-// Device pass: recompute two_prod_dekker through the C3 harness. On a CUDA/HIP
-// build this is a real kernel governed by the device compiler's --fmad flag; on a
-// host build the harness runs the same functor in a serial loop, still through
-// two genuinely separate allocations and a memcpy each way. Mirrors ff_eft_test's
-// device parity pass.
+// Device pass: recompute production xp::two_prod through the C3 harness. On a
+// CUDA/HIP build this is a real kernel governed by the device compiler's
+// --fmad flag; on a host build the harness runs the same functor in a serial
+// loop, still through two genuinely separate allocations and a memcpy each
+// way. Mirrors ff_eft_test's device parity pass.
 //
 // The functor is a trivially-copyable STRUCT holding raw device pointers, not a
 // lambda: device_harness.hpp passes it by value into a __global__ and
@@ -371,7 +408,7 @@ struct GuardKernel {
     float* p_lo;
 
     XPMATH_INLINE_FUNCTION void operator()(std::size_t i) const {
-        TwoOut p = two_prod_dekker(a[i], b[i]);
+        xp::FloatFloat p = xp::two_prod(a[i], b[i]);
         p_hi[i] = p.hi;
         p_lo[i] = p.lo;
     }
@@ -481,7 +518,7 @@ static void check_baseline(long observed) {
 int main(int, char**) {
     int rc = 0;
     {
-        std::printf("=== ff_fma_guard_test (T2.5): FMA-contraction guard for FF Dekker twoProduct ===\n");
+        std::printf("=== ff_fma_guard_test (T2.5): FMA-contraction guard for FF production two_prod ===\n");
         std::printf("contraction posture: %s\n", kPostureName);
         std::printf("execution space: %s\n", xpt::where_name());
         // Deliberately does NOT spell the 128-bit type's name here. A string
@@ -505,7 +542,7 @@ int main(int, char**) {
         std::printf("[control] twoSum (contraction-immune): tested=%ld mismatches=%ld\n",
                     S.tested, S.mismatches);
 
-        // --- Dekker twoProduct: host + device passes -------------------------
+        // --- production two_prod: host + device passes ------------------------
         GuardCount H = run_host_pass(inputs, ref, samples_left);
         GuardCount D = run_device_pass(inputs, ref, samples_left);
         const long F = H.mismatches + D.mismatches;
@@ -522,7 +559,7 @@ int main(int, char**) {
         XPMATH_ASSERT(S.mismatches == 0,
                          "twoSum control not exact under contraction-off (unexpected)");
         XPMATH_ASSERT(F == 0,
-                         "Dekker twoProduct not exact under contraction-off — "
+                         "production two_prod not exact under contraction-off — "
                          "the -ffp-contract=off posture is not taking effect");
         // A nonzero vendor code is a TEST FAILURE, not a warning: a launch that
         // never ran leaves p_hi/p_lo at whatever the allocator returned, and the
@@ -535,16 +572,17 @@ int main(int, char**) {
                     rc == 0 ? "ALL EXACT (posture holds)" : "FAILURES PRESENT");
 #else
         // ON variant: REPORT ONLY. F may be nonzero if the compiler contracted the
-        // Dekker sequence; that is informative, not a failure. Exit 0 regardless.
+        // production two_prod sequence; that is informative, not a failure. Exit 0
+        // regardless.
         std::printf("\nmode=ON: reporting only (never fail-gates).\n");
         if (F == 0) {
-            std::printf("  result: F == 0 — this compiler did NOT contract the Dekker\n");
-            std::printf("          sequence at -ffp-contract=fast on this ISA target.\n");
+            std::printf("  result: F == 0 — production two_prod stayed exact at\n");
+            std::printf("          -ffp-contract=fast on this compiler/ISA target.\n");
             std::printf("          The -ffp-contract=off safety posture is belt+suspenders here.\n");
         } else {
-            std::printf("  result: F == %ld — this compiler DID contract the Dekker\n", F);
-            std::printf("          sequence. The -ffp-contract=off posture in ff_math.hpp's\n");
-            std::printf("          build is REQUIRED; this count is the evidence.\n");
+            std::printf("  result: F == %ld — production two_prod was NOT exact under\n", F);
+            std::printf("          contraction-on. The -ffp-contract=off posture in\n");
+            std::printf("          ff_math.hpp's build is REQUIRED; this count is the evidence.\n");
         }
         // The twoSum control should still be exact even in ON mode (contraction-
         // immune). If it is not, something is very wrong — but still WARN, do not
