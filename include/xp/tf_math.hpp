@@ -129,66 +129,66 @@ XPMATH_INLINE_FUNCTION float tf_two_sum(float a, float b, float& err) {
     return detail::eft_two_sum(a, b, err);
 }
 
-// Veltkamp split with QD's large-magnitude guard.  Port of qd::split,
-// QD 2.3.24 qd/include/qd/inline.h:66-83, at FP32.
+// KI-9 — HISTORICAL, subsumed by the FMA-based tf_two_prod/tf_two_sqr below.
 //
-// Splitter 8193.0f = 2^13+1 for the 24-bit FP32 mantissa — reused from
-// ff_math.hpp (ff_math.hpp:220, validated for FF at T2.1).
+// KI-9 (fixed 2026-09-02, see docs/history/KNOWN_ISSUES.md) was a
+// Veltkamp-splitter overflow, identical in cause and fix to qf_math.hpp's own
+// KI-9 (see the derivation there): the original port of qd::split (QD 2.3.24
+// qd/include/qd/inline.h:66-83) dropped QD's `_QD_SPLIT_THRESH` branch. For
+// |a| > FLT_MAX / (split + 1) ~ 4.15e34 the product `a * split` overflows to
+// ±inf, and then `hi = con - (con - a)` is inf - inf = NaN, which poisoned
+// every consumer — multiply, sqr, multiply_scalar, and through
+// multiply_scalar the long-division quotient digits of divide() — even where
+// the true product was exactly representable. It was mitigated with a
+// `tf_split()` wrapper that pre-scaled by an exact power of two (2^-14,
+// bringing FLT_MAX down to 2.08e34, inside the safe band) before splitting and
+// unscaled hi/lo by 2^14 after.
 //
-// KI-9 (fixed 2026-09-02). Identical defect and identical fix to
-// qf_math.hpp:qf_split — see the derivation there. In short: without the
-// threshold branch, `a * split` overflows for |a| > FLT_MAX / (split + 1) ≈
-// 4.15e34 and `hi = con - (con - a)` becomes inf - inf = NaN, taking multiply,
-// sqr, multiply_scalar and divide's quotient digits with it. The pre-scale by
-// 2^-14 and unscale by 2^14 are exact powers of two, so the hazard path adds no
-// rounding and the non-hazard path is bit-identical to before.
-XPMATH_INLINE_FUNCTION void tf_split(float a, float& hi, float& lo) {
-    const float split  = 8193.0f;
-    const float thresh = 4.1528233e34f;      // FLT_MAX / (split + 1)
-    if (a > thresh || a < -thresh) {
-        a *= 6.103515625e-05f;               // 2^-14, exact
-        detail::eft_split(a, split, hi, lo);
-        hi  *= 16384.0f;                     // 2^14, exact
-        lo  *= 16384.0f;
-    } else {
-        detail::eft_split(a, split, hi, lo);
-    }
-}
+// tf_two_prod/tf_two_sqr no longer split at all — they compute p = fl(a*b)
+// (q = fl(a*a)) and the exact residual via a single hardware FMA, the same
+// mathematical object Dekker/Veltkamp splitting computed, in 2 ops instead of
+// the split-and-cross-multiply sequence and with no splitter to overflow in
+// the first place. `tf_split()` has therefore been removed as dead code (no
+// remaining caller; verified against KI-9's own repro inputs directly in the
+// removed band -- hypot(1e35..3e38, ...), divide() operands past 4.15e34 --
+// which now return the correct finite answer instead of NaN. corpus.hpp's
+// huge_tiny<float>() (caps near 1.5e30) and exp_overflow<float>() (values
+// near 88.7, an exp()-scaling hazard, not a two_prod operand-magnitude one)
+// were also re-run as ordinary regression checks but neither one actually
+// reaches this ~4.15e34 threshold band, so they confirm the migration didn't
+// disturb smaller-magnitude behavior rather than directly exercising the
+// removed guard. Direct, permanent coverage of the band lives in
+// tf_fma_guard_test.cpp's widened `prod_in_domain`, which — unlike before
+// this migration — now admits operands up to FLT_MAX itself.
+//
+// The GENUINE-overflow tail that KI-9 also fixed — when the true product
+// exceeds FLT_MAX, p is ±inf and the error term carries no information, so
+// the only defensible value is 0 — is NOT splitter-specific and still lives
+// inside tf_two_prod/tf_two_sqr's `!isfinite` guard below. Non-finite operands
+// (±inf, NaN) take the same branch and propagate whatever `a * b` already
+// gives, which is already the IEEE answer.
 
-// fl(a*b) and err (Dekker TwoProduct via Veltkamp split).  QD inline.h:85-99.
-// Empirically exact over |operands| <= 1e6; KI-9 extends that to the full FP32
-// range.
-//
-// The non-finite early return is the genuine-overflow half of KI-9; see
-// qf_math.hpp:qf_two_prod for the rationale. Briefly: for an overflowed product
-// the residual is inf - inf = NaN, so a correctly-±inf result came back
-// NaN-tailed; the error term of an overflowed product carries no information
-// and 0 is the only defensible value.
+// fl(a*b) and err. FMA-based TwoProduct: p = fl(a*b) and e = fma(a, b, -p) is
+// the exact residual a*b - p whenever p is correctly rounded and the product
+// neither overflows nor underflows to zero. QD inline.h:85-99 computed the
+// same mathematical object via Dekker/Veltkamp splitting; see the KI-9
+// comment above. Bit-identical in structure to the primitive validated for
+// DD, FF and QF (dd_math.hpp two_prod, ff_math.hpp two_prod, qf_math.hpp
+// qf_two_prod).
 XPMATH_INLINE_FUNCTION float tf_two_prod(float a, float b, float& err) {
-    float p = detail::eft_mul(a, b);
+    const float p = detail::eft_mul(a, b);
     if (!detail::isfinite(p)) { err = 0.0f; return p; }
-    float a1, a2, b1, b2;
-    tf_split(a, a1, a2);
-    tf_split(b, b1, b2);
-    err = detail::eft_add(detail::eft_add(detail::eft_add(
-              detail::eft_sub(detail::eft_mul(a1, b1), p),
-              detail::eft_mul(a1, b2)),
-              detail::eft_mul(a2, b1)),
-              detail::eft_mul(a2, b2));
+    err = detail::eft_fma(a, b, -p);
     return p;
 }
 
-// fl(a*a) and err.  QD inline.h:101-113 (two_sqr).
+// fl(a*a) and err. QD inline.h:101-113 (two_sqr) computed this via a
+// dedicated single-split squaring form; the FMA residual for a*a is just
+// tf_two_prod(a, a), so tf_two_sqr is now a thin alias — FMA squaring costs
+// the same 2 ops as the general product, so there is nothing left to
+// specialize.
 XPMATH_INLINE_FUNCTION float tf_two_sqr(float a, float& err) {
-    float q = detail::eft_mul(a, a);
-    if (!detail::isfinite(q)) { err = 0.0f; return q; }
-    float hi, lo;
-    tf_split(a, hi, lo);
-    err = detail::eft_add(detail::eft_add(
-              detail::eft_sub(detail::eft_mul(hi, hi), q),
-              detail::eft_mul(detail::eft_mul(2.0f, hi), lo)),
-              detail::eft_mul(lo, lo));
-    return q;
+    return tf_two_prod(a, a, err);
 }
 
 // three_sum / three_sum2.  QD inline.h:192-204 (used in add).

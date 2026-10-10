@@ -4,20 +4,25 @@
 //
 // WHAT THIS TEST IS AND WHY IT EXISTS
 // -----------------------------------
-// TF's arithmetic is built on Dekker's error-free transforms. Two of them are
-// TWO-ROUNDED-OPERATION sequences whose error term is meaningful only because a
-// product and its subtraction are DISTINCT rounded steps:
+// TF's production tf_two_prod / tf_two_sqr (include/xp/tf_math.hpp, backing
+// multiply, sqr, multiply_scalar, and through multiply_scalar the long-division
+// quotient digits of divide()) compute the exact product/square error term via
+// an FMA-based TwoProduct, not Dekker/Veltkamp splitting:
 //
-//   tf_two_prod(a,b)  ->  p = fl(a*b),  e = ((a1*b1 - p) + a1*b2 + a2*b1) + a2*b2
-//   tf_two_sqr (a)    ->  q = fl(a*a),  e = ((hi*hi  - q) + 2*hi*lo)      + lo*lo
-//                                             ^^^^^^^^^^^ the contraction hazard
-//   (Veltkamp splitter 8193.0f = 2^13 + 1, reused from ff_math.hpp.)
+//   tf_two_prod(a,b)  ->  p = fl(a*b),  e = fma(a, b, -p)
+//   tf_two_sqr (a)    ->  q = fl(a*a),  e = fma(a, a, -q)   // tf_two_prod(a,a)
 //
-// If the compiler CONTRACTS `a1*b1 - p` (resp. `hi*hi - q`) into a single fused
-// multiply-add, the rounding Dekker's algebra depends on never happens and the
-// "error" term is silently wrong. This test builds the tf_math.hpp primitives
-// under BOTH contraction settings and cross-checks against a contraction-immune
-// FP64 oracle.
+// This is correct provided (a) `p` (resp. `q`) is the correctly-rounded product
+// and (b) the single rounding inside `fma` is the ONLY rounding — i.e. the
+// compiler is not allowed to further reassociate the already-explicit `fma`
+// call, and the volatile guards inside `detail::eft_mul`/`detail::eft_fma`
+// (include/xp/config.hpp) are not allowed to be optimized away. Those guards
+// exist precisely because aggressive compilers (gfx90a under ROCm 7.0.2 even
+// with -ffp-contract=off; g++ 13.3 under -ffp-contract=fast/-ffast-math) have
+// been observed to fuse or fold adjacent rounded ops that look, to a
+// real-number-algebra optimizer, like they cancel to zero. This test builds the
+// tf_math.hpp primitives under BOTH contraction settings and cross-checks
+// against a contraction-immune FP64 oracle.
 //
 //   * contraction-OFF build  -> the error terms must be EXACT. FAIL-GATES.
 //   * contraction-ON  build  -> the compiler is ALLOWED to contract. The verdict
@@ -34,18 +39,34 @@
 //
 // TF DIVERGENCE FROM FF: DIRECT CALL TO SHIPPED PRIMITIVES (same as QF)
 // ----------------------------------------------------------------------
-// ff_fma_guard_test had to DUPLICATE FF's Dekker twoProduct because ff_math.hpp
-// embeds it inside multiply() with no standalone primitive to call. tf_math.hpp
-// is different: it EXPOSES the shipped primitives as free functions (tf_two_prod
-// / tf_two_sqr / tf_two_sum). So this test calls the ACTUAL shipped code under
-// the ON flags — strictly stronger for a contraction guard, as it characterizes
-// whether GCC contracts *tf_math.hpp's own source*, not a copy. This mirrors
-// T3.5's same divergence from T2.5. (Rule 4 is trivially respected — we only
-// #include, never edit.)
+// ff_fma_guard_test originally had to DUPLICATE FF's Dekker twoProduct because
+// ff_math.hpp embedded it inside multiply() with no standalone primitive to
+// call (that mirror was retired when FF migrated to FMA; see
+// ff_fma_guard_test.cpp's own "WHY THIS NO LONGER TESTS A LOCAL DEKKER
+// MIRROR"). tf_math.hpp never had that problem: it has always EXPOSED its EFT
+// primitives as free functions (tf_two_prod / tf_two_sqr / tf_two_sum). So this
+// test has always called the ACTUAL shipped code under the ON flags —
+// strictly stronger for a contraction guard, as it characterizes whether GCC
+// contracts *tf_math.hpp's own source* (Dekker's, historically; FMA's, now),
+// not a copy that could drift. This mirrors T3.5's same divergence from T2.5.
+// (Rule 4 is trivially respected — we only #include, never edit.)
 //
 // tf_two_sqr IS ALSO GUARDED (same as QF). FF had no squaring EFT; TF ships
-// tf_two_sqr, a SECOND Dekker sequence with a `hi*hi - q` contraction hazard, so
-// this test guards both — matching T3.5's op surface.
+// tf_two_sqr, a SECOND FMA-based TwoProduct instance (tf_two_prod(a,a)) with
+// the same reassociation hazard, so this test guards both — matching T3.5's op
+// surface.
+//
+// DOMAIN WIDENING vs. the pre-migration version of this file
+// ------------------------------------------------------------
+// The old Dekker-based domain predicate excluded |operand| >= split_safe_max
+// (~4.1528e34 = FLT_MAX/8193, ~2^114.9998) because SPLITTING an operand that
+// large overflows the splitter itself — a hazard specific to Veltkamp splitting
+// that does not exist for FMA-based tf_two_prod/tf_two_sqr (they never split).
+// That exclusion is removed below (see prod_in_domain). What remains —
+// rejecting subnormal operands and bounding the TRUE product away from FP32's
+// overflow/underflow edges — is NOT splitter-specific: it is the IEEE-754
+// "exact FMA residual" precondition (Boldo & Muller), the same requirement an
+// FMA-based TwoProduct has that a Dekker one does. It stays.
 //
 // THREE-WAY CLASSIFICATION (the ON reporter's refinement)
 // --------------------------------------------------------
@@ -118,38 +139,75 @@ inline bool sqr_is_exact(float a) {
 }
 
 // ----------------------------------------------------------------------------
-// Domain predicates
+// Domain predicates — the "no overflow / no underflow" region the FMA-based
+// TwoProduct is proven over. A pair outside the domain is SKIPPED, not counted
+// (EFT skip-not-fail discipline). The splitter-overflow exclusion this
+// predicate used to carry (split_safe_max) is GONE — see "DOMAIN WIDENING" in
+// the file header: tf_two_prod/tf_two_sqr never split, so there is no splitter
+// left to overflow.
 // ----------------------------------------------------------------------------
 inline bool sum_in_domain(float a, float b) {
   if (!std::isfinite(a) || !std::isfinite(b)) return false;
   return std::isfinite(a + b);
 }
 
-inline float split_safe_max() {
-  return std::numeric_limits<float>::max() / 8193.0f;
-}
-
-// twoProd/twoSqr domain. Ported from qf_fma_guard_test.cpp:187-204 (which is
-// itself T3.1's predicate): finite normal-or-zero operands, both below the
-// splitter-overflow bound, with the TRUE (exact FP64) product inside the FP32
-// normal range so BOTH p and its error term are representable. Dekker's
-// twoProduct is exact only absent underflow; outside this region a nonzero
-// residual is EXPECTED BEHAVIOUR, not a defect, and the pair is SKIPPED.
+// twoProd/twoSqr domain: finite normal-or-zero operands with the TRUE product
+// comfortably inside the normal range (so both p and its error term e are
+// representable without underflow). The FMA-based TwoProduct is exact only
+// absent underflow/overflow of the true product (Boldo & Muller; Muller et al.,
+// "Handbook of Floating-Point Arithmetic", §4.4 — the same precondition a
+// Dekker-split TwoProduct has). The predicate is evaluated on the EXACT (double)
+// product, not the rounded FP32 product (which would flush to 0 in the underflow
+// regime and let underflowing pairs masquerade as in-domain). Subnormal OPERANDS
+// are excluded — an exact FMA residual against a subnormal operand is itself a
+// separate, narrower guarantee this predicate does not attempt to certify.
+// Threshold FLT_MIN * 2^24 = 2^-102 keeps e >= ~2^-126.
 inline bool prod_in_domain(float a, float b) {
   if (!std::isfinite(a) || !std::isfinite(b)) return false;
-  const float fmin = std::numeric_limits<float>::min();
+  const float fmin = std::numeric_limits<float>::min();   // smallest normal FP32
   auto normal_or_zero = [fmin](float x) {
-    return x == 0.0f || std::fabs(x) >= fmin;
+    return x == 0.0f || std::fabs(x) >= fmin;             // reject subnormals
   };
   if (!normal_or_zero(a) || !normal_or_zero(b)) return false;
-  const float ssm = split_safe_max();
-  if (std::fabs(a) >= ssm || std::fabs(b) >= ssm) return false;
-  if (a == 0.0f || b == 0.0f) return true;
-  double tp = (double)a * (double)b;
+  if (a == 0.0f || b == 0.0f) return true;                       // exact product 0
+  double tp = (double)a * (double)b;                             // exact (48 <= 53)
   double mag = tp < 0.0 ? -tp : tp;
   const double hi_lim = (double)std::numeric_limits<float>::max();
   const double lo_lim = std::ldexp(1.0, -102);
-  return mag <= hi_lim && mag >= lo_lim;
+  if (mag > hi_lim) return false;   // product (and p) would overflow FP32
+  if (mag < lo_lim) return false;   // error term would fall into FP32 subnormals
+  return true;
+}
+
+// twoSum oracle-faithfulness predicate (CONTROL pass only). FP32-SPECIFIC —
+// same guard T2.5's ff_fma_guard_test / T3.5's qf_fma_guard_test carry (no DD
+// counterpart). A product-domain pair like (a = FLT_MIN = 2^-126, b = 2^24)
+// has an in-range PRODUCT (2^-102) yet an exact SUM spanning 2^24 down to
+// 2^-126 — far beyond the FP64 oracle's 53-bit mantissa. The FP32 twoSum is
+// CORRECT there (hi = 2^24, lo = 2^-126, non-overlapping); it is the FP64
+// *decomposition oracle* that collapses the tiny tail, so the exact FP32 lo
+// would look like a false "mismatch". A pair is in the control's domain only
+// when the exact FP64 sum is faithful, i.e. the FP64 twoSum error term is zero
+// (the double sum carries no rounding). This excludes ONLY wide-exponent sums,
+// never a pair where FP32 twoSum is actually wrong. (tf_two_prod / tf_two_sqr
+// need no such guard — their exact product is always <= 48 bits, so the FP64
+// oracle is unconditionally faithful.)
+//
+// This was latent and unaddressed before this chunk (TF's guard test gated its
+// twoSum CONTROL on sum_in_domain alone, same gap Chunk B found and fixed in
+// dd_fma_guard_test.cpp for DD — unlike FF/QF, which already carried it).
+// Needed regardless of the FMA migration's domain widening above: it is a
+// general FP64-oracle-faithfulness check, not a threshold tied to the old
+// splitter bound (matching ff_fma_guard_test's/qf_fma_guard_test's identical
+// finding for their own word width).
+inline bool sum_oracle_faithful(float a, float b) {
+  if (!std::isfinite(a) || !std::isfinite(b)) return false;
+  double da = (double)a, db = (double)b;
+  double s  = da + db;
+  if (!std::isfinite(s)) return false;             // sum must not overflow (twoSum domain)
+  double e   = s - da;                             // FP64 twoSum error term;
+  double err = (db - e) + (da - (s - e));          // zero <=> the double sum is exact.
+  return err == 0.0;
 }
 
 // ----------------------------------------------------------------------------
@@ -217,7 +275,9 @@ inline void check_pair(Op op, float a, float b, EftCount& c) {
   // was already correct; only this host path was not.
   bool in_domain;
   switch (op) {
-    case Op::Sum:  in_domain = sum_in_domain(a, b);   break;
+    // sum_oracle_faithful: see its comment — excludes wide-exponent-gap pairs
+    // where the FP64 oracle itself can't witness the exact FP32 twoSum result.
+    case Op::Sum:  in_domain = sum_in_domain(a, b) && sum_oracle_faithful(a, b);  break;
     case Op::Prod: in_domain = prod_in_domain(a, b);  break;
     case Op::Sqr:  in_domain = prod_in_domain(a, a);  break;
   }
@@ -351,7 +411,7 @@ static EftCount run_device_parity() {
     float a = ha[i], b = hb[i];
 
     // twoSum
-    if (sum_in_domain(a, b)) {
+    if (sum_in_domain(a, b) && sum_oracle_faithful(a, b)) {
       if ((double)hshi[i] + (double)hslo[i] != (double)a + (double)b) ++sum_fail;
     } else ++sum_skip;
 
@@ -463,7 +523,7 @@ int main(int, char**) {
     std::printf("=== tf_fma_guard_test_contract_on: contraction ON (report) ===\n");
 #endif
     std::printf("Oracle: FP64 (exact, 25-bit sum / 48-bit product fit in 53-bit FP64)\n");
-    std::printf("Splitter: 8193.0f = 2^13 + 1 (reused from ff_math.hpp)\n\n");
+    std::printf("TwoProduct: FMA-based (p = fl(a*b), e = fma(a,b,-p)); primitives called directly from tf_math.hpp\n\n");
 
     // twoSum CONTROL
     std::printf("[Control] tf_two_sum\n");
@@ -513,7 +573,7 @@ int main(int, char**) {
 
 #if XPMATH_CONTRACTION_MODE == 0
     long F = prod_h.failures + sqr_h.failures + dev.failures;
-    XPMATH_ASSERT(F == 0, "OFF: at least one Dekker primitive broke");
+    XPMATH_ASSERT(F == 0, "OFF: at least one FMA-based TwoProduct primitive broke");
     rc = ep_exit_code();
 #else
     // The drift counter is the ON-mode analogue of the OFF-mode failure count:
@@ -527,7 +587,7 @@ int main(int, char**) {
 #  endif
     long W_total = prod_h.wrong + sqr_h.wrong + dev.wrong;
     if (W_total > 0) {
-      std::printf("\nERROR: ERR_NONZERO_WRONG detected (nonzero but violates Dekker identity)\n");
+      std::printf("\nERROR: ERR_NONZERO_WRONG detected (nonzero but violates TwoProduct identity)\n");
     } else {
       std::printf("\nON target: ERR_NONZERO_WRONG == 0 -> PASS\n");
     }
