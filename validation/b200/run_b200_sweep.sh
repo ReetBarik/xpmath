@@ -117,11 +117,89 @@ fi
 
 echo
 echo "--- [2/3] sweep_device on this GPU ---"
-"$DEV_BIN" --out "$RAW_OUT"
+SWEEP_LOG="$LOGDIR/sweep_device_${STAMP}.out"
+"$DEV_BIN" --out "$RAW_OUT" >"$SWEEP_LOG" 2>&1
 rc=$?
+cat "$SWEEP_LOG"
 if [ "$rc" -ne 0 ]; then
-  echo "FATAL: sweep_device exited $rc -- last_error() was nonzero; do not score $RAW_OUT" >&2
-  exit "$rc"
+  echo "sweep_device exited $rc -- last_error() was nonzero; do not score $RAW_OUT" >&2
+  echo
+  echo "--- isolating each remaining kernel in its own process ---"
+  echo "    one illegal access poisons every later launch in the same process."
+  echo "    a kernel that exits 0 here is not scored unless every kernel from"
+  echo "    the first fault onward also exits 0."
+
+  # Same order as scripts/sweep_device.cpp: op-major, backend-minor, real then complex.
+  real_ops=(add sub mul div sqrt abs exp log exp2 exp10 expm1 log2 log10 log1p \
+            sin cos tan asin acos atan sinh cosh tanh acosh asinh atanh \
+            pow hypot fmod remainder copysign fmax fmin fdim fma \
+            ceil floor round trunc)
+  complex_ops=(add sub mul div abs conj sqrt exp log log10 \
+               sin cos tan asin acos atan sinh cosh tanh asinh acosh atanh \
+               pow polar)
+  backends=(DD FF QF TF)
+  keys=()
+  for op in "${real_ops[@]}"; do
+    for be in "${backends[@]}"; do keys+=("${be}:r:${op}"); done
+  done
+  for op in "${complex_ops[@]}"; do
+    for be in "${backends[@]}"; do keys+=("${be}:c:${op}"); done
+  done
+
+  fault=$(grep -E 'sweep_device: first fault backend=' "$SWEEP_LOG" | tail -1 || true)
+  start=0
+  if [ -n "$fault" ]; then
+    be=$(sed -n 's/.*backend=\([^ ]*\).*/\1/p' <<<"$fault")
+    kind=$(sed -n 's/.*kind=\([^ ]*\).*/\1/p' <<<"$fault")
+    op=$(sed -n 's/.*op=\([^ ]*\).*/\1/p' <<<"$fault")
+    needle="${be}:${kind}:${op}"
+    for i in "${!keys[@]}"; do
+      if [ "${keys[$i]}" = "$needle" ]; then start=$i; break; fi
+    done
+    echo "  first fault: $needle  (resume index $start / ${#keys[@]})"
+  else
+    echo "  no 'first fault' line; re-running every kernel"
+  fi
+
+  ISO="$LOGDIR/isolate_${STAMP}"
+  mkdir -p "$ISO"
+  faults=()
+  for ((i = start; i < ${#keys[@]}; i++)); do
+    key=${keys[$i]}
+    one="$ISO/${key//:/_}.csv"
+    "$DEV_BIN" --only "$key" --out "$one"
+    one_rc=$?
+    if [ "$one_rc" -ne 0 ]; then
+      echo "  FAULT $key exit $one_rc"
+      faults+=("$key")
+    else
+      echo "  ok    $key"
+    fi
+  done
+
+  if [ "${#faults[@]}" -ne 0 ]; then
+    echo
+    echo "kernels that faulted in their own process (${#faults[@]}):"
+    printf '  %s\n' "${faults[@]}"
+    echo "not scoring. the full-sweep file $RAW_OUT stops before the first fault"
+    echo "and is not a result."
+    exit 3
+  fi
+
+  STITCHED="$LOGDIR/sweep_b200_stitched.csv"
+  {
+    awk 'BEGIN{p=1} /^[^#]/ && !/^backend,/ {p=0} p' "$RAW_OUT"
+    if [ "$start" -gt 0 ]; then
+      awk '!/^#/ && !/^backend,/' "$RAW_OUT"
+    fi
+    for ((i = start; i < ${#keys[@]}; i++)); do
+      key=${keys[$i]}
+      awk '!/^#/ && !/^backend,/' "$ISO/${key//:/_}.csv"
+    done
+  } > "$STITCHED"
+  echo
+  echo "every kernel from the fault onward exited 0; stitched $STITCHED"
+  RAW_OUT=$STITCHED
 fi
 
 echo

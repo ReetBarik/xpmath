@@ -556,13 +556,25 @@ XPMATH_INLINE_FUNCTION TripleFloatComplex log1p(TripleFloatComplex w) {
                                atan2(w.im, add(TripleFloat(1.0f), w.re)));
 }
 
-// Not inline. On sm_100, pasting this body (noinline log plus two noinline
-// divides) into its callers makes nvcc/ptxas underestimate the __local__ frame
-// (TD-4); cudaLimitStackSize cannot enlarge that frame. Same mark as log above.
+// Not inline. On sm_100, pasting this body into its callers makes nvcc/ptxas
+// underestimate the __local__ frame (TD-4); cudaLimitStackSize cannot enlarge
+// that frame. Same mark as log above.
+//
+// Does NOT call the complex log(TripleFloatComplex) above and divide its
+// result -- on sm_100 that call chain (one NOINLINE complex function reading
+// the returned TripleFloatComplex of another) is exactly the TD-4 shape that
+// silently corrupted the return value in testing: the real component came
+// back as z.re/ln10 (i.e. as if `log(z).re` had aliased `z.re`, the
+// uncomputed input, rather than the computed modulus's log). Recomputing
+// modulus/argument directly here, the same way acos() above stopped routing
+// through asin(z), removes that specific call boundary. Verified bit-exact
+// against the MPFR/MPC oracle on host (same formula, so no accuracy change)
+// and correct on B200 hardware (log10(1e8+0i) -> 8+0i, was 4.34294...e7+0i).
 XPMATH_NOINLINE_FUNCTION TripleFloatComplex log10(TripleFloatComplex z) {
-    TripleFloatComplex lg = log(z);
-    TripleFloat ln10 = TripleFloat_log10();
-    return TripleFloatComplex(divide(lg.re, ln10), divide(lg.im, ln10));
+    TripleFloat modulus  = abs(z);
+    TripleFloat argument = atan2(z.im, z.re);
+    TripleFloat ln10     = TripleFloat_log10();
+    return TripleFloatComplex(divide(log(modulus), ln10), divide(argument, ln10));
 }
 
 // ============================================================
@@ -745,8 +757,28 @@ XPMATH_NOINLINE_FUNCTION TripleFloat xp_asin_imag_mag(TripleFloat x, TripleFloat
     // algebraically equivalent sm*(sm + sqrt(m+2)) was measured too and is
     // very slightly worse overall (5290 sweep cells down vs 5126), so this
     // form ships.
-    return log1p(add(m, multiply(sm, sqrt(add(m, TripleFloat(2.0f))))));
+    const TripleFloat arg = add(m, multiply(sm, sqrt(add(m, TripleFloat(2.0f)))));
+    return log1p(arg);
 }
+#if defined(__CUDACC__)
+// TD4 experiment: a genuine indirect call through a volatile device function
+// pointer. XPMATH_NOINLINE_FUNCTION (a __noinline__ hint) is NOT honored here
+// -- cuobjdump confirms ptxas fully inlines xp_asin_imag_mag into the caller
+// regardless of this attribute, which is why NOINLINE placement alone has
+// not fixed the TD-4 corruption. A volatile function pointer blocks the
+// compiler from resolving the call target at compile time, so there is no
+// "probably safe to inline anyway" heuristic left to override: the call
+// target is genuinely unknown until the indirect branch executes.
+//
+// Declared under __CUDACC__ (true in BOTH nvcc passes), not __CUDA_ARCH__
+// (device pass only) -- nvcc's host-pass cudafe stub generator needs to see
+// this __device__ variable's declaration to emit its registration code, even
+// though it is only ever read on the device side.
+namespace td4_workaround {
+using ImagMagFn = TripleFloat (*)(TripleFloat, TripleFloat);
+__device__ const volatile ImagMagFn kAsinImagMagIndirect = &xp_asin_imag_mag;
+}  // namespace td4_workaround
+#endif
 // KI-32. |Re asin(z)| -- the OTHER component of the same Hull, Fairgrove & Tang
 // (1997) parametrisation, and the one the `atan2(iz + sqrt(1-z^2))` form used to
 // destroy on the far real axis.
@@ -796,7 +828,8 @@ XPMATH_NOINLINE_FUNCTION TripleFloat xp_asin_imag_mag(TripleFloat x, TripleFloat
 // derived for x >= 0 and is wrong for negative x. That costs acos nothing,
 // because a is EVEN in x -- x -> -x swaps r and s -- so the leg is even too and
 // the quadrant comes from the SIGNED Re z in acos's atan2 alone, with no case
-// split. xp_asin_real_mag() is left as the atan2 wrapper so asin is unchanged.
+// split. asin() below calls atan2(x, xp_asin_real_leg(x,y)) directly (no
+// separate wrapper -- see asin()'s own comment for why).
 XPMATH_NOINLINE_FUNCTION TripleFloat xp_asin_real_leg(TripleFloat x, TripleFloat y) {
     const TripleFloat one(1.0f);
     const TripleFloat xp1  = add(x, one);
@@ -827,26 +860,54 @@ XPMATH_NOINLINE_FUNCTION TripleFloat xp_asin_real_leg(TripleFloat x, TripleFloat
     const TripleFloat apx = add(multiply_scalar(add(r, s_), 0.5f), x);   // a + x
     return multiply(sax, sqrt(apx));
 }
-XPMATH_INLINE_FUNCTION TripleFloat xp_asin_real_mag(TripleFloat x, TripleFloat y) {
-    return atan2(x, xp_asin_real_leg(x, y));
-}
+#if defined(__CUDACC__)
+// Same TD4 indirection as xp_asin_imag_mag above, for this function's every
+// direct call site (asin/acos/acosh all call it). See td4_workaround above
+// for why a volatile function pointer is used instead of NOINLINE.
+namespace td4_workaround {
+using RealLegFn = TripleFloat (*)(TripleFloat, TripleFloat);
+__device__ const volatile RealLegFn kAsinRealLegIndirect = &xp_asin_real_leg;
+}  // namespace td4_workaround
+#endif
 // |Re z| and |Im z|, the two arguments xp_asin_imag_mag() wants. Split out so
 // asin/acosh/asinh cannot disagree about them.
 XPMATH_INLINE_FUNCTION TripleFloat xp_abs_word(TripleFloat v) {
     return (v.f0 < 0.0f) ? negate(v) : v;
 }
-XPMATH_INLINE_FUNCTION TripleFloatComplex asin(TripleFloatComplex z) {
+// Not inline. On sm_100, pasting this body into its callers makes nvcc/ptxas
+// underestimate the __local__ frame (TD-4). Same mark as QuadFloatComplex::asin
+// and TripleFloatComplex::log10.
+//
+// Does NOT route the real part through a separate xp_asin_real_mag(x,y)
+// wrapper (`return atan2(x, xp_asin_real_leg(x,y));`) the way an earlier
+// revision did -- on sm_100 that extra NOINLINE-calls-NOINLINE layer was
+// exactly the TD-4 shape that silently corrupted this function's OWN
+// im = xp_asin_imag_mag(x,y) result in testing (asin(10000+0i) came back
+// im=0.0 instead of 9.9034872..., with re correct -- the real-part call
+// chain's corruption bled into the next call's return, not its own).
+// Calling atan2(x, xp_asin_real_leg(x,y)) directly here keeps the exact same
+// two out-of-line calls (atan2, xp_asin_real_leg) with one fewer NOINLINE
+// hop, the same fix shape that closed log10's analogous corruption above.
+// Verified bit-exact against the MPFR/MPC oracle on host (same formula) and
+// correct on B200 hardware.
+XPMATH_NOINLINE_FUNCTION TripleFloatComplex asin(TripleFloatComplex z) {
     // Both components from the Hull/Fairgrove/Tang r-s-a parametrisation, on the
     // first-quadrant magnitudes, with the signs put back by copysign so a signed
     // zero on either cut picks the C99 Annex G side. Re asin is odd in x and Im
     // asin is odd in y, so that is the whole of the sign logic.
     // KI-32: this used to be -i*log(iz + sqrt(1 - z^2)) for the real part; see
-    // xp_asin_real_mag above for why that sum cannot be formed.
+    // xp_asin_real_leg above for why that sum cannot be formed.
     const TripleFloat x = xp_abs_word(z.re);
     const TripleFloat y = xp_abs_word(z.im);
-    TripleFloat re = xp_asin_real_mag(x, y);
+#if defined(__CUDA_ARCH__)
+    TripleFloat re = atan2(x, td4_workaround::kAsinRealLegIndirect(x, y));
+    if (detail::copysign(1.0f, z.re.f0) < 0.0f) re = negate(re);
+    TripleFloat im = td4_workaround::kAsinImagMagIndirect(x, y);
+#else
+    TripleFloat re = atan2(x, xp_asin_real_leg(x, y));
     if (detail::copysign(1.0f, z.re.f0) < 0.0f) re = negate(re);
     TripleFloat im = xp_asin_imag_mag(x, y);
+#endif
     if (detail::copysign(1.0f, z.im.f0) < 0.0f) im = negate(im);
     return TripleFloatComplex(re, im);
 }
@@ -919,10 +980,30 @@ XPMATH_INLINE_FUNCTION TripleFloatComplex asin(TripleFloatComplex z) {
 // z=2+0i -> -1.3170i; z=2-0i -> +1.3170i; z=-2+0i -> pi-1.3170i;
 // z=-2-0i -> pi+1.3170i. Now checked mechanically, on all four backends and
 // including the sign of every zero component, by scripts/probe_acos_branch.cpp.
-XPMATH_INLINE_FUNCTION TripleFloatComplex acos(TripleFloatComplex z) {
-    TripleFloat leg = xp_asin_real_leg(xp_abs_word(z.re), xp_abs_word(z.im));
+// Not inline (TD-4, sm_100; see asin() above). Same mark as
+// QuadFloatComplex::acos.
+//
+// Does NOT call the full asin(z) for the imaginary half. asin(z).im is
+// xp_asin_imag_mag(x,y) with z.im's sign reapplied -- going through asin()
+// also computes and immediately discards asin's real part, which itself
+// recomputes xp_asin_real_leg(x,y) (acos already has it, as `leg`) and wraps
+// it in another atan2. That is a whole duplicate leg computation pasted into
+// this body for a value never used. Calling xp_asin_imag_mag directly removes
+// it.
+XPMATH_NOINLINE_FUNCTION TripleFloatComplex acos(TripleFloatComplex z) {
+    const TripleFloat x = xp_abs_word(z.re);
+    const TripleFloat y = xp_abs_word(z.im);
+#if defined(__CUDA_ARCH__)
+    TripleFloat leg = td4_workaround::kAsinRealLegIndirect(x, y);
     if (leg.f0 == 0.0f) leg = TripleFloat(0.0f);   // never -0; see SIGNED ZEROS above
-    return TripleFloatComplex(atan2(leg, z.re), negate(asin(z).im));
+    TripleFloat im = td4_workaround::kAsinImagMagIndirect(x, y);
+#else
+    TripleFloat leg = xp_asin_real_leg(x, y);
+    if (leg.f0 == 0.0f) leg = TripleFloat(0.0f);   // never -0; see SIGNED ZEROS above
+    TripleFloat im = xp_asin_imag_mag(x, y);
+#endif
+    if (detail::copysign(1.0f, z.im.f0) < 0.0f) im = negate(im);   // == asin(z).im
+    return TripleFloatComplex(atan2(leg, z.re), negate(im));
 }
 // atan(z) = (i/2)·log((1 - iz)/(1 + iz)).  qf_complex.hpp:317-324 /
 // ff_complex.hpp:243-251 / dd_complex.hpp:238-247.
@@ -1219,7 +1300,11 @@ XPMATH_INLINE_FUNCTION TripleFloatComplex tanh(TripleFloatComplex z) {
 // Re asinh(z), the KI-11 form. Kept as its own function so the reflected and
 // unreflected branches below cannot drift apart.
 XPMATH_INLINE_FUNCTION TripleFloat xp_ki11_asinh_re(TripleFloatComplex z) {
+#if defined(__CUDA_ARCH__)
+    TripleFloat v = td4_workaround::kAsinImagMagIndirect(xp_abs_word(z.im), xp_abs_word(z.re));
+#else
     TripleFloat v = xp_asin_imag_mag(xp_abs_word(z.im), xp_abs_word(z.re));
+#endif
     if (detail::copysign(1.0f, z.re.f0) < 0.0f) v = negate(v);
     return v;
 }
@@ -1300,7 +1385,11 @@ XPMATH_NOINLINE_FUNCTION TripleFloatComplex acosh(TripleFloatComplex z) {
     // construction, so re-attaching the sign from copysign(Im z) is exact.
     TripleFloat im_;
     if (xp_acosh_chain_short(z.re, z.im)) {
+#if defined(__CUDA_ARCH__)
+        TripleFloat leg = td4_workaround::kAsinRealLegIndirect(xp_abs_word(z.re), xp_abs_word(z.im));
+#else
         TripleFloat leg = xp_asin_real_leg(xp_abs_word(z.re), xp_abs_word(z.im));
+#endif
         if (leg.f0 == 0.0f) leg = TripleFloat(0.0f);   // never -0; see SIGNED ZEROS above
         im_ = atan2(leg, z.re);
     } else {
@@ -1312,7 +1401,11 @@ XPMATH_NOINLINE_FUNCTION TripleFloatComplex acosh(TripleFloatComplex z) {
     }
     if (im_.f0 < 0.0f) im_ = negate(im_);
     if (detail::copysign(1.0f, z.im.f0) < 0.0f) im_ = negate(im_);
+#if defined(__CUDA_ARCH__)
+    return TripleFloatComplex(td4_workaround::kAsinImagMagIndirect(xp_abs_word(z.re), xp_abs_word(z.im)), im_);
+#else
     return TripleFloatComplex(xp_asin_imag_mag(xp_abs_word(z.re), xp_abs_word(z.im)), im_);
+#endif
 }
 // atanh(z) = ½·log((1 + z)/(1 - z)).  qf_complex.hpp:373-376 / ff_complex.hpp:295-299 / dd_complex.hpp:290-295.
 // KI-5(b) fix. Two independent defects lived in the old one-line body

@@ -970,10 +970,14 @@ XPMATH_INLINE_FUNCTION void sincos(FloatFloat a, FloatFloat& x, FloatFloat& y) {
     else { x = sin_r;  y = negate(cos_r); }
 }
 
-XPMATH_INLINE_FUNCTION FloatFloat sin(FloatFloat a) {
+// sin and cos are NOINLINE for the same reason as qf_math.hpp's and
+// tf_math.hpp's versions: a kernel calling exp(FloatFloatComplex) calls both,
+// and inlining sincos's body into each would produce a frame too large for
+// nvcc/ptxas to lay out correctly alongside the rest of exp(FFC) (TD-4).
+XPMATH_NOINLINE_FUNCTION FloatFloat sin(FloatFloat a) {
     FloatFloat c, s; sincos(a, c, s); return s;
 }
-XPMATH_INLINE_FUNCTION FloatFloat cos(FloatFloat a) {
+XPMATH_NOINLINE_FUNCTION FloatFloat cos(FloatFloat a) {
     FloatFloat c, s; sincos(a, c, s); return c;
 }
 XPMATH_INLINE_FUNCTION FloatFloat tan(FloatFloat a) {

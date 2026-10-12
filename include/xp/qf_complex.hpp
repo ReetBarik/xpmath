@@ -548,7 +548,17 @@ XPMATH_NOINLINE_FUNCTION QuadFloatComplex exp(QuadFloatComplex z) {
 }
 
 // log(z) = log|z| + i·arg(z).  ff_complex.hpp:172-176 / dd_complex.hpp:186-190.
-XPMATH_INLINE_FUNCTION QuadFloatComplex log(QuadFloatComplex z) {
+//
+// Not inline. dd_complex.hpp and tf_complex.hpp mark their complex log()
+// XPMATH_NOINLINE_FUNCTION for TD-4 (sm_100 mis-sizes the __local__ frame when
+// this body -- itself three NOINLINE callees, abs/atan2/log -- gets pasted
+// into a caller). This QF copy was left inline by oversight; B200 sweep
+// verification (2026-10-12) found exactly the TD-4 signature here: QF c log
+// correct on host (and on every other arch) but wrong at a scattered ~12% of
+// grid points on B200 (measured up to 6.7e13 ulps against ~100-ulp bounds,
+// at points where host measures ~0.02 ulps) -- a never-before-run device
+// path, not a regression. Same mark as TripleFloatComplex::log.
+XPMATH_NOINLINE_FUNCTION QuadFloatComplex log(QuadFloatComplex z) {
     QuadFloat modulus = abs(z);
     QuadFloat argument = atan2(z.im, z.re);
     return QuadFloatComplex(log(modulus), argument);
@@ -816,6 +826,31 @@ XPMATH_NOINLINE_FUNCTION QuadFloat xp_asin_imag_mag(QuadFloat x, QuadFloat y) {
     // form ships.
     return log1p(add(m, multiply(sm, sqrt(add(m, QuadFloat(2.0f))))));
 }
+#if defined(__CUDACC__)
+// TD4 (sm_100): XPMATH_NOINLINE_FUNCTION (a __noinline__ hint) is not honored
+// by ptxas for this function -- see tf_complex.hpp's td4_workaround comment
+// for the cuobjdump evidence and the full rationale. A volatile device
+// function pointer forces a genuine indirect call ptxas cannot inline away,
+// closing a sanitizer-confirmed out-of-bounds __local__ write that direct
+// calls to this function hit on TripleFloat (same code shape, same
+// XPMATH_NOINLINE_FUNCTION mark). Applied defensively here even though no
+// QuadFloat-specific corruption has been reproduced yet, since the bug is
+// proven to be fragile and layout-sensitive rather than something "clean
+// today" rules out for tomorrow.
+//
+// Declared under __CUDACC__ (true in both nvcc passes), not __CUDA_ARCH__
+// (device pass only) -- nvcc's host-pass cudafe stub generator needs to see
+// this __device__ variable's declaration to emit its registration code, even
+// though it is only ever read on the device side.
+// Own namespace, not tf_complex.hpp's td4_workaround: both headers land in
+// the same TU (sweep_device.cpp includes every backend), and identical names
+// over different pointee types (TripleFloat here vs. QuadFloat there) is a
+// hard redeclaration error, not just a shadow.
+namespace td4_workaround_qf {
+using ImagMagFn = QuadFloat (*)(QuadFloat, QuadFloat);
+__device__ const volatile ImagMagFn kAsinImagMagIndirect = &xp_asin_imag_mag;
+}  // namespace td4_workaround_qf
+#endif
 // KI-32. |Re asin(z)| -- the OTHER component of the same Hull, Fairgrove & Tang
 // (1997) parametrisation, and the one the `atan2(iz + sqrt(1-z^2))` form used to
 // destroy on the far real axis.
@@ -1244,9 +1279,17 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex atan(QuadFloatComplex z) {
     QuadFloatComplex num   = QuadFloatComplex(one) - iz;
     QuadFloatComplex den   = QuadFloatComplex(one) + iz;
     QuadFloatComplex ratio = num / den;
-    QuadFloatComplex lg    = log(ratio);
+    // Not routed through the complex log(QuadFloatComplex) above -- on sm_100
+    // that call (an INLINE caller invoking the NOINLINE complex log, itself
+    // three more NOINLINE callees) is the TD-4 shape: B200 measured `inf` at
+    // 1132/1780 c:atan points once log() picked up its own NOINLINE mark
+    // (2026-10-12). Recomputing modulus/argument directly, the same way
+    // log10() above and TripleFloatComplex::log10 already do, removes the
+    // boundary. Algebraically identical to log(ratio).
+    QuadFloat lg_re = log(abs(ratio));
+    QuadFloat lg_im = atan2(ratio.im, ratio.re);
     // multiply by i/2: (a+bi)*(i/2) = (-b/2) + (a/2)*i
-    return QuadFloatComplex(multiply_scalar(negate(lg.im), 0.5f), multiply_scalar(lg.re, 0.5f));
+    return QuadFloatComplex(multiply_scalar(negate(lg_im), 0.5f), multiply_scalar(lg_re, 0.5f));
 }
 
 // ============================================================
@@ -1514,9 +1557,12 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex atanh(QuadFloatComplex z) {
         else
             r.im = multiply_scalar(xp_atan2_safe(twoy, subtract(omx2, y2)), 0.5f);
     } else {
-        QuadFloatComplex lg = log((QuadFloatComplex(one) + z) / (QuadFloatComplex(one) - z));
-        r.re = multiply_scalar(lg.re, 0.5f);
-        r.im = multiply_scalar(lg.im, 0.5f);
+        // Same TD-4 boundary as atan()'s far-field branch above -- avoid the
+        // complex log(QuadFloatComplex) call, recompute modulus/argument
+        // directly instead.
+        QuadFloatComplex ratio = (QuadFloatComplex(one) + z) / (QuadFloatComplex(one) - z);
+        r.re = multiply_scalar(log(abs(ratio)), 0.5f);
+        r.im = multiply_scalar(atan2(ratio.im, ratio.re), 0.5f);
     }
     if (z.im.f0 == 0.0f && detail::fabs(z.re.f0) > 1.0f) {
         QuadFloat half_pi = multiply_scalar(QuadFloat_pi(), 0.5f);
