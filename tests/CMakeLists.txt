@@ -1294,7 +1294,16 @@ set(_xp_dev_raw_a100
 set(_xp_dev_raw_mi250
     "${CMAKE_SOURCE_DIR}/validation/mi250/logs/1001915_raw.csv.gz")
 set(_xp_dev_raw_b200
-    "${CMAKE_SOURCE_DIR}/validation/b200/logs/1004484_raw.csv.gz")
+    # Re-pointed 2026-10-12 (core/cuda-eft-rn): the old 1004484_raw.csv.gz
+    # (2026-09-26) predates the TD-4 fixes in ff_complex.hpp/qf_complex.hpp/
+    # tf_complex.hpp and several ops the sweep grid has since grown (QF
+    # complex log among them) -- it is not a record of this build, and
+    # sweep_device_gate_b200 would (correctly) fail the monotone comparison
+    # against the re-baselined sweep_baseline_b200.csv.gz otherwise. The new
+    # file is job 1008571's sweep (interactive node, not a batch job --
+    # named for consistency with every other arch's job-ID convention
+    # anyway), the same run sweep_baseline_b200.csv.gz was regenerated from.
+    "${CMAKE_SOURCE_DIR}/validation/b200/logs/1008571_raw.csv.gz")
 set(_xp_dev_raw_mi300
     "${CMAKE_SOURCE_DIR}/validation/mi300/logs/1004487_raw.csv.gz")
 foreach(_xp_arch IN ITEMS a100 mi250 b200 mi300)
