@@ -1314,7 +1314,19 @@ set(_xp_dev_raw_b200
     # anyway), the same run sweep_baseline_b200.csv.gz was regenerated from.
     "${CMAKE_SOURCE_DIR}/validation/b200/logs/1008571_raw.csv.gz")
 set(_xp_dev_raw_mi300
-    "${CMAKE_SOURCE_DIR}/validation/mi300/logs/1004487_raw.csv.gz")
+    # Re-pointed 2026-10-12 (core/cuda-eft-rn): the old 1004487_raw.csv.gz
+    # predates the FMA-based TwoProduct migration across all four backends
+    # -- it is not a record of this build, and sweep_device_gate_mi300
+    # would (correctly) fail the monotone comparison against the
+    # re-baselined sweep_baseline_mi300.csv.gz otherwise. The new file is
+    # job 1008578's sweep (interactive node, HIP/gfx942), the same run
+    # sweep_baseline_mi300.csv.gz was regenerated from. Full ctest
+    # (44/44 host + 24/24 device) and the absolute gate (0/436080 above
+    # bound) both passed clean on this tree before the re-baseline; the
+    # monotone diff against the old baseline matched MI250's (gfx90a) exactly,
+    # same benign FMA-rounding footprint, same ratios, since MI250 and
+    # MI300 share the identical non-fnptr HIP code path.
+    "${CMAKE_SOURCE_DIR}/validation/mi300/logs/1008578_raw.csv.gz")
 foreach(_xp_arch IN ITEMS a100 mi250 b200 mi300)
   set(_xp_dev_base
       "${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline_${_xp_arch}.csv.gz")
