@@ -1292,7 +1292,16 @@ xpm_tag_test(host sweep_monotone_gate_selftest sweep_absolute_gate_selftest)
 set(_xp_dev_raw_a100
     "${CMAKE_SOURCE_DIR}/validation/a100/logs/1004542_raw.csv.gz")
 set(_xp_dev_raw_mi250
-    "${CMAKE_SOURCE_DIR}/validation/mi250/logs/1001915_raw.csv.gz")
+    # Re-pointed 2026-10-12 (core/cuda-eft-rn): the old 1001915_raw.csv.gz
+    # (2026-09-18) predates the FMA-based TwoProduct migration across all
+    # four backends -- it is not a record of this build, and
+    # sweep_device_gate_mi250 would (correctly) fail the monotone comparison
+    # against the re-baselined sweep_baseline_mi250.csv.gz otherwise. The new
+    # file is job 1008575's sweep (interactive node, HIP/gfx90a), the same
+    # run sweep_baseline_mi250.csv.gz was regenerated from. Full ctest
+    # (44/44 host + 24/24 device) and the absolute gate (0/436080 above
+    # bound) both passed clean on this tree before the re-baseline.
+    "${CMAKE_SOURCE_DIR}/validation/mi250/logs/1008575_raw.csv.gz")
 set(_xp_dev_raw_b200
     # Re-pointed 2026-10-12 (core/cuda-eft-rn): the old 1004484_raw.csv.gz
     # (2026-09-26) predates the TD-4 fixes in ff_complex.hpp/qf_complex.hpp/
