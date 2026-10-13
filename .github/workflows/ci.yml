@@ -645,6 +645,9 @@ jobs:
   device-nvcc:
     name: nvcc device compile (${{ matrix.hdr }})
     runs-on: ubuntu-24.04
+    # Pinned, not `latest`, on purpose -- see the `:7.0.2` pin and its comment
+    # on the hipcc job below for what a floating tag cost that lane. Re-pin
+    # deliberately if CUDA's toolchain of record ever moves; do not float it.
     container: nvidia/cuda:12.9.2-devel-ubuntu24.04
     strategy:
       fail-fast: false
@@ -856,11 +859,23 @@ jobs:
   #    reports a real defect nobody has to act on is a lane that does not exist.
   #
   #    On failure: fix the code.  Do NOT restore continue-on-error.
+  #
+  #    TAG PINNED 2026-10-13 (core/cuda-eft-rn PR #44).  `:latest` was exactly
+  #    the "first red would be indistinguishable from a broken image" risk
+  #    this comment already named, and it landed: PR #44's merge run pulled a
+  #    `:latest` that had drifted to HIP 7.16.26385 / AMD clang 24.0.0git (a
+  #    nightly, not a release), and the newer clang's `--save-temps=obj`
+  #    output no longer matched the `*-amdgcn-amd-amdhsa-*.s` glob below --
+  #    `ls` found nothing and the step failed with no compiler error at all.
+  #    Reproduced twice (a fresh job rerun, then a full workflow rerun), so it
+  #    was the image, not a flake. Pinned to `7.0.2`, the exact version this
+  #    lane was hand-validated against per the paragraph above. Re-pin
+  #    deliberately if ROCm's toolchain of record ever moves; do not float it.
   # ==========================================================================
   device-hip:
     name: hipcc device compile
     runs-on: ubuntu-24.04
-    container: rocm/dev-ubuntu-24.04:latest
+    container: rocm/dev-ubuntu-24.04:7.0.2
     steps:
       - name: Install git (the ROCm image is minimal)
         run: |
