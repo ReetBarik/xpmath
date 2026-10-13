@@ -1290,7 +1290,20 @@ xpm_tag_test(host sweep_monotone_gate_selftest sweep_absolute_gate_selftest)
 # Raw paths are job-of-record files. A baseline without its raw is a
 # configure error -- the gate cannot run.
 set(_xp_dev_raw_a100
-    "${CMAKE_SOURCE_DIR}/validation/a100/logs/1004542_raw.csv.gz")
+    # Re-pointed 2026-10-13 (core/cuda-eft-rn): the old 1004542_raw.csv.gz
+    # (2026-09-27) predates both the FMA-based TwoProduct migration and the
+    # A100-only QF complex atan fix (xp_log_hypot2's fnptr indirection +
+    # volatile round-trip, qf_complex.hpp) -- it is not a record of this
+    # build, and sweep_device_gate_a100 would (correctly) fail the monotone
+    # comparison against the re-baselined sweep_baseline_a100.csv.gz
+    # otherwise. The new file is job 1008580's sweep (A100, CUDA/sm_80), the
+    # same run sweep_baseline_a100.csv.gz was regenerated from. Full ctest
+    # (44/44 host + 24/24 device) and the absolute gate (0/436080 above
+    # bound) both passed clean on this tree before the re-baseline; the
+    # monotone diff against the old baseline matched MI250/MI300's
+    # FMA-rounding footprint and ratios (max 1.358x vs their 1.36x, median
+    # 0.00953x vs their 0.0095x), nowhere near the 8x gate allowance.
+    "${CMAKE_SOURCE_DIR}/validation/a100/logs/1008580_raw.csv.gz")
 set(_xp_dev_raw_mi250
     # Re-pointed 2026-10-12 (core/cuda-eft-rn): the old 1001915_raw.csv.gz
     # (2026-09-18) predates the FMA-based TwoProduct migration across all
