@@ -394,7 +394,10 @@ XPMATH_INLINE_FUNCTION FloatFloatComplex conj(FloatFloatComplex z) {
 // ============================================================
 // Complex square root
 // ============================================================
-XPMATH_INLINE_FUNCTION FloatFloatComplex sqrt(FloatFloatComplex z) {
+// Not inline. Same TD-4 reason as the other sqrt/exp/log10 complex functions:
+// on sm_100, nvcc/ptxas underestimates the __local__ frame for an oversized
+// inlined callee. Same mark as QuadFloatComplex::sqrt and TripleFloatComplex::sqrt.
+XPMATH_NOINLINE_FUNCTION FloatFloatComplex sqrt(FloatFloatComplex z) {
     if (z.re.hi == 0.0f && z.im.hi == 0.0f) return FloatFloatComplex();
     FloatFloat r  = abs(z);   // KI-8: scaled magnitude, was sqrt(re^2+im^2) inline
     FloatFloat a1 = abs(z.re);
@@ -425,10 +428,13 @@ XPMATH_INLINE_FUNCTION FloatFloatComplex sqrt(FloatFloatComplex z) {
 // ============================================================
 // Complex exp / log
 // ============================================================
-XPMATH_INLINE_FUNCTION FloatFloatComplex exp(FloatFloatComplex z) {
+// Not inline, and calls the NOINLINE sin/cos separately rather than the joint
+// inline sincos: same approach as qf_complex.hpp/tf_complex.hpp's exp, same
+// TD-4 reason (see ff_math.hpp's sin/cos).
+XPMATH_NOINLINE_FUNCTION FloatFloatComplex exp(FloatFloatComplex z) {
     FloatFloat er = exp(z.re);
-    FloatFloat c, s;
-    sincos(z.im, c, s);
+    FloatFloat c = cos(z.im);
+    FloatFloat s = sin(z.im);
     return FloatFloatComplex(multiply(er, c), multiply(er, s));
 }
 
@@ -472,7 +478,10 @@ XPMATH_INLINE_FUNCTION FloatFloatComplex log1p(FloatFloatComplex w) {
                                atan2(w.im, add(FloatFloat(1.0f), w.re)));
 }
 
-XPMATH_INLINE_FUNCTION FloatFloatComplex log10(FloatFloatComplex z) {
+// Not inline. Same TD-4 reason as exp above (log itself stays inline here,
+// matching QuadFloatComplex::log10 -- QF's log10 is noinline with log left
+// inline too). Same mark as QuadFloatComplex::log10 and TripleFloatComplex::log10.
+XPMATH_NOINLINE_FUNCTION FloatFloatComplex log10(FloatFloatComplex z) {
     FloatFloatComplex lg = log(z);
     FloatFloat ln10 = FloatFloat_log10();
     return FloatFloatComplex(divide(lg.re, ln10), divide(lg.im, ln10));
@@ -613,7 +622,11 @@ XPMATH_INLINE_FUNCTION FloatFloatComplex tan(FloatFloatComplex z) {
 // at a >= 2 into log(a) + log1p(sqrt(1 - (1/a)^2)); it measured WORSE (FF asin
 // 14.00 -> 13.81, QF asinh 28.83 -> 27.75 at z = 2, pure rounding churn from
 // the extra log), so the split does not ship.
-XPMATH_INLINE_FUNCTION FloatFloat xp_asin_imag_mag(FloatFloat x, FloatFloat y) {
+// Not inline. TD-4: on CUDA, nvcc/ptxas underestimates the __local__ spill
+// frame for an oversized inlined callee pasted into a caller; the fix is to
+// stop inlining it. Same mark as QuadFloatComplex's and TripleFloatComplex's
+// version of this helper.
+XPMATH_NOINLINE_FUNCTION FloatFloat xp_asin_imag_mag(FloatFloat x, FloatFloat y) {
     const FloatFloat one(1.0f);
     const FloatFloat xp1  = add(x, one);
     const FloatFloat xm1s = subtract(x, one);            // signed, for the max(x,1) term
@@ -702,7 +715,8 @@ XPMATH_INLINE_FUNCTION FloatFloat xp_asin_imag_mag(FloatFloat x, FloatFloat y) {
 // because a is EVEN in x -- x -> -x swaps r and s -- so the leg is even too and
 // the quadrant comes from the SIGNED Re z in acos's atan2 alone, with no case
 // split. xp_asin_real_mag() is left as the atan2 wrapper so asin is unchanged.
-XPMATH_INLINE_FUNCTION FloatFloat xp_asin_real_leg(FloatFloat x, FloatFloat y) {
+// Not inline. Same TD-4 reason as xp_asin_imag_mag above.
+XPMATH_NOINLINE_FUNCTION FloatFloat xp_asin_real_leg(FloatFloat x, FloatFloat y) {
     const FloatFloat one(1.0f);
     const FloatFloat xp1  = add(x, one);
     const FloatFloat xm1s = subtract(x, one);            // signed, for the max(1,x) term
@@ -740,7 +754,11 @@ XPMATH_INLINE_FUNCTION FloatFloat xp_asin_real_mag(FloatFloat x, FloatFloat y) {
 XPMATH_INLINE_FUNCTION FloatFloat xp_abs_word(FloatFloat v) {
     return (v.hi < 0.0f) ? negate(v) : v;
 }
-XPMATH_INLINE_FUNCTION FloatFloatComplex asin(FloatFloatComplex z) {
+// Not inline. The two helpers above are already noinline, but pasting both
+// back into this body plus atan2 still gives nvcc/ptxas a frame it
+// underestimates (TD-4). Same mark as QuadFloatComplex::asin and
+// TripleFloatComplex::asin.
+XPMATH_NOINLINE_FUNCTION FloatFloatComplex asin(FloatFloatComplex z) {
     // Both components from the Hull/Fairgrove/Tang r-s-a parametrisation, on the
     // first-quadrant magnitudes, with the signs put back by copysign so a signed
     // zero on either cut picks the C99 Annex G side. Re asin is odd in x and Im
@@ -823,7 +841,9 @@ XPMATH_INLINE_FUNCTION FloatFloatComplex asin(FloatFloatComplex z) {
 // z=2+0i -> -1.3170i; z=2-0i -> +1.3170i; z=-2+0i -> pi-1.3170i;
 // z=-2-0i -> pi+1.3170i. Now checked mechanically, on all four backends and
 // including the sign of every zero component, by scripts/probe_acos_branch.cpp.
-XPMATH_INLINE_FUNCTION FloatFloatComplex acos(FloatFloatComplex z) {
+// Not inline. Same TD-4 reason as asin above. Same mark as QuadFloatComplex::acos
+// and TripleFloatComplex::acos.
+XPMATH_NOINLINE_FUNCTION FloatFloatComplex acos(FloatFloatComplex z) {
     FloatFloat leg = xp_asin_real_leg(xp_abs_word(z.re), xp_abs_word(z.im));
     if (leg.hi == 0.0f) leg = FloatFloat(0.0f);   // never -0; see SIGNED ZEROS above
     return FloatFloatComplex(atan2(leg, z.re), negate(asin(z).im));

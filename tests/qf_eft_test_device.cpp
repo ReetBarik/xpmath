@@ -32,9 +32,9 @@
 // here scores and nothing here needed weakening to cross the boundary.
 //
 // COPIED, because they are header-free helpers in a .cpp: sum_in_domain,
-// split_safe_max, prod_in_domain, fbits, print_fail_sum, print_fail_prod,
-// half_ulp, kUnderflowTail, pair_checkable, nonoverlap_holds, draw_ordered_double
-// and NamedResult. The host half keeps its own copies. Copying rather than
+// prod_in_domain, fbits, print_fail_sum, print_fail_prod, half_ulp,
+// kUnderflowTail, pair_checkable, nonoverlap_holds, draw_ordered_double and
+// NamedResult. The host half keeps its own copies. Copying rather than
 // cross-including a .cpp is the convention the whole QF test family already uses
 // (qf_nonoverlap_test copies the same non-overlap machinery out of this file's
 // host half); a shared header for them would be a fifth place to look.
@@ -80,18 +80,14 @@ inline bool sum_in_domain(float a, float b) {
     return std::isfinite(a + b);
 }
 
-// Splitter-overflow bound, DERIVED from qf_two_prod's body:
-// the first FP32 op is `cona = a * split` with split = 8193.0f. That overflows to
-// +inf once |a| * 8193 > FLT_MAX, i.e. |a| >= FLT_MAX / 8193 (~2^114.9998); then
-// `cona - (cona - a)` becomes inf - inf = NaN and the error term is poisoned.
-inline float split_safe_max() {
-    return std::numeric_limits<float>::max() / 8193.0f;   // ~2^114.9998
-}
-
 // twoProd/twoSqr domain: finite normal-or-zero operands with the TRUE product
-// comfortably inside the normal range. Evaluated on the EXACT (double) product,
-// not the rounded FP32 one (which would flush to 0 in the underflow regime and
-// let underflowing pairs masquerade as in-domain). Threshold FLT_MIN * 2^24 =
+// comfortably inside the normal range. The splitter-overflow exclusion this
+// predicate used to carry is GONE — qf_two_prod/qf_two_sqr are FMA-based now
+// (p = fl(a*b), e = fma(a,b,-p)) and no longer split; see qf_eft_test.cpp's
+// "WHY -ffp-contract=off" and qf_fma_guard_test.cpp's "DOMAIN WIDENING" for the
+// full derivation. What remains is evaluated on the EXACT (double) product, not
+// the rounded FP32 one (which would flush to 0 in the underflow regime and let
+// underflowing pairs masquerade as in-domain). Threshold FLT_MIN * 2^24 =
 // 2^-102 keeps the error term e >= ~2^-126 (normal).
 inline bool prod_in_domain(float a, float b) {
     if (!std::isfinite(a) || !std::isfinite(b)) return false;
@@ -100,14 +96,12 @@ inline bool prod_in_domain(float a, float b) {
         return x == 0.0f || std::fabs(x) >= fmin;           // reject subnormals
     };
     if (!normal_or_zero(a) || !normal_or_zero(b)) return false;
-    const float ssm = split_safe_max();
-    if (std::fabs(a) >= ssm || std::fabs(b) >= ssm) return false;  // splitter overflow
     if (a == 0.0f || b == 0.0f) return true;                       // exact product 0
     double tp  = (double)a * (double)b;                            // exact (48 <= 53)
     double mag = tp < 0.0 ? -tp : tp;
     const double hi_lim = (double)std::numeric_limits<float>::max();
     const double lo_lim = std::ldexp(1.0, -102);
-    if (mag > hi_lim) return false;   // product (and a1*b1) would overflow FP32
+    if (mag > hi_lim) return false;   // product (and p) would overflow FP32
     if (mag < lo_lim) return false;   // error term would fall into FP32 subnormals
     return true;
 }
@@ -197,7 +191,7 @@ struct NamedResult { int passed = 0; int skipped = 0; int failed = 0; int total 
 // host FP64 oracle. With the harness's host backend this reduces to a host loop
 // over two real allocations (still valid); under hipcc/nvcc it is a real kernel
 // and catches device-side FP differences (subnormal flush,
-// contraction) the host pass cannot see. Inputs drawn from the splitter- and
+// contraction) the host pass cannot see. Inputs drawn from the overflow- and
 // underflow-safe range [-1e18,1e18] so BOTH sum stays finite AND product stays in
 // FP32's normal range (using twoSum's wider 1e30 would domain-skip nearly every
 // product — the vacuous-coverage trap FP32's narrow exponent range sets).

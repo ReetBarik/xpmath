@@ -4,6 +4,7 @@
 // Added by CORE_PLAN section C6 (chunk A).
 //
 //   sweep_device --out <path> [--grid <path>] [--seed N] [--dump-inputs OP:POINT]
+//                [--only BE:kind:op]
 //
 // WHAT IT DOES
 // Evaluates all four backends (DD, FF, QF, TF) over all 63 operations (39 real
@@ -265,7 +266,40 @@ struct RunCtx {
   const char*          dump_op;     // --dump-inputs OP:POINT, or nullptr
   int                  dump_point;
   char                 dump_kind;   // 'r' or 'c'
+  const char*          only_be;     // --only BE:kind:op, or nullptr for every kernel
+  char                 only_kind;
+  const char*          only_op;
 };
+
+// --only restricts this process to one kernel. A fresh process is how a fault
+// on one kernel stays off the next: last_error() is sticky, and an illegal
+// access leaves later launches storing a leftover host pointer.
+bool selected(const RunCtx& ctx, const char* be, char kind, const char* op) {
+  if (!ctx.only_be) return true;
+  return std::strcmp(ctx.only_be, be) == 0 && ctx.only_kind == kind &&
+         std::strcmp(ctx.only_op, op) == 0;
+}
+
+bool any_selected(const RunCtx& ctx, char kind, const char* op) {
+  if (!ctx.only_be) return true;
+  return selected(ctx, "DD", kind, op) || selected(ctx, "FF", kind, op) ||
+         selected(ctx, "QF", kind, op) || selected(ctx, "TF", kind, op);
+}
+
+// Stop before writing this kernel's rows. The file already holds every kernel
+// that ran clean; the fault line names the one that did not.
+[[noreturn]] void fault_exit(const RunCtx& ctx, const char* be, char kind,
+                             const char* op) {
+  std::fprintf(stderr,
+               "sweep_device: first fault backend=%s kind=%c op=%s error=%d\n",
+               be, kind, op, xpt::last_error());
+  std::fflush(stderr);
+  if (ctx.out) {
+    std::fflush(ctx.out);
+    std::fclose(ctx.out);
+  }
+  std::exit(3);
+}
 
 template <class B, int ID>
 void real_backend(const RunCtx& ctx, xpt::buffer<double>& A,
@@ -276,12 +310,15 @@ void real_backend(const RunCtx& ctx, xpt::buffer<double>& A,
   xpt::buffer<W>    O(n * Limbs<S>::n);
   RealKernel<S, ID> k{A.device(), Bb.device(), C.device(), O.device()};
   xpt::parallel_for_n(n, k);
+  if (xpt::last_error() != 0)
+    fault_exit(ctx, B::name(), 'r', xpsweep::kReal[ID].name);
   O.from_device();
   write_real_rows<S>(ctx.out, B::name(), xpsweep::kReal[ID].name, n, O.host());
 }
 
 template <int ID>
 void real_op(const RunCtx& ctx) {
+  if (!any_selected(ctx, 'r', xpsweep::kReal[ID].name)) return;
   const std::vector<xpsweep::GridPoint>& g = ctx.grid->real;
   const std::size_t                      n = g.size();
 
@@ -311,10 +348,14 @@ void real_op(const RunCtx& ctx) {
     if (xpsweep::kReal[ID].nops >= 3) std::printf("  c      = %.36g\n", C.host()[i]);
   }
 
-  real_backend<BeDD, ID>(ctx, A, Bb, C);
-  real_backend<BeFF, ID>(ctx, A, Bb, C);
-  real_backend<BeQF, ID>(ctx, A, Bb, C);
-  real_backend<BeTF, ID>(ctx, A, Bb, C);
+  if (selected(ctx, "DD", 'r', xpsweep::kReal[ID].name))
+    real_backend<BeDD, ID>(ctx, A, Bb, C);
+  if (selected(ctx, "FF", 'r', xpsweep::kReal[ID].name))
+    real_backend<BeFF, ID>(ctx, A, Bb, C);
+  if (selected(ctx, "QF", 'r', xpsweep::kReal[ID].name))
+    real_backend<BeQF, ID>(ctx, A, Bb, C);
+  if (selected(ctx, "TF", 'r', xpsweep::kReal[ID].name))
+    real_backend<BeTF, ID>(ctx, A, Bb, C);
 }
 
 template <class B, int ID>
@@ -329,12 +370,15 @@ void complex_backend(const RunCtx& ctx, xpt::buffer<double>& Are,
   ComplexKernel<S, Z, ID> k{Are.device(), Aim.device(), Bre.device(),
                             Bim.device(), O.device()};
   xpt::parallel_for_n(n, k);
+  if (xpt::last_error() != 0)
+    fault_exit(ctx, B::name(), 'c', xpsweep::kComplex[ID].name);
   O.from_device();
   write_complex_rows<S>(ctx.out, B::name(), xpsweep::kComplex[ID].name, n, O.host());
 }
 
 template <int ID>
 void complex_op(const RunCtx& ctx) {
+  if (!any_selected(ctx, 'c', xpsweep::kComplex[ID].name)) return;
   const std::vector<xpsweep::GridPoint>& g = ctx.grid->complx;
   const std::size_t                      n = g.size();
 
@@ -365,10 +409,14 @@ void complex_op(const RunCtx& ctx) {
     }
   }
 
-  complex_backend<BeDD, ID>(ctx, Are, Aim, Bre, Bim);
-  complex_backend<BeFF, ID>(ctx, Are, Aim, Bre, Bim);
-  complex_backend<BeQF, ID>(ctx, Are, Aim, Bre, Bim);
-  complex_backend<BeTF, ID>(ctx, Are, Aim, Bre, Bim);
+  if (selected(ctx, "DD", 'c', xpsweep::kComplex[ID].name))
+    complex_backend<BeDD, ID>(ctx, Are, Aim, Bre, Bim);
+  if (selected(ctx, "FF", 'c', xpsweep::kComplex[ID].name))
+    complex_backend<BeFF, ID>(ctx, Are, Aim, Bre, Bim);
+  if (selected(ctx, "QF", 'c', xpsweep::kComplex[ID].name))
+    complex_backend<BeQF, ID>(ctx, Are, Aim, Bre, Bim);
+  if (selected(ctx, "TF", 'c', xpsweep::kComplex[ID].name))
+    complex_backend<BeTF, ID>(ctx, Are, Aim, Bre, Bim);
 }
 
 // Compile-time unrolls, ascending, so the emitted row order matches the host
@@ -401,6 +449,9 @@ void usage(std::FILE* f) {
     "                        names exist in BOTH realms, so prefix r: or c: to\n"
     "                        say which; bare defaults to real when the name is\n"
     "                        a real op, complex otherwise.\n"
+    "  --only BE:kind:op     run one kernel (BE is DD|FF|QF|TF, kind is r|c).\n"
+    "                        A new process per kernel keeps one illegal access\n"
+    "                        from poisoning the launches after it.\n"
     "  --help                this text\n"
     "\n"
     "Row: backend,kind,op,point,limb0..limb7 -- limb0-3 the real component's\n"
@@ -415,6 +466,7 @@ int main(int argc, char** argv) {
   std::string out;
   std::string grid = XPMATH_SWEEP_GRID_DEFAULT;
   std::string dump;
+  std::string only;
   uint64_t    seed = xpsweep::kDefaultSeed;
 
   for (int i = 1; i < argc; ++i) {
@@ -430,6 +482,7 @@ int main(int argc, char** argv) {
     else if (s == "--grid")       grid = need("--grid");
     else if (s == "--seed")       seed = std::strtoull(need("--seed").c_str(), nullptr, 10);
     else if (s == "--dump-inputs") dump = need("--dump-inputs");
+    else if (s == "--only")        only = need("--only");
     else if (s == "--help" || s == "-h") { usage(stdout); return 0; }
     else {
       std::fprintf(stderr, "sweep_device: unknown argument '%s'\n", s.c_str());
@@ -485,6 +538,27 @@ int main(int argc, char** argv) {
                expected_rows, nr, int(xpsweep::R_COUNT), nc, int(xpsweep::C_COUNT));
   std::fprintf(f, "backend,kind,op,point,limb0,limb1,limb2,limb3,limb4,limb5,limb6,limb7\n");
 
+  std::string only_be, only_op;
+  char        only_kind = '\0';
+  if (!only.empty()) {
+    const std::size_t c1 = only.find(':');
+    const std::size_t c2 = only.find(':', c1 == std::string::npos ? 0 : c1 + 1);
+    if (c1 == std::string::npos || c2 == std::string::npos || c2 + 1 >= only.size() ||
+        c2 != c1 + 2 || (only[c1 + 1] != 'r' && only[c1 + 1] != 'c')) {
+      std::fprintf(stderr, "sweep_device: --only wants BE:kind:op (DD|FF|QF|TF : r|c : name)\n");
+      std::fclose(f);
+      return 2;
+    }
+    only_be   = only.substr(0, c1);
+    only_kind = only[c1 + 1];
+    only_op   = only.substr(c2 + 1);
+    if (only_be != "DD" && only_be != "FF" && only_be != "QF" && only_be != "TF") {
+      std::fprintf(stderr, "sweep_device: --only backend must be DD, FF, QF, or TF\n");
+      std::fclose(f);
+      return 2;
+    }
+  }
+
   RunCtx ctx;
   ctx.grid       = &g;
   ctx.seed       = seed;
@@ -492,6 +566,9 @@ int main(int argc, char** argv) {
   ctx.dump_op    = nullptr;
   ctx.dump_point = -1;
   ctx.dump_kind  = 'r';
+  ctx.only_be    = only.empty() ? nullptr : only_be.c_str();
+  ctx.only_kind  = only_kind;
+  ctx.only_op    = only.empty() ? nullptr : only_op.c_str();
 
   std::string dump_name;
   if (!dump.empty()) {

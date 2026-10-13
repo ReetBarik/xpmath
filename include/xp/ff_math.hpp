@@ -96,6 +96,10 @@ XPMATH_FWDDECL_FUNCTION FloatFloat multiply(FloatFloat a, FloatFloat b);
 XPMATH_FWDDECL_FUNCTION FloatFloat divide(FloatFloat a, FloatFloat b);
 XPMATH_INLINE_FUNCTION FloatFloat multiply_scalar(FloatFloat a, float b);
 XPMATH_INLINE_FUNCTION FloatFloat divide_scalar(FloatFloat a, float b);
+// FMA-based TwoProduct: p = fl(fa*fb), e = fma(fa, fb, -p). Forward-declared
+// here because multiply/multiply_scalar/divide/divide_scalar call it but
+// (for file-layout reasons predating this primitive) are defined ahead of it.
+XPMATH_INLINE_FUNCTION FloatFloat two_prod(float fa, float fb);
 XPMATH_INLINE_FUNCTION FloatFloat negate(FloatFloat a);
 XPMATH_INLINE_FUNCTION FloatFloat abs(FloatFloat a);
 XPMATH_FWDDECL_FUNCTION FloatFloat sqrt(FloatFloat a);
@@ -232,62 +236,35 @@ XPMATH_INLINE_FUNCTION FloatFloat subtract(FloatFloat a, FloatFloat b) {
     return FloatFloat(hi, lo);
 }
 
-// TwoProduct (Dekker splitting). Splitter = 2^13 + 1 for FP32 (24-bit mantissa).
+// B8/B9/B10 — HISTORICAL, all subsumed by the FMA-based two_prod below.
+//
+// B9 was a Dekker-splitter overflow: `x.hi * split` overflows to ±inf for
+// |x.hi| > FLT_MAX / (split + 1) ~ 4.15e34, and then `x1 = conx - (conx -
+// x.hi)` is inf - inf = NaN, which poisoned every consumer (multiply,
+// multiply_scalar, ff_divide_core, divide_scalar, two_prod) even where the
+// true product/quotient was exactly representable (multiply(1e-30f, 1e30f)
+// -> NaN; the answer is 1.0f). It was mitigated with a scale/unscale dance by
+// an exact power of two around each splitter site (B9 at multiply/
+// multiply_scalar/two_prod, B8 at the divisor in ff_divide_core/
+// divide_scalar, B10 at the quotient estimate in the same two). two_prod no
+// longer splits at all — it computes p = fl(a*b) and the exact residual via a
+// single hardware FMA — so the hazard all three guards protected against
+// cannot occur, and the scale/unscale dances have been removed as dead code
+// (no remaining caller; verified against corpus.hpp's huge_tiny<float>()/
+// exp_overflow<float>() and FF's own documented hazard constant
+// 4.1528233e34f before deletion).
+//
+// KI-27 is the non-finite/degenerate signal on the PRODUCT itself (a genuine
+// overflow/0/NaN in `a.hi * b.hi`, independent of how the residual is
+// computed) — that guard is NOT splitter-specific and now lives inside
+// two_prod, which every production call site below routes through.
+//
+// TwoProduct (FMA-based: p = fl(a*b), e = fma(a, b, -p))
 XPMATH_NOINLINE_FUNCTION FloatFloat multiply(FloatFloat a, FloatFloat b) {
-    // KI-27.  Non-finite / degenerate signalling on the PRODUCT — the
-    // multiply-side counterpart of the guard KI-19 put on divide(), and the
-    // exact rule qf_two_prod/tf_two_prod already carry.  Full derivation at
-    // dd_math.hpp:multiply.  This supersedes the "Scope" paragraph below, which
-    // recorded genuine product overflow as deliberately out of B9's scope: the
-    // hardware product IS the answer when it is inf, NaN or zero, and the
-    // error-free transform must not run on it.  Placed before the B9 scaling so
-    // that it sees the TRUE product rather than a rescaled stand-in.
-    //   was: multiply(1e30, 1e30) -> NaN;  now +inf.
-    const float p = a.hi * b.hi;
-    if (!detail::isfinite(p) || p == 0.0f) return FloatFloat(p, 0.0f);
-    const float split = 8193.0f;
-    // B9: scaled splitter — the same overflow B8 fixed in divide() below, at a
-    // third site (see divide()'s comment for the full derivation). BOTH operands
-    // are split here, so both need the guard: for |x.hi| > FLT_MAX / (split + 1)
-    // ≈ 4.15e34 the product x.hi * split overflows to ±inf, and then
-    // x1 = conx - (conx - x.hi) = inf - inf = NaN poisons the whole result.
-    // Surfaced by B6: erfc's multiply(sqrt(pi), exp(z^2)) walks into it at
-    // z ≈ 8.93 (PORT_NOTES §4i). B6 dodged the exposure by reformulating; this
-    // closes it at the primitive.
-    //
-    // Unscale by MULTIPLYING by 2^64 per scaled operand, applied SEPARATELY —
-    // never by 1/(sa*sb). When both operands are scaled, sa*sb = 2^-128 is
-    // subnormal and 1/(sa*sb) overflows to +inf, which would replace one garbage
-    // answer with another. Two exact power-of-two multiplies have no such
-    // intermediate.
-    //
-    // Scope: this fixes products that are REPRESENTABLE but were reached through
-    // a hazard-band operand. It does not change what happens when the product
-    // itself overflows FP32 — multiply() already returned NaN there long before
-    // any splitter scaling (c11 = inf makes a1*b1 - c11 = -inf and then
-    // e = t1 - c11 = NaN), as multiply(1e30, 1e30) shows with both operands well
-    // below the band. Both operands in the band always implies such an overflow
-    // (|a.hi*b.hi| > 1.7e69), so that corner stays non-finite; it lands on
-    // (inf, -inf) rather than NaN, which is neither better nor worse. Fixing
-    // overflow semantics is a separate question from fixing the splitter.
-    const float kSplitOverflowThresh = 4.1528233e34f; // FLT_MAX / (split + 1)
-    const bool  ha = detail::fabs(a.hi) > kSplitOverflowThresh;
-    const bool  hb = detail::fabs(b.hi) > kSplitOverflowThresh;
-    const float sa = ha ? ldexpf(1.0f, -64) : 1.0f;
-    const float sb = hb ? ldexpf(1.0f, -64) : 1.0f;
-    const float ua = ha ? ldexpf(1.0f,  64) : 1.0f;
-    const float ub = hb ? ldexpf(1.0f,  64) : 1.0f;
-    a = FloatFloat(a.hi * sa, a.lo * sa);
-    b = FloatFloat(b.hi * sb, b.lo * sb);
-    float a1, a2, b1, b2;
-    detail::eft_split(a.hi, split, a1, a2);
-    detail::eft_split(b.hi, split, b1, b2);
-    float c11 = detail::eft_mul(a.hi, b.hi);
-    float c21 = detail::eft_add(detail::eft_add(detail::eft_add(
-                      detail::eft_sub(detail::eft_mul(a1, b1), c11),
-                      detail::eft_mul(a1, b2)),
-                      detail::eft_mul(a2, b1)),
-                      detail::eft_mul(a2, b2));
+    const FloatFloat p = two_prod(a.hi, b.hi);                    // KI-27 lives here now
+    if (!detail::isfinite(p.hi) || p.hi == 0.0f) return p;
+    const float c11 = p.hi;
+    const float c21 = p.lo;
     float c2  = detail::eft_add(detail::eft_mul(a.hi, b.lo),
                                 detail::eft_mul(a.lo, b.hi));
     float t1  = detail::eft_add(c11, c2);
@@ -299,19 +276,17 @@ XPMATH_NOINLINE_FUNCTION FloatFloat multiply(FloatFloat a, FloatFloat b) {
                       detail::eft_mul(a.lo, b.lo));
     float hi  = detail::eft_add(t1, t2);
     float lo  = detail::eft_sub(t2, detail::eft_sub(hi, t1));
-    // B9: unscale. ua/ub are exact powers of two (or 1.0f on the non-hazard path,
-    // where `hi * 1.0f * 1.0f == hi` bit-for-bit).
-    return FloatFloat(hi * ua * ub, lo * ua * ub);
+    return FloatFloat(hi, lo);
 }
 
 namespace detail {
 XPMATH_INLINE_FUNCTION FloatFloat ff_pow2_scale(FloatFloat a, float s);   // defined below
 
-// KI-41 at the UNDERFLOW end.  Every guard in ff_divide_core below — B8, B9,
-// B10 — is a splitter-OVERFLOW guard at the TOP of the range; this is the
-// bottom.  Same defect, same remedy and same derivation as qf_math.hpp:divide,
-// read it there.  FF is two words, so the residual's low word sits at |a|·2^-24
-// and its Dekker tail one word further down at |a|·2^-48; the predicate tests
+// KI-41 at the UNDERFLOW end.  B8/B9/B10 below (now removed, see ff_divide_core)
+// were splitter-OVERFLOW guards at the TOP of the range; this is the bottom.
+// Same defect, same remedy and same derivation as qf_math.hpp:divide, read it
+// there.  FF is two words, so the residual's low word sits at |a|·2^-24 and its
+// TwoProduct tail one word further down at |a|·2^-48; the predicate tests
 // 2^-24 and the lift targets 2^-48.  Cap 2^72, for the reason qf_math.hpp gives.
 XPMATH_INLINE_FUNCTION bool ff_div_lift_wanted(FloatFloat a, FloatFloat b) {
     const float a0 = detail::fabs(a.hi), b0 = detail::fabs(b.hi);
@@ -319,116 +294,40 @@ XPMATH_INLINE_FUNCTION bool ff_div_lift_wanted(FloatFloat a, FloatFloat b) {
     const float m = (a0 < b0) ? a0 : b0;
     return m * 0x1p-24f < 1.17549435e-38f * 4.0f;
 }
+// KI-19 (DD sibling audit — the KI was filed QF-only; the same defect was
+// present here at FP32 scale, fixed by B8/B9/B10, now simplified further by
+// the FMA-based two_prod).  Measured before the B8/B10 fix:
+//   1e35f/1.0f    -> NaN   (quotient 1e35f IS representable)
+//   1e30f/1e-5f   -> NaN   (quotient 1e35f, same hazard)
+//   1.0f/0.0f     -> NaN   (should be +inf)
+//   1.0f/inf      -> NaN   (IEEE 754-2019 §6.1 requires +0)
+//
+//   guard 1  non-finite DIVISOR.  The bare float quotient IS the answer:
+//            finite/±inf -> correctly-signed ±0, ±inf/±inf -> NaN (kept as NaN
+//            precisely because the quotient is returned rather than a
+//            copysign form), anything/NaN -> NaN.
+//   Zone C   |s1| = inf.  No finite FloatFloat exists (|value| is bounded by
+//            |hi|(1+2^-24)), so ±inf IS the answer — this is the genuine
+//            quotient-overflow case, about the MAGNITUDE of the quotient, not
+//            about how the exact product s1*b.hi is computed.  Includes x/0,
+//            where IEEE already requires ±inf.
+//
+// B8/B9/B10's splitter-overflow scale/unscale dances (around the divisor and
+// around the quotient estimate s1) are gone along with the Dekker splitter
+// they protected: two_prod(s1, b.hi) below no longer splits (p = fl(s1*b.hi),
+// e = fma(s1, b.hi, -p)), so that intermediate overflow cannot happen.
+// Verified against ff_divide_core's former B8/B10 probe inputs
+// (divide(1.0f, inf), divide(1e35f, 1.0f), divide(1e30f, 1e-5f)) before
+// deletion — all now correct without any scaling. Zone C and KI-41 below are
+// both about the quotient's own magnitude, independent of splitting, and are
+// kept verbatim.
 XPMATH_INLINE_FUNCTION FloatFloat ff_divide_core(FloatFloat a, FloatFloat b) {
-    // §B8 extension: a NON-FINITE DIVISOR must never reach the Dekker splitter.
-    // B8's divisor guard below classifies on |b.hi| > kSplitOverflowThresh, which
-    // is TRUE for b.hi = ±inf, so it scales by 2^-64 — and inf * 2^-64 is still
-    // inf. The splitter then computes conb = inf * split = inf and
-    // b1 = conb - (conb - b.hi) = inf - inf = NaN, poisoning a quotient that IEEE
-    // defines perfectly well: x / ±inf = ±0 for finite x. divide(1.0f, inf)
-    // returned NaN where IEEE 754-2019 §6.1 requires +0.
-    //
-    // The whole answer is the bare float quotient a.hi / b.hi, which is exact for
-    // every non-finite divisor and needs no FF arithmetic at all:
-    //   finite / ±inf  ->  ±0, correctly signed (including ±0 / ±inf, where IEEE
-    //                      preserves the sign of the zero numerator)
-    //   ±inf   / ±inf  ->  NaN (invalid), unchanged
-    //   anything/ NaN  ->  NaN, unchanged
-    // Returning the quotient itself, rather than a copysign(0, ...) form, is what
-    // keeps the inf/inf case NaN — copysign would flatten it to a signed zero.
-    // lo = 0.0f because the result is exact, matching B10's Zone C convention.
-    //
-    // Early return, so this short-circuits ahead of every splitter below by
-    // construction. Divide-by-ZERO is deliberately NOT touched here: b.hi = 0 is
-    // finite, falls through, and keeps B10's Zone C ±inf semantics.
     if (!detail::isfinite(b.hi)) return FloatFloat(a.hi / b.hi, 0.0f);
-    const float split = 8193.0f;
-    // B8: the Dekker splitter below computes conb = b.hi * split (line ~"conb =")
-    // to extract b.hi's high half. For |b.hi| > FLT_MAX / (split + 1) ≈ 4.15e34
-    // that product overflows to ±inf, then b1 = conb - (conb - b.hi) = inf - inf
-    // = NaN, which poisons the whole quotient. This bites log()'s Newton
-    // iteration (divisor exp(b) ≈ a) for x ≳ e^79.7 ≈ 1.5e34, feeding NaN back
-    // into exp() and hanging its Taylor loop at the 60-iteration cap (surfaced by
-    // the B4 investigation — see TEST_SUITE_PLAN.md §B4/§B8).
-    //
-    // Fix: when b.hi is in the overflow-hazard band, pre-scale the divisor down
-    // by an exact power of two (2^-64: no FP rounding, so b's full FF precision is
-    // preserved), run the unchanged Dekker split, then unscale the quotient. Since
-    // q = a / (b·s) = (a/b) / s, the true quotient a/b is recovered by MULTIPLYING
-    // q by the same down-scale factor s. 2^-64 gives ample headroom: the largest
-    // |b.hi| ≈ FLT_MAX = 2^128 maps to 2^64, and 2^64 * split ≈ 2^77 ≪ FLT_MAX.
-    // Mirrors PORT_NOTES §4a's power-of-2 scaling pattern for exp's final scaling
-    // (same bug class, different site — the splitter, not exp's scaling).
-    //
-    // B10: the SECOND splitter run in this function splits the QUOTIENT ESTIMATE
-    // s1 = a.hi / b.hi via `cona = s1 * split`, and |s1| can land in the same
-    // 4.15e34 band with BOTH operands far below it — divide(1e35f, 1.0f) and
-    // divide(1e30f, 1e-5f) returned NaN with no large operand anywhere. Three
-    // zones, classified from the actual value of s1:
-    //
-    //   Zone A  |s1| <= kSplitOverflowThresh. Safe; untouched, bit-identical.
-    //   Zone B  kSplitOverflowThresh < |s1| < inf. The splitter overflows but the
-    //           true quotient IS representable. Pre-scale the NUMERATOR down by
-    //           the exact power of two 2^-32, run the unchanged body, unscale the
-    //           quotient by 2^32. Was NaN; now correct.
-    //   Zone C  |s1| == inf. The true quotient overflows FP32, so NO scaling
-    //           recovers a finite answer. Return the correctly-signed ±inf
-    //           instead of NaN.
-    //
-    // Zone C is a deliberate SEMANTIC upgrade (an honest overflow signal instead
-    // of a NaN poison), not a bit-identical fix. Unlike B8 and B9, B10 cannot
-    // promise "correct everywhere in the band", because part of the band has no
-    // representable answer at all. That is inherent to division, not a shortcut.
-    //
-    // Classifying on s1 itself is overflow-safe by construction, which is why no
-    // `|a.hi|` vs `|b.hi| * thresh` product is needed: IEEE division never traps,
-    // delivers a correctly-signed ±inf exactly when the quotient exceeds FLT_MAX,
-    // and yields NaN only for 0/0 and inf/inf — both of which fail
-    // `fabs(s1) > thresh` and fall through to the unchanged body, where they
-    // produced NaN before and still do.
-    //
-    // Why scale the NUMERATOR: the divisor is B8's to scale, and s1 is what has to
-    // shrink. Multiplying `a` by an exact power of two scales s1, every Dekker
-    // intermediate, and the final (hi, lo) by exactly that factor, so the result
-    // is recovered exactly. Watch the direction, as in B8/B9:
-    // q = (a*sn) / (b*s) = (a/b) * (sn/s), so recovering a/b means MULTIPLYING q
-    // by s/sn — applied as two separate exact factors, never as one reciprocal.
-    //
-    // Why 2^-32 rather than B8/B9's 2^-64: this scale lands on the NUMERATOR,
-    // which in Zone B can be as small as |b.hi| * 4.15e34 ~ 2^-34 (b.hi subnormal),
-    // so an over-aggressive scale risks flushing a.lo into the subnormal range.
-    // 2^-32 keeps ~19 binades of splitter headroom (|s1| <= 2^128 maps to 2^96 and
-    // 2^96 * split ~ 2^109 << FLT_MAX) while leaving a.lo >= 2^-90 in that worst
-    // corner, ~36 binades clear of 2^-126. 2^-64 would leave under 4.
-    //
-    // Interaction with B8's divisor scale: the two guards are mutually exclusive.
-    // B8 fires only for |b.hi| > T, which already forces |a.hi/b.hi| <= FLT_MAX/T
-    // = split+1 = 8194; after B8's 2^-64 the estimate is |s1| <= 8194 * 2^64
-    // ~ 1.5e23, eleven orders below T. So B10 can never fire on top of B8. The
-    // unscale is still written as two independent factors so it would compose
-    // correctly if it ever could.
-    const float kSplitOverflowThresh = 4.1528233e34f; // FLT_MAX / (split + 1)
-    const float s = (detail::fabs(b.hi) > kSplitOverflowThresh)
-                        ? ldexpf(1.0f, -64) : 1.0f;
-    b = FloatFloat(b.hi * s, b.lo * s);
     float s1 = a.hi / b.hi;
-    float un = 1.0f;                                     // B10 numerator unscale
-    if (detail::fabs(s1) > kSplitOverflowThresh) {       // not Zone A
-        if (detail::isinf(s1)) return FloatFloat(s1, 0.0f);        // Zone C
-        const float sn = ldexpf(1.0f, -32);                        // Zone B
-        un = ldexpf(1.0f, 32);
-        a  = FloatFloat(a.hi * sn, a.lo * sn);
-        s1 = s1 * sn;   // exact, and identical to recomputing (a.hi*sn) / b.hi
-    }
-    float a1, a2, b1, b2;
-    detail::eft_split(s1, split, a1, a2);
-    detail::eft_split(b.hi, split, b1, b2);
-    float c11  = detail::eft_mul(s1, b.hi);
-    float c21  = detail::eft_add(detail::eft_add(detail::eft_add(
-                     detail::eft_sub(detail::eft_mul(a1, b1), c11),
-                     detail::eft_mul(a1, b2)),
-                     detail::eft_mul(a2, b1)),
-                     detail::eft_mul(a2, b2));
+    if (detail::isinf(s1)) return FloatFloat(s1, 0.0f);   // Zone C
+    const FloatFloat p = two_prod(s1, b.hi);
+    const float c11 = p.hi;
+    const float c21 = p.lo;
     float c2   = detail::eft_mul(s1, b.lo);
     float t1   = detail::eft_add(c11, c2);
     float e    = detail::eft_sub(t1, c11);
@@ -450,10 +349,7 @@ XPMATH_INLINE_FUNCTION FloatFloat ff_divide_core(FloatFloat a, FloatFloat b) {
     float s2   = detail::eft_add(t11, t21) / b.hi;
     float hi   = detail::eft_add(s1, s2);
     float lo   = detail::eft_sub(s2, detail::eft_sub(hi, s1));
-    // B8/B10: unscale — recover a/b from (a·un⁻¹)/(b·s) by multiplying by s and by
-    // un, as two separate exact powers of two. Both are 1.0f on the non-hazard
-    // path, where `hi * 1.0f * 1.0f == hi` bit-for-bit.
-    return FloatFloat(hi * s * un, lo * s * un);
+    return FloatFloat(hi, lo);
 }
 }  // namespace detail
 
@@ -475,32 +371,10 @@ XPMATH_NOINLINE_FUNCTION FloatFloat divide(FloatFloat a, FloatFloat b) {
 }
 
 XPMATH_INLINE_FUNCTION FloatFloat multiply_scalar(FloatFloat a, float b) {
-    const float p = a.hi * b;                                    // KI-27, see multiply()
-    if (!detail::isfinite(p) || p == 0.0f) return FloatFloat(p, 0.0f);
-    const float split = 8193.0f;
-    // B9: scaled splitter, identical in shape to multiply() above — both a.hi and
-    // the scalar b are split, so both are guarded. Reachable from the public
-    // operator*(FloatFloat, float) / operator*(float, FloatFloat) with either side
-    // in the hazard band; the in-header callers all pass small scalars, but `a`
-    // is unconstrained. Same separate-unscale rule as multiply().
-    const float kSplitOverflowThresh = 4.1528233e34f; // FLT_MAX / (split + 1)
-    const bool  ha = detail::fabs(a.hi) > kSplitOverflowThresh;
-    const bool  hb = detail::fabs(b)    > kSplitOverflowThresh;
-    const float sa = ha ? ldexpf(1.0f, -64) : 1.0f;
-    const float sb = hb ? ldexpf(1.0f, -64) : 1.0f;
-    const float ua = ha ? ldexpf(1.0f,  64) : 1.0f;
-    const float ub = hb ? ldexpf(1.0f,  64) : 1.0f;
-    a = FloatFloat(a.hi * sa, a.lo * sa);
-    b = b * sb;
-    float a1, a2, b1, b2;
-    detail::eft_split(a.hi, split, a1, a2);
-    detail::eft_split(b, split, b1, b2);
-    float c11  = detail::eft_mul(a.hi, b);
-    float c21  = detail::eft_add(detail::eft_add(detail::eft_add(
-                     detail::eft_sub(detail::eft_mul(a1, b1), c11),
-                     detail::eft_mul(a1, b2)),
-                     detail::eft_mul(a2, b1)),
-                     detail::eft_mul(a2, b2));
+    const FloatFloat p = two_prod(a.hi, b);                       // KI-27 lives in two_prod now
+    if (!detail::isfinite(p.hi) || p.hi == 0.0f) return p;
+    const float c11  = p.hi;
+    const float c21  = p.lo;
     float c2   = detail::eft_mul(a.lo, b);
     float t1   = detail::eft_add(c11, c2);
     float e    = detail::eft_sub(t1, c11);
@@ -510,108 +384,46 @@ XPMATH_INLINE_FUNCTION FloatFloat multiply_scalar(FloatFloat a, float b) {
                      c21);
     float hi   = detail::eft_add(t1, t2);
     float lo   = detail::eft_sub(t2, detail::eft_sub(hi, t1));
-    return FloatFloat(hi * ua * ub, lo * ua * ub);   // B9 unscale, see multiply()
+    return FloatFloat(hi, lo);
 }
 
+// KI-19: same Zone C / non-finite-divisor guards as divide() above, with the
+// divisor a bare float. The former B8/B9/B10 splitter-overflow rescaling is
+// gone along with the splitter it protected — see the KI-19 comment above
+// ff_divide_core.
 XPMATH_INLINE_FUNCTION FloatFloat divide_scalar(FloatFloat a, float b) {
-    // §B8 extension: non-finite divisor, divide()'s guard at the scalar site. The
-    // divisor guard below scales by 2^-64 for |b| > kSplitOverflowThresh, which
-    // b = ±inf satisfies while staying inf, so conb = inf * split = inf and
-    // b1 = inf - inf = NaN. Same bare-quotient answer, same reasoning; the full
-    // derivation lives at divide() and is not repeated here.
     if (!detail::isfinite(b)) return FloatFloat(a.hi / b, 0.0f);
-    const float split = 8193.0f;
-    // B9: scaled splitter on the DIVISOR — B8's divide() fix at the scalar site.
-    // For |b| > FLT_MAX / (split + 1) ≈ 4.15e34, conb = b * split overflows and
-    // b1 = inf - inf = NaN. Pre-scale b down by the exact power of two 2^-64, run
-    // the unchanged split, then recover a/b from a/(b·s) by MULTIPLYING the
-    // quotient by s (B8's sign-error warning applies verbatim). Reachable from
-    // the public operator/(FloatFloat, float).
-    //
-    // Scaling b down inflates the quotient estimate t1 = a.hi / b by 2^64, which
-    // cannot itself reach the band: the guard only fires for |b| > 4.15e34, so
-    // |t1| < FLT_MAX / 4.15e34 = 8193 beforehand and < 8193·2^64 ≈ 1.5e23 after —
-    // eleven orders below the 4.15e34 threshold.
-    //
-    // B10: the quotient-estimate guard, divide()'s fix at the scalar site. t1 is
-    // this function's `s1` — the estimate that `cona = t1 * split` splits — and it
-    // reaches the hazard band on its own with a perfectly ordinary scalar
-    // (divide_scalar(1e35f, 2.0f) returned NaN). Same three zones, same
-    // classify-on-the-quotient-itself rule, same 2^-32 numerator scale, same
-    // Zone C ±inf-instead-of-NaN semantic upgrade, same mutual exclusivity with
-    // the divisor guard above. The full derivation lives at divide(); it is not
-    // repeated here.
-    //
-    // No shared helper for the two sites: the operand types differ (FloatFloat vs
-    // float divisor) and each guard is five lines inline at a hot arithmetic
-    // primitive — the same trade B9 made across its four splitter sites.
-    const float kSplitOverflowThresh = 4.1528233e34f; // FLT_MAX / (split + 1)
-    const float s = (detail::fabs(b) > kSplitOverflowThresh) ? ldexpf(1.0f, -64) : 1.0f;
-    b = b * s;
     float t1 = a.hi / b;
-    float un = 1.0f;                                     // B10 numerator unscale
-    if (detail::fabs(t1) > kSplitOverflowThresh) {       // not Zone A
-        if (detail::isinf(t1)) return FloatFloat(t1, 0.0f);        // Zone C
-        const float sn = ldexpf(1.0f, -32);                        // Zone B
-        un = ldexpf(1.0f, 32);
-        a  = FloatFloat(a.hi * sn, a.lo * sn);
-        t1 = t1 * sn;   // exact, and identical to recomputing (a.hi*sn) / b
-    }
-    float a1, a2, b1, b2;
-    detail::eft_split(t1, split, a1, a2);
-    detail::eft_split(b, split, b1, b2);
-    float t12  = detail::eft_mul(t1, b);
-    float t22  = detail::eft_add(detail::eft_add(detail::eft_add(
-                     detail::eft_sub(detail::eft_mul(a1, b1), t12),
-                     detail::eft_mul(a1, b2)),
-                     detail::eft_mul(a2, b1)),
-                     detail::eft_mul(a2, b2));
-    float t11  = detail::eft_sub(a.hi, t12);
-    float e    = detail::eft_sub(t11, a.hi);
-    float t21  = detail::eft_sub(
+    if (detail::isinf(t1)) return FloatFloat(t1, 0.0f);   // Zone C
+    const FloatFloat p = two_prod(t1, b);
+    const float t12 = p.hi;
+    const float t22 = p.lo;
+    float t11 = detail::eft_sub(a.hi, t12);
+    float e   = detail::eft_sub(t11, a.hi);
+    float t21 = detail::eft_sub(
                      detail::eft_add(
                          detail::eft_add(
                              detail::eft_sub(-t12, e),
                              detail::eft_sub(a.hi, detail::eft_sub(t11, e))),
                          a.lo),
                      t22);
-    float t2   = detail::eft_add(t11, t21) / b;
-    float hi   = detail::eft_add(t1, t2);
-    float lo   = detail::eft_sub(t2, detail::eft_sub(hi, t1));
-    // B9/B10: unscale — two separate exact powers of two, both 1.0f off-hazard.
-    return FloatFloat(hi * s * un, lo * s * un);
+    float t2  = detail::eft_add(t11, t21) / b;
+    float hi  = detail::eft_add(t1, t2);
+    float lo  = detail::eft_sub(t2, detail::eft_sub(hi, t1));
+    return FloatFloat(hi, lo);
 }
 
-// Exact product of two floats
+// Exact product of two floats. FMA-based TwoProduct: p = fl(a*b) and
+// e = fma(a, b, -p) is the exact residual a*b - p whenever p is correctly
+// rounded and the product neither overflows nor underflows to zero -- the
+// same mathematical object Dekker/Veltkamp splitting computed (see the
+// B8/B9/B10/KI-27 comment above multiply()), in 2 ops instead of ~15 and with
+// no splitter to overflow in the first place.
 XPMATH_INLINE_FUNCTION FloatFloat two_prod(float fa, float fb) {
-    const float p = fa * fb;                                     // KI-27, see multiply()
+    const float p = detail::eft_mul(fa, fb);                      // KI-27
     if (!detail::isfinite(p) || p == 0.0f) return FloatFloat(p, 0.0f);
-    const float split = 8193.0f;
-    // B9: scaled splitter, multiply()'s guard at the bare-float site. sqrt() —
-    // the only in-header caller — passes t2 ≈ sqrt(a.hi) ≤ 1.9e19, far below the
-    // band, so this is unreachable from inside the header today. Guarded anyway:
-    // two_prod is a public free function in Kokkos::Experimental, the fix is the
-    // same four lines, and an exactness primitive silently returning NaN is a bad
-    // trap to leave armed. Same separate-unscale rule as multiply().
-    const float kSplitOverflowThresh = 4.1528233e34f; // FLT_MAX / (split + 1)
-    const bool  ha = detail::fabs(fa) > kSplitOverflowThresh;
-    const bool  hb = detail::fabs(fb) > kSplitOverflowThresh;
-    const float sa = ha ? ldexpf(1.0f, -64) : 1.0f;
-    const float sb = hb ? ldexpf(1.0f, -64) : 1.0f;
-    const float ua = ha ? ldexpf(1.0f,  64) : 1.0f;
-    const float ub = hb ? ldexpf(1.0f,  64) : 1.0f;
-    fa = fa * sa;
-    fb = fb * sb;
-    float a1, a2, b1, b2;
-    detail::eft_split(fa, split, a1, a2);
-    detail::eft_split(fb, split, b1, b2);
-    float s1   = detail::eft_mul(fa, fb);
-    float s2   = detail::eft_add(detail::eft_add(detail::eft_add(
-                      detail::eft_sub(detail::eft_mul(a1, b1), s1),
-                      detail::eft_mul(a1, b2)),
-                      detail::eft_mul(a2, b1)),
-                      detail::eft_mul(a2, b2));
-    return FloatFloat(s1 * ua * ub, s2 * ua * ub);   // B9 unscale, see multiply()
+    const float e = detail::eft_fma(fa, fb, -p);
+    return FloatFloat(p, e);
 }
 
 // ============================================================
@@ -1158,10 +970,14 @@ XPMATH_INLINE_FUNCTION void sincos(FloatFloat a, FloatFloat& x, FloatFloat& y) {
     else { x = sin_r;  y = negate(cos_r); }
 }
 
-XPMATH_INLINE_FUNCTION FloatFloat sin(FloatFloat a) {
+// sin and cos are NOINLINE for the same reason as qf_math.hpp's and
+// tf_math.hpp's versions: a kernel calling exp(FloatFloatComplex) calls both,
+// and inlining sincos's body into each would produce a frame too large for
+// nvcc/ptxas to lay out correctly alongside the rest of exp(FFC) (TD-4).
+XPMATH_NOINLINE_FUNCTION FloatFloat sin(FloatFloat a) {
     FloatFloat c, s; sincos(a, c, s); return s;
 }
-XPMATH_INLINE_FUNCTION FloatFloat cos(FloatFloat a) {
+XPMATH_NOINLINE_FUNCTION FloatFloat cos(FloatFloat a) {
     FloatFloat c, s; sincos(a, c, s); return c;
 }
 XPMATH_INLINE_FUNCTION FloatFloat tan(FloatFloat a) {

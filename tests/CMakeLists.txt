@@ -235,13 +235,30 @@ function(xpm_add_device_test name)
 endfunction()
 
 # --- WHY EVERY EFT TEST BELOW IS BUILT WITH CONTRACTION OFF ----------------
-# Error-free-transform tests (Layer 1: T1.1 DD, T2.1 FF, T3.1 QF) validate that
-# twoSum/twoProd produce an EXACT (result, error) pair. The Dekker twoProduct in
-# dd_math.hpp's multiply relies on `a1*b1 - c11` being two distinct rounded
-# operations; if the compiler contracts that into a single FMA the error term
-# collapses to zero and the EFT silently breaks — and the test would validate a
-# transform the shipped binary does not perform. So EFT test targets MUST be
-# compiled with contraction OFF.
+# Error-free-transform tests (Layer 1: T1.1 DD, T2.1 FF, T3.1 QF, T3.6 TF)
+# validate that twoSum/twoProd produce an EXACT (result, error) pair. DD's,
+# FF's, QF's and TF's production `two_prod` (dd_math.hpp, ff_math.hpp,
+# qf_math.hpp's qf_two_prod/qf_two_sqr, tf_math.hpp's tf_two_prod/tf_two_sqr)
+# are all FMA-based, not Dekker-based: each computes its residual with an
+# EXPLICIT fma()/fmaf() call through the volatile-guarded
+# detail::eft_mul/eft_fma primitives in config.hpp. That explicit two-step
+# sequence (`p = fl(a*b); e = fma(a,b,-p);`) is itself fragile — it relies on
+# the plain multiply NOT being fused with the fma into a single operation; if
+# the compiler contracts the pair the residual collapses to zero and the EFT
+# silently breaks, and the test would validate a transform the shipped binary
+# does not perform. An aggressive compiler can reassociate that
+# already-explicit sequence (observed on gfx90a even at -ffp-contract=off for
+# the sibling EFT primitives; see config.hpp:305-332), so all four backends'
+# EFT/guard tests still need contraction OFF, to protect the FMA call rather
+# than to stop one being synthesized. DD's and FF's own local EFT-test mirror
+# (dd_eft_test's two_prod_dekker, ff_eft_test's two_prod_dekker) is kept as an
+# independent historical implementation and still exercises the original
+# Dekker sequence under the same contraction-OFF discipline, regardless of
+# what production now does; QF's and TF's EFT/guard tests never had such a
+# mirror and call shipped two_prod/two_sqr directly, so for QF and TF the OFF
+# posture protects the measurement of production itself. In every case the
+# test would otherwise validate a transform the shipped binary does not
+# perform. So EFT test targets MUST be compiled with contraction OFF.
 #
 # This is applied PER TARGET (target_compile_options), not as a global build flag:
 # only the EFT tests need it; the demos and other test layers should build with
@@ -253,11 +270,12 @@ endfunction()
 # one-liners and cost nothing, but are not the tested path.
 #
 # The ON-posture companions build the SAME source into a SEPARATE executable
-# (<name>_contract_on) with contraction forced on, so the Dekker sequence is
+# (<name>_contract_on) with contraction forced on, so the sequence under test
+# (the explicit fma()/fmaf() call for DD, FF, QF and TF) is
 # exercised under the posture the OFF helper protects against. Whether that
-# produces the same (compiler didn't contract) or different (it did) results, the
-# outcome is RECORDED rather than gated — the ON test is a reporter. See the
-# dd_fma_guard_test.cpp header.
+# produces the same (compiler didn't reassociate) or different (it did)
+# results, the outcome is RECORDED rather than gated — the ON test is a
+# reporter. See the dd_fma_guard_test.cpp header.
 #
 # CORE_PLAN C4 step 5: the Kokkos-linked pair that used to stand here
 # (kokkos_ep_add_eft_test / kokkos_ep_add_eft_test_contract_on) is deleted with
@@ -444,9 +462,15 @@ xpm_add_host_test(tf_property_test)
 # registrations said.
 xpm_add_host_test(dd_property_test)
 xpm_add_host_test(ff_property_test)
-# dd_eft_test and dd_fma_guard_test use the EFT pair: both call the Dekker
-# sequence `a1*b1 - c11` directly on the host, so contraction OFF is as load-
-# bearing here as it was before the split. dd_fma_guard_test keeps its
+# dd_eft_test and dd_fma_guard_test use the EFT pair, but for two different
+# reasons now. dd_eft_test's own local two_prod_dekker mirror still calls the
+# Dekker sequence `a1*b1 - c11` directly on the host, so contraction OFF is as
+# load-bearing there as it was before the split. dd_fma_guard_test was
+# re-purposed when DD's production two_prod moved off Dekker splitting onto an
+# FMA-based TwoProduct: it now calls PRODUCTION xp::two_prod directly and
+# checks it against the __float128 oracle, so contraction OFF here protects
+# the explicit fma() call inside detail::eft_fma from reassociation, not a
+# Dekker sequence from being fused into one. dd_fma_guard_test keeps its
 # _contract_on companion and, via the <base>_baseline.txt derivation, keeps
 # reading tests/dd_fma_guard_baseline.txt -- drift detection is continuous
 # across the split rather than restarting from "no file".
@@ -469,8 +493,12 @@ xpm_add_host_test(qf_nonoverlap_test)
 # truncation check is a genuine binary128 host assertion. It is split now: this
 # half keeps Tests A-D including that check, and moves from
 # xpm_add_device_eft_test to the HOST EFT helper. The contraction-OFF posture
-# travels with it -- Tests A/B call the Dekker sequence `a1*b1 - c11` directly on
-# the host, so the flag is as load-bearing here as before the split.
+# travels with it -- Tests A/B call qf_two_prod/qf_two_sqr's FMA-based
+# TwoProduct directly on the host (QF's own FMA migration, chunk D; qf_two_prod
+# no longer Dekker-splits; qf_eft_test never had a local mirror to retire, see
+# that file's own header), so the flag is defense in depth here for the same
+# reason it is on dd_fma_guard_test's/ff_fma_guard_test's direct calls to
+# production.
 xpm_add_host_eft_test(qf_eft_test)
 
 # --- DEVICE TESTS THAT LINK NO KOKKOS --------------------------------------
@@ -534,10 +562,14 @@ xpm_add_device_eft_test_contract_on(tf_fma_guard_test)  # -> tf_fma_guard_test_c
 #
 # The property pair uses the plain device helper (identities are contraction
 # agnostic). The EFT pair uses the contraction-OFF helper, and
-# dd_fma_guard_test_device additionally gets its _contract_on companion: the
-# question that test asks -- "did the compiler fuse the Dekker sequence" -- is
-# meaningless without both postures, and it is a per-compilation question, so
-# the device half needs its own pair rather than inheriting the host half's.
+# dd_fma_guard_test_device additionally gets its _contract_on companion.
+# dd_fma_guard_test_device was re-purposed alongside its host sibling when DD's
+# production two_prod moved off Dekker splitting onto an FMA-based TwoProduct:
+# the question it now asks is "did the compiler reassociate production
+# two_prod's guarded fma() call" rather than "did the compiler fuse the Dekker
+# sequence" -- still meaningless without both postures, and still a
+# per-compilation question, so the device half needs its own pair rather than
+# inheriting the host half's.
 xpm_add_device_test(dd_property_test_device)
 xpm_add_device_test(ff_property_test_device)
 xpm_add_device_eft_test(dd_eft_test_device)
@@ -564,8 +596,10 @@ xpm_add_device_eft_test_contract_on(ff_fma_guard_test)  # -> ff_fma_guard_test_c
 # The property and non-overlap halves use the plain device helper -- neither the
 # bit-exact identities nor a per-word add/compare has anything to contract, which
 # is what their pre-split plain registrations said. qf_eft_test_device uses the
-# contraction-OFF helper: it calls qf_two_prod's Dekker sequence in a kernel, so
-# the flag is exactly as load-bearing on this half as on the host one.
+# contraction-OFF helper: it calls qf_two_prod's FMA-based TwoProduct in a kernel
+# (QF's own FMA migration, chunk D; qf_two_prod no longer Dekker-splits), and the
+# OFF flag is defense in depth there for the same reason it is on the host half --
+# see qf_eft_test.cpp's "WHY -ffp-contract=off IS REQUIRED".
 xpm_add_device_test(qf_property_test_device)
 xpm_add_device_test(qf_nonoverlap_test_device)
 xpm_add_device_eft_test(qf_eft_test_device)
@@ -766,16 +800,24 @@ endif()
 # source/two-postures dual-registration pattern (see qf_fma_guard_test.cpp). Reuses
 # the SAME helpers as the DD/FF guards — the only per-variant knobs are the compile
 # definitions the helpers set; the ON helper derives qf_fma_guard_baseline.txt from
-# the target name. Unlike FF (which mirrors ff_math.hpp's embedded Dekker), this test
-# calls the SHIPPED qf_math.hpp primitives (qf_two_prod / qf_two_sqr) directly, so it
-# characterizes GCC's contraction of the shipped source itself (cf. T3.1 qf_eft_test,
-# which established the same direct-call posture under contraction-OFF). Also guards
-# qf_two_sqr (a second Dekker sequence, no FF analogue). FP64 oracle (exact, no
-# type wider than a machine word), so it runs on any target, not x86_64 only --
-# and that is also why C4 chunk D migrated it WHOLE onto the C3 harness instead
-# of splitting it, exactly as chunk C did with the FF guard. Both postures are
-# registered in the Kokkos-free device block above; the reasoning is written
-# there and in the file's own header.
+# the target name. Like FF's post-TwoProduct-FMA-migration ff_fma_guard_test (which
+# now also calls xp::two_prod directly rather than mirroring a local Dekker copy),
+# this test calls the SHIPPED qf_math.hpp primitives (qf_two_prod / qf_two_sqr)
+# directly, so it characterizes GCC's contraction of the shipped source itself (cf.
+# T3.1 qf_eft_test, which established the same direct-call posture under
+# contraction-OFF). QF's own FMA migration (chunk D of the same core/cuda-eft-rn
+# work that moved DD and FF) retired qf_two_prod's/qf_two_sqr's Dekker splitting
+# onto the same FMA-based TwoProduct shape (p = fl(a*b), e = fma(a,b,-p)); this
+# test now guards THAT primitive's contraction hazard, not a Dekker sequence's —
+# specifically, whether detail::eft_mul's/detail::eft_fma's volatile guards (see
+# qf_fma_guard_test.cpp's header) hold under -ffp-contract=fast. Also guards
+# qf_two_sqr (a second FMA-based instance, no FF analogue, since FF has no
+# separate two_sqr). FP64 oracle (exact, no type wider than a machine word), so
+# it runs on any target, not x86_64 only -- and that is also why C4 chunk D
+# migrated it WHOLE onto the C3 harness instead of splitting it, exactly as
+# chunk C did with the FF guard. Both postures are registered in the Kokkos-free
+# device block above; the reasoning is written there and in the file's own
+# header.
 
 # T3.6 end-to-end cancellation kernels for QF: __float128-oracle-scored, host-side.
 # QF analogue of dd_e2e_test (T1.6) / ff_cancellation_test (T2.6). Plain helper —
@@ -784,8 +826,9 @@ endif()
 # adjacency to contract; K1's naive form sqrt(x²+1)-x has a mul-then-sub adjacency
 # an FMA *could* contract, but K1_naive is REPORTED, never gated, so a
 # contraction-induced shift in its (already low-digit) result cannot flip a
-# pass/fail. The Dekker-twoProduct contraction hazard the EFT helper guards is on no
-# gated path here (it is covered by qf_fma_guard_test, T3.5). So this test mirrors
+# pass/fail. The TwoProduct contraction hazard the EFT helper guards (Dekker's
+# splitting, historically; the FMA-based shape since QF's own migration, chunk D)
+# is on no gated path here (it is covered by qf_fma_guard_test, T3.5). So this test mirrors
 # dd_e2e_test / ff_cancellation_test registration exactly (no EFT helper).
 # (qf_cancellation_test itself moved to the Kokkos-free block above in C4.)
 
@@ -799,6 +842,16 @@ endif()
 # Group A/B/C) and tf_cancellation_test (e2e cancellation kernels K1-K4) moved
 # to the Kokkos-free host block above in C4 step 1.
 # With that, TF has no Kokkos-linked target left at all.
+# TF's own FMA migration (chunk E of the same core/cuda-eft-rn work that moved
+# DD, FF and QF) retired tf_two_prod's/tf_two_sqr's Dekker splitting (tf_split,
+# the 8193.0f Veltkamp constant) onto the same FMA-based TwoProduct shape
+# (p = fl(a*b), e = fma(a,b,-p)) QF already carried. tf_eft_test and
+# tf_fma_guard_test never had a local Dekker mirror to retire and call shipped
+# tf_two_prod/tf_two_sqr directly (same posture as qf_eft_test/
+# qf_fma_guard_test, T3.1/T3.5), so for TF the OFF posture protects the
+# measurement of production itself, and the ON posture (tf_fma_guard_test's
+# contraction-ON companion) now reports on whether the compiler reassociated
+# that FMA call rather than on whether it fused a Dekker sequence.
 # =================== END OF THE FORMER KOKKOS-LINKED BLOCK ==================
 
 # ---------------------------------------------------------------------------
@@ -876,8 +929,8 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/contraction_manifest.txt" "${_xp_manifes
 #
 # THE TOTALS GREW, from 10/6 to 11/6, and no target quietly acquired a flag. The
 # one new OFF entry is qf_eft_test_device, the device half of the ninth mixed TU.
-# Both halves call qf_two_prod's Dekker sequence -- the host one on the host, the
-# device one in a kernel -- so both are still EFT tests and both must stay
+# Both halves call qf_two_prod's FMA-based TwoProduct -- the host one on the
+# host, the device one in a kernel -- so both are still EFT tests and both must stay
 # guarded; a split that guarded only one half would be exactly the silent failure
 # this gate exists to catch. qf_fma_guard_test was NOT split (it migrated whole;
 # see its registration) so it still contributes 1 OFF + 1 ON, from the
@@ -1237,13 +1290,56 @@ xpm_tag_test(host sweep_monotone_gate_selftest sweep_absolute_gate_selftest)
 # Raw paths are job-of-record files. A baseline without its raw is a
 # configure error -- the gate cannot run.
 set(_xp_dev_raw_a100
-    "${CMAKE_SOURCE_DIR}/validation/a100/logs/1004542_raw.csv.gz")
+    # Re-pointed 2026-10-13 (core/cuda-eft-rn): the old 1004542_raw.csv.gz
+    # (2026-09-27) predates both the FMA-based TwoProduct migration and the
+    # A100-only QF complex atan fix (xp_log_hypot2's fnptr indirection +
+    # volatile round-trip, qf_complex.hpp) -- it is not a record of this
+    # build, and sweep_device_gate_a100 would (correctly) fail the monotone
+    # comparison against the re-baselined sweep_baseline_a100.csv.gz
+    # otherwise. The new file is job 1008580's sweep (A100, CUDA/sm_80), the
+    # same run sweep_baseline_a100.csv.gz was regenerated from. Full ctest
+    # (44/44 host + 24/24 device) and the absolute gate (0/436080 above
+    # bound) both passed clean on this tree before the re-baseline; the
+    # monotone diff against the old baseline matched MI250/MI300's
+    # FMA-rounding footprint and ratios (max 1.358x vs their 1.36x, median
+    # 0.00953x vs their 0.0095x), nowhere near the 8x gate allowance.
+    "${CMAKE_SOURCE_DIR}/validation/a100/logs/1008580_raw.csv.gz")
 set(_xp_dev_raw_mi250
-    "${CMAKE_SOURCE_DIR}/validation/mi250/logs/1001915_raw.csv.gz")
+    # Re-pointed 2026-10-12 (core/cuda-eft-rn): the old 1001915_raw.csv.gz
+    # (2026-09-18) predates the FMA-based TwoProduct migration across all
+    # four backends -- it is not a record of this build, and
+    # sweep_device_gate_mi250 would (correctly) fail the monotone comparison
+    # against the re-baselined sweep_baseline_mi250.csv.gz otherwise. The new
+    # file is job 1008575's sweep (interactive node, HIP/gfx90a), the same
+    # run sweep_baseline_mi250.csv.gz was regenerated from. Full ctest
+    # (44/44 host + 24/24 device) and the absolute gate (0/436080 above
+    # bound) both passed clean on this tree before the re-baseline.
+    "${CMAKE_SOURCE_DIR}/validation/mi250/logs/1008575_raw.csv.gz")
 set(_xp_dev_raw_b200
-    "${CMAKE_SOURCE_DIR}/validation/b200/logs/1004484_raw.csv.gz")
+    # Re-pointed 2026-10-12 (core/cuda-eft-rn): the old 1004484_raw.csv.gz
+    # (2026-09-26) predates the TD-4 fixes in ff_complex.hpp/qf_complex.hpp/
+    # tf_complex.hpp and several ops the sweep grid has since grown (QF
+    # complex log among them) -- it is not a record of this build, and
+    # sweep_device_gate_b200 would (correctly) fail the monotone comparison
+    # against the re-baselined sweep_baseline_b200.csv.gz otherwise. The new
+    # file is job 1008571's sweep (interactive node, not a batch job --
+    # named for consistency with every other arch's job-ID convention
+    # anyway), the same run sweep_baseline_b200.csv.gz was regenerated from.
+    "${CMAKE_SOURCE_DIR}/validation/b200/logs/1008571_raw.csv.gz")
 set(_xp_dev_raw_mi300
-    "${CMAKE_SOURCE_DIR}/validation/mi300/logs/1004487_raw.csv.gz")
+    # Re-pointed 2026-10-12 (core/cuda-eft-rn): the old 1004487_raw.csv.gz
+    # predates the FMA-based TwoProduct migration across all four backends
+    # -- it is not a record of this build, and sweep_device_gate_mi300
+    # would (correctly) fail the monotone comparison against the
+    # re-baselined sweep_baseline_mi300.csv.gz otherwise. The new file is
+    # job 1008578's sweep (interactive node, HIP/gfx942), the same run
+    # sweep_baseline_mi300.csv.gz was regenerated from. Full ctest
+    # (44/44 host + 24/24 device) and the absolute gate (0/436080 above
+    # bound) both passed clean on this tree before the re-baseline; the
+    # monotone diff against the old baseline matched MI250's (gfx90a) exactly,
+    # same benign FMA-rounding footprint, same ratios, since MI250 and
+    # MI300 share the identical non-fnptr HIP code path.
+    "${CMAKE_SOURCE_DIR}/validation/mi300/logs/1008578_raw.csv.gz")
 foreach(_xp_arch IN ITEMS a100 mi250 b200 mi300)
   set(_xp_dev_base
       "${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline_${_xp_arch}.csv.gz")

@@ -11,13 +11,17 @@
 //   twoProd(a, b) -> (p, e)   with  p = fl(a * b)  and  e = (a * b) - p exactly
 //
 // These two transforms are the atoms of double-double arithmetic. Every DD op
-// in third_party/include/dd_math.hpp is built on the twoSum inside `add` and the
-// Dekker twoProduct inside `multiply` (equivalently the standalone `two_prod`).
-// If either EFT is not bit-exact, NOTHING downstream (sqrt/exp/log/sin/…)
-// is trustworthy — the whole precision claim rests on these primitives. So this
-// layer tests them in isolation, at the raw-double level, BEFORE any higher-
-// level op is exercised (those are T1.2 invariants / T1.3 properties / T1.4
-// accuracy).
+// in include/xp/dd_math.hpp is built on the twoSum inside `add` and the
+// production `two_prod` inside `multiply`/`multiply_scalar`/`divide`/
+// `divide_scalar`. Production `two_prod` is now FMA-based
+// (p = fl(a*b), e = fma(a, b, -p)) rather than Dekker/Veltkamp splitting — see
+// the "WHY -ffp-contract=off IS REQUIRED" note below for what this file's
+// local `two_prod_dekker` mirror is and is not still telling you about that
+// change. If either EFT is not bit-exact, NOTHING downstream (sqrt/exp/log/
+// sin/…) is trustworthy — the whole precision claim rests on these
+// primitives. So this layer tests them in isolation, at the raw-double level,
+// BEFORE any higher-level op is exercised (those are T1.2 invariants / T1.3
+// properties / T1.4 accuracy).
 //
 // WHY GROUND TRUTH IS __float128 (PROVABLE, NOT MERELY HIGHER-PRECISION)
 // ---------------------------------------------------------------------
@@ -36,18 +40,27 @@
 //
 // WHY -ffp-contract=off IS REQUIRED (DEKKER SPLITTER CORRECTNESS)
 // --------------------------------------------------------------
-// DD's `multiply` uses Dekker splitting (splitter constant 134217729.0 = 2^27+1),
-// NOT an FMA-based twoProd. The correctness of the error term hinges on
-// `a1*b1 - c11` being TWO distinct rounded operations. If the compiler contracts
-// that into a single fused multiply-add, the "error" collapses to zero and the
-// EFT silently breaks — the test would then validate a transform the shipped
-// binary does not actually perform. This translation unit is therefore compiled
-// with -ffp-contract=off on host (and --fmad=false on CUDA), applied by the
-// xpm_add_host_eft_test() helper in tests/CMakeLists.txt (it was
-// kokkos_ep_add_eft_test() until C4 unlinked this target from Kokkos; the
-// contraction posture is byte-identical, only the Kokkos link went away).
-// (T1.5 later builds the full contraction-on/off regression matrix; T1.1 only
-// needs the posture here so its own results are meaningful.)
+// Production DD `multiply`/`two_prod` (include/xp/dd_math.hpp) used to use
+// Dekker splitting (splitter constant 134217729.0 = 2^27+1); it is now
+// FMA-based (p = fl(a*b), e = fma(a, b, -p) via a genuine hardware/library
+// FMA call, not compiler contraction of a separately-written multiply and
+// subtract). This file's local `two_prod_dekker` below is NOT a mirror of
+// that production primitive anymore — it is kept as an independent,
+// historically-first EFT implementation of the same mathematical transform,
+// cross-checked against the same binary128 oracle as a standalone regression
+// test. Its correctness still hinges on `a1*b1 - c11` being TWO distinct
+// rounded operations: if the compiler contracts that into a fused multiply-
+// add, its "error" term collapses to zero and the EFT it implements silently
+// breaks. This translation unit is therefore compiled with -ffp-contract=off
+// on host (and --fmad=false on CUDA), applied by the xpm_add_host_eft_test()
+// helper in tests/CMakeLists.txt (it was kokkos_ep_add_eft_test() until C4
+// unlinked this target from Kokkos; the contraction posture is byte-identical,
+// only the Kokkos link went away). (T1.5 later builds the full
+// contraction-on/off regression matrix; T1.1 only needs the posture here so
+// its own results are meaningful.) Production `two_prod`'s FMA call is
+// contraction-posture-independent by construction — see the FMA-guard tests
+// (dd_fma_guard_test{,_device}.cpp) for what now needs guarding instead:
+// that the compiler doesn't reassociate the shipped FMA-based residual away.
 //
 // Cross-reference: docs/TEST_SUITE_PLAN.md, Phase 1, "T1.1: EFT unit tests for
 // DD" and "The six test layers" layer 1.
@@ -121,10 +134,13 @@ XPMATH_INLINE_FUNCTION TwoOut two_sum(double a, double b) {
     return TwoOut{ s, err };                 // hi = s = fl(a+b), lo = err = exact error
 }
 
-// Mirrors the Dekker twoProduct embedded in xp::multiply, equivalently the
-// standalone `two_prod`, with a.lo == b.lo == 0. Splitter 134217729.0 = 2^27 + 1. Exact provided no overflow
-// occurs in the splitter (a*split), in a1*b1, or in the product, and no underflow
-// occurs (Dekker 1971; Muller et al., "Handbook of Floating-Point Arithmetic",
+// Independent Dekker twoProduct implementation (NOT a mirror of production —
+// xp::multiply/xp::two_prod are now FMA-based; see the file header comment).
+// Kept as a second, historically-first exact algorithm for the same
+// mathematical transform, cross-checked against the binary128 oracle below.
+// Splitter 134217729.0 = 2^27 + 1. Exact provided no overflow occurs in the
+// splitter (a*split), in a1*b1, or in the product, and no underflow occurs
+// (Dekker 1971; Muller et al., "Handbook of Floating-Point Arithmetic",
 // §4.4 — Veltkamp/Dekker require operands and result in the normal range).
 XPMATH_INLINE_FUNCTION TwoOut two_prod_dekker(double a, double b) {
     const double split = 134217729.0;        // 2^27 + 1

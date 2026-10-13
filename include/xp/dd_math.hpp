@@ -84,6 +84,10 @@ XPMATH_FWDDECL_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b);
 XPMATH_FWDDECL_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b);
 XPMATH_INLINE_FUNCTION DoubleDouble multiply_scalar(DoubleDouble a, double b);
 XPMATH_INLINE_FUNCTION DoubleDouble divide_scalar(DoubleDouble a, double b);
+// FMA-based TwoProduct: p = fl(da*db), e = fma(da, db, -p). Forward-declared
+// here because multiply/multiply_scalar/divide/divide_scalar call it but
+// (for file-layout reasons predating this primitive) are defined ahead of it.
+XPMATH_INLINE_FUNCTION DoubleDouble two_prod(double da, double db);
 XPMATH_INLINE_FUNCTION DoubleDouble negate(DoubleDouble a);
 XPMATH_INLINE_FUNCTION DoubleDouble abs(DoubleDouble a);
 XPMATH_FWDDECL_FUNCTION DoubleDouble sqrt(DoubleDouble a);
@@ -226,88 +230,32 @@ XPMATH_INLINE_FUNCTION DoubleDouble subtract(DoubleDouble a, DoubleDouble b) {
     return DoubleDouble(hi, lo);
 }
 
-// KI-30.  Veltkamp split with a large-magnitude guard: the FP64 counterpart of
-// qf_math.hpp:qf_split / tf_math.hpp:tf_split, and a port of QD's own
-// `qd::split` (QD 2.3.24 qd/include/qd/inline.h:66-83) whose threshold branch
-// the DD port had dropped.
+// KI-30 / KI-27 — HISTORICAL, both subsumed by the FMA-based two_prod below.
 //
-// Splitter 134217729.0 = 2^27+1 for the 53-bit FP64 mantissa.  Without the
-// branch, `a * split` overflows to ±inf for |a| > DBL_MAX / (split + 1) ~
-// 1.34e300, and then `hi = temp - (temp - a)` is inf - inf = NaN, which poisons
-// every consumer: multiply, multiply_scalar and two_prod all returned NaN for
-// ANY operand past that point, even where the true product is exactly
-// representable.  Measured before the fix, with the true product exactly 1.0:
-//   multiply(1e-300, 1e300) -> 1.0    (below the threshold, fine)
-//   multiply(1e-302, 1e302) -> NaN    (above it; the answer is still 1.0)
-// This is the FP64 instance of KI-9, which fixed the same defect at FP32 in
-// qf_split/tf_split and, separately, in DD's own divide()/divide_scalar().
-// multiply was never audited at the time.  It is distinct from KI-27, which
-// concerns products that GENUINELY overflow, where ±inf is the right answer;
-// here nothing overflows but the splitter itself.
+// KI-30 was a Veltkamp-splitter overflow: `a * split` overflows to ±inf for
+// |a| > DBL_MAX / (split + 1) ~ 1.34e300, and then `hi = temp - (temp - a)` is
+// inf - inf = NaN, which poisoned every consumer (multiply, multiply_scalar,
+// two_prod) even where the true product was exactly representable
+// (multiply(1e-302, 1e302) -> NaN; the answer is 1.0). It was mitigated with a
+// `dd_split()` wrapper that pre-scaled by an exact power of two before
+// splitting and unscaled hi/lo after. two_prod no longer splits at all — it
+// computes p = fl(a*b) and the exact residual via a single hardware FMA — so
+// the hazard this guarded against cannot occur, and `dd_split()` has been
+// removed as dead code (no remaining caller; verified against KI-30's own
+// repro inputs and corpus.hpp's huge_tiny<double>()/exp_overflow<double>()
+// before deletion).
 //
-// The guard scales by an exact power of two, so it introduces no rounding:
-// pre-scale by 2^-28 (bringing DBL_MAX down to 6.70e299, inside the safe band —
-// split * 6.70e299 = 8.99e307 < DBL_MAX), split, then unscale hi and lo by 2^28.
-// Both unscalings are exact: |hi| <= |a| and |lo| < ulp(a), so neither can
-// overflow, and |lo| >= 2^-28 * ulp(DBL_MIN_normal) stays 218 binades clear of
-// the subnormal floor.  These are QD's own 2^-28 / 2^28 constants.
+// KI-27 is the non-finite/degenerate signal on the PRODUCT itself (a genuine
+// overflow/0/NaN in `a.hi * b.hi`, independent of how the residual is
+// computed) — that guard is NOT splitter-specific and now lives inside
+// two_prod, which every production call site below routes through.
 //
-// As in qf_split — and unlike ff_math.hpp's B9 guard, which scales the whole
-// operand and unscales the RESULT — scaling only INSIDE the split leaves the
-// product `p = a.hi * b.hi` untouched.  The non-hazard path is therefore
-// bit-identical to the unguarded code it replaces (same three operations, same
-// order), and the hazard path costs no extra rounding.
-XPMATH_INLINE_FUNCTION void dd_split(double a, double& hi, double& lo) {
-    const double split  = 134217729.0;
-    const double thresh = 1.3393857e300;     // DBL_MAX / (split + 1)
-    if (a > thresh || a < -thresh) {
-        a  *= 3.7252902984619140625e-09;     // 2^-28, exact
-        detail::eft_split(a, split, hi, lo);
-        hi  *= 268435456.0;                  // 2^28, exact
-        lo  *= 268435456.0;
-    } else {
-        detail::eft_split(a, split, hi, lo);
-    }
-}
-
-// KI-27.  Non-finite / degenerate signalling on the PRODUCT, the multiply-side
-// counterpart of the guard KI-19 put on divide().  The error-free transform
-// below is only meaningful while the hardware product is a finite non-zero
-// number; outside that, `p` is already the IEEE-correct answer and the residual
-// expression manufactures a NaN out of it (c11 = ±inf makes a1*b1 - c11 =
-// ∓inf and then e = t1 - c11 = NaN).  Measured before the fix:
-//   multiply(1e300, 1e300) -> NaN   (true 1e600, +inf is the answer)
-//   multiply(2.0,   inf)   -> NaN   (IEEE 754-2019 §6.1 requires +inf)
-// and, through the complex division formula which multiplies before it divides,
-//   (1e300+1e300i)/(1e-10+1e-10i) -> NaN
-// even after the KI-19 divide fix.  QF and TF already carry exactly this guard
-// at qf_two_prod/tf_two_prod ("the error term of an overflowed product carries
-// no information, so the only defensible value is 0"); this is the same rule at
-// DD's monolithic site.
-//
-// Three cases fold into one test on `p = a.hi * b.hi`:
-//   |p| = inf   the true product exceeds the format; ±inf with the IEEE sign.
-//   p   = NaN   a genuinely undefined form (0·inf, or a NaN operand); kept.
-//   p   = 0     |a| <= |a.hi|(1+2^-53) and likewise for b, so a product whose
-//               leading term underflows to zero is below the smallest subnormal
-//               and ±0 with the IEEE sign is the answer.  The low words cannot
-//               rescue it: |a.lo*b.hi| <= |a.hi*b.hi| * 2^-53.
-// The guard is placed BEFORE any splitter scaling so that it reads the true
-// hardware product, not a rescaled stand-in.
-//
-// TwoProduct (Dekker splitting)
+// TwoProduct (FMA-based: p = fl(a*b), e = fma(a, b, -p))
 XPMATH_NOINLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b) {
-    const double p = a.hi * b.hi;                                   // KI-27
-    if (!detail::isfinite(p) || p == 0.0) return DoubleDouble(p, 0.0);
-    double a1, a2, b1, b2;                                          // KI-30
-    dd_split(a.hi, a1, a2);
-    dd_split(b.hi, b1, b2);
-    double c11 = detail::eft_mul(a.hi, b.hi);
-    double c21 = detail::eft_add(detail::eft_add(detail::eft_add(
-                      detail::eft_sub(detail::eft_mul(a1, b1), c11),
-                      detail::eft_mul(a1, b2)),
-                      detail::eft_mul(a2, b1)),
-                      detail::eft_mul(a2, b2));
+    const DoubleDouble p = two_prod(a.hi, b.hi);                     // KI-27 lives here now
+    if (!detail::isfinite(p.hi) || p.hi == 0.0) return p;
+    const double c11 = p.hi;
+    const double c21 = p.lo;
     double c2  = detail::eft_add(detail::eft_mul(a.hi, b.lo),
                                  detail::eft_mul(a.lo, b.hi));
     double t1  = detail::eft_add(c11, c2);
@@ -322,45 +270,45 @@ XPMATH_NOINLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b) {
     return DoubleDouble(hi, lo);
 }
 
-// KI-19 (DD sibling audit — the KI was filed QF-only; the same three-zone
-// defect is present here at FP64 scale and is fixed with the same structure
-// ff_math.hpp:divide already carries as B8/B10).  Measured before the fix:
+// KI-19 (DD sibling audit — the KI was filed QF-only; the same defect is
+// present here at FP64 scale).  Measured before the fix:
 //   1e301/1.0    -> NaN   (quotient 1e301 IS representable)
 //   1e300/1e-10  -> NaN   (quotient 1e310, should be +inf)
 //   1.0/0.0      -> NaN   (should be +inf)
 //   1.0/inf      -> NaN   (IEEE 754-2019 §6.1 requires +0)
 //
-//   guard 1  non-finite DIVISOR.  conb = b.hi * split is inf and
-//            b1 = conb - (conb - b.hi) = inf - inf = NaN, poisoning a quotient
-//            IEEE defines exactly.  The bare double quotient IS the answer:
+//   guard 1  non-finite DIVISOR.  The bare double quotient IS the answer:
 //            finite/±inf -> correctly-signed ±0, ±inf/±inf -> NaN (kept as NaN
 //            precisely because the quotient is returned rather than a
 //            copysign form), anything/NaN -> NaN.
-//   Zone A   |s1| <= thresh.  Untouched, bit-identical to before.
-//   Zone B   thresh < |s1| < inf.  The splitter overflows on the QUOTIENT
-//            ESTIMATE with both operands well inside range, yet the true
-//            quotient is representable.  Pre-scale the NUMERATOR by the exact
-//            power of two 2^-64 and multiply the result back by 2^64; every
-//            Dekker intermediate scales with it, so the recovery is exact.
 //   Zone C   |s1| = inf.  No finite DoubleDouble exists (|value| is bounded by
-//            |hi|(1+2^-53)), so ±inf IS the answer — this is the KI-19 case.
-//            Includes x/0, where IEEE already requires ±inf.
+//            |hi|(1+2^-53)), so ±inf IS the answer — this is the genuine
+//            quotient-overflow case, about the MAGNITUDE of the quotient, not
+//            about how the exact product s1*b.hi is computed.  Includes x/0,
+//            where IEEE already requires ±inf.
 //   |s1| = 0 the true quotient is below the smallest subnormal; ±0 is the
 //            answer and IEEE's sign rules already give the right zero.
 //   s1 = NaN 0/0 and inf/inf only; falls through unchanged and stays NaN.
 //
-// Zone B's 2^-64 has ample headroom at both ends: |s1| <= 2^1024 maps to 2^960
-// and 2^960 * split ~ 2^987 << DBL_MAX, while the smallest a.lo that can reach
-// Zone B (b.hi subnormal) is ~7e-40, i.e. ~4e-59 after scaling — 249 binades
-// clear of the subnormal floor.  B8 and B10 remain mutually exclusive for the
-// reason ff_math.hpp gives: the divisor guard forces |s1| <= split+1.
+// This used to also carry a "Zone B" (thresh < |s1| < inf): the Dekker
+// splitter overflowed on the quotient ESTIMATE with both operands well inside
+// range, mitigated by pre-scaling the numerator by an exact power of two.
+// That hazard was splitter-specific — it existed only because computing
+// s1*b.hi exactly required splitting s1 and b.hi into half-width pieces whose
+// products could themselves overflow at magnitudes the true quotient didn't
+// warrant. two_prod(s1, b.hi) below no longer splits (p = fl(s1*b.hi),
+// e = fma(s1, b.hi, -p)), so that intermediate overflow cannot happen and Zone
+// B's rescue scaffolding (the `sd`/`sn`/`un` dance) has been removed as dead
+// code — verified against dd_divide_core's former Zone B/C probe inputs
+// before deletion. Zone C and KI-41 below are both about the quotient's own
+// magnitude, independent of splitting, and are kept verbatim.
 namespace detail {
 XPMATH_INLINE_FUNCTION DoubleDouble dd_pow2_scale(DoubleDouble a, double s);   // defined below
 
-// KI-41 at the UNDERFLOW end.  KI-19's three zones below are all splitter-
-// OVERFLOW guards at the TOP of the range; this is the bottom.  Same defect,
-// same remedy and same derivation as qf_math.hpp:divide, read it there.  DD is
-// two words, so the residual's low word sits at |a|·2^-53 and its Dekker tail
+// KI-41 at the UNDERFLOW end.  KI-19's guards below are all at the TOP of the
+// range (genuine quotient overflow); this is the bottom.  Same defect, same
+// remedy and same derivation as qf_math.hpp:divide, read it there.  DD is two
+// words, so the residual's low word sits at |a|·2^-53 and its TwoProduct tail
 // one word further down at |a|·2^-106; the predicate tests 2^-53 and the lift
 // targets 2^-106.  Cap 2^159, for the reason qf_math.hpp gives.
 //
@@ -375,30 +323,12 @@ XPMATH_INLINE_FUNCTION bool dd_div_lift_wanted(DoubleDouble a, DoubleDouble b) {
     return m * 0x1p-53 < 2.2250738585072014e-308 * 4.0;
 }
 XPMATH_INLINE_FUNCTION DoubleDouble dd_divide_core(DoubleDouble a, DoubleDouble b) {
-    const double split = 134217729.0;
     if (!detail::isfinite(b.hi)) return DoubleDouble(a.hi / b.hi, 0.0);
-    const double kSplitOverflowThresh = 1.3393857e300;   // DBL_MAX / (split + 1)
-    const double sd = (detail::fabs(b.hi) > kSplitOverflowThresh)
-                          ? ldexp(1.0, -64) : 1.0;
-    b = DoubleDouble(b.hi * sd, b.lo * sd);
-    double s1  = a.hi / b.hi;
-    double un  = 1.0;                                    // Zone B numerator unscale
-    if (detail::fabs(s1) > kSplitOverflowThresh) {       // not Zone A
-        if (detail::isinf(s1)) return DoubleDouble(s1, 0.0);       // Zone C
-        const double sn = ldexp(1.0, -64);                         // Zone B
-        un = ldexp(1.0, 64);
-        a  = DoubleDouble(a.hi * sn, a.lo * sn);
-        s1 = s1 * sn;   // exact, and identical to recomputing (a.hi*sn) / b.hi
-    }
-    double a1, a2, b1, b2;
-    detail::eft_split(s1, split, a1, a2);
-    detail::eft_split(b.hi, split, b1, b2);
-    double c11 = detail::eft_mul(s1, b.hi);
-    double c21 = detail::eft_add(detail::eft_add(detail::eft_add(
-                     detail::eft_sub(detail::eft_mul(a1, b1), c11),
-                     detail::eft_mul(a1, b2)),
-                     detail::eft_mul(a2, b1)),
-                     detail::eft_mul(a2, b2));
+    double s1 = a.hi / b.hi;
+    if (detail::isinf(s1)) return DoubleDouble(s1, 0.0);   // Zone C
+    const DoubleDouble p = two_prod(s1, b.hi);
+    const double c11 = p.hi;
+    const double c21 = p.lo;
     double c2  = detail::eft_mul(s1, b.lo);
     double t1  = detail::eft_add(c11, c2);
     double e   = detail::eft_sub(t1, c11);
@@ -420,10 +350,7 @@ XPMATH_INLINE_FUNCTION DoubleDouble dd_divide_core(DoubleDouble a, DoubleDouble 
     double s2  = detail::eft_add(t11, t21) / b.hi;
     double hi  = detail::eft_add(s1, s2);
     double lo  = detail::eft_sub(s2, detail::eft_sub(hi, s1));
-    // KI-19: unscale — recover a/b from (a·sn)/(b·sd) by multiplying by sd and
-    // by un, as two separate exact powers of two.  Both are 1.0 on the
-    // non-hazard path, where `hi * 1.0 * 1.0 == hi` bit-for-bit.
-    return DoubleDouble(hi * sd * un, lo * sd * un);
+    return DoubleDouble(hi, lo);
 }
 }  // namespace detail
 
@@ -445,17 +372,10 @@ XPMATH_NOINLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b) {
 }
 
 XPMATH_INLINE_FUNCTION DoubleDouble multiply_scalar(DoubleDouble a, double b) {
-    const double p = a.hi * b;                                      // KI-27, see multiply()
-    if (!detail::isfinite(p) || p == 0.0) return DoubleDouble(p, 0.0);
-    double a1, a2, b1, b2;                                          // KI-30
-    dd_split(a.hi, a1, a2);
-    dd_split(b,    b1, b2);
-    double c11  = detail::eft_mul(a.hi, b);
-    double c21  = detail::eft_add(detail::eft_add(detail::eft_add(
-                      detail::eft_sub(detail::eft_mul(a1, b1), c11),
-                      detail::eft_mul(a1, b2)),
-                      detail::eft_mul(a2, b1)),
-                      detail::eft_mul(a2, b2));
+    const DoubleDouble p = two_prod(a.hi, b);                        // KI-27 lives in two_prod now
+    if (!detail::isfinite(p.hi) || p.hi == 0.0) return p;
+    const double c11  = p.hi;
+    const double c21  = p.lo;
     double c2   = detail::eft_mul(a.lo, b);
     double t1   = detail::eft_add(c11, c2);
     double e    = detail::eft_sub(t1, c11);
@@ -468,31 +388,17 @@ XPMATH_INLINE_FUNCTION DoubleDouble multiply_scalar(DoubleDouble a, double b) {
     return DoubleDouble(hi, lo);
 }
 
-// KI-19: same three zones as divide() above, with the divisor a bare double.
+// KI-19: same Zone C / non-finite-divisor guards as divide() above, with the
+// divisor a bare double. The former "Zone B" splitter-overflow rescaling
+// (KI-31's sd/sn/un dance) is gone along with the splitter it protected — see
+// the KI-19 comment above dd_divide_core.
 XPMATH_INLINE_FUNCTION DoubleDouble divide_scalar(DoubleDouble a, double b) {
-    const double split = 134217729.0;
     if (!detail::isfinite(b)) return DoubleDouble(a.hi / b, 0.0);
-    const double kSplitOverflowThresh = 1.3393857e300;   // DBL_MAX / (split + 1)
-    const double sd = (detail::fabs(b) > kSplitOverflowThresh) ? ldexp(1.0, -64) : 1.0;
-    b = b * sd;
-    double t1  = a.hi / b;
-    double un  = 1.0;
-    if (detail::fabs(t1) > kSplitOverflowThresh) {
-        if (detail::isinf(t1)) return DoubleDouble(t1, 0.0);
-        const double sn = ldexp(1.0, -64);
-        un = ldexp(1.0, 64);
-        a  = DoubleDouble(a.hi * sn, a.lo * sn);
-        t1 = t1 * sn;
-    }
-    double a1, a2, b1, b2;
-    detail::eft_split(t1, split, a1, a2);
-    detail::eft_split(b, split, b1, b2);
-    double t12 = detail::eft_mul(t1, b);
-    double t22 = detail::eft_add(detail::eft_add(detail::eft_add(
-                     detail::eft_sub(detail::eft_mul(a1, b1), t12),
-                     detail::eft_mul(a1, b2)),
-                     detail::eft_mul(a2, b1)),
-                     detail::eft_mul(a2, b2));
+    double t1 = a.hi / b;
+    if (detail::isinf(t1)) return DoubleDouble(t1, 0.0);   // Zone C
+    const DoubleDouble p = two_prod(t1, b);
+    const double t12 = p.hi;
+    const double t22 = p.lo;
     double t11 = detail::eft_sub(a.hi, t12);
     double e   = detail::eft_sub(t11, a.hi);
     double t21 = detail::eft_sub(
@@ -505,35 +411,20 @@ XPMATH_INLINE_FUNCTION DoubleDouble divide_scalar(DoubleDouble a, double b) {
     double t2  = detail::eft_add(t11, t21) / b;
     double hi  = detail::eft_add(t1, t2);
     double lo  = detail::eft_sub(t2, detail::eft_sub(hi, t1));
-    // KI-31.  Unscale, exactly as divide() does.  This return used to be a bare
-    // `DoubleDouble(hi, lo)`: the KI-19 guard above scaled the DIVISOR by
-    // sd = 2^-64 and the numerator by sn, but the result was never scaled back,
-    // so every divisor past kSplitOverflowThresh came out too large by exactly
-    // 2^64.  Measured before the fix, with the true quotient exactly 1.0:
-    //   divide_scalar(2^996, 2^996) -> 1.0                  (below the threshold)
-    //   divide_scalar(2^997, 2^997) -> 1.8446744073709552e19 (= 2^64)
-    // A silent WRONG VALUE rather than a NaN, which is why neither KI-19 nor the
-    // sweep caught it -- `un` was assigned and then dropped.  divide() has
-    // always been correct here; only the scalar sibling was missed.  Both
-    // factors are 1.0 on the non-hazard path, where `hi * 1.0 * 1.0 == hi`
-    // bit-for-bit.
-    return DoubleDouble(hi * sd * un, lo * sd * un);
+    return DoubleDouble(hi, lo);
 }
 
-// Exact product of two doubles
+// Exact product of two doubles. FMA-based TwoProduct: p = fl(a*b) and
+// e = fma(a, b, -p) is the exact residual a*b - p whenever p is correctly
+// rounded and the product neither overflows nor underflows to zero -- the
+// same mathematical object Dekker/Veltkamp splitting computed (see the
+// KI-30/KI-27 comment above multiply()), in 2 ops instead of ~15 and with no
+// splitter to overflow in the first place.
 XPMATH_INLINE_FUNCTION DoubleDouble two_prod(double da, double db) {
-    const double p = da * db;                                       // KI-27, see multiply()
+    const double p = detail::eft_mul(da, db);                       // KI-27
     if (!detail::isfinite(p) || p == 0.0) return DoubleDouble(p, 0.0);
-    double a1, a2, b1, b2;                                          // KI-30
-    dd_split(da, a1, a2);
-    dd_split(db, b1, b2);
-    double s1   = detail::eft_mul(da, db);
-    double s2   = detail::eft_add(detail::eft_add(detail::eft_add(
-                      detail::eft_sub(detail::eft_mul(a1, b1), s1),
-                      detail::eft_mul(a1, b2)),
-                      detail::eft_mul(a2, b1)),
-                      detail::eft_mul(a2, b2));
-    return DoubleDouble(s1, s2);
+    const double e = detail::eft_fma(da, db, -p);
+    return DoubleDouble(p, e);
 }
 
 // ============================================================
@@ -704,8 +595,8 @@ XPMATH_NOINLINE_FUNCTION DoubleDouble exp(DoubleDouble a) {
     // rows are the series core, not the reduction -- no reduction headroom is
     // left here.
     //
-    // GPU: no Dekker split anywhere in this sequence, so it is unperturbed by
-    // -ffp-contract=fast (unlike two_prod, which breaks on device).
+    // GPU: no twoProduct anywhere in this sequence, so it is unperturbed by
+    // contraction posture either way.
     const double kLn2_1 =  0x1.62e42fefa38p-1;   // 42 significant bits
     const double kLn2_2 =  0x1.ef35793c768p-45;  // 42
     const double kLn2_3 = -0x1.9ff0342543p-90;   // 41
@@ -760,9 +651,9 @@ XPMATH_NOINLINE_FUNCTION DoubleDouble exp(DoubleDouble a) {
     // KI-6: scale by 2^nz through the EXPONENT, component-wise, not by forming
     // the factor 2^nz as a double and multiplying. ldexp(1.0, nz) is +inf for
     // nz >= 1024 and 0 for nz <= -1075, so the old multiply_scalar form could
-    // not reach either end of the range even with the guard widened; and
-    // multiply_scalar runs a Dekker split, which itself overflows above
-    // ~1.3e300. Scaling each word by a power of two is exact (bar gradual
+    // not reach either end of the range: `ldexp(1.0, nz)` is itself already
+    // ±0/±inf there, and multiplying by a non-finite factor poisons the whole
+    // DoubleDouble. Scaling each word by a power of two is exact (bar gradual
     // underflow at the very bottom, where the lo word is unrepresentable
     // anyway) and spans the full FP64 exponent range.
     // Inside the normal FP64 exponent band the factor 2^nz is itself exact and
@@ -801,12 +692,13 @@ XPMATH_NOINLINE_FUNCTION DoubleDouble log(DoubleDouble a) {
         if (b.hi < -671.7 && -b.hi <= 709.78271289338397) {
             DoubleDouble s0 = exp(negate(b));                   // e^{|b|} >= 1
             // KI-30.  e^{|b|} runs to 1.8e308 here, past the point where
-            // Dekker's splitter overflows -- which is why this product used to
-            // carry a local power-of-two rebalance (s0 down and a up by 2^10,
-            // up to three times) to keep multiply() out of the hazard band.
-            // multiply() now guards its own splitter via dd_split(), so the
-            // rebalance is redundant and has been removed; the call below is
-            // exact for every s0 the branch can produce.
+            // Dekker's splitter used to overflow -- which is why this product
+            // once carried a local power-of-two rebalance (s0 down and a up by
+            // 2^10, up to three times) to keep multiply() out of the hazard
+            // band. multiply() now routes through the FMA-based two_prod,
+            // which never splits, so the rebalance is redundant and has been
+            // removed; the call below is exact for every s0 the branch can
+            // produce.
             b = subtract(add(b, multiply(a, s0)), DoubleDouble(1.0));
         } else {
             DoubleDouble s0 = exp(b);                           // e^{b} >= 1
@@ -2351,11 +2243,11 @@ XPMATH_INLINE_FUNCTION DoubleDouble round(DoubleDouble a) {
 //
 // Only the SUM is returned, not erfc: the two callers need different scalings.
 // erf() (B3) sees only |z| <= 8.5, where e^{z²} <= 2.4e31, and divides by it;
-// erfc() (B2) runs out to the DD underflow floor |z| ~ 27.25, where e^{z²} would
-// exceed the Dekker splitter's headroom (DBL_MAX/2^27+1 ~ 1.3e300, reached at
-// |z| ~ 26.29) and turn divide() into NaN, so it multiplies by e^{-z²} instead.
-// Keeping the scaling at the call sites lets erf()'s arithmetic stay
-// bit-for-bit what B3 shipped while erfc() gets the overflow-safe form.
+// erfc() (B2) runs out to the DD underflow floor |z| ~ 27.25, where e^{z²}
+// itself is near DBL_MAX (reached at |z| ~ 26.29), so it multiplies by e^{-z²}
+// instead of dividing by the huge e^{z²}. Keeping the scaling at the call
+// sites lets erf()'s arithmetic stay bit-for-bit what B3 shipped while erfc()
+// gets the overflow-safe form.
 //
 // Preconditions: az = |z| > 0 and z2 = z·z, both finite or +inf.
 XPMATH_INLINE_FUNCTION DoubleDouble erfc_asymptotic_sum(DoubleDouble az, DoubleDouble z2) {
@@ -2530,19 +2422,18 @@ XPMATH_INLINE_FUNCTION DoubleDouble erfc(DoubleDouble z) {
     // is the only representable answer, so honest underflow beats evaluating
     // the series. Derivation: erfc(z) ~ e^{-z²}/(z·sqrt(pi)) crosses 4.94e-324
     // at z ~ 27.28 (measured: erfc(27.2) = 1.0e-323, erfc(27.3) = 4.2e-326).
-    // This also keeps z² away from the range where 2z² would overflow the
-    // Dekker splitter inside divide() (b.hi · 2²⁷+1 > DBL_MAX above 1.3e300)
-    // and turn the series into NaN — reachable from the corpus, which feeds
-    // erfc DBL_MAX.
+    // This also keeps z² away from the range where e^{z²} itself nears
+    // DBL_MAX (above ~1.3e300 at z = 26.29) — reachable from the corpus,
+    // which feeds erfc DBL_MAX.
     const double kUnderflowMax = 27.25;
     if (z.hi >= kDirectMin) {
         if (!(z.hi <= kUnderflowMax)) return DoubleDouble(0.0);  // also catches +inf
         DoubleDouble z2 = multiply(z, z);
         DoubleDouble sum = erfc_asymptotic_sum(z, z2);
         // e^{-z²}, not 1/e^{z²}: dividing by e^{z²} would (a) hit dd exp()'s
-        // hard ±300 argument guard at z = 17.32 and return 0, and (b) overflow
-        // the Dekker splitter in divide() at z = 26.29. The multiply form has
-        // neither failure and reaches the underflow floor above.
+        // hard ±300 argument guard at z = 17.32 and return 0, and (b) push the
+        // divisor near DBL_MAX at z = 26.29. The multiply form has neither
+        // failure and reaches the underflow floor above.
         DoubleDouble emz2;
         if (z2.hi < 300.0) {
             emz2 = exp(negate(z2));

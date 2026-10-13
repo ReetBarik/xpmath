@@ -260,6 +260,53 @@ declare -A ARCH_CXX=(
 # the node reports a different name, use that name and record both.
 # b200: -arch=sm_100 is load-bearing for the same reason — without it the
 # wrapper defaults to sm_80 and the binary will not run on Blackwell.
+#
+# b200: TD-4, sm_100 extension — mitigated at the source, no ptxas flag
+# needed, but NOT a one-shot fix; it recurred twice more before the sweep
+# came back clean (see validation/b200/logs/ and the project memory entry for
+# the full timeline, last update 2026-10-12). ptxas's default -O3 optimizer
+# on sm_100 mis-sizes the __local__ spill frame around certain inlined
+# multi-callee complex-math bodies (SASS forensics on the original
+# xp::acos(TripleFloatComplex) instance: a genuine CALL.REL.NOINC to a
+# locally-cloned xp::asin, present regardless of source inline/noinline
+# spelling — confirmed by forcing full inlining of the entire TF
+# transcendental chain via __forceinline__, which did NOT remove ptxas's
+# internal call synthesis, it produced MORE of it, 266 instances vs. 139).
+# The boundary is ptxas's own backend code-size optimization, invisible to
+# and uncontrollable from any single C++ inlining attribute — three
+# different mitigations were needed across three recurrences:
+#
+#  1. xp::acos(TripleFloatComplex) (first found): was calling the full
+#     asin(z) just to read asin(z).im, discarding asin(z)'s real part, which
+#     itself redundantly recomputed xp_asin_real_leg(x,y) (acos already has
+#     that value as `leg`) and wrapped it in a second atan2
+#     (xp_asin_real_mag). Calling xp_asin_imag_mag(x,y) directly removes
+#     that whole redundant subtree.
+#  2. xp_asin_imag_mag / xp_asin_real_leg (TripleFloat): mitigation #1
+#     alone did not hold — TF c asin/log10 came back with bit-exact-zero
+#     wrong answers in a later build of the SAME source. XPMATH_NOINLINE_
+#     FUNCTION on these two is NOT honored by ptxas (cuobjdump: ptxas
+#     inlines them anyway). Fixed with a genuine indirect call through a
+#     `const volatile __device__` function pointer (td4_workaround
+#     namespace in tf_complex.hpp) — no inlining heuristic survives an
+#     unresolved-until-runtime call target.
+#  3. QuadFloatComplex log()/atan()/atanh(): a third, independent instance,
+#     found 2026-10-12 — not a regression, QF complex log had simply never
+#     been run on B200 hardware before (the committed baseline predates it).
+#     log() was left XPMATH_INLINE_FUNCTION when its DD/TF siblings were
+#     already NOINLINE for this exact reason; marking it NOINLINE fixed
+#     log() but then broke atan()/atanh() (which call it), so those two were
+#     additionally rewritten to compute modulus/argument directly instead of
+#     calling the complex log() wrapper (same style as fix #1).
+#
+# Verified bit-identical against the MPFR/MPC oracle on host (zero diff, all
+# 436,080 sweep rows) and clean on B200 hardware WITHOUT -Xptxas -O1: the
+# full device sweep exits 0 and scores 0 points above bound on the absolute
+# gate (2026-10-12, build-b200-final). `compute-sanitizer --tool memcheck`
+# has NOT been re-run against this exact tree — the "0 errors" result below
+# is from mitigation #1 only and should not be trusted for the current tree
+# without re-running it. See tf_complex.hpp's acos()/asin() comments and
+# qf_complex.hpp's log()/atan()/atanh() comments.
 declare -A ARCH_CONTRACT=(
   [host]="-ffp-contract=off"
   [a100]=""

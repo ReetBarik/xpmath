@@ -18,7 +18,10 @@
 //
 // TEST STRUCTURE
 //   Test A — tf_two_sum + tf_quick_two_sum bit-exactness (FP64 oracle)
-//   Test B — tf_two_prod + tf_two_sqr bit-exactness (FP64 oracle, splitter 8193.0f)
+//   Test B — tf_two_prod + tf_two_sqr bit-exactness (FP64 oracle, FMA-based
+//            TwoProduct: p = fl(a*b), e = fma(a,b,-p); no splitter — the
+//            8193.0f Veltkamp splitter this file used to carry is gone, same
+//            migration as DD/FF/QF's own two_prod)
 //   Test C — renorm_3 (len 4->3) + renorm (len 3->3): Priest non-overlap invariant
 //            plus exact FP64 value-preservation on ordered 53-bit-source input
 //   Test D — named hard cases (zero, cancellation, subnormals, inf/nan)
@@ -69,14 +72,29 @@ inline bool sqr_is_exact(float a) {
 
 // ----------------------------------------------------------------------------
 // Skip predicates (domain = no overflow/underflow for provable bit-exactness).
+// The splitter-overflow exclusion this file used to carry (split_safe_max) is
+// GONE: tf_two_prod/tf_two_sqr no longer split (see Test B above), so there is
+// no splitter left to overflow — see tests/tf_fma_guard_test.cpp's "DOMAIN
+// WIDENING" section for the full derivation of why removing it is sound. What
+// remains below is the underflow/overflow floor on the TRUE product, ported
+// verbatim from qf_eft_test.cpp's identical FP32 predicate.
 // ----------------------------------------------------------------------------
 inline bool sum_in_domain(float a, float b) {
     if (!std::isfinite(a) || !std::isfinite(b)) return false;
     return std::isfinite(a + b);
 }
-inline float split_safe_max() {
-    return std::numeric_limits<float>::max() / 8193.0f;   // ~2^114.9998
-}
+// twoProd/twoSqr domain: finite normal-or-zero operands with the TRUE product
+// comfortably inside the normal range (so both p and its error term e are
+// representable without underflow). The FMA-based TwoProduct is exact only
+// absent underflow/overflow of the true product (Boldo & Muller; Muller et
+// al., "Handbook of Floating-Point Arithmetic", §4.4 — the same precondition a
+// Dekker-split TwoProduct has). The underflow/overflow predicate is evaluated
+// on the EXACT (double) product, not the rounded FP32 product (which would
+// flush to 0 in the underflow regime and let underflowing pairs masquerade as
+// in-domain). Subnormal OPERANDS are excluded — an exact FMA residual against
+// a subnormal operand is itself a separate, narrower guarantee this predicate
+// does not attempt to certify.
+//   Threshold FLT_MIN * 2^24 = 2^-102 keeps the error term e >= ~2^-126 (normal).
 inline bool prod_in_domain(float a, float b) {
     if (!std::isfinite(a) || !std::isfinite(b)) return false;
     const float fmin = std::numeric_limits<float>::min();
@@ -84,15 +102,13 @@ inline bool prod_in_domain(float a, float b) {
         return x == 0.0f || std::fabs(x) >= fmin;
     };
     if (!normal_or_zero(a) || !normal_or_zero(b)) return false;
-    const float ssm = split_safe_max();
-    if (std::fabs(a) >= ssm || std::fabs(b) >= ssm) return false;
     if (a == 0.0f || b == 0.0f) return true;
     double tp = (double)a * (double)b;
     double mag = tp < 0.0 ? -tp : tp;
     const double hi_lim = (double)std::numeric_limits<float>::max();
     const double lo_lim = std::ldexp(1.0, -102);
-    if (mag > hi_lim) return false;
-    if (mag < lo_lim) return false;
+    if (mag > hi_lim) return false;   // product (and p) would overflow FP32
+    if (mag < lo_lim) return false;   // error term would fall into FP32 subnormals
     return true;
 }
 
@@ -510,7 +526,7 @@ int main(int, char**) {
     {
         std::printf("=== tf_eft_test: EFT bit-exactness for TF twoSum / twoProd / twoSqr / renorm ===\n");
         std::printf("Oracle: FP64 (exact, 25-bit sum / 48-bit product fit in 53-bit FP64)\n");
-        std::printf("Splitter: 8193.0f = 2^13 + 1 (reused from ff_math.hpp)\n\n");
+        std::printf("TwoProduct: FMA-based (p = fl(a*b), e = fma(a,b,-p)); primitives called directly from tf_math.hpp\n\n");
 
         std::printf("[Test A] tf_two_sum bit-exactness\n");
         EftCount A1 = run_host_batches(Op::Sum, "A/twoSum");
@@ -521,7 +537,7 @@ int main(int, char**) {
         std::printf("  tf_quick_two_sum: total tested=%ld, skipped=%ld, failures=%ld\n\n", A2.tested, A2.skipped, A2.failures);
         XPMATH_ASSERT(A2.failures == 0, "tf_quick_two_sum was not bit-exact");
 
-        std::printf("[Test B] tf_two_prod (Dekker twoProduct) bit-exactness\n");
+        std::printf("[Test B] tf_two_prod (FMA-based twoProduct) bit-exactness\n");
         EftCount B1 = run_host_batches(Op::Prod, "B/twoProd");
         std::printf("  tf_two_prod: total tested=%ld, skipped=%ld, failures=%ld\n", B1.tested, B1.skipped, B1.failures);
         XPMATH_ASSERT(B1.failures == 0, "tf_two_prod was not bit-exact");
