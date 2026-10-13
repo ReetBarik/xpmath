@@ -1065,6 +1065,59 @@ XPMATH_NOINLINE_FUNCTION QuadFloatComplex acos(QuadFloatComplex z) {
 // -- never forms a product that can underflow or overflow, and returns the full
 // width at those points. s == 0 (both operands zero) gives log(0) = -inf, which
 // is the right answer for the branch point itself.
+// A100 (sm_80) ptxas bug, root-caused by direct SASS/compute-sanitizer
+// bisection while verifying core/cuda-eft-rn on A100 (2026-10-13), DISTINCT
+// from the B200 (sm_100) TD-4 mechanism: compute-sanitizer memcheck AND
+// initcheck both report 0 errors here (no out-of-bounds or uninitialized
+// access -- unlike B200's confirmed OOB __local__ write), yet a VALUE is
+// silently wrong once it is consumed by further computation inside a
+// function that is not inlined into its caller's frame. Two layers were
+// needed, both pure header-side C++ (no compiler flags: --fmad=false and
+// -Xptxas -O0/-O1 were both tried and neither changed anything, and this is
+// a header-only library -- a flag a user never passes is not a fix):
+//
+//  1. Route divide() and log() through a volatile device function pointer --
+//     forcing ptxas onto the conservative, assume-nothing-about-the-callee
+//     ABI path, the same mechanism tf_complex.hpp's td4_workaround already
+//     uses for its own reasons. Verified with a standalone, non-sweep repro:
+//     a bare `NOINLINE QuadFloat f(a,b) { return log1p(divide(a,b)); }`,
+//     called from a trivial kernel with NO atan() and no sweep context at
+//     all, returned log1p(2) instead of log1p(1/3) for divide(1,3) -- the
+//     divide() result is correct in isolation but corrupted once consumed by
+//     log1p() -- and the fnptr-wrapped form round-trips bit-identical to
+//     host.
+//  2. THAT ALONE IS NOT ENOUGH once TWO such fnptr-protected results are
+//     combined in one function (xp_log_hypot2 needs both a wrapped divide()
+//     and a wrapped log(), then adds functions of each): each call was
+//     verified individually correct through its fnptr, and splitting them
+//     into two separate NOINLINE functions combined by a third did not help
+//     either -- the corruption survives being spread across frames, which is
+//     what says this is a dataflow/liveness bug, not an inlining-heuristic
+//     one. What closes it is a genuine memory round-trip: write the first
+//     sub-result (log(s)*2) to a `volatile` local between the two fnptr
+//     calls and read it back afterward, which forbids ptxas from keeping it
+//     live in registers across the second indirect call at all. Confirmed:
+//     the identical formula without the round-trip mismatches host at both
+//     of grid point 117's internal xp_log_hypot2 calls; with it, both are
+//     bit-exact.
+//
+// scripts/attic/td4_repro/repro_a100_qf_{identity_call,nested_noinline,
+// fnptr_div,atan_point117,log_fnptr_check,split_funcs,volatile_roundtrip}.cu
+// are the minimization chain that found this, in order. NOT wrapped in a
+// second, outer layer of fnptr indirection at THIS function's own call sites
+// (e.g. atan() calling xp_atan_im, or xp_atan_im calling xp_log_hypot2):
+// chaining two genuine indirect calls back-to-back crashes with an illegal
+// device address (CUDA error 700) on A100, a third, different defect. One
+// fnptr layer at each primitive call site, plus the volatile round-trip
+// where two such results are combined, is what is both necessary and
+// sufficient here.
+#if defined(__CUDACC__)
+using QfDivideFn = QuadFloat (*)(QuadFloat, QuadFloat);
+__device__ const volatile QfDivideFn kQfDivideIndirect = &divide;
+using QfLogFn = QuadFloat (*)(QuadFloat);
+__device__ const volatile QfLogFn kQfLogIndirect = &log;
+#endif
+
 XPMATH_INLINE_FUNCTION QuadFloat xp_log_hypot2(QuadFloat a, QuadFloat b) {
     QuadFloat s = a, t = b;
     if (s.f0 < 0.0f) s = negate(s);
@@ -1074,9 +1127,25 @@ XPMATH_INLINE_FUNCTION QuadFloat xp_log_hypot2(QuadFloat a, QuadFloat b) {
     // does NOT work -- feeding -inf into the caller's subtract() makes the
     // error limb inf - inf = NaN and destroys the whole result -- so the two
     // poles are intercepted at the top of atan()/atanh() instead.
+#if defined(__CUDA_ARCH__)
+    if (s.f0 == 0.0f) return kQfLogIndirect(s);
+    // See the A100 block comment above: the volatile round-trip on
+    // log_part is load-bearing, not defensive -- without it this mismatches
+    // host even with both calls individually fnptr-wrapped.
+    const QuadFloat log_part = multiply_scalar(kQfLogIndirect(s), 2.0f);
+    volatile float log_part_rt[4];
+    log_part_rt[0] = log_part.f0; log_part_rt[1] = log_part.f1;
+    log_part_rt[2] = log_part.f2; log_part_rt[3] = log_part.f3;
+    const QuadFloat r = kQfDivideIndirect(t, s);
+    QuadFloat log_part_reloaded;
+    log_part_reloaded.f0 = log_part_rt[0]; log_part_reloaded.f1 = log_part_rt[1];
+    log_part_reloaded.f2 = log_part_rt[2]; log_part_reloaded.f3 = log_part_rt[3];
+    return add(log_part_reloaded, log1p(multiply(r, r)));
+#else
     if (s.f0 == 0.0f) return log(s);
     const QuadFloat r = divide(t, s);
     return add(multiply_scalar(log(s), 2.0f), log1p(multiply(r, r)));
+#endif
 }
 // atan2()/angle() forms hypot(a, b) internally, so an operand pair whose
 // SQUARES overflow the word format comes back NaN. That is what turned
@@ -1144,6 +1213,41 @@ XPMATH_NOINLINE_FUNCTION QuadFloat xp_atan_re_split(QuadFloat x, QuadFloat y) {
                                xp_atan2_safe(x, add(one_, y))),
                            0.5f);
 }
+
+// Im atan(z) = 0.25*log1p(4y/(x^2+(1-y)^2)), with the large-ratio two-log
+// fallback -- see the block comment above atan() for the derivation of both
+// forms and kXpAtanBigRatio, and above xp_log_hypot2 for the A100 divide()
+// fnptr fix the near branch below reuses. NOINLINE placement on atan() itself
+// was tried first and left all 1124/1780 failing points unchanged (ptxas does
+// not honor it here either, matching the B200 TD-4 history). Reproduced
+// device-only (host CPU computes this exact branch correctly, 29.00 digits)
+// and bit-identical whether run inside the full sweep or alone in its own
+// process, which rules out cross-kernel corruption.
+XPMATH_NOINLINE_FUNCTION QuadFloat xp_atan_im(QuadFloat x, QuadFloat y) {
+    const QuadFloat one_(1.0f);
+    const float kXpAtanBigRatio_ = 1.0e4f;
+    const QuadFloat x2  = multiply(x, x);
+    const QuadFloat omy = subtract(one_, y);
+    const QuadFloat den = add(x2, multiply(omy, omy));
+    const QuadFloat num = multiply_scalar(y, 4.0f);
+    if (num.f0 < den.f0 * kXpAtanBigRatio_ && num.f0 > -0.875f * den.f0) {
+#if defined(__CUDA_ARCH__)
+        return multiply_scalar(log1p(kQfDivideIndirect(num, den)), 0.25f);
+#else
+        return multiply_scalar(log1p(divide(num, den)), 0.25f);
+#endif
+    }
+    return multiply_scalar(
+        subtract(xp_log_hypot2(x, add(one_, y)), xp_log_hypot2(x, omy)), 0.25f);
+}
+// NOT also wrapped in its own outer function-pointer indirection: chaining
+// two genuine indirect calls (atan() -> fnptr -> xp_atan_im -> fnptr ->
+// divide()) crashes with an illegal device address (CUDA error 700) on A100,
+// a DIFFERENT ptxas defect than the silent-wrong-value one the inner
+// indirection above fixes. One layer of indirection -- at the actual
+// divide() call site, where the corruption is -- is both necessary and
+// sufficient; a direct (non-indirected) call from atan() into xp_atan_im is
+// correct once that inner fix is in place.
 
 // KI-11 + KI-18 fix. The old body was
 //     atan(z) = (i/2) * log( (1 - iz) / (1 + iz) )
@@ -1214,7 +1318,6 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex atan(QuadFloatComplex z) {
         }
     }
     const float kXpAtanBigL     = 1.0e18f;
-    const float kXpAtanBigRatio = 1.0e4f;
     const QuadFloat one = QuadFloat(1.0f);
     if (detail::fabs(z.re.f0) < kXpAtanBigL && detail::fabs(z.im.f0) < kXpAtanBigL) {
         const QuadFloat x2 = multiply(z.re, z.re);
@@ -1259,18 +1362,7 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex atan(QuadFloatComplex z) {
             re = multiply_scalar(QuadFloat_pi(), 0.5f);
             if (detail::copysign(1.0f, z.re.f0) < 0.0f) re = negate(re);
         }
-        const QuadFloat omy = subtract(one, z.im);
-        const QuadFloat den = add(x2, multiply(omy, omy));
-        const QuadFloat num = multiply_scalar(z.im, 4.0f);
-        QuadFloat im;
-        if (num.f0 < den.f0 * kXpAtanBigRatio &&
-            num.f0 > -0.875f * den.f0) {
-            im = multiply_scalar(log1p(divide(num, den)), 0.25f);
-        } else {
-            im = multiply_scalar(
-                subtract(xp_log_hypot2(z.re, add(one, z.im)),
-                         xp_log_hypot2(z.re, omy)), 0.25f);
-        }
+        const QuadFloat im = xp_atan_im(z.re, z.im);
         return QuadFloatComplex(re, im);
     }
     // |z| past sqrt(word range): squaring would overflow. The ratio form is
