@@ -1743,6 +1743,8 @@ points at xpmath-kokkos; the script remains as a historical campaign recipe
 
 ### Directive for future xpmath-kokkos work
 
+Kokkos layer repository: https://github.com/ReetBarik/xpmath-kokkos
+
 Closing the remaining S8 cross-vendor gap belongs to the Kokkos layer
 repository once `v0.2.0` exists. Run the wrappers / demos / bit-identity suite
 on real Kokkos execution spaces (A100 / MI250 first; B200 / PVC when hardware
