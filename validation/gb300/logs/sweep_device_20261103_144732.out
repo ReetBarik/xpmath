@@ -1,0 +1,2 @@
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: first fault backend=DD kind=c op=acos error=700

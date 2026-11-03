@@ -1,0 +1,345 @@
+===========================================================
+ GB300 device sweep (raw only; score on the login node)
+ date      : 2026-11-03T14:47:32+00:00
+ host      : graceblackwell01 (aarch64)
+ repo      : /home/rbarik/kokkos-extended-precision-demo
+ commit    : 1cfa793
+ build dir : /home/rbarik/kokkos-extended-precision-demo/build-gb300-sweep
+ raw out   : /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/sweep_gb300_raw.csv
+ log       : /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/gb300_sweep_20261103_144732.log
+===========================================================
+  module load gcc/11.2.0
+  module load cmake/3.22.1
+  module load cuda/13.3.1
+
+--- provenance ---
+    Tue Nov  3 14:47:32 2026       
+    +-----------------------------------------------------------------------------------------+
+    | NVIDIA-SMI 615.71.09              KMD Version: 615.71.09     CUDA UMD Version: 13.4     |
+    +-----------------------------------------+------------------------+----------------------+
+    | GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+    | Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+    |                                         |                        |               MIG M. |
+    |=========================================+========================+======================|
+    |   0  NVIDIA GB300                   Off |   00000009:06:00.0 Off |                    0 |
+    | N/A   29C    P0            146W / 1300W |       0MiB / 256703MiB |      0%      Default |
+    |                                         |                        |             Disabled |
+    +-----------------------------------------+------------------------+----------------------+
+    
+    +-----------------------------------------------------------------------------------------+
+    | Processes:                                                                              |
+    |  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+    |        ID   ID                                                               Usage      |
+    |=========================================================================================|
+    |  No running processes found                                                             |
+    +-----------------------------------------------------------------------------------------+
+    nvcc: NVIDIA (R) Cuda compiler driver
+    Copyright (c) 2005-2026 NVIDIA Corporation
+    Built on Tue_Jun_09_02:45:27_PM_PDT_2026
+    Cuda compilation tools, release 13.3, V13.3.73
+    Build cuda_13.3.r13.3/compiler.38244171_0
+    g++ (GCC) 11.2.0
+
+--- [1/2] build (xpm_build.sh --arch gb300 --no-test) ---
+  module load gcc/11.2.0
+  module load cmake/3.22.1
+  module load cuda/13.3.1
+
+===========================================================
+ xpm_build : DEVICE TREE
+   arch        : gb300  (NVIDIA GB300 / sm_103 (aarch64), CUDA device_harness, device tree only)
+   build dir   : /home/rbarik/kokkos-extended-precision-demo/build-gb300-sweep/device
+   compiler    : /home/rbarik/qcdl_gb300/kokkos/install/kokkos-5.1.0-gb300/Release/bin/nvcc_wrapper
+   optimization: -O3
+   contraction : -arch=sm_103
+   targets     : HOST=OFF DEVICE=ON
+===========================================================
+-- The CXX compiler identification is GNU 11.2.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /home/rbarik/qcdl_gb300/kokkos/install/kokkos-5.1.0-gb300/Release/bin/nvcc_wrapper - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- build provenance: /home/rbarik/kokkos-extended-precision-demo/build-gb300-sweep/device/build-info.txt (arch=gb300, tree=device)
+-- contraction guard: 8 OFF targets, 5 ON targets (expected 8/5)
+-- C5 side tags: 24 tests registered = 0 host + 24 device (HOST_TARGETS=OFF, DEVICE_TARGETS=ON)
+-- Configuring done
+-- Generating done
+CMake Warning:
+  Manually-specified variables were not used by the project:
+
+    CMAKE_C_COMPILER
+
+
+-- Build files have been written to: /home/rbarik/kokkos-extended-precision-demo/build-gb300-sweep/device
+[ 20%] Building CXX object tests/CMakeFiles/tf_eft_test.dir/tf_eft_test.cpp.o
+[ 20%] Building CXX object tests/CMakeFiles/ff_eft_test.dir/ff_eft_test.cpp.o
+[ 20%] Building CXX object tests/CMakeFiles/tf_eft_test_contract_on.dir/tf_eft_test.cpp.o
+[ 20%] Building CXX object tests/CMakeFiles/ff_invariant_test.dir/ff_invariant_test.cpp.o
+[ 20%] Building CXX object tests/CMakeFiles/hello_test_device.dir/hello_test_device.cpp.o
+[ 20%] Building CXX object tests/CMakeFiles/dd_invariant_test.dir/dd_invariant_test.cpp.o
+[ 20%] Building CXX object tests/CMakeFiles/tf_fma_guard_test.dir/tf_fma_guard_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_nonoverlap_test_device.dir/qf_nonoverlap_test_device.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_fma_guard_test.dir/qf_fma_guard_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/ff_property_test_device.dir/ff_property_test_device.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/dd_property_test_device.dir/dd_property_test_device.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/device_harness_test.dir/device_harness_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/dd_fma_guard_test_device_contract_on.dir/dd_fma_guard_test_device.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/sweep_device.dir/__/scripts/sweep_device.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_fma_guard_test_contract_on.dir/qf_fma_guard_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_eft_test_device.dir/qf_eft_test_device.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/ff_fma_guard_test_contract_on.dir/ff_fma_guard_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/tf_fma_guard_test_contract_on.dir/tf_fma_guard_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/qf_property_test_device.dir/qf_property_test_device.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/dd_eft_test_device.dir/dd_eft_test_device.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/ff_fma_guard_test.dir/ff_fma_guard_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/dd_fma_guard_test_device.dir/dd_fma_guard_test_device.cpp.o
+[ 52%] Linking CXX executable device_harness_test
+[ 52%] Built target device_harness_test
+[ 54%] Linking CXX executable hello_test_device
+[ 54%] Built target hello_test_device
+[ 56%] Linking CXX executable qf_eft_test_device
+[ 56%] Built target qf_eft_test_device
+[ 59%] Linking CXX executable dd_eft_test_device
+[ 61%] Linking CXX executable dd_fma_guard_test_device
+[ 63%] Linking CXX executable dd_fma_guard_test_device_contract_on
+[ 65%] Linking CXX executable ff_fma_guard_test
+[ 68%] Linking CXX executable ff_fma_guard_test_contract_on
+[ 68%] Built target dd_eft_test_device
+[ 70%] Linking CXX executable tf_fma_guard_test
+[ 72%] Linking CXX executable ff_eft_test
+[ 75%] Linking CXX executable tf_fma_guard_test_contract_on
+[ 75%] Built target ff_fma_guard_test_contract_on
+[ 75%] Built target dd_fma_guard_test_device_contract_on
+[ 75%] Built target ff_fma_guard_test
+[ 75%] Built target dd_fma_guard_test_device
+[ 75%] Built target tf_fma_guard_test
+[ 77%] Linking CXX executable dd_property_test_device
+[ 77%] Built target ff_eft_test
+[ 79%] Built target tf_fma_guard_test_contract_on
+[ 79%] Linking CXX executable ff_property_test_device
+[ 79%] Built target dd_property_test_device
+[ 79%] Built target ff_property_test_device
+[ 81%] Linking CXX executable qf_fma_guard_test
+[ 84%] Linking CXX executable qf_fma_guard_test_contract_on
+[ 86%] Linking CXX executable tf_eft_test
+[ 88%] Linking CXX executable tf_eft_test_contract_on
+[ 90%] Linking CXX executable qf_property_test_device
+[ 90%] Built target qf_fma_guard_test_contract_on
+[ 90%] Built target tf_eft_test_contract_on
+[ 90%] Built target tf_eft_test
+[ 90%] Built target qf_fma_guard_test
+[ 90%] Built target qf_property_test_device
+[ 93%] Linking CXX executable qf_nonoverlap_test_device
+[ 93%] Built target qf_nonoverlap_test_device
+[ 95%] Linking CXX executable ff_invariant_test
+[ 97%] Linking CXX executable dd_invariant_test
+[ 97%] Built target ff_invariant_test
+[ 97%] Built target dd_invariant_test
+[100%] Linking CXX executable sweep_device
+[100%] Built target sweep_device
+
+--- build-info.txt (device tree) ---
+# xpmath build provenance -- written by CMakeLists.txt at configure time.
+# Regenerated on every configure. Do not edit; do not commit.
+arch: gb300
+tree: device
+git-head: 1cfa7936687909ef47e2f8a89c344014456b4863
+compiler: /home/rbarik/qcdl_gb300/kokkos/install/kokkos-5.1.0-gb300/Release/bin/nvcc_wrapper
+compiler-id: GNU
+compiler-version: 11.2.0
+kokkos: OFF
+kokkos-prefix: (none: Kokkos lives in xpmath-kokkos)
+cxx-standard: 17
+cxx-standard-raised: (none: no target in this tree links Kokkos)
+build-type: Release
+opt-level: O3
+cxx-flags: -arch=sm_103 -fext-numeric-literals -O3 -DNDEBUG
+timestamp-utc: 2026-11-03T14:47:35Z
+
+===========================================================
+ xpm_build MERGED VERDICT -- arch gb300, --only device
+   build dir : /home/rbarik/kokkos-extended-precision-demo/build-gb300-sweep
+-----------------------------------------------------------
+   tree     tests  passed  failed  result           note
+   host         0       0       0  SKIPPED          --only device
+   device       0       0       0  BUILT            built
+-----------------------------------------------------------
+   TOTAL        0       0       0
+-----------------------------------------------------------
+ --no-test: NO VERDICT WAS TAKEN. The table above reports the build only.
+ RESULT: BUILT -- every requested tree configured and built.
+         ctest --test-dir /home/rbarik/kokkos-extended-precision-demo/build-gb300-sweep/device
+===========================================================
+
+--- [2/2] sweep_device on this GPU ---
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: first fault backend=DD kind=c op=acos error=700
+sweep_device exited 3 -- last_error() was nonzero; do not score /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/sweep_gb300_raw.csv
+
+--- isolating each remaining kernel in its own process ---
+    one illegal access poisons every later launch in the same process.
+  first fault: DD:c:acos  (resume index 212 / 252)
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: first fault backend=DD kind=c op=acos error=700
+  FAULT DD:c:acos exit 3
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/FF_c_acos.csv
+  ok    FF:c:acos
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/QF_c_acos.csv
+  ok    QF:c:acos
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/TF_c_acos.csv
+  ok    TF:c:acos
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/DD_c_atan.csv
+  ok    DD:c:atan
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/FF_c_atan.csv
+  ok    FF:c:atan
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/QF_c_atan.csv
+  ok    QF:c:atan
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/TF_c_atan.csv
+  ok    TF:c:atan
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/DD_c_sinh.csv
+  ok    DD:c:sinh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/FF_c_sinh.csv
+  ok    FF:c:sinh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/QF_c_sinh.csv
+  ok    QF:c:sinh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/TF_c_sinh.csv
+  ok    TF:c:sinh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/DD_c_cosh.csv
+  ok    DD:c:cosh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/FF_c_cosh.csv
+  ok    FF:c:cosh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/QF_c_cosh.csv
+  ok    QF:c:cosh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/TF_c_cosh.csv
+  ok    TF:c:cosh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/DD_c_tanh.csv
+  ok    DD:c:tanh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/FF_c_tanh.csv
+  ok    FF:c:tanh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/QF_c_tanh.csv
+  ok    QF:c:tanh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/TF_c_tanh.csv
+  ok    TF:c:tanh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/DD_c_asinh.csv
+  ok    DD:c:asinh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/FF_c_asinh.csv
+  ok    FF:c:asinh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/QF_c_asinh.csv
+  ok    QF:c:asinh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/TF_c_asinh.csv
+  ok    TF:c:asinh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/DD_c_acosh.csv
+  ok    DD:c:acosh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/FF_c_acosh.csv
+  ok    FF:c:acosh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/QF_c_acosh.csv
+  ok    QF:c:acosh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/TF_c_acosh.csv
+  ok    TF:c:acosh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/DD_c_atanh.csv
+  ok    DD:c:atanh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/FF_c_atanh.csv
+  ok    FF:c:atanh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/QF_c_atanh.csv
+  ok    QF:c:atanh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/TF_c_atanh.csv
+  ok    TF:c:atanh
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/DD_c_pow.csv
+  ok    DD:c:pow
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/FF_c_pow.csv
+  ok    FF:c:pow
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/QF_c_pow.csv
+  ok    QF:c:pow
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/TF_c_pow.csv
+  ok    TF:c:pow
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/DD_c_polar.csv
+  ok    DD:c:polar
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/FF_c_polar.csv
+  ok    FF:c:polar
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/QF_c_polar.csv
+  ok    QF:c:polar
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/isolate_20261103_144732/TF_c_polar.csv
+  ok    TF:c:polar
+
+kernels that faulted in their own process (1):
+  DD:c:acos
+not a result: the full-sweep file /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/sweep_gb300_raw.csv stops before the first fault.
