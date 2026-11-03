@@ -1,0 +1,3 @@
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/sweep_gb300_raw.csv

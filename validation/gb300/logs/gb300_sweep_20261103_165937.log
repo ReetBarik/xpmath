@@ -1,0 +1,152 @@
+===========================================================
+ GB300 device sweep (raw only; score on the login node)
+ date      : 2026-11-03T16:59:37+00:00
+ host      : graceblackwell01 (aarch64)
+ repo      : /home/rbarik/kokkos-extended-precision-demo
+ commit    : 63daa15
+ build dir : /home/rbarik/kokkos-extended-precision-demo/build-gb300-sweep
+ raw out   : /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/sweep_gb300_raw.csv
+ log       : /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/gb300_sweep_20261103_165937.log
+===========================================================
+  module load gcc/11.2.0
+  module load cmake/3.22.1
+  module load cuda/13.3.1
+
+--- provenance ---
+    Tue Nov  3 16:59:37 2026       
+    +-----------------------------------------------------------------------------------------+
+    | NVIDIA-SMI 615.71.09              KMD Version: 615.71.09     CUDA UMD Version: 13.4     |
+    +-----------------------------------------+------------------------+----------------------+
+    | GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+    | Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+    |                                         |                        |               MIG M. |
+    |=========================================+========================+======================|
+    |   0  NVIDIA GB300                   Off |   00000009:06:00.0 Off |                    0 |
+    | N/A   29C    P0            146W / 1300W |       0MiB / 256703MiB |      0%      Default |
+    |                                         |                        |             Disabled |
+    +-----------------------------------------+------------------------+----------------------+
+    
+    +-----------------------------------------------------------------------------------------+
+    | Processes:                                                                              |
+    |  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+    |        ID   ID                                                               Usage      |
+    |=========================================================================================|
+    |  No running processes found                                                             |
+    +-----------------------------------------------------------------------------------------+
+    nvcc: NVIDIA (R) Cuda compiler driver
+    Copyright (c) 2005-2026 NVIDIA Corporation
+    Built on Tue_Jun_09_02:45:27_PM_PDT_2026
+    Cuda compilation tools, release 13.3, V13.3.73
+    Build cuda_13.3.r13.3/compiler.38244171_0
+    g++ (GCC) 11.2.0
+
+--- [1/2] build (xpm_build.sh --arch gb300 --no-test) ---
+  module load gcc/11.2.0
+  module load cmake/3.22.1
+  module load cuda/13.3.1
+
+===========================================================
+ xpm_build : DEVICE TREE
+   arch        : gb300  (NVIDIA GB300 / sm_103 (aarch64), CUDA device_harness, device tree only)
+   build dir   : /home/rbarik/kokkos-extended-precision-demo/build-gb300-sweep/device
+   compiler    : /home/rbarik/qcdl_gb300/kokkos/install/kokkos-5.1.0-gb300/Release/bin/nvcc_wrapper
+   optimization: -O3
+   contraction : -arch=sm_103
+   targets     : HOST=OFF DEVICE=ON
+===========================================================
+-- build provenance: /home/rbarik/kokkos-extended-precision-demo/build-gb300-sweep/device/build-info.txt (arch=gb300, tree=device)
+-- contraction guard: 8 OFF targets, 5 ON targets (expected 8/5)
+-- C5 side tags: 24 tests registered = 0 host + 24 device (HOST_TARGETS=OFF, DEVICE_TARGETS=ON)
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /home/rbarik/kokkos-extended-precision-demo/build-gb300-sweep/device
+Consolidate compiler generated dependencies of target tf_eft_test
+Consolidate compiler generated dependencies of target hello_test_device
+Consolidate compiler generated dependencies of target qf_property_test_device
+Consolidate compiler generated dependencies of target dd_fma_guard_test_device
+Consolidate compiler generated dependencies of target ff_invariant_test
+Consolidate compiler generated dependencies of target dd_fma_guard_test_device_contract_on
+Consolidate compiler generated dependencies of target dd_invariant_test
+Consolidate compiler generated dependencies of target ff_eft_test
+Consolidate compiler generated dependencies of target tf_fma_guard_test_contract_on
+Consolidate compiler generated dependencies of target dd_property_test_device
+Consolidate compiler generated dependencies of target tf_eft_test_contract_on
+Consolidate compiler generated dependencies of target qf_eft_test_device
+Consolidate compiler generated dependencies of target ff_fma_guard_test
+Consolidate compiler generated dependencies of target qf_nonoverlap_test_device
+Consolidate compiler generated dependencies of target qf_fma_guard_test
+Consolidate compiler generated dependencies of target dd_eft_test_device
+Consolidate compiler generated dependencies of target ff_property_test_device
+Consolidate compiler generated dependencies of target ff_fma_guard_test_contract_on
+Consolidate compiler generated dependencies of target tf_fma_guard_test
+Consolidate compiler generated dependencies of target sweep_device
+Consolidate compiler generated dependencies of target device_harness_test
+Consolidate compiler generated dependencies of target qf_fma_guard_test_contract_on
+[ 15%] Built target device_harness_test
+[ 18%] Built target qf_eft_test_device
+[ 18%] Building CXX object tests/CMakeFiles/sweep_device.dir/__/scripts/sweep_device.cpp.o
+[ 20%] Built target qf_nonoverlap_test_device
+[ 20%] Built target hello_test_device
+[ 77%] Built target ff_invariant_test
+[ 97%] Built target dd_property_test_device
+[ 97%] Built target dd_fma_guard_test_device
+[ 97%] Built target ff_eft_test
+[ 97%] Built target ff_property_test_device
+[ 97%] Built target tf_fma_guard_test_contract_on
+[ 97%] Built target tf_eft_test
+[ 97%] Built target dd_invariant_test
+[ 97%] Built target qf_property_test_device
+[ 97%] Built target tf_fma_guard_test
+[ 97%] Built target dd_eft_test_device
+[ 97%] Built target qf_fma_guard_test_contract_on
+[ 97%] Built target dd_fma_guard_test_device_contract_on
+[ 97%] Built target ff_fma_guard_test
+[ 97%] Built target qf_fma_guard_test
+[ 97%] Built target tf_eft_test_contract_on
+[ 97%] Built target ff_fma_guard_test_contract_on
+[100%] Linking CXX executable sweep_device
+[100%] Built target sweep_device
+
+--- build-info.txt (device tree) ---
+# xpmath build provenance -- written by CMakeLists.txt at configure time.
+# Regenerated on every configure. Do not edit; do not commit.
+arch: gb300
+tree: device
+git-head: 63daa15919e3e2bce907420e646b4c206bc5d9a5
+compiler: /home/rbarik/qcdl_gb300/kokkos/install/kokkos-5.1.0-gb300/Release/bin/nvcc_wrapper
+compiler-id: GNU
+compiler-version: 11.2.0
+kokkos: OFF
+kokkos-prefix: (none: Kokkos lives in xpmath-kokkos)
+cxx-standard: 17
+cxx-standard-raised: (none: no target in this tree links Kokkos)
+build-type: Release
+opt-level: O3
+cxx-flags: -arch=sm_103 -fext-numeric-literals -O3 -DNDEBUG
+timestamp-utc: 2026-11-03T16:59:38Z
+
+===========================================================
+ xpm_build MERGED VERDICT -- arch gb300, --only device
+   build dir : /home/rbarik/kokkos-extended-precision-demo/build-gb300-sweep
+-----------------------------------------------------------
+   tree     tests  passed  failed  result           note
+   host         0       0       0  SKIPPED          --only device
+   device       0       0       0  BUILT            built
+-----------------------------------------------------------
+   TOTAL        0       0       0
+-----------------------------------------------------------
+ --no-test: NO VERDICT WAS TAKEN. The table above reports the build only.
+ RESULT: BUILT -- every requested tree configured and built.
+         ctest --test-dir /home/rbarik/kokkos-extended-precision-demo/build-gb300-sweep/device
+===========================================================
+
+--- [2/2] sweep_device on this GPU ---
+sweep_device: CUDA stack limit = 16384 B
+sweep_device: where=cuda  grid real=1700 complex=1780  seed=12345
+sweep_device: wrote 436080 rows to /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/sweep_gb300_raw.csv
+
+sweep_device exit 0 -- raw device output written (NOT scored).
+raw : /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/sweep_gb300_raw.csv
+log : /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/gb300_sweep_20261103_165937.log
+score on an x86 login node with:
+  <host-build>/host/tests/sweep_accuracy --ulp --score-results /home/rbarik/kokkos-extended-precision-demo/validation/gb300/logs/sweep_gb300_raw.csv --where gb300 --out /tmp/gb300_scored.csv
