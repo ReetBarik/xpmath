@@ -1,0 +1,411 @@
+  module load gcc/13.3.0
+  module load cmake/3.28.3
+
+===========================================================
+ xpm_build : HOST TREE
+   arch        : host  (x86_64 login/compute node, serial device_harness)
+   build dir   : /tmp/xpm-P0.5fix/host
+   compiler    : g++
+   optimization: -O3
+   contraction : -ffp-contract=off
+   targets     : HOST=ON DEVICE=OFF
+===========================================================
+-- The CXX compiler identification is GNU 13.3.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /soft/compilers/gcc/13.3.0/x86_64-suse-linux/bin/g++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- build provenance: /tmp/xpm-P0.5fix/host/build-info.txt (arch=host, tree=host)
+-- contraction guard: 3 OFF targets, 1 ON targets (expected 3/1)
+-- MPFR found: /usr/lib64/libmpfr.so
+-- MPC  found: /usr/lib64/libmpc.so -- the oracle is available for BOTH real and complex ops
+-- C5 side tags: 44 tests registered = 44 host + 0 device (HOST_TARGETS=ON, DEVICE_TARGETS=OFF)
+-- Configuring done (0.5s)
+-- Generating done (0.0s)
+CMake Warning:
+  Manually-specified variables were not used by the project:
+
+    CMAKE_C_COMPILER
+
+
+-- Build files have been written to: /tmp/xpm-P0.5fix/host
+[  1%] Building CXX object tests/CMakeFiles/hello_test.dir/hello_test.cpp.o
+[  5%] Building CXX object tests/CMakeFiles/corpus_test.dir/corpus_test.cpp.o
+[  5%] Building CXX object tests/CMakeFiles/ff_cancellation_test.dir/ff_cancellation_test.cpp.o
+[  9%] Building CXX object tests/CMakeFiles/dd_e2e_test.dir/dd_e2e_test.cpp.o
+[  9%] Building CXX object tests/CMakeFiles/qf_cancellation_test.dir/qf_cancellation_test.cpp.o
+[ 11%] Building CXX object tests/CMakeFiles/tf_property_test.dir/tf_property_test.cpp.o
+[ 14%] Building CXX object tests/CMakeFiles/dd_eft_test.dir/dd_eft_test.cpp.o
+[ 14%] Building CXX object tests/CMakeFiles/dd_property_test.dir/dd_property_test.cpp.o
+[ 16%] Building CXX object tests/CMakeFiles/tf_cancellation_test.dir/tf_cancellation_test.cpp.o
+[ 18%] Building CXX object tests/CMakeFiles/dd_fma_guard_test.dir/dd_fma_guard_test.cpp.o
+[ 20%] Building CXX object tests/CMakeFiles/ff_property_test.dir/ff_property_test.cpp.o
+[ 22%] Building CXX object tests/CMakeFiles/dd_fma_guard_test_contract_on.dir/dd_fma_guard_test.cpp.o
+[ 24%] Building CXX object tests/CMakeFiles/qf_property_test.dir/qf_property_test.cpp.o
+[ 25%] Building CXX object tests/CMakeFiles/qf_eft_test.dir/qf_eft_test.cpp.o
+[ 27%] Building CXX object tests/CMakeFiles/qf_nonoverlap_test.dir/qf_nonoverlap_test.cpp.o
+[ 29%] Building CXX object tests/CMakeFiles/dd_no_kokkos_smoke.dir/standalone/dd_no_kokkos_smoke.cpp.o
+[ 31%] Building CXX object tests/CMakeFiles/ff_no_kokkos_smoke.dir/standalone/ff_no_kokkos_smoke.cpp.o
+[ 33%] Building CXX object tests/CMakeFiles/dd_complex_no_kokkos_smoke.dir/standalone/dd_complex_no_kokkos_smoke.cpp.o
+[ 37%] Building CXX object tests/CMakeFiles/qf_no_kokkos_smoke.dir/standalone/qf_no_kokkos_smoke.cpp.o
+[ 37%] Building CXX object tests/CMakeFiles/ff_complex_no_kokkos_smoke.dir/standalone/ff_complex_no_kokkos_smoke.cpp.o
+[ 38%] Building CXX object tests/CMakeFiles/qf_complex_no_kokkos_smoke.dir/standalone/qf_complex_no_kokkos_smoke.cpp.o
+[ 40%] Building CXX object tests/CMakeFiles/tf_no_kokkos_smoke.dir/standalone/tf_no_kokkos_smoke.cpp.o
+[ 44%] Building CXX object tests/CMakeFiles/sweep_accuracy.dir/__/scripts/sweep_accuracy.cpp.o
+[ 44%] Building CXX object tests/CMakeFiles/tf_complex_no_kokkos_smoke.dir/standalone/tf_complex_no_kokkos_smoke.cpp.o
+[ 48%] Building CXX object tests/CMakeFiles/exp_reduction_test.dir/exp_reduction_test.cpp.o
+[ 48%] Building CXX object tests/CMakeFiles/pow_domain_test.dir/pow_domain_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/trig_reduction_test.dir/trig_reduction_test.cpp.o
+[ 51%] Linking CXX executable exp_reduction_test
+[ 51%] Built target exp_reduction_test
+[ 53%] Linking CXX executable hello_test
+[ 53%] Built target hello_test
+[ 55%] Linking CXX executable trig_reduction_test
+[ 55%] Built target trig_reduction_test
+[ 57%] Linking CXX executable dd_fma_guard_test
+[ 59%] Linking CXX executable qf_no_kokkos_smoke
+[ 61%] Linking CXX executable tf_no_kokkos_smoke
+[ 62%] Linking CXX executable dd_eft_test
+[ 62%] Built target dd_fma_guard_test
+[ 62%] Built target qf_no_kokkos_smoke
+[ 62%] Built target tf_no_kokkos_smoke
+[ 62%] Built target dd_eft_test
+[ 64%] Linking CXX executable dd_fma_guard_test_contract_on
+[ 64%] Built target dd_fma_guard_test_contract_on
+[ 66%] Linking CXX executable qf_eft_test
+[ 68%] Linking CXX executable ff_cancellation_test
+[ 70%] Linking CXX executable dd_e2e_test
+[ 70%] Built target qf_eft_test
+[ 72%] Linking CXX executable ff_no_kokkos_smoke
+[ 72%] Built target ff_cancellation_test
+[ 72%] Built target dd_e2e_test
+[ 74%] Linking CXX executable dd_no_kokkos_smoke
+[ 74%] Built target ff_no_kokkos_smoke
+[ 75%] Linking CXX executable qf_cancellation_test
+[ 75%] Built target dd_no_kokkos_smoke
+[ 75%] Built target qf_cancellation_test
+[ 77%] Linking CXX executable dd_complex_no_kokkos_smoke
+[ 77%] Built target dd_complex_no_kokkos_smoke
+[ 79%] Linking CXX executable ff_complex_no_kokkos_smoke
+[ 79%] Built target ff_complex_no_kokkos_smoke
+[ 81%] Linking CXX executable tf_cancellation_test
+[ 81%] Built target tf_cancellation_test
+[ 83%] Linking CXX executable pow_domain_test
+[ 85%] Linking CXX executable tf_complex_no_kokkos_smoke
+[ 85%] Built target pow_domain_test
+[ 85%] Built target tf_complex_no_kokkos_smoke
+[ 87%] Linking CXX executable qf_complex_no_kokkos_smoke
+[ 87%] Built target qf_complex_no_kokkos_smoke
+[ 88%] Linking CXX executable tf_property_test
+[ 88%] Built target tf_property_test
+[ 90%] Linking CXX executable corpus_test
+[ 90%] Built target corpus_test
+[ 92%] Linking CXX executable dd_property_test
+[ 94%] Linking CXX executable ff_property_test
+[ 94%] Built target dd_property_test
+[ 94%] Built target ff_property_test
+[ 96%] Linking CXX executable qf_property_test
+[ 96%] Built target qf_property_test
+[ 98%] Linking CXX executable qf_nonoverlap_test
+[ 98%] Built target qf_nonoverlap_test
+[100%] Linking CXX executable sweep_accuracy
+[100%] Built target sweep_accuracy
+
+===========================================================
+ xpm_build : DEVICE TREE
+   arch        : host  (x86_64 login/compute node, serial device_harness)
+   build dir   : /tmp/xpm-P0.5fix/device
+   compiler    : g++
+   optimization: -O3
+   contraction : -ffp-contract=off
+   targets     : HOST=OFF DEVICE=ON
+===========================================================
+-- The CXX compiler identification is GNU 13.3.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /soft/compilers/gcc/13.3.0/x86_64-suse-linux/bin/g++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- build provenance: /tmp/xpm-P0.5fix/device/build-info.txt (arch=host, tree=device)
+-- contraction guard: 8 OFF targets, 5 ON targets (expected 8/5)
+-- C5 side tags: 24 tests registered = 0 host + 24 device (HOST_TARGETS=OFF, DEVICE_TARGETS=ON)
+-- Configuring done (0.4s)
+-- Generating done (0.0s)
+CMake Warning:
+  Manually-specified variables were not used by the project:
+
+    CMAKE_C_COMPILER
+
+
+-- Build files have been written to: /tmp/xpm-P0.5fix/device
+[  2%] Building CXX object tests/CMakeFiles/ff_invariant_test.dir/ff_invariant_test.cpp.o
+[  4%] Building CXX object tests/CMakeFiles/hello_test_device.dir/hello_test_device.cpp.o
+[  6%] Building CXX object tests/CMakeFiles/tf_eft_test.dir/tf_eft_test.cpp.o
+[  9%] Building CXX object tests/CMakeFiles/dd_invariant_test.dir/dd_invariant_test.cpp.o
+[ 11%] Building CXX object tests/CMakeFiles/ff_eft_test.dir/ff_eft_test.cpp.o
+[ 13%] Building CXX object tests/CMakeFiles/tf_eft_test_contract_on.dir/tf_eft_test.cpp.o
+[ 15%] Building CXX object tests/CMakeFiles/tf_fma_guard_test.dir/tf_fma_guard_test.cpp.o
+[ 18%] Building CXX object tests/CMakeFiles/dd_property_test_device.dir/dd_property_test_device.cpp.o
+[ 20%] Building CXX object tests/CMakeFiles/tf_fma_guard_test_contract_on.dir/tf_fma_guard_test.cpp.o
+[ 22%] Building CXX object tests/CMakeFiles/dd_fma_guard_test_device.dir/dd_fma_guard_test_device.cpp.o
+[ 25%] Building CXX object tests/CMakeFiles/ff_property_test_device.dir/ff_property_test_device.cpp.o
+[ 27%] Building CXX object tests/CMakeFiles/dd_fma_guard_test_device_contract_on.dir/dd_fma_guard_test_device.cpp.o
+[ 31%] Building CXX object tests/CMakeFiles/ff_fma_guard_test_contract_on.dir/ff_fma_guard_test.cpp.o
+[ 31%] Building CXX object tests/CMakeFiles/dd_eft_test_device.dir/dd_eft_test_device.cpp.o
+[ 36%] Building CXX object tests/CMakeFiles/qf_nonoverlap_test_device.dir/qf_nonoverlap_test_device.cpp.o
+[ 36%] Building CXX object tests/CMakeFiles/qf_property_test_device.dir/qf_property_test_device.cpp.o
+[ 38%] Building CXX object tests/CMakeFiles/ff_fma_guard_test.dir/ff_fma_guard_test.cpp.o
+[ 40%] Building CXX object tests/CMakeFiles/qf_fma_guard_test_contract_on.dir/qf_fma_guard_test.cpp.o
+[ 43%] Building CXX object tests/CMakeFiles/qf_eft_test_device.dir/qf_eft_test_device.cpp.o
+[ 45%] Building CXX object tests/CMakeFiles/qf_fma_guard_test.dir/qf_fma_guard_test.cpp.o
+[ 47%] Building CXX object tests/CMakeFiles/device_harness_test.dir/device_harness_test.cpp.o
+[ 50%] Building CXX object tests/CMakeFiles/sweep_device.dir/__/scripts/sweep_device.cpp.o
+[ 52%] Linking CXX executable device_harness_test
+[ 52%] Built target device_harness_test
+[ 54%] Linking CXX executable hello_test_device
+[ 54%] Built target hello_test_device
+[ 56%] Linking CXX executable qf_eft_test_device
+[ 56%] Built target qf_eft_test_device
+[ 59%] Linking CXX executable dd_eft_test_device
+[ 59%] Built target dd_eft_test_device
+[ 61%] Linking CXX executable ff_fma_guard_test
+[ 63%] Linking CXX executable dd_fma_guard_test_device
+[ 65%] Linking CXX executable ff_eft_test
+[ 65%] Built target ff_fma_guard_test
+[ 68%] Linking CXX executable dd_fma_guard_test_device_contract_on
+[ 68%] Built target dd_fma_guard_test_device
+[ 70%] Linking CXX executable ff_fma_guard_test_contract_on
+[ 70%] Built target ff_eft_test
+[ 72%] Linking CXX executable tf_fma_guard_test
+[ 72%] Built target dd_fma_guard_test_device_contract_on
+[ 72%] Built target ff_fma_guard_test_contract_on
+[ 72%] Built target tf_fma_guard_test
+[ 75%] Linking CXX executable tf_fma_guard_test_contract_on
+[ 75%] Built target tf_fma_guard_test_contract_on
+[ 77%] Linking CXX executable qf_fma_guard_test
+[ 77%] Built target qf_fma_guard_test
+[ 79%] Linking CXX executable qf_fma_guard_test_contract_on
+[ 79%] Built target qf_fma_guard_test_contract_on
+[ 81%] Linking CXX executable qf_nonoverlap_test_device
+[ 84%] Linking CXX executable tf_eft_test
+[ 86%] Linking CXX executable tf_eft_test_contract_on
+[ 86%] Built target qf_nonoverlap_test_device
+[ 86%] Built target tf_eft_test
+[ 86%] Built target tf_eft_test_contract_on
+[ 88%] Linking CXX executable ff_property_test_device
+[ 90%] Linking CXX executable dd_property_test_device
+[ 90%] Built target ff_property_test_device
+[ 90%] Built target dd_property_test_device
+[ 93%] Linking CXX executable qf_property_test_device
+[ 93%] Built target qf_property_test_device
+[ 95%] Linking CXX executable ff_invariant_test
+[ 95%] Built target ff_invariant_test
+[ 97%] Linking CXX executable dd_invariant_test
+[ 97%] Built target dd_invariant_test
+[100%] Linking CXX executable sweep_device
+[100%] Built target sweep_device
+
+--- build-info.txt (host tree) ---
+# xpmath build provenance -- written by CMakeLists.txt at configure time.
+# Regenerated on every configure. Do not edit; do not commit.
+arch: host
+tree: host
+git-head: adf9aceef63a1d6fd9c3e22d7e236bb36ce6cef5
+compiler: /soft/compilers/gcc/13.3.0/x86_64-suse-linux/bin/g++
+compiler-id: GNU
+compiler-version: 13.3.0
+kokkos: OFF
+kokkos-prefix: (none: Kokkos lives in xpmath-kokkos)
+cxx-standard: 17
+cxx-standard-raised: (none: no target in this tree links Kokkos)
+build-type: Release
+opt-level: O3
+cxx-flags: -ffp-contract=off -fext-numeric-literals -O3 -DNDEBUG
+timestamp-utc: 2026-11-03T16:28:05Z
+
+--- build-info.txt (device tree) ---
+# xpmath build provenance -- written by CMakeLists.txt at configure time.
+# Regenerated on every configure. Do not edit; do not commit.
+arch: host
+tree: device
+git-head: adf9aceef63a1d6fd9c3e22d7e236bb36ce6cef5
+compiler: /soft/compilers/gcc/13.3.0/x86_64-suse-linux/bin/g++
+compiler-id: GNU
+compiler-version: 13.3.0
+kokkos: OFF
+kokkos-prefix: (none: Kokkos lives in xpmath-kokkos)
+cxx-standard: 17
+cxx-standard-raised: (none: no target in this tree links Kokkos)
+build-type: Release
+opt-level: O3
+cxx-flags: -ffp-contract=off -fext-numeric-literals -O3 -DNDEBUG
+timestamp-utc: 2026-11-03T16:28:29Z
+
+--- ctest: host tree (/tmp/xpm-P0.5fix/host) ---
+Internal ctest changing into directory: /tmp/xpm-P0.5fix/host
+Test project /tmp/xpm-P0.5fix/host
+      Start  1: hello_test
+      Start  2: corpus_test
+      Start  3: dd_e2e_test
+      Start  4: ff_cancellation_test
+      Start  5: qf_cancellation_test
+      Start  6: tf_cancellation_test
+      Start  7: tf_property_test
+      Start  8: dd_property_test
+ 1/44 Test  #2: corpus_test ......................   Passed    0.01 sec
+      Start  9: ff_property_test
+ 2/44 Test  #7: tf_property_test .................   Passed    0.02 sec
+      Start 10: dd_eft_test
+ 3/44 Test  #1: hello_test .......................   Passed    0.07 sec
+      Start 11: dd_fma_guard_test
+ 4/44 Test #11: dd_fma_guard_test ................   Passed    0.08 sec
+      Start 12: dd_fma_guard_test_contract_on
+ 5/44 Test #12: dd_fma_guard_test_contract_on ....   Passed    0.08 sec
+      Start 13: qf_property_test
+ 6/44 Test  #4: ff_cancellation_test .............   Passed    0.66 sec
+      Start 14: qf_nonoverlap_test
+ 7/44 Test  #3: dd_e2e_test ......................   Passed    0.67 sec
+      Start 15: qf_eft_test
+ 8/44 Test #10: dd_eft_test ......................   Passed    1.19 sec
+      Start 16: dd_no_kokkos_smoke
+ 9/44 Test #16: dd_no_kokkos_smoke ...............   Passed    0.00 sec
+      Start 17: dd_complex_no_kokkos_smoke
+10/44 Test #17: dd_complex_no_kokkos_smoke .......   Passed    0.00 sec
+      Start 18: ff_no_kokkos_smoke
+11/44 Test #18: ff_no_kokkos_smoke ...............   Passed    0.00 sec
+      Start 19: ff_complex_no_kokkos_smoke
+12/44 Test #19: ff_complex_no_kokkos_smoke .......   Passed    0.00 sec
+      Start 20: qf_no_kokkos_smoke
+13/44 Test #20: qf_no_kokkos_smoke ...............   Passed    0.00 sec
+      Start 21: qf_complex_no_kokkos_smoke
+14/44 Test #21: qf_complex_no_kokkos_smoke .......   Passed    0.00 sec
+      Start 22: tf_no_kokkos_smoke
+15/44 Test #22: tf_no_kokkos_smoke ...............   Passed    0.00 sec
+      Start 23: tf_complex_no_kokkos_smoke
+16/44 Test #23: tf_complex_no_kokkos_smoke .......   Passed    0.00 sec
+      Start 24: sweep_absolute_gate
+17/44 Test  #6: tf_cancellation_test .............   Passed    2.01 sec
+      Start 25: sweep_monotone_gate
+18/44 Test #15: qf_eft_test ......................   Passed    2.07 sec
+      Start 26: sweep_monotone_gate_selftest
+19/44 Test  #5: qf_cancellation_test .............   Passed    3.21 sec
+      Start 27: sweep_absolute_gate_selftest
+20/44 Test #24: sweep_absolute_gate ..............   Passed   39.28 sec
+      Start 28: sweep_device_gate_a100
+21/44 Test #25: sweep_monotone_gate ..............   Passed   40.13 sec
+      Start 29: sweep_device_gate_mi250
+22/44 Test  #9: ff_property_test .................   Passed   59.42 sec
+      Start 30: sweep_device_gate_b200
+23/44 Test #28: sweep_device_gate_a100 ...........   Passed   34.52 sec
+      Start 31: sweep_device_gate_mi300
+24/44 Test #29: sweep_device_gate_mi250 ..........   Passed   34.21 sec
+      Start 32: sweep_device_gate_selftest
+25/44 Test  #8: dd_property_test .................   Passed   90.06 sec
+      Start 33: pow_domain_test
+26/44 Test #33: pow_domain_test ..................   Passed    0.00 sec
+      Start 34: exp_reduction_test
+27/44 Test #34: exp_reduction_test ...............   Passed    0.00 sec
+      Start 35: exp_reduction_selftest
+28/44 Test #35: exp_reduction_selftest ...........   Passed    0.93 sec
+      Start 36: trig_reduction_test
+29/44 Test #36: trig_reduction_test ..............   Passed    0.12 sec
+      Start 37: trig_reduction_selftest
+30/44 Test #30: sweep_device_gate_b200 ...........   Passed   33.90 sec
+      Start 38: oracle_conv_test
+31/44 Test #38: oracle_conv_test .................   Passed    0.01 sec
+      Start 39: oracle_conv_selftest
+32/44 Test #37: trig_reduction_selftest ..........   Passed   13.04 sec
+      Start 40: consumer_package
+33/44 Test #31: sweep_device_gate_mi300 ..........   Passed   34.01 sec
+      Start 41: domains_fresh
+34/44 Test #40: consumer_package .................   Passed    5.44 sec
+      Start 42: device_domains_fresh
+35/44 Test #41: domains_fresh ....................   Passed    7.27 sec
+      Start 43: device_tu_purity
+36/44 Test #43: device_tu_purity .................   Passed   11.00 sec
+      Start 44: build_provenance
+37/44 Test #44: build_provenance .................   Passed    0.01 sec
+38/44 Test #13: qf_property_test .................   Passed  147.52 sec
+39/44 Test #42: device_domains_fresh .............   Passed   40.07 sec
+40/44 Test #27: sweep_absolute_gate_selftest .....   Passed  159.95 sec
+41/44 Test #39: oracle_conv_selftest .............   Passed  109.05 sec
+42/44 Test #14: qf_nonoverlap_test ...............   Passed  265.80 sec
+43/44 Test #32: sweep_device_gate_selftest .......   Passed  662.11 sec
+44/44 Test #26: sweep_monotone_gate_selftest .....   Passed  779.63 sec
+
+100% tests passed, 0 tests failed out of 44
+
+Label Time Summary:
+packaging    =   5.44 sec*proc (1 test)
+
+Total Test time (real) = 782.38 sec
+
+--- ctest: device tree (/tmp/xpm-P0.5fix/device) ---
+Internal ctest changing into directory: /tmp/xpm-P0.5fix/device
+Test project /tmp/xpm-P0.5fix/device
+      Start  1: dd_invariant_test
+      Start  2: ff_invariant_test
+      Start  3: hello_test_device
+      Start  4: ff_eft_test
+      Start  5: tf_eft_test
+      Start  6: tf_eft_test_contract_on
+      Start  7: tf_fma_guard_test
+      Start  8: tf_fma_guard_test_contract_on
+ 1/24 Test  #3: hello_test_device ......................   Passed    0.05 sec
+      Start  9: dd_property_test_device
+ 2/24 Test  #9: dd_property_test_device ................   Passed    0.07 sec
+      Start 10: ff_property_test_device
+ 3/24 Test #10: ff_property_test_device ................   Passed    0.06 sec
+      Start 11: dd_eft_test_device
+ 4/24 Test  #4: ff_eft_test ............................   Passed    0.20 sec
+      Start 12: dd_fma_guard_test_device
+ 5/24 Test  #7: tf_fma_guard_test ......................   Passed    0.21 sec
+      Start 13: dd_fma_guard_test_device_contract_on
+ 6/24 Test  #8: tf_fma_guard_test_contract_on ..........   Passed    0.21 sec
+      Start 14: ff_fma_guard_test
+ 7/24 Test #12: dd_fma_guard_test_device ...............   Passed    0.03 sec
+      Start 15: ff_fma_guard_test_contract_on
+ 8/24 Test #14: ff_fma_guard_test ......................   Passed    0.02 sec
+      Start 16: qf_property_test_device
+ 9/24 Test #11: dd_eft_test_device .....................   Passed    0.06 sec
+      Start 17: qf_nonoverlap_test_device
+10/24 Test #15: ff_fma_guard_test_contract_on ..........   Passed    0.02 sec
+      Start 18: qf_eft_test_device
+11/24 Test #13: dd_fma_guard_test_device_contract_on ...   Passed    0.04 sec
+      Start 19: qf_fma_guard_test
+12/24 Test #19: qf_fma_guard_test ......................   Passed    0.04 sec
+      Start 20: qf_fma_guard_test_contract_on
+13/24 Test #20: qf_fma_guard_test_contract_on ..........   Passed    0.04 sec
+      Start 21: contraction_flags_guard
+14/24 Test #21: contraction_flags_guard ................   Passed    0.01 sec
+      Start 22: contraction_flags_selftest
+15/24 Test #18: qf_eft_test_device .....................   Passed    0.10 sec
+      Start 23: device_harness_test
+16/24 Test #23: device_harness_test ....................   Passed    0.00 sec
+      Start 24: build_provenance
+17/24 Test #24: build_provenance .......................   Passed    0.01 sec
+18/24 Test #22: contraction_flags_selftest .............   Passed    0.15 sec
+19/24 Test #16: qf_property_test_device ................   Passed    0.37 sec
+20/24 Test  #5: tf_eft_test ............................   Passed    0.77 sec
+21/24 Test  #6: tf_eft_test_contract_on ................   Passed    0.77 sec
+22/24 Test #17: qf_nonoverlap_test_device ..............   Passed    5.90 sec
+23/24 Test  #2: ff_invariant_test ......................   Passed  111.43 sec
+24/24 Test  #1: dd_invariant_test ......................   Passed  185.30 sec
+
+100% tests passed, 0 tests failed out of 24
+
+Total Test time (real) = 185.31 sec
+
+===========================================================
+ xpm_build MERGED VERDICT -- arch host, --only both
+   build dir : /tmp/xpm-P0.5fix
+-----------------------------------------------------------
+   tree     tests  passed  failed  result           note
+   host        44      44       0  PASS             clean
+   device      24      24       0  PASS             clean
+-----------------------------------------------------------
+   TOTAL       68      68       0
+-----------------------------------------------------------
+ RESULT: PASS -- every tree built and every registered test passed.
+===========================================================
