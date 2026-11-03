@@ -866,9 +866,13 @@ XPMATH_INLINE_FUNCTION DoubleDoubleComplex asin(DoubleDoubleComplex z) {
 // z=-2-0i -> pi+1.3170i. Now checked mechanically, on all four backends and
 // including the sign of every zero component, by scripts/probe_acos_branch.cpp.
 XPMATH_INLINE_FUNCTION DoubleDoubleComplex acos(DoubleDoubleComplex z) {
-    DoubleDouble leg = xp_asin_real_leg(xp_abs_word(z.re), xp_abs_word(z.im));
+    const DoubleDouble x = xp_abs_word(z.re);
+    const DoubleDouble y = xp_abs_word(z.im);
+    DoubleDouble leg = xp_asin_real_leg(x, y);
     if (leg.hi == 0.0) leg = DoubleDouble(0.0);   // never -0; see SIGNED ZEROS above
-    return DoubleDoubleComplex(atan2(leg, z.re), negate(asin(z).im));
+    DoubleDouble im = xp_asin_imag_mag(x, y);
+    if (detail::copysign(1.0, z.im.hi) < 0.0) im = negate(im);   // == asin(z).im
+    return DoubleDoubleComplex(atan2(leg, z.re), negate(im));
 }
 // log(a^2 + b^2), formed without ever squaring the larger operand -- used by the
 // two-log branches of atan()/atanh() below. Writing it as log(a*a + b*b) is what
