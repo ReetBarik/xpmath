@@ -261,6 +261,33 @@ inline void fill_real_operands(int id, size_t i, double a, Rng& rng, double& b, 
                               : rng.slogunif(-100, 100);
 }
 
+// Correctly rounded hypot(x, y), built only from IEEE-exact operations, so the
+// derived operand stream is the same on every platform. std::hypot is not: glibc
+// takes an FMA path where FP_FAST_FMA is defined (aarch64) and a splitting path
+// where it is not (x86_64), and the two disagree in the last bit. The pow clamp
+// below turns that bit into a different operand, and the scorer re-derives the
+// operands on a different machine than the producer. Every product goes through
+// std::fma(a, b, 0.0) so the compiler cannot contract it into a neighbouring add.
+inline double hypot_cr(double x, double y) {
+  double ax = std::fabs(x), ay = std::fabs(y);
+  if (std::isinf(ax) || std::isinf(ay)) return INFINITY;
+  if (std::isnan(ax) || std::isnan(ay)) return NAN;
+  if (ax < ay) { const double t = ax; ax = ay; ay = t; }
+  if (ay == 0.0) return ax;
+  const int e = std::ilogb(ax);
+  ax = std::ldexp(ax, -e);
+  ay = std::ldexp(ay, -e);
+  const double p1 = std::fma(ax, ax, 0.0), e1 = std::fma(ax, ax, -p1);
+  const double p2 = std::fma(ay, ay, 0.0), e2 = std::fma(ay, ay, -p2);
+  const double sh = p1 + p2;
+  const double bb = sh - p1;
+  const double sl = ((p1 - (sh - bb)) + (p2 - bb)) + (e1 + e2);
+  const double r0 = std::sqrt(sh);
+  const double q  = std::fma(r0, r0, 0.0), qe = std::fma(r0, r0, -q);
+  const double res = ((sh - q) - qe) + sl;
+  return std::ldexp(r0 + res / (2.0 * r0), e);
+}
+
 // Second operand for the binary complex ops. The complex grid is stride-paired
 // against itself (stride 7, coprime with the grid length, so the pairing is a
 // permutation and never a fixed point), with the same one-in-seven cancelling
@@ -275,10 +302,10 @@ inline void fill_complex_operands(int id, size_t i, const std::vector<GridPoint>
   if (id == C_Pow) {
     bre = rng.slogunif(-10, 4);
     bim = rng.slogunif(-10, 4);
-    const double mod = std::hypot(are, aim);
+    const double mod = hypot_cr(are, aim);
     if (std::isfinite(mod) && mod > 0.0 && mod != 1.0) {
       const double la  = std::log2(mod);
-      const double mag = std::hypot(bre, bim) * std::fabs(la);
+      const double mag = hypot_cr(bre, bim) * std::fabs(la);
       if (mag > 120.0) { const double s = 120.0 / mag; bre *= s; bim *= s; }
     }
     return;
