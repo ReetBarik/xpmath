@@ -4,7 +4,7 @@
 #                        as TWO TREES, and return ONE verdict over both
 # ===========================================================================
 #
-#   scripts/xpm_build.sh --arch {host|a100|mi250|b200|mi300} [--build-dir DIR]
+#   scripts/xpm_build.sh --arch {host|a100|mi250|b200|mi300|gb300} [--build-dir DIR]
 #                        [--only {host|device|both}]
 #                        [--opt LEVEL] [--no-test]
 #
@@ -191,14 +191,16 @@ usage() {
 scripts/xpm_build.sh — configure and build xpmath for a NAMED ARCHITECTURE,
                        as TWO TREES, and return ONE verdict over both
 
-  scripts/xpm_build.sh --arch {host|a100|mi250|b200|mi300} [--build-dir DIR]
+  scripts/xpm_build.sh --arch {host|a100|mi250|b200|mi300|gb300} [--build-dir DIR]
                        [--only {host|device|both}]
                        [--opt LEVEL] [--no-test]
 
-  --arch        host | a100 | mi250 | b200 | mi300   (required)
+  --arch        host | a100 | mi250 | b200 | mi300 | gb300   (required)
+                gb300 is aarch64: DEVICE TREE ONLY (no __float128, so the host
+                oracle tree cannot build there); build on the GB300 node.
   --build-dir   parent directory; the two trees are <dir>/host and <dir>/device
                                              (default: $REPO_ROOT/build)
-  --only        host | device | both         (default: both)
+  --only        host | device | both         (default: both; gb300: device)
   --opt         O0 O1 O2 O3 Os Og Ofast      (default: O3)
   --no-test     build only; do not run ctest and do not print a verdict
 
@@ -222,6 +224,7 @@ declare -A ARCH_DESC=(
   [mi250]="AMD MI250X / gfx90a, HIP device_harness"
   [b200]="NVIDIA B200 / sm_100, CUDA device_harness (JLSE gpu_b200 / blackwell00)"
   [mi300]="AMD MI300X / gfx942, HIP device_harness (JLSE gpu_amd_mi300x)"
+  [gb300]="NVIDIA GB300 / sm_103 (aarch64), CUDA device_harness, device tree only"
 )
 declare -A ARCH_MODULES=(
   [host]="gcc/13.3.0 cmake/3.28.3"
@@ -233,6 +236,8 @@ declare -A ARCH_MODULES=(
   # header / STATUS if that happens.
   [b200]="gcc/13.3.0 cmake/3.28.3 cuda/12.9.1"
   [mi300]="gcc/13.3.0 cmake/3.28.3 rocm/7.0.2"
+  # gb300: aarch64 Grace host; compile on the node only (no cross compile).
+  [gb300]="gcc/11.2.0 cmake/3.22.1 cuda/13.3.1"
 )
 declare -A ARCH_CC=(
   [host]="gcc"
@@ -240,6 +245,7 @@ declare -A ARCH_CC=(
   [mi250]="gcc"
   [b200]="gcc"
   [mi300]="gcc"
+  [gb300]="gcc"
 )
 declare -A ARCH_CXX=(
   [host]="g++"
@@ -249,6 +255,9 @@ declare -A ARCH_CXX=(
   # the wrapper's default_arch is still sm_80.
   [b200]="/home/rbarik/kokkos-src-5.1.0-cuda-sm80/bin/nvcc_wrapper"
   [mi300]="/soft/compilers/rocm/rocm-7.0.2/bin/hipcc"
+  # The GB300 Kokkos install's nvcc_wrapper (aarch64 host); its default_arch is
+  # also sm_80, so -arch=sm_103 is pinned in ARCH_CONTRACT.
+  [gb300]="/home/rbarik/qcdl_gb300/kokkos/install/kokkos-5.1.0-gb300/Release/bin/nvcc_wrapper"
 )
 # --offload-arch is load-bearing for mi250 / mi300. After C4, sweep_device and
 # the other device TUs do not link Kokkos, so they do not inherit
@@ -313,6 +322,7 @@ declare -A ARCH_CONTRACT=(
   [mi250]="-ffp-contract=off --offload-arch=gfx90a"
   [b200]="-arch=sm_100"
   [mi300]="-ffp-contract=off --offload-arch=gfx942"
+  [gb300]="-arch=sm_103"
 )
 
 # The host tree, as constants rather than as a fourth table row -- there is no
@@ -334,7 +344,7 @@ CTEST_TIMEOUT=1800
 # ---------------------------------------------------------------------------
 ARCH=""
 BUILD_DIR=""
-ONLY="both"
+ONLY=""
 OPT="O3"
 RUN_TESTS=1
 
@@ -353,7 +363,16 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$ARCH" ] || { usage >&2; die "--arch is required"; }
-[ -n "${ARCH_DESC[$ARCH]+set}" ] || die "unknown --arch '$ARCH' (host|a100|mi250|b200|mi300)"
+[ -n "${ARCH_DESC[$ARCH]+set}" ] || die "unknown --arch '$ARCH' (host|a100|mi250|b200|mi300|gb300)"
+if [ "$ARCH" = gb300 ]; then
+  # aarch64 has no __float128: the host oracle tree cannot build. Produce raw
+  # device output on the node and score it on an x86 login node.
+  case "${ONLY:-device}" in
+    device) ONLY=device ;;
+    *) die "--arch gb300 builds the device tree only (got --only $ONLY)" ;;
+  esac
+fi
+ONLY=${ONLY:-both}
 case "$ONLY" in
   host|device|both) ;;
   *) die "unknown --only '$ONLY' (host|device|both)" ;;

@@ -4516,7 +4516,7 @@ int main(int argc, char** argv) {
   // `where` defaults to "host": every baseline written without an explicit
   // --where carries the producer label, matching CORE_PLAN C6 ("when
   // --score-results is absent, where is host"). Pass --where explicitly to
-  // override. Accepted tokens: host, a100, mi250, b200, mi300.
+  // override. Accepted tokens: host, a100, mi250, b200, mi300, gb300.
   std::string score_results_path, where_label = "host";
   int dump_point = -1;
   bool dump_terms = false;
@@ -4632,14 +4632,14 @@ int main(int argc, char** argv) {
 
   // Known producer labels. Open-ended strings used to be accepted; C11/C12 pin
   // the set so a typo (--where mi30) cannot silently write a baseline nobody
-  // will find. host / a100 / mi250 from C6–C8; b200 / mi300 from C11 / C12.
+  // will find. host / a100 / mi250 from C6–C8; b200 / mi300 from C11 / C12; gb300 from P0.5.
   {
-    const char* known[] = {"host", "a100", "mi250", "b200", "mi300", nullptr};
+    const char* known[] = {"host", "a100", "mi250", "b200", "mi300", "gb300", nullptr};
     bool ok = false;
     for (int i = 0; known[i]; ++i) if (where_label == known[i]) { ok = true; break; }
     if (!ok) {
       std::fprintf(stderr,
-                   "--where '%s' is not a known token (host|a100|mi250|b200|mi300)\n",
+                   "--where '%s' is not a known token (host|a100|mi250|b200|mi300|gb300)\n",
                    where_label.c_str());
       return 2;
     }
