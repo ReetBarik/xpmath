@@ -11,6 +11,7 @@ Reads, all committed:
   validation/sweep/sweep_baseline.csv.gz
   validation/sweep/sweep_baseline_a100.csv.gz   (may be absent → NO BASELINE gap)
   validation/sweep/sweep_baseline_mi250.csv.gz  (may be absent → NO BASELINE gap)
+  validation/sweep/sweep_baseline_gb300.csv.gz  (may be absent → NO BASELINE gap)
   validation/sweep/sweep_grid.csv
   validation/sweep/open_defects.txt
 
@@ -62,6 +63,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASELINE = os.path.join(ROOT, "validation/sweep/sweep_baseline.csv.gz")
 BASELINE_A100 = os.path.join(ROOT, "validation/sweep/sweep_baseline_a100.csv.gz")
 BASELINE_MI250 = os.path.join(ROOT, "validation/sweep/sweep_baseline_mi250.csv.gz")
+BASELINE_GB300 = os.path.join(ROOT, "validation/sweep/sweep_baseline_gb300.csv.gz")
 GRID = os.path.join(ROOT, "validation/sweep/sweep_grid.csv")
 REGISTER = os.path.join(ROOT, "validation/sweep/open_defects.txt")
 
@@ -81,6 +83,13 @@ ARCH_META = {
         "job": "Cobalt 1001915",
         "status_ptr": "docs/CORE_PLAN_STATUS.md §C8",
         "no_baseline": "NO BASELINE — see C8 STATUS",
+    },
+    "gb300": {
+        "path": BASELINE_GB300,
+        "label": "gb300",
+        "job": "GPU_PERF P0.5 graceblackwell01",
+        "status_ptr": "validation/gb300/logs/",
+        "no_baseline": "NO BASELINE — see GPU_PERF P0.5c",
     },
 }
 
@@ -421,11 +430,11 @@ def cell_device_stats(host_rows, device_rows, grid, be, kind, op):
     }
 
 
-def classify_cause(op, a100, mi250):
-    """One cause label for a (backend, kind, op) cell across both arches."""
+def classify_cause(op, *arch_stats):
+    """One cause label for a (backend, kind, op) cell across all device arches."""
     # Gap on either arch is reported at the coverage layer, not here.
     diffs = []
-    for stats in (a100, mi250):
+    for stats in arch_stats:
         if stats is None:
             continue
         if stats["identical"] < stats["n"]:
@@ -641,15 +650,16 @@ def emit_domains(grid, host, register, a100, mi250):
     sys.stdout.write("\n".join(o) + "\n")
 
 
-def emit_device_precision(grid, host, a100, mi250):
+def emit_device_precision(grid, host, a100, mi250, gb300):
     """Emit docs/DEVICE_PRECISION.md to stdout."""
     o = []
     w = o.append
+    devs = (("a100", a100), ("mi250", mi250), ("gb300", gb300))
 
-    w("# Device precision — host vs A100 vs MI250X")
+    w("# Device precision — host vs A100 vs MI250X vs GB300")
     w("")
     w("**GENERATED FILE — do not edit.** Produced by")
-    w("`scripts/gen_domains.py --device-precision` from the three committed sweep")
+    w("`scripts/gen_domains.py --device-precision` from the four committed sweep")
     w("baselines and `validation/sweep/sweep_grid.csv`. Regenerate with:")
     w("")
     w("```bash")
@@ -668,7 +678,7 @@ def emit_device_precision(grid, host, a100, mi250):
     # ---- coverage (degradation rule) ----------------------------------------
     present = []
     missing = []
-    for name, data in (("a100", a100), ("mi250", mi250)):
+    for name, data in devs:
         if data is None:
             missing.append(name)
         else:
@@ -679,8 +689,8 @@ def emit_device_precision(grid, host, a100, mi250):
         w("as an explicit gap below — never as a column that quietly is not there.")
         w("")
     else:
-        w("**Coverage is complete for the two device arches this arc measures.**")
-        w("Both A100 and MI250X baselines are present; every table below has a")
+        w("**Coverage is complete for the three device arches this document measures.**")
+        w("A100, MI250X and GB300 baselines are present; every table below has a")
         w("measured column for each.")
         w("")
 
@@ -690,9 +700,8 @@ def emit_device_precision(grid, host, a100, mi250):
     w("|---|---|---|")
     w("| host | `validation/sweep/sweep_baseline.csv.gz` | PRESENT — %d rows, where=`%s` |"
       % (len(host["rows"]), host["where"]))
-    for name in ("a100", "mi250"):
+    for name, data in devs:
         meta = ARCH_META[name]
-        data = a100 if name == "a100" else mi250
         if data is None:
             w("| %s | `%s` | **%s** (%s) |" % (
                 name, os.path.basename(meta["path"]),
@@ -709,7 +718,7 @@ def emit_device_precision(grid, host, a100, mi250):
     w("| arch | above bound |")
     w("|---|---:|")
     w("| host | %d |" % above_h)
-    for name, data in (("a100", a100), ("mi250", mi250)):
+    for name, data in devs:
         if data is None:
             w("| %s | %s |" % (name, ARCH_META[name]["no_baseline"]))
         else:
@@ -728,7 +737,7 @@ def emit_device_precision(grid, host, a100, mi250):
     w("")
     w("| arch | identical | differ at all | worse beyond noise | better beyond noise | state moved | above bound |")
     w("|---|---:|---:|---:|---:|---:|---:|")
-    for name, data in (("a100", a100), ("mi250", mi250)):
+    for name, data in devs:
         if data is None:
             gap = ARCH_META[name]["no_baseline"]
             w("| %s | %s | — | — | — | — | — |" % (name, gap))
@@ -760,6 +769,18 @@ def emit_device_precision(grid, host, a100, mi250):
             w("letter; the 12k+ ulp moves below stay inside `S`/`U`/`N` as scored")
             w("on the host.")
             w("")
+    if gb300 is not None:
+        c = compare_arch(host["rows"], gb300["rows"], grid)
+        if c["state_pairs"]:
+            w("GB300 state transitions (host → gb300):")
+            w("")
+            for (a, b), n in c["state_pairs"].most_common():
+                w("- `%s → %s`: %d" % (a, b, n))
+            w("")
+        else:
+            w("GB300: **0** state transitions. Every point keeps the host verdict")
+            w("letter.")
+            w("")
 
     # ---- four mechanisms ----------------------------------------------------
     w("---")
@@ -767,7 +788,7 @@ def emit_device_precision(grid, host, a100, mi250):
     w("## The four mechanisms, measured")
     w("")
     w("The repository already knew these in pieces. The numbers below are from")
-    w("the three baselines, not from reasoning about flags.")
+    w("the committed baselines, not from reasoning about flags.")
     w("")
 
     # 1. FTZ/DAZ
@@ -780,19 +801,21 @@ def emit_device_precision(grid, host, a100, mi250):
     w("90% of cap on every grid point at that magnitude — the same definition")
     w("`docs/DOMAINS.md` uses for its trusted band.")
     w("")
-    w("| backend | format floor | host measured | a100 measured | mi250 measured |")
-    w("|---|---|---|---|---|")
+    w("| backend | format floor | host measured | a100 measured | mi250 measured | gb300 measured |")
+    w("|---|---|---|---|---|---|")
     for be, _, _, floor, _, _ in FORMATS:
         h = abs_trusted_floor(host["rows"], grid, be)
         a = (abs_trusted_floor(a100["rows"], grid, be) if a100
              else ARCH_META["a100"]["no_baseline"])
         m = (abs_trusted_floor(mi250["rows"], grid, be) if mi250
              else ARCH_META["mi250"]["no_baseline"])
+        g = (abs_trusted_floor(gb300["rows"], grid, be) if gb300
+             else ARCH_META["gb300"]["no_baseline"])
         def fmt_f(v):
             if isinstance(v, str):
                 return v
             return fmt_mag(v) if v is not None else "none"
-        w("| %s | %s | %s | %s | %s |" % (be, floor, fmt_f(h), fmt_f(a), fmt_f(m)))
+        w("| %s | %s | %s | %s | %s | %s |" % (be, floor, fmt_f(h), fmt_f(a), fmt_f(m), fmt_f(g)))
     w("")
     w("On every present arch the measured `abs` floor matches the host. FTZ did")
     w("**not** raise the trusted band for `abs`.")
@@ -810,6 +833,12 @@ def emit_device_precision(grid, host, a100, mi250):
         sn_present.append(sn_m)
     else:
         sn_m = None
+    if gb300 is not None:
+        c = compare_arch(host["rows"], gb300["rows"], grid)
+        sn_g = c["state_pairs"].get(("S", "N"), 0)
+        sn_present.append(sn_g)
+    else:
+        sn_g = None
     if any(sn_present):
         w("The remaining FTZ signal is scorability, not the floor: a host-scored")
         w("point the device marks unscored.")
@@ -826,6 +855,10 @@ def emit_device_precision(grid, host, a100, mi250):
         w("- MI250: **%d** `S → N` moves." % sn_m)
     else:
         w("- MI250: %s" % ARCH_META["mi250"]["no_baseline"])
+    if gb300 is not None:
+        w("- GB300: **%d** `S → N` moves." % sn_g)
+    else:
+        w("- GB300: %s" % ARCH_META["gb300"]["no_baseline"])
     w("")
 
     # 2. FMA
@@ -845,15 +878,14 @@ def emit_device_precision(grid, host, a100, mi250):
     n_arith = len(arith_keys)
     w("| arch | bit-identical arithmetic points | of |")
     w("|---|---:|---:|")
-    for name, data in (("a100", a100), ("mi250", mi250)):
+    for name, data in devs:
         if data is None:
             w("| %s | %s | %d |" % (name, ARCH_META[name]["no_baseline"], n_arith))
         else:
             same = sum(1 for k in arith_keys if host["rows"][k] == data["rows"][k])
             w("| %s | %d | %d |" % (name, same, n_arith))
     w("")
-    w("A count below the total would be an FMA regression. Both present arches")
-    w("are exact.")
+    w("A count below the total would be an FMA regression.")
     w("")
 
     # 3. Vendor libm
@@ -865,7 +897,7 @@ def emit_device_precision(grid, host, a100, mi250):
     libm_keys = [k for k in host["rows"] if k[2] in LIBM_OPS]
     w("| arch | libm-family points that differ | of | worse beyond noise | better beyond noise |")
     w("|---|---:|---:|---:|---:|")
-    for name, data in (("a100", a100), ("mi250", mi250)):
+    for name, data in devs:
         if data is None:
             w("| %s | %s | %d | — | — |" % (
                 name, ARCH_META[name]["no_baseline"], len(libm_keys)))
@@ -918,12 +950,12 @@ def emit_device_precision(grid, host, a100, mi250):
     # ---- per-op table -------------------------------------------------------
     w("---")
     w("")
-    w("## Per-op mean ulps — host / a100 / mi250")
+    w("## Per-op mean ulps — host / a100 / mi250 / gb300")
     w("")
     w("Mean ulps over **scored** (`state=S`) points only — `N` carries the")
     w("sentinel `ulps=-1` and must not enter the average. The identical-point")
     w("counts cover every grid point and are the sharper signal. `cause` is one")
-    w("label for the cell across both device arches; see the class list at the")
+    w("label for the cell across all device arches; see the class list at the")
     w("top of `scripts/gen_domains.py`.")
     w("")
 
@@ -931,23 +963,25 @@ def emit_device_precision(grid, host, a100, mi250):
     for title, kind, ops in FAMILIES:
         w("### %s (%s)" % (title, "real" if kind == "r" else "complex"))
         w("")
-        w("| backend | op | host ulps | a100 ulps | mi250 ulps | Δa100 | Δmi250 | ident a100 | ident mi250 | cause |")
-        w("|---|---|---:|---:|---:|---:|---:|---:|---:|---|")
+        w("| backend | op | host ulps | a100 ulps | mi250 ulps | gb300 ulps | Δa100 | Δmi250 | Δgb300 | ident a100 | ident mi250 | ident gb300 | cause |")
+        w("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|")
         for op in ops:
             for be in BACKENDS:
                 sa = (cell_device_stats(host["rows"], a100["rows"], grid, be, kind, op)
                       if a100 else None)
                 sm = (cell_device_stats(host["rows"], mi250["rows"], grid, be, kind, op)
                       if mi250 else None)
+                sg = (cell_device_stats(host["rows"], gb300["rows"], grid, be, kind, op)
+                      if gb300 else None)
                 # Need a host-only mean even when an arch is missing.
                 keys = [k for k in host["rows"]
                         if k[0] == be and k[1] == kind and k[2] == op]
                 mean_h = mean_ulps_scored(host["rows"], keys)
 
-                if a100 is None and mi250 is None:
+                if a100 is None and mi250 is None and gb300 is None:
                     cause = "NO BASELINE"
                 else:
-                    cause = classify_cause(op, sa, sm)
+                    cause = classify_cause(op, sa, sm, sg)
                 cause_totals[cause] += 1
 
                 def col_mean(stats, fallback_arch):
@@ -965,11 +999,11 @@ def emit_device_precision(grid, host, a100, mi250):
                         return "—"
                     return "%d/%d" % (stats["identical"], stats["n"])
 
-                w("| %s | `%s` | %s | %s | %s | %s | %s | %s | %s | %s |" % (
+                w("| %s | `%s` | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
                     be, op, fmt_ulps(mean_h),
-                    col_mean(sa, "a100"), col_mean(sm, "mi250"),
-                    col_delta(sa, "a100"), col_delta(sm, "mi250"),
-                    col_ident(sa, "a100"), col_ident(sm, "mi250"),
+                    col_mean(sa, "a100"), col_mean(sm, "mi250"), col_mean(sg, "gb300"),
+                    col_delta(sa, "a100"), col_delta(sm, "mi250"), col_delta(sg, "gb300"),
+                    col_ident(sa, "a100"), col_ident(sm, "mi250"), col_ident(sg, "gb300"),
                     cause))
         w("")
 
@@ -1009,8 +1043,9 @@ def load_all():
     host = read_baseline(BASELINE)
     a100 = read_baseline(BASELINE_A100)
     mi250 = read_baseline(BASELINE_MI250)
+    gb300 = read_baseline(BASELINE_GB300)
     register = read_register()
-    return grid, host, a100, mi250, register
+    return grid, host, a100, mi250, gb300, register
 
 
 def main(argv):
@@ -1025,14 +1060,14 @@ def main(argv):
             sys.stderr.write("unknown argument: %s\n" % a)
             return 2
 
-    grid, host, a100, mi250, register = load_all()
+    grid, host, a100, mi250, gb300, register = load_all()
     # Positive assertion that every arch name appears in the device doc, even
     # as a gap — enforced by the gate's grep, but fail loud here too if we ever
     # drop a name from ARCH_META.
-    assert "a100" in ARCH_META and "mi250" in ARCH_META
+    assert "a100" in ARCH_META and "mi250" in ARCH_META and "gb300" in ARCH_META
 
     if device:
-        emit_device_precision(grid, host, a100, mi250)
+        emit_device_precision(grid, host, a100, mi250, gb300)
     else:
         emit_domains(grid, host, register, a100, mi250)
     return 0

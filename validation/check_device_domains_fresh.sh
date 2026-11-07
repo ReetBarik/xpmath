@@ -36,7 +36,7 @@ fi
 
 # Every arch must be accounted for — present with data, or present with a
 # NO BASELINE verdict. A zero means an arch was dropped rather than reported.
-for arch in a100 mi250; do
+for arch in a100 mi250 gb300; do
   n=$(grep -c "$arch" "$tmp" || true)
   echo "check_device_domains_fresh: '$arch' mentions in generated doc: $n"
   if [ "$n" -eq 0 ]; then

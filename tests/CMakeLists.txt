@@ -1284,8 +1284,8 @@ xpm_tag_test(host sweep_monotone_gate_selftest sweep_absolute_gate_selftest)
 # so it IS in CI -- the thing GitHub cannot do is re-produce the limbs, and
 # those are the committed artifact.
 #
-# C7 landed the a100 arm; C8 lands mi250; C11 lands b200; C12 lands mi300.
-# All re-score committed raw limbs (no GPU).
+# C7 landed the a100 arm; C8 lands mi250; C11 lands b200; C12 lands mi300;
+# GPU_PERF P0.5c lands gb300. All re-score committed raw limbs (no GPU).
 #
 # Raw paths are job-of-record files. A baseline without its raw is a
 # configure error -- the gate cannot run.
@@ -1340,7 +1340,14 @@ set(_xp_dev_raw_mi300
     # same benign FMA-rounding footprint, same ratios, since MI250 and
     # MI300 share the identical non-fnptr HIP code path.
     "${CMAKE_SOURCE_DIR}/validation/mi300/logs/1008578_raw.csv.gz")
-foreach(_xp_arch IN ITEMS a100 mi250 b200 mi300)
+set(_xp_dev_raw_gb300
+    # P0.5c (GPU_PERF_PLAN): GB300 (sm_103, aarch64) sweep_device raw limbs at
+    # 63daa15, produced by validation/gb300/run_gb300_sweep.sh. Two independent
+    # GB300 sweeps (the second from a fresh build dir, at 0bd8b95) were
+    # bit-identical once '#' lines were removed. Scored on the x86 login node
+    # (no __float128 on aarch64); sweep_baseline_gb300.csv.gz is that score.
+    "${CMAKE_SOURCE_DIR}/validation/gb300/logs/sweep_gb300_raw_63daa15.csv.gz")
+foreach(_xp_arch IN ITEMS a100 mi250 b200 mi300 gb300)
   set(_xp_dev_base
       "${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline_${_xp_arch}.csv.gz")
   if(EXISTS "${_xp_dev_base}")
@@ -1569,6 +1576,9 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline_b200.csv.gz")
 endif()
 if(EXISTS "${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline_mi300.csv.gz")
   set_tests_properties(sweep_device_gate_mi300 PROPERTIES TIMEOUT 600)
+endif()
+if(EXISTS "${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline_gb300.csv.gz")
+  set_tests_properties(sweep_device_gate_gb300 PROPERTIES TIMEOUT 600)
 endif()
 # Nine compiles of sweep_accuracy.cpp, four at a time.
 set_tests_properties(oracle_conv_selftest PROPERTIES TIMEOUT 600)
