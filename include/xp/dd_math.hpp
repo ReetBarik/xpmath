@@ -251,12 +251,10 @@ XPMATH_INLINE_FUNCTION DoubleDouble subtract(DoubleDouble a, DoubleDouble b) {
 // two_prod, which every production call site below routes through.
 //
 // Rare-case bodies (XPMATH_COLD_FUNCTION, config.hpp 2c).  Each is the exact
-// expression the inline branch used to carry.
+// expression the inline branch used to carry.  two_prod/multiply degenerate
+// returns are deliberately NOT outlined: on B200 that perturbs ptxas around
+// log1p and corrupts DD complex acos/asin (P2.1[dd] addendum).
 namespace detail {
-// two_prod: non-finite or zero product p; no residual exists.
-XPMATH_COLD_FUNCTION DoubleDouble dd_two_prod_slow(double p) { return DoubleDouble(p, 0.0); }
-// multiply / multiply_scalar: non-finite or zero leading product, already a DD.
-XPMATH_COLD_FUNCTION DoubleDouble dd_multiply_slow(DoubleDouble p) { return p; }
 // divide / divide_scalar: non-finite divisor, the bare quotient is the answer.
 XPMATH_COLD_FUNCTION DoubleDouble dd_divide_nonfinite_slow(double a_hi, double b) {
     return DoubleDouble(a_hi / b, 0.0);
@@ -268,7 +266,7 @@ XPMATH_COLD_FUNCTION DoubleDouble dd_divide_zone_c_slow(double s1) { return Doub
 // TwoProduct (FMA-based: p = fl(a*b), e = fma(a, b, -p))
 XPMATH_NOINLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b) {
     const DoubleDouble p = two_prod(a.hi, b.hi);                     // KI-27 lives here now
-    if (!detail::isfinite(p.hi) || p.hi == 0.0) return detail::dd_multiply_slow(p);
+    if (!detail::isfinite(p.hi) || p.hi == 0.0) return p;
     const double c11 = p.hi;
     const double c21 = p.lo;
     double c2  = detail::eft_add(detail::eft_mul(a.hi, b.lo),
@@ -392,7 +390,7 @@ XPMATH_NOINLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b) {
 
 XPMATH_INLINE_FUNCTION DoubleDouble multiply_scalar(DoubleDouble a, double b) {
     const DoubleDouble p = two_prod(a.hi, b);                        // KI-27 lives in two_prod now
-    if (!detail::isfinite(p.hi) || p.hi == 0.0) return detail::dd_multiply_slow(p);
+    if (!detail::isfinite(p.hi) || p.hi == 0.0) return p;
     const double c11  = p.hi;
     const double c21  = p.lo;
     double c2   = detail::eft_mul(a.lo, b);
@@ -441,7 +439,7 @@ XPMATH_INLINE_FUNCTION DoubleDouble divide_scalar(DoubleDouble a, double b) {
 // splitter to overflow in the first place.
 XPMATH_INLINE_FUNCTION DoubleDouble two_prod(double da, double db) {
     const double p = detail::eft_mul(da, db);                       // KI-27
-    if (!detail::isfinite(p) || p == 0.0) return detail::dd_two_prod_slow(p);
+    if (!detail::isfinite(p) || p == 0.0) return DoubleDouble(p, 0.0);
     const double e = detail::eft_fma(da, db, -p);
     return DoubleDouble(p, e);
 }
@@ -798,7 +796,12 @@ XPMATH_INLINE_FUNCTION DoubleDouble log1p(DoubleDouble a) {
             sum = add(sum, incr);
             if (detail::fabs(incr.hi) <= 1.0e-34 * detail::fabs(sum.hi)) break;
         }
-        return multiply_scalar(sum, 2.0);
+        // Own result slot, as below: forwarding multiply_scalar's trips the
+        // ptxas UR7 defect on B200 (docs: F-b200-acos, P2.1[dd] addendum).
+        const DoubleDouble r2 = multiply_scalar(sum, 2.0);
+        double e2;
+        const double h2 = detail::eft_quick_two_sum(r2.hi, r2.lo, e2);
+        return DoubleDouble(h2, e2);
     }
     // log's result is already normalised, so this quick-two-sum returns it
     // unchanged; it exists so log1p owns a result slot of its own instead of
