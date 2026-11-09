@@ -297,7 +297,7 @@ XPMATH_INLINE_FUNCTION void renorm_4(float& c0, float& c1, float& c2,
 // ============================================================
 // QuadFloat struct
 // ============================================================
-struct QuadFloat {
+struct alignas(16) QuadFloat {
     float f0, f1, f2, f3;
 
     XPMATH_INLINE_FUNCTION QuadFloat() : f0(0.0f), f1(0.0f), f2(0.0f), f3(0.0f) {}

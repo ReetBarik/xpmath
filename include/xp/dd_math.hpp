@@ -111,7 +111,7 @@ XPMATH_INLINE_FUNCTION DoubleDouble angle(DoubleDouble x, DoubleDouble y);
 // ============================================================
 // DoubleDouble struct
 // ============================================================
-struct DoubleDouble {
+struct alignas(16) DoubleDouble {
     double hi;
     double lo;
 

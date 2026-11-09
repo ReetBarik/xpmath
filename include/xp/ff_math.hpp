@@ -123,7 +123,7 @@ XPMATH_INLINE_FUNCTION FloatFloat angle(FloatFloat x, FloatFloat y);
 // ============================================================
 // FloatFloat struct
 // ============================================================
-struct FloatFloat {
+struct alignas(8) FloatFloat {
     float hi;
     float lo;
 
