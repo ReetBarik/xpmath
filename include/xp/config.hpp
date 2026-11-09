@@ -309,10 +309,11 @@ using std::sqrt;
 // residuals are the rounding error. Fusing a multiply with an add erases
 // that residual.
 //
-// HIP: hipcc/gfx90a (ROCm 7.0.2) reassociates those residuals on the
-// device pass even when CMAKE_CXX_FLAGS carries -ffp-contract=off: that
-// flag reaches the host clang, not the AMDGPU backend. Volatile forces
-// each rounded op to hit the pipe under __HIP_DEVICE_COMPILE__.
+// HIP device pass (__HIP_DEVICE_COMPILE__): -ffp-contract=off reaches the
+// host clang, not the AMDGPU backend, so eft_add/sub/mul scope
+// `#pragma clang fp contract(off)` and `reassociate(off)` around a plain
+// operation, and eft_fma is __builtin_fma (it cannot be split). These
+// replaced volatile locals, which cost a stack store/reload per operation.
 //
 // Host: g++ 13.3 -O3 -ffp-contract=fast and -ffast-math both fuse the
 // inlined product a*b - c into one vfmsub, which zeroes the residual.
@@ -336,6 +337,12 @@ XPMATH_INLINE_FUNCTION T eft_add(T a, T b) {
     static_assert(sizeof(T) == 0,
                   "CUDA eft_add is specialized for float and double");
     return a + b;
+#elif defined(__HIP_DEVICE_COMPILE__)
+    {
+#pragma clang fp contract(off)
+#pragma clang fp reassociate(off)
+        return a + b;
+    }
 #else
     volatile T va = a;
     volatile T vb = b;
@@ -364,6 +371,12 @@ XPMATH_INLINE_FUNCTION T eft_sub(T a, T b) {
     static_assert(sizeof(T) == 0,
                   "CUDA eft_sub is specialized for float and double");
     return a - b;
+#elif defined(__HIP_DEVICE_COMPILE__)
+    {
+#pragma clang fp contract(off)
+#pragma clang fp reassociate(off)
+        return a - b;
+    }
 #else
     volatile T va = a;
     volatile T vb = b;
@@ -392,6 +405,12 @@ XPMATH_INLINE_FUNCTION T eft_mul(T a, T b) {
     static_assert(sizeof(T) == 0,
                   "CUDA eft_mul is specialized for float and double");
     return a * b;
+#elif defined(__HIP_DEVICE_COMPILE__)
+    {
+#pragma clang fp contract(off)
+#pragma clang fp reassociate(off)
+        return a * b;
+    }
 #else
     volatile T va = a;
     volatile T vb = b;
@@ -417,14 +436,15 @@ XPMATH_INLINE_FUNCTION float eft_mul(float a, float b) {
 // Fused multiply-add, correctly rounded: fl(a*b+c) with only one rounding.
 // Used to recover the TwoProduct residual (a*b - p) in 2 ops instead of
 // Dekker/Veltkamp splitting's ~15; see the eft_add/eft_sub/eft_mul
-// commentary above for why volatile/PTX is needed at all. The host generic
-// branch also covers HIP, matching eft_add/eft_sub/eft_mul's shape.
+// commentary above for why volatile/PTX/pragmas are needed at all.
 template <class T>
 XPMATH_INLINE_FUNCTION T eft_fma(T a, T b, T c) {
 #if defined(__CUDA_ARCH__)
     static_assert(sizeof(T) == 0,
                   "CUDA eft_fma is specialized for float and double");
     return a;
+#elif defined(__HIP_DEVICE_COMPILE__)
+    return __builtin_fma(a, b, c);
 #else
     volatile T va = a;
     volatile T vb = b;
