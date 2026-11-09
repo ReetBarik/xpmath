@@ -178,6 +178,27 @@
 #endif
 #endif
 
+// ============================================================
+// 2c. XPMATH_COLD_FUNCTION — rare-case paths kept out of line
+// ============================================================
+// Fast/slow rule: ordinary inputs run a short sequence that stays inline.  A
+// cheap test (non-finite or zero product, quotient overflow, subnormal-range
+// rescale) guards each rare case, and the body of that case lives in a
+// `detail::<name>_slow` function marked XPMATH_COLD_FUNCTION.  The slow
+// function performs exactly the operations the inline branch used to, so
+// results are bit-identical; only the code placement changes.  noinline always;
+// `cold` where the compiler spells it (host g++/clang++ and hipcc).  nvcc gets
+// __noinline__ only, as for XPMATH_NOINLINE_FUNCTION.
+#if !defined(XPMATH_COLD_FUNCTION)
+#if defined(__CUDACC__)
+#define XPMATH_COLD_FUNCTION __host__ __device__ __noinline__ inline
+#elif defined(__GNUC__) || defined(__clang__)
+#define XPMATH_COLD_FUNCTION XPMATH_FWDDECL_FUNCTION inline __attribute__((noinline, cold))
+#else
+#define XPMATH_COLD_FUNCTION XPMATH_INLINE_FUNCTION
+#endif
+#endif
+
 // Suppress -Wattributes for CUDA host-pass compilation.
 // XPMATH_NOINLINE_FUNCTION expands to '__host__ __device__ __noinline__ inline'
 // under nvcc.  The C++ 'inline' keyword is required for header-only COMDAT
