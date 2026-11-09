@@ -781,11 +781,13 @@ XPMATH_INLINE_FUNCTION DoubleDouble log1p(DoubleDouble a) {
         }
         return multiply_scalar(sum, 2.0);
     }
-    DoubleDouble xp_exp_r = log(add(DoubleDouble(1.0), a));
-#if defined(__CUDA_ARCH__)
-    asm volatile("" : "+d"(xp_exp_r.hi), "+d"(xp_exp_r.lo));  // EXPERIMENT F-b200-acos
-#endif
-    return xp_exp_r;
+    // log's result is already normalised, so this quick-two-sum returns it
+    // unchanged; it exists so log1p owns a result slot of its own instead of
+    // forwarding its caller's to log (see docs: F-b200-acos).
+    const DoubleDouble r = log(add(DoubleDouble(1.0), a));
+    double e;
+    const double h = detail::eft_quick_two_sum(r.hi, r.lo, e);
+    return DoubleDouble(h, e);
 }
 
 // KI-43: exp2/exp10 reduce their OWN argument; they no longer hand exp a
