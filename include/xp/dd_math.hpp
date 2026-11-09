@@ -781,7 +781,11 @@ XPMATH_INLINE_FUNCTION DoubleDouble log1p(DoubleDouble a) {
         }
         return multiply_scalar(sum, 2.0);
     }
-    return log(add(DoubleDouble(1.0), a));
+    DoubleDouble xp_exp_r = log(add(DoubleDouble(1.0), a));
+#if defined(__CUDA_ARCH__)
+    asm volatile("" : "+d"(xp_exp_r.hi), "+d"(xp_exp_r.lo));  // EXPERIMENT F-b200-acos
+#endif
+    return xp_exp_r;
 }
 
 // KI-43: exp2/exp10 reduce their OWN argument; they no longer hand exp a
