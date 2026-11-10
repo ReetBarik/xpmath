@@ -729,13 +729,8 @@ XPMATH_INLINE_FUNCTION FloatFloat exp2(FloatFloat a) {
 XPMATH_INLINE_FUNCTION FloatFloat exp10(FloatFloat a) {
     const float kLog2_10 = 3.32192809f;
     const float kf = detail::rint(a.hi * kLog2_10);
-    if (!(detail::fabs(kf) < 1.0e5f)) {
-        // Own result slot instead of forwarding exp's (P2.2[ff] audit).
-        const FloatFloat r = exp(multiply(a, FloatFloat_log10()));
-        float e;
-        const float h = detail::eft_quick_two_sum(r.hi, r.lo, e);
-        return FloatFloat(h, e);
-    }
+    if (!(detail::fabs(kf) < 1.0e5f))
+        return exp(multiply(a, FloatFloat_log10()));
     const int ki = (int)kf;
     const float kLog10_2_1 =  0x1.3442p-2f;             // 16 significant bits
     const float kLog10_2_2 = -0x1.95ecp-19f;            // 15
