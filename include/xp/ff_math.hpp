@@ -689,9 +689,22 @@ XPMATH_INLINE_FUNCTION FloatFloat log1p(FloatFloat a) {
             sum = add(sum, incr);
             if (detail::fabs(incr.hi) <= 1.0e-17f * detail::fabs(sum.hi)) break;
         }
-        return multiply_scalar(sum, 2.0f);
+        // Own result slot, like the large-|x| path below: forwarding
+        // multiply_scalar's result slot is the shape that trips the ptxas UR7
+        // defect on B200 when anything on this path becomes a real call
+        // (docs: F-b200-acos, P2.1[dd] addendum).
+        const FloatFloat r2 = multiply_scalar(sum, 2.0f);
+        float e2;
+        const float h2 = detail::eft_quick_two_sum(r2.hi, r2.lo, e2);
+        return FloatFloat(h2, e2);
     }
-    return log(add(FloatFloat(1.0f), a));
+    // log's result is already normalised, so this quick-two-sum returns it
+    // unchanged; it exists so log1p owns a result slot of its own instead of
+    // forwarding its caller's to log (see docs: F-b200-acos).
+    const FloatFloat r = log(add(FloatFloat(1.0f), a));
+    float e;
+    const float h = detail::eft_quick_two_sum(r.hi, r.lo, e);
+    return FloatFloat(h, e);
 }
 
 // KI-43: see dd_math.hpp's exp2 for the derivation.
