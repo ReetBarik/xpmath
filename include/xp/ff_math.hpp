@@ -260,7 +260,7 @@ XPMATH_INLINE_FUNCTION FloatFloat subtract(FloatFloat a, FloatFloat b) {
 // two_prod, which every production call site below routes through.
 //
 // TwoProduct (FMA-based: p = fl(a*b), e = fma(a, b, -p))
-XPMATH_NOINLINE_FUNCTION FloatFloat multiply(FloatFloat a, FloatFloat b) {
+XPMATH_INLINE_FUNCTION FloatFloat multiply(FloatFloat a, FloatFloat b) {
     const FloatFloat p = two_prod(a.hi, b.hi);                    // KI-27 lives here now
     if (!detail::isfinite(p.hi) || p.hi == 0.0f) return p;
     const float c11 = p.hi;
@@ -353,7 +353,7 @@ XPMATH_INLINE_FUNCTION FloatFloat ff_divide_core(FloatFloat a, FloatFloat b) {
 }
 }  // namespace detail
 
-XPMATH_NOINLINE_FUNCTION FloatFloat divide(FloatFloat a, FloatFloat b) {
+XPMATH_INLINE_FUNCTION FloatFloat divide(FloatFloat a, FloatFloat b) {
     if (!detail::ff_div_lift_wanted(a, b)) return detail::ff_divide_core(a, b);
     const float step = 0x1p24f, target = 1.17549435e-38f * 4.0f, cap = 0x1p72f;
     float sa = 1.0f, sb = 1.0f;
@@ -497,7 +497,7 @@ XPMATH_INLINE_FUNCTION FloatFloat round_to_nearest_int(FloatFloat a) {
     return FloatFloat(hi, lo);
 }
 
-XPMATH_NOINLINE_FUNCTION FloatFloat sqrt(FloatFloat a) {
+XPMATH_INLINE_FUNCTION FloatFloat sqrt(FloatFloat a) {
     if (a.hi == 0.0f) return FloatFloat(0.0f);
     if (a.hi < 0.0f) {
         XPMATH_PRINTF("FFSQRT: negative argument\n");
@@ -729,8 +729,13 @@ XPMATH_INLINE_FUNCTION FloatFloat exp2(FloatFloat a) {
 XPMATH_INLINE_FUNCTION FloatFloat exp10(FloatFloat a) {
     const float kLog2_10 = 3.32192809f;
     const float kf = detail::rint(a.hi * kLog2_10);
-    if (!(detail::fabs(kf) < 1.0e5f))
-        return exp(multiply(a, FloatFloat_log10()));
+    if (!(detail::fabs(kf) < 1.0e5f)) {
+        // Own result slot instead of forwarding exp's (P2.2[ff] audit).
+        const FloatFloat r = exp(multiply(a, FloatFloat_log10()));
+        float e;
+        const float h = detail::eft_quick_two_sum(r.hi, r.lo, e);
+        return FloatFloat(h, e);
+    }
     const int ki = (int)kf;
     const float kLog10_2_1 =  0x1.3442p-2f;             // 16 significant bits
     const float kLog10_2_2 = -0x1.95ecp-19f;            // 15
@@ -1308,7 +1313,11 @@ XPMATH_INLINE_FUNCTION FloatFloat acosh(FloatFloat a) {
         return add(log(a), log(add(FloatFloat(1.0f), sqrt(subtract(FloatFloat(1.0f), u)))));
     }
     FloatFloat t1 = subtract(multiply(a, a), FloatFloat(1.0f));
-    return log(add(a, sqrt(t1)));
+    // Own result slot instead of forwarding log's (P2.2[ff] audit).
+    const FloatFloat r = log(add(a, sqrt(t1)));
+    float e;
+    const float h = detail::eft_quick_two_sum(r.hi, r.lo, e);
+    return FloatFloat(h, e);
 }
 XPMATH_INLINE_FUNCTION FloatFloat atanh(FloatFloat a) {
     // |a| == 1 is the C99 pole, not a domain error: atanh(+-1) = +-inf.

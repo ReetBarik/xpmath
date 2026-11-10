@@ -747,7 +747,10 @@ XPMATH_NOINLINE_FUNCTION FloatFloat xp_asin_real_leg(FloatFloat x, FloatFloat y)
     return multiply(sax, sqrt(apx));
 }
 XPMATH_INLINE_FUNCTION FloatFloat xp_asin_real_mag(FloatFloat x, FloatFloat y) {
-    return atan2(x, xp_asin_real_leg(x, y));
+    const FloatFloat r = atan2(x, xp_asin_real_leg(x, y));
+    float e;
+    const float h = detail::eft_quick_two_sum(r.hi, r.lo, e);
+    return FloatFloat(h, e);
 }
 // |Re z| and |Im z|, the two arguments xp_asin_imag_mag() wants. Split out so
 // asin/acosh/asinh cannot disagree about them.
@@ -890,7 +893,10 @@ XPMATH_INLINE_FUNCTION FloatFloat xp_atan2_safe(FloatFloat a, FloatFloat b) {
         if (b.hi != 0.0f) b = multiply_scalar(b, kXpAtan2Down);
         m *= kXpAtan2Down;
     }
-    return atan2(a, b);
+    const FloatFloat r = atan2(a, b);
+    float e;
+    const float h = detail::eft_quick_two_sum(r.hi, r.lo, e);
+    return FloatFloat(h, e);
 }
 // A squared operand whose LEADING WORD has left the format's normal range --
 // zero, or subnormal, where a float word carries only a handful of bits.  Such a
