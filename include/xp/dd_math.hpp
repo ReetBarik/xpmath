@@ -250,19 +250,6 @@ XPMATH_INLINE_FUNCTION DoubleDouble subtract(DoubleDouble a, DoubleDouble b) {
 // computed) — that guard is NOT splitter-specific and now lives inside
 // two_prod, which every production call site below routes through.
 //
-// Rare-case bodies (XPMATH_COLD_FUNCTION, config.hpp 2c).  Each is the exact
-// expression the inline branch used to carry.  two_prod/multiply degenerate
-// returns are deliberately NOT outlined: on B200 that perturbs ptxas around
-// log1p and corrupts DD complex acos/asin (P2.1[dd] addendum).
-namespace detail {
-// divide / divide_scalar: non-finite divisor, the bare quotient is the answer.
-XPMATH_COLD_FUNCTION DoubleDouble dd_divide_nonfinite_slow(double a_hi, double b) {
-    return DoubleDouble(a_hi / b, 0.0);
-}
-// divide / divide_scalar: Zone C (quotient estimate overflowed to +-inf).
-XPMATH_COLD_FUNCTION DoubleDouble dd_divide_zone_c_slow(double s1) { return DoubleDouble(s1, 0.0); }
-}  // namespace detail
-
 // TwoProduct (FMA-based: p = fl(a*b), e = fma(a, b, -p))
 XPMATH_NOINLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b) {
     const DoubleDouble p = two_prod(a.hi, b.hi);                     // KI-27 lives here now
@@ -336,9 +323,9 @@ XPMATH_INLINE_FUNCTION bool dd_div_lift_wanted(DoubleDouble a, DoubleDouble b) {
     return m * 0x1p-53 < 2.2250738585072014e-308 * 4.0;
 }
 XPMATH_INLINE_FUNCTION DoubleDouble dd_divide_core(DoubleDouble a, DoubleDouble b) {
-    if (!detail::isfinite(b.hi)) return dd_divide_nonfinite_slow(a.hi, b.hi);
+    if (!detail::isfinite(b.hi)) return DoubleDouble(a.hi / b.hi, 0.0);
     double s1 = a.hi / b.hi;
-    if (detail::isinf(s1)) return dd_divide_zone_c_slow(s1);   // Zone C
+    if (detail::isinf(s1)) return DoubleDouble(s1, 0.0);   // Zone C
     const DoubleDouble p = two_prod(s1, b.hi);
     const double c11 = p.hi;
     const double c21 = p.lo;
@@ -365,9 +352,10 @@ XPMATH_INLINE_FUNCTION DoubleDouble dd_divide_core(DoubleDouble a, DoubleDouble 
     double lo  = detail::eft_sub(s2, detail::eft_sub(hi, s1));
     return DoubleDouble(hi, lo);
 }
+}  // namespace detail
 
-// KI-41 rescale (underflow end), taken only when dd_div_lift_wanted(a, b).
-XPMATH_COLD_FUNCTION DoubleDouble dd_divide_lifted_slow(DoubleDouble a, DoubleDouble b) {
+XPMATH_NOINLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b) {
+    if (!detail::dd_div_lift_wanted(a, b)) return detail::dd_divide_core(a, b);
     const double step = 0x1p53, target = 2.2250738585072014e-308 * 4.0, cap = 0x1p159;
     double sa = 1.0, sb = 1.0;
     double pa = detail::fabs(a.hi), pb = detail::fabs(b.hi);
@@ -378,14 +366,9 @@ XPMATH_COLD_FUNCTION DoubleDouble dd_divide_lifted_slow(DoubleDouble a, DoubleDo
     for (int k = 0; k < 16 && (pa * pb) * 0x1p-106 < target && sa < cap && sb < cap; ++k) {
         if (pa < pb) { sa *= step; pa *= step; } else { sb *= step; pb *= step; }
     }
-    const DoubleDouble q = dd_divide_core(dd_pow2_scale(a, sa), dd_pow2_scale(b, sb));
-    return dd_pow2_scale(q, sb / sa);   // exact: both are powers of two
-}
-}  // namespace detail
-
-XPMATH_NOINLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b) {
-    if (!detail::dd_div_lift_wanted(a, b)) return detail::dd_divide_core(a, b);
-    return detail::dd_divide_lifted_slow(a, b);
+    const DoubleDouble q = detail::dd_divide_core(detail::dd_pow2_scale(a, sa),
+                                                  detail::dd_pow2_scale(b, sb));
+    return detail::dd_pow2_scale(q, sb / sa);   // exact: both are powers of two
 }
 
 XPMATH_INLINE_FUNCTION DoubleDouble multiply_scalar(DoubleDouble a, double b) {
@@ -410,9 +393,9 @@ XPMATH_INLINE_FUNCTION DoubleDouble multiply_scalar(DoubleDouble a, double b) {
 // (KI-31's sd/sn/un dance) is gone along with the splitter it protected — see
 // the KI-19 comment above dd_divide_core.
 XPMATH_INLINE_FUNCTION DoubleDouble divide_scalar(DoubleDouble a, double b) {
-    if (!detail::isfinite(b)) return detail::dd_divide_nonfinite_slow(a.hi, b);
+    if (!detail::isfinite(b)) return DoubleDouble(a.hi / b, 0.0);
     double t1 = a.hi / b;
-    if (detail::isinf(t1)) return detail::dd_divide_zone_c_slow(t1);   // Zone C
+    if (detail::isinf(t1)) return DoubleDouble(t1, 0.0);   // Zone C
     const DoubleDouble p = two_prod(t1, b);
     const double t12 = p.hi;
     const double t22 = p.lo;
@@ -796,8 +779,10 @@ XPMATH_INLINE_FUNCTION DoubleDouble log1p(DoubleDouble a) {
             sum = add(sum, incr);
             if (detail::fabs(incr.hi) <= 1.0e-34 * detail::fabs(sum.hi)) break;
         }
-        // Own result slot, as below: forwarding multiply_scalar's trips the
-        // ptxas UR7 defect on B200 (docs: F-b200-acos, P2.1[dd] addendum).
+        // Own result slot, like the large-|x| path below: forwarding
+        // multiply_scalar's result slot is the shape that trips the ptxas UR7
+        // defect on B200 when anything on this path becomes a real call
+        // (docs: F-b200-acos, P2.1[dd] addendum).
         const DoubleDouble r2 = multiply_scalar(sum, 2.0);
         double e2;
         const double h2 = detail::eft_quick_two_sum(r2.hi, r2.lo, e2);
