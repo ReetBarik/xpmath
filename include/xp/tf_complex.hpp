@@ -758,7 +758,10 @@ XPMATH_NOINLINE_FUNCTION TripleFloat xp_asin_imag_mag(TripleFloat x, TripleFloat
     // very slightly worse overall (5290 sweep cells down vs 5126), so this
     // form ships.
     const TripleFloat arg = add(m, multiply(sm, sqrt(add(m, TripleFloat(2.0f)))));
-    return log1p(arg);
+    // Own result slot instead of forwarding log1p's (P2.2[tf] audit).
+    TripleFloat r = log1p(arg);
+    renorm(r.f0, r.f1, r.f2);
+    return r;
 }
 #if defined(__CUDACC__)
 // TD4 experiment: a genuine indirect call through a volatile device function
@@ -1049,7 +1052,10 @@ XPMATH_INLINE_FUNCTION TripleFloat xp_atan2_safe(TripleFloat a, TripleFloat b) {
         if (b.f0 != 0.0f) b = multiply_scalar(b, kXpAtan2Down);
         m *= kXpAtan2Down;
     }
-    return atan2(a, b);
+    // Own result slot instead of forwarding atan2's (P2.2[tf] audit).
+    TripleFloat r = atan2(a, b);
+    renorm(r.f0, r.f1, r.f2);
+    return r;
 }
 // A squared operand whose LEADING WORD has left the format's normal range --
 // zero, or subnormal, where a float word carries only a handful of bits.  Such a

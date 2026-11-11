@@ -533,7 +533,7 @@ XPMATH_INLINE_FUNCTION TripleFloat abs(TripleFloat a) {
 // (those words do not exist at k=3), and the closing renormalization is
 // renorm_3 over four words (p0,p1,s0,s1) instead of renorm over five —
 // so s2, QD's u^4 word, is folded into s1 rather than passed separately.
-XPMATH_NOINLINE_FUNCTION TripleFloat multiply(TripleFloat a, TripleFloat b) {
+XPMATH_INLINE_FUNCTION TripleFloat multiply(TripleFloat a, TripleFloat b) {
     float p0, p1, p2, p3, p4, p5;
     float q0, q1, q2, q3, q4, q5;
     float t0, t1;
@@ -707,7 +707,7 @@ XPMATH_INLINE_FUNCTION TripleFloat tf_divide_core(TripleFloat a, TripleFloat b) 
 }
 }  // namespace detail
 
-XPMATH_NOINLINE_FUNCTION TripleFloat divide(TripleFloat a, TripleFloat b) {
+XPMATH_INLINE_FUNCTION TripleFloat divide(TripleFloat a, TripleFloat b) {
     if (!detail::tf_div_lift_wanted(a, b)) return detail::tf_divide_core(a, b);
     const float step = 0x1p24f, target = 1.17549435e-38f * 4.0f, cap = 0x1p96f;
     float sa = 1.0f, sb = 1.0f;
@@ -748,7 +748,7 @@ XPMATH_INLINE_FUNCTION TripleFloat divide_scalar(TripleFloat a, float b) {
 // 48b → 72b, saturating at TF width, so 2 iterations reach full precision
 // (confirmed by early-out on iteration 2). QD uses eps = 2^-212; TF uses
 // eps = 2^-72, the unit roundoff.
-XPMATH_NOINLINE_FUNCTION TripleFloat sqrt(TripleFloat a) {
+XPMATH_INLINE_FUNCTION TripleFloat sqrt(TripleFloat a) {
     if (a.f0 == 0.0f)
         return TripleFloat(0.0f);
 
@@ -1568,7 +1568,10 @@ XPMATH_INLINE_FUNCTION TripleFloat acosh(TripleFloat a) {
         u = multiply(u, u);
         return add(log(a), log(add(TripleFloat(1.0f), sqrt(subtract(TripleFloat(1.0f), u)))));
     }
-    return log(add(a, sqrt(subtract(sqr(a), TripleFloat(1.0f)))));
+    // Own result slot instead of forwarding log's (P2.2[tf] audit).
+    TripleFloat r = log(add(a, sqrt(subtract(sqr(a), TripleFloat(1.0f)))));
+    renorm(r.f0, r.f1, r.f2);
+    return r;
 }
 
 XPMATH_INLINE_FUNCTION TripleFloat atanh(TripleFloat a) {
