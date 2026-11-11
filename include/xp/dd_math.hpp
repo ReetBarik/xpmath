@@ -251,7 +251,7 @@ XPMATH_INLINE_FUNCTION DoubleDouble subtract(DoubleDouble a, DoubleDouble b) {
 // two_prod, which every production call site below routes through.
 //
 // TwoProduct (FMA-based: p = fl(a*b), e = fma(a, b, -p))
-XPMATH_NOINLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b) {
+XPMATH_INLINE_FUNCTION DoubleDouble multiply(DoubleDouble a, DoubleDouble b) {
     const DoubleDouble p = two_prod(a.hi, b.hi);                     // KI-27 lives here now
     if (!detail::isfinite(p.hi) || p.hi == 0.0) return p;
     const double c11 = p.hi;
@@ -354,7 +354,7 @@ XPMATH_INLINE_FUNCTION DoubleDouble dd_divide_core(DoubleDouble a, DoubleDouble 
 }
 }  // namespace detail
 
-XPMATH_NOINLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b) {
+XPMATH_INLINE_FUNCTION DoubleDouble divide(DoubleDouble a, DoubleDouble b) {
     if (!detail::dd_div_lift_wanted(a, b)) return detail::dd_divide_core(a, b);
     const double step = 0x1p53, target = 2.2250738585072014e-308 * 4.0, cap = 0x1p159;
     double sa = 1.0, sb = 1.0;
@@ -473,7 +473,7 @@ XPMATH_INLINE_FUNCTION DoubleDouble round_to_nearest_int(DoubleDouble a) {
     else            return add(subtract(a, CON), CON);
 }
 
-XPMATH_NOINLINE_FUNCTION DoubleDouble sqrt(DoubleDouble a) {
+XPMATH_INLINE_FUNCTION DoubleDouble sqrt(DoubleDouble a) {
     if (a.hi == 0.0) return DoubleDouble(0.0);
     if (a.hi < 0.0) {
         XPMATH_PRINTF("DDSQRT: negative argument\n");
@@ -1673,7 +1673,11 @@ XPMATH_INLINE_FUNCTION DoubleDouble acosh(DoubleDouble a) {
         return add(log(a), log(add(DoubleDouble(1.0), sqrt(subtract(DoubleDouble(1.0), u)))));
     }
     DoubleDouble t1 = subtract(multiply(a, a), DoubleDouble(1.0));
-    return log(add(a, sqrt(t1)));
+    // Own result slot instead of forwarding log's (P2.2[dd] audit).
+    const DoubleDouble r = log(add(a, sqrt(t1)));
+    double e;
+    const double h = detail::eft_quick_two_sum(r.hi, r.lo, e);
+    return DoubleDouble(h, e);
 }
 XPMATH_INLINE_FUNCTION DoubleDouble atanh(DoubleDouble a) {
     // KI-16: compare the VALUE, not the leading word.  |a| == 1 is not a domain

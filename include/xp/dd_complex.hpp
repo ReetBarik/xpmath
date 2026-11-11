@@ -692,7 +692,10 @@ XPMATH_INLINE_FUNCTION DoubleDouble xp_asin_imag_mag(DoubleDouble x, DoubleDoubl
     // algebraically equivalent sm*(sm + sqrt(m+2)) was measured too and is
     // very slightly worse overall (5290 sweep cells down vs 5126), so this
     // form ships.
-    return log1p(add(m, multiply(sm, sqrt(add(m, DoubleDouble(2.0))))));
+    const DoubleDouble r = log1p(add(m, multiply(sm, sqrt(add(m, DoubleDouble(2.0))))));
+    double e;
+    const double h = detail::eft_quick_two_sum(r.hi, r.lo, e);
+    return DoubleDouble(h, e);
 }
 // KI-32. |Re asin(z)| -- the OTHER component of the same Hull, Fairgrove & Tang
 // (1997) parametrisation, and the one the `atan2(iz + sqrt(1-z^2))` form used to
@@ -775,7 +778,10 @@ XPMATH_INLINE_FUNCTION DoubleDouble xp_asin_real_leg(DoubleDouble x, DoubleDoubl
     return multiply(sax, sqrt(apx));
 }
 XPMATH_INLINE_FUNCTION DoubleDouble xp_asin_real_mag(DoubleDouble x, DoubleDouble y) {
-    return atan2(x, xp_asin_real_leg(x, y));
+    const DoubleDouble r = atan2(x, xp_asin_real_leg(x, y));
+    double e;
+    const double h = detail::eft_quick_two_sum(r.hi, r.lo, e);
+    return DoubleDouble(h, e);
 }
 // |Re z| and |Im z|, the two arguments xp_asin_imag_mag() wants. Split out so
 // asin/acosh/asinh cannot disagree about them.
@@ -916,7 +922,10 @@ XPMATH_INLINE_FUNCTION DoubleDouble xp_atan2_safe(DoubleDouble a, DoubleDouble b
         if (b.hi != 0.0) b = multiply_scalar(b, kXpAtan2Down);
         m *= kXpAtan2Down;
     }
-    return atan2(a, b);
+    const DoubleDouble r = atan2(a, b);
+    double e;
+    const double h = detail::eft_quick_two_sum(r.hi, r.lo, e);
+    return DoubleDouble(h, e);
 }
 // A squared operand whose LEADING WORD has left the format's normal range --
 // zero, or subnormal, where a double word carries only a handful of bits.  Such a
