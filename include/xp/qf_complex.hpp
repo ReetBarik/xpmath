@@ -824,7 +824,10 @@ XPMATH_NOINLINE_FUNCTION QuadFloat xp_asin_imag_mag(QuadFloat x, QuadFloat y) {
     // algebraically equivalent sm*(sm + sqrt(m+2)) was measured too and is
     // very slightly worse overall (5290 sweep cells down vs 5126), so this
     // form ships.
-    return log1p(add(m, multiply(sm, sqrt(add(m, QuadFloat(2.0f))))));
+    // Own result slot instead of forwarding the callee's (P2.2[qf] audit).
+    QuadFloat fwd_slot = log1p(add(m, multiply(sm, sqrt(add(m, QuadFloat(2.0f))))));
+    renorm(fwd_slot.f0, fwd_slot.f1, fwd_slot.f2, fwd_slot.f3);
+    return fwd_slot;
 }
 #if defined(__CUDACC__)
 // TD4 (sm_100): XPMATH_NOINLINE_FUNCTION (a __noinline__ hint) is not honored
@@ -952,7 +955,10 @@ XPMATH_NOINLINE_FUNCTION QuadFloat xp_asin_real_leg(QuadFloat x, QuadFloat y) {
     return multiply(sax, sqrt(apx));
 }
 XPMATH_INLINE_FUNCTION QuadFloat xp_asin_real_mag(QuadFloat x, QuadFloat y) {
-    return atan2(x, xp_asin_real_leg(x, y));
+    // Own result slot instead of forwarding the callee's (P2.2[qf] audit).
+    QuadFloat fwd_slot = atan2(x, xp_asin_real_leg(x, y));
+    renorm(fwd_slot.f0, fwd_slot.f1, fwd_slot.f2, fwd_slot.f3);
+    return fwd_slot;
 }
 // |Re z| and |Im z|, the two arguments xp_asin_imag_mag() wants. Split out so
 // asin/acosh/asinh cannot disagree about them.
@@ -1165,7 +1171,10 @@ XPMATH_INLINE_FUNCTION QuadFloat xp_atan2_safe(QuadFloat a, QuadFloat b) {
         if (b.f0 != 0.0f) b = multiply_scalar(b, kXpAtan2Down);
         m *= kXpAtan2Down;
     }
-    return atan2(a, b);
+    // Own result slot instead of forwarding the callee's (P2.2[qf] audit).
+    QuadFloat fwd_slot = atan2(a, b);
+    renorm(fwd_slot.f0, fwd_slot.f1, fwd_slot.f2, fwd_slot.f3);
+    return fwd_slot;
 }
 // A squared operand whose LEADING WORD has left the format's normal range --
 // zero, or subnormal, where a float word carries only a handful of bits.  Such a

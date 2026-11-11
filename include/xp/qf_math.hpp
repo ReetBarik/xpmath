@@ -561,7 +561,7 @@ XPMATH_INLINE_FUNCTION QuadFloat mul_pwr2(QuadFloat a, float b) {
 // folded in scalar, and terms of weight u^4 and higher are dropped before
 // renorm_4 collapses the length-5 accumulator to length-4.  Port of
 // qd_real::sloppy_mul, QD 2.3.24 qd_inline.h:567-599.
-XPMATH_NOINLINE_FUNCTION QuadFloat multiply(QuadFloat a, QuadFloat b) {
+XPMATH_INLINE_FUNCTION QuadFloat multiply(QuadFloat a, QuadFloat b) {
     float p0, p1, p2, p3, p4, p5;
     float q0, q1, q2, q3, q4, q5;
     float t0, t1;
@@ -761,7 +761,7 @@ XPMATH_INLINE_FUNCTION QuadFloat qf_divide_core(QuadFloat a, QuadFloat b) {
 }
 }  // namespace detail
 
-XPMATH_NOINLINE_FUNCTION QuadFloat divide(QuadFloat a, QuadFloat b) {
+XPMATH_INLINE_FUNCTION QuadFloat divide(QuadFloat a, QuadFloat b) {
     if (!detail::qf_div_lift_wanted(a, b)) return detail::qf_divide_core(a, b);
     const float step = 0x1p24f, target = 1.17549435e-38f * 4.0f, cap = 0x1p120f;
     float sa = 1.0f, sb = 1.0f;
@@ -846,7 +846,7 @@ XPMATH_INLINE_FUNCTION QuadFloat divide_accurate(QuadFloat a, QuadFloat b) {
 // (24 -> 48 -> 96, saturating at the ~96-bit QuadFloat width), so 3 iterations
 // suffice. QD's loop runs up to 10 with an early-out convergence test; the port
 // keeps that structure with eps = 2^-96 so it stops after ~3 on real inputs.
-XPMATH_NOINLINE_FUNCTION QuadFloat sqrt(QuadFloat a) {
+XPMATH_INLINE_FUNCTION QuadFloat sqrt(QuadFloat a) {
     if (a.f0 == 0.0f && a.f1 == 0.0f && a.f2 == 0.0f && a.f3 == 0.0f)
         return QuadFloat(0.0f);
     if (a.f0 < 0.0f) {
@@ -1800,7 +1800,10 @@ XPMATH_INLINE_FUNCTION QuadFloat acosh(QuadFloat a) {
         u = multiply(u, u);
         return add(log(a), log(add(QuadFloat(1.0f), sqrt(subtract(QuadFloat(1.0f), u)))));
     }
-    return log(add(a, sqrt(subtract(multiply(a, a), QuadFloat(1.0f)))));
+    // Own result slot instead of forwarding the callee's (P2.2[qf] audit).
+    QuadFloat fwd_slot = log(add(a, sqrt(subtract(multiply(a, a), QuadFloat(1.0f)))));
+    renorm(fwd_slot.f0, fwd_slot.f1, fwd_slot.f2, fwd_slot.f3);
+    return fwd_slot;
 }
 // atanh(a).  QD qd_real.cpp:2589 is 0.5*log((1+a)/(1-a)) only; this port adds a
 // Taylor branch for |a| < 0.5 (PORT_NOTES §3c, ff_math.hpp:595) — all-positive
