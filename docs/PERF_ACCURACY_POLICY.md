@@ -44,7 +44,8 @@ GB300 is scored and timed, reported only, never gated.
    Reference. If the change seems to need it: **stop and ask the user**.
 2. Absolute gate fails or the register changes on host or any GPU -> **reject**.
 3. All strict rows pass on host + 4 gated GPUs -> **accept into strict**
-   (the default path; fast inherits it). Re-baseline strict and fast.
+   (the default path; fast inherits it). Re-baseline strict and fast. If fast
+   already has its own version of this function for this backend: stop and ask.
 4. Else, all fast rows pass -> **accept into fast only**; strict keeps the old
    code for that backend. Re-baseline fast.
 5. Else -> **reject**. Record the numbers in the status block; keep the branch.
