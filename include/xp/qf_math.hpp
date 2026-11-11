@@ -1800,10 +1800,7 @@ XPMATH_INLINE_FUNCTION QuadFloat acosh(QuadFloat a) {
         u = multiply(u, u);
         return add(log(a), log(add(QuadFloat(1.0f), sqrt(subtract(QuadFloat(1.0f), u)))));
     }
-    // Own result slot instead of forwarding the callee's (P2.2[qf] audit).
-    QuadFloat fwd_slot = log(add(a, sqrt(subtract(multiply(a, a), QuadFloat(1.0f)))));
-    renorm(fwd_slot.f0, fwd_slot.f1, fwd_slot.f2, fwd_slot.f3);
-    return fwd_slot;
+    return log(add(a, sqrt(subtract(multiply(a, a), QuadFloat(1.0f)))));
 }
 // atanh(a).  QD qd_real.cpp:2589 is 0.5*log((1+a)/(1-a)) only; this port adds a
 // Taylor branch for |a| < 0.5 (PORT_NOTES §3c, ff_math.hpp:595) — all-positive

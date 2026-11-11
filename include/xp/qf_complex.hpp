@@ -955,10 +955,7 @@ XPMATH_NOINLINE_FUNCTION QuadFloat xp_asin_real_leg(QuadFloat x, QuadFloat y) {
     return multiply(sax, sqrt(apx));
 }
 XPMATH_INLINE_FUNCTION QuadFloat xp_asin_real_mag(QuadFloat x, QuadFloat y) {
-    // Own result slot instead of forwarding the callee's (P2.2[qf] audit).
-    QuadFloat fwd_slot = atan2(x, xp_asin_real_leg(x, y));
-    renorm(fwd_slot.f0, fwd_slot.f1, fwd_slot.f2, fwd_slot.f3);
-    return fwd_slot;
+    return atan2(x, xp_asin_real_leg(x, y));
 }
 // |Re z| and |Im z|, the two arguments xp_asin_imag_mag() wants. Split out so
 // asin/acosh/asinh cannot disagree about them.
