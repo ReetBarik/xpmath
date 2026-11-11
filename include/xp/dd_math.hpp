@@ -1212,7 +1212,13 @@ XPMATH_INLINE_FUNCTION DoubleDouble angle(DoubleDouble x, DoubleDouble y) {
             (detail::copysign(1.0, x.hi) < 0.0) ? pi : DoubleDouble(0.0);
         return (detail::copysign(1.0, y.hi) < 0.0) ? negate(r) : r;
     }
-    if (x.hi == 0.0) return (y.hi > 0.0) ? multiply_scalar(pi, 0.5) : multiply_scalar(pi, -0.5);
+    // +-pi/2 as exact bit constants: halving pi is exact, so these are the very
+    // words multiply_scalar(pi, +-0.5) produced. A multiply here lowers to a DMUL
+    // by an immediate 0.5, which ptxas builds in UR6:UR7 and so clobbers the
+    // caller's result pointer once multiply is inlined (sm_103, P2.2[dd]).
+    if (x.hi == 0.0)
+        return (y.hi > 0.0) ? DoubleDouble::from_bits(0x3ff921fb54442d18ULL, 0x3c91a62633145c07ULL)
+                            : DoubleDouble::from_bits(0xbff921fb54442d18ULL, 0xbc91a62633145c07ULL);
     // Normalize
     // KI-13.  The r below is a sum of squares and has exactly hypot's exposure:
     // it overflowed the word above |x| ~ 1.3e154 (atan(1e160) returned NaN, and
