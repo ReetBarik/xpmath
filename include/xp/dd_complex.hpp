@@ -692,10 +692,10 @@ XPMATH_INLINE_FUNCTION DoubleDouble xp_asin_imag_mag(DoubleDouble x, DoubleDoubl
     // algebraically equivalent sm*(sm + sqrt(m+2)) was measured too and is
     // very slightly worse overall (5290 sweep cells down vs 5126), so this
     // form ships.
-    const DoubleDouble r = log1p(add(m, multiply(sm, sqrt(add(m, DoubleDouble(2.0))))));
-    double e;
-    const double h = detail::eft_quick_two_sum(r.hi, r.lo, e);
-    return DoubleDouble(h, e);
+    const DoubleDouble lr = log1p(add(m, multiply(sm, sqrt(add(m, DoubleDouble(2.0))))));
+    double le;
+    const double lh = detail::eft_quick_two_sum(lr.hi, lr.lo, le);
+    return DoubleDouble(lh, le);
 }
 // KI-32. |Re asin(z)| -- the OTHER component of the same Hull, Fairgrove & Tang
 // (1997) parametrisation, and the one the `atan2(iz + sqrt(1-z^2))` form used to
