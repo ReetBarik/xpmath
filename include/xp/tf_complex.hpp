@@ -759,9 +759,9 @@ XPMATH_NOINLINE_FUNCTION TripleFloat xp_asin_imag_mag(TripleFloat x, TripleFloat
     // form ships.
     const TripleFloat arg = add(m, multiply(sm, sqrt(add(m, TripleFloat(2.0f)))));
     // Own result slot instead of forwarding log1p's (P2.2[tf] audit).
-    TripleFloat r = log1p(arg);
-    renorm(r.f0, r.f1, r.f2);
-    return r;
+    TripleFloat res = log1p(arg);
+    renorm(res.f0, res.f1, res.f2);
+    return res;
 }
 #if defined(__CUDACC__)
 // TD4 experiment: a genuine indirect call through a volatile device function
