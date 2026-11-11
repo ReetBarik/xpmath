@@ -533,7 +533,7 @@ XPMATH_INLINE_FUNCTION TripleFloat abs(TripleFloat a) {
 // (those words do not exist at k=3), and the closing renormalization is
 // renorm_3 over four words (p0,p1,s0,s1) instead of renorm over five —
 // so s2, QD's u^4 word, is folded into s1 rather than passed separately.
-XPMATH_INLINE_FUNCTION TripleFloat multiply(TripleFloat a, TripleFloat b) {
+XPMATH_NOINLINE_FUNCTION TripleFloat multiply(TripleFloat a, TripleFloat b) {
     float p0, p1, p2, p3, p4, p5;
     float q0, q1, q2, q3, q4, q5;
     float t0, t1;
@@ -707,7 +707,7 @@ XPMATH_INLINE_FUNCTION TripleFloat tf_divide_core(TripleFloat a, TripleFloat b) 
 }
 }  // namespace detail
 
-XPMATH_INLINE_FUNCTION TripleFloat divide(TripleFloat a, TripleFloat b) {
+XPMATH_NOINLINE_FUNCTION TripleFloat divide(TripleFloat a, TripleFloat b) {
     if (!detail::tf_div_lift_wanted(a, b)) return detail::tf_divide_core(a, b);
     const float step = 0x1p24f, target = 1.17549435e-38f * 4.0f, cap = 0x1p96f;
     float sa = 1.0f, sb = 1.0f;
