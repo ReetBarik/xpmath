@@ -33,6 +33,11 @@ The mapping below is authoritative for **this** repository.
 | `include/xp/qf_math.hpp` | LBNL-BSD-License | C++ port of QD 2.3.24 quad-double (real), retargeted from 4×FP64 to 4×FP32. **Not** a DDFUN derivative. |
 | `include/xp/qf_complex.hpp` | LBNL-BSD-License | QF complex layer composed on the QD-derived real four-word algorithms. **Not** a DDFUN derivative. |
 | `include/xp/tf_math.hpp`, `include/xp/tf_complex.hpp` | see SPDX headers | Triple-float backend; see each file's SPDX line. |
+| `include/xp/dd_fast.hpp`, `include/xp/ff_fast.hpp` | DHB-License | P3.0b fast-tier headers; same license as the sibling strict `dd_*`/`ff_*` headers. |
+| `include/xp/qf_fast.hpp`, `include/xp/tf_fast.hpp` | LBNL-BSD-License | P3.0b fast-tier headers; same license as the sibling strict `qf_*`/`tf_*` headers. |
+| `include/xp/tier.hpp` | Apache-2.0 | P3.0b tier switch (no ported algorithm). |
+| `scripts/p3_tier_gate.py`, `scripts/p3_tier_gate_selftest.py`, `tests/tier_mix_compile_fail.cpp`, `validation/check_tier_mix.sh`, `validation/check_reference_frozen.sh` | Apache-2.0 | P3.0b tier gate and tests. |
+| `validation/sweep/sweep_baseline_fast*.csv.gz`, `validation/sweep/reference_4d597fd/` | Apache-2.0 | P3.0b data files (fast baselines; frozen Reference). |
 | Everything else (tests, harness, corpus, scripts, docs) | Apache-2.0 | Covered by the top-level `LICENSE`. |
 
 ## The DDFUN-derived files

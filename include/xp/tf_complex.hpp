@@ -1545,3 +1545,6 @@ XPMATH_INLINE_FUNCTION TripleFloatComplex polar(TripleFloat r, TripleFloat theta
 }
 
 } // namespace xp
+
+// Fast tier (P3.0b): shadow types forwarding to the strict functions above.
+#include <xp/tf_fast.hpp>

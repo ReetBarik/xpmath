@@ -1446,3 +1446,6 @@ XPMATH_INLINE_FUNCTION DoubleDoubleComplex polar(DoubleDouble r, DoubleDouble th
 }
 
 } // namespace xp
+
+// Fast tier (P3.0b): shadow types forwarding to the strict functions above.
+#include <xp/dd_fast.hpp>

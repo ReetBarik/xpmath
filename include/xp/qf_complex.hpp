@@ -1682,3 +1682,6 @@ XPMATH_INLINE_FUNCTION QuadFloatComplex polar(QuadFloat r, QuadFloat theta) {
 }
 
 } // namespace xp
+
+// Fast tier (P3.0b): shadow types forwarding to the strict functions above.
+#include <xp/qf_fast.hpp>
