@@ -138,7 +138,29 @@ XPMATH_INLINE_FUNCTION DoubleDoubleFast sqrt(DoubleDoubleFast a) { return to_fas
 XPMATH_INLINE_FUNCTION DoubleDoubleFast round_to_nearest_int(DoubleDoubleFast a) { return to_fast(round_to_nearest_int(to_strict(a))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast pow_int(DoubleDoubleFast a, int n) { return to_fast(pow_int(to_strict(a), n)); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast exp(DoubleDoubleFast a) { return to_fast(exp(to_strict(a))); }
-XPMATH_INLINE_FUNCTION DoubleDoubleFast log(DoubleDoubleFast a) { return to_fast(log(to_strict(a))); }
+namespace detail {
+XPMATH_INLINE_FUNCTION DoubleDouble dd_log_fast_impl(DoubleDouble a) {
+    if (detail::isinf(a.hi)) return a;
+    if (a.hi <= 0.0) {
+        XPMATH_PRINTF("DDLOG: non-positive argument\n");
+        return DoubleDouble(0.0);
+    }
+    DoubleDouble b = DoubleDouble(detail::log(a.hi));
+    for (int k = 0; k < 1; ++k) {
+        if (b.hi < -671.7 && -b.hi <= 709.78271289338397) {
+            DoubleDouble s0 = exp(negate(b));
+            b = subtract(add(b, multiply(a, s0)), DoubleDouble(1.0));
+        } else {
+            DoubleDouble s0 = exp(b);
+            DoubleDouble s1 = subtract(a, s0);
+            DoubleDouble s2 = divide(s1, s0);
+            b = add(b, s2);
+        }
+    }
+    return b;
+}
+} // namespace detail
+XPMATH_INLINE_FUNCTION DoubleDoubleFast log(DoubleDoubleFast a) { return to_fast(detail::dd_log_fast_impl(to_strict(a))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast pow(DoubleDoubleFast a, DoubleDoubleFast b) { return to_fast(pow(to_strict(a), to_strict(b))); }
 XPMATH_INLINE_FUNCTION void sinhcosh(DoubleDoubleFast a, DoubleDoubleFast& x, DoubleDoubleFast& y) { DoubleDouble t_x; DoubleDouble t_y; sinhcosh(to_strict(a), t_x, t_y); x = to_fast(t_x); y = to_fast(t_y); }
 XPMATH_INLINE_FUNCTION void sincos(DoubleDoubleFast a, DoubleDoubleFast& x, DoubleDoubleFast& y) { DoubleDouble t_x; DoubleDouble t_y; sincos(to_strict(a), t_x, t_y); x = to_fast(t_x); y = to_fast(t_y); }
