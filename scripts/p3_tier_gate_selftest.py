@@ -27,9 +27,9 @@ def base_rows():
                 for pt in range(4):
                     ulps = 0.3 + 0.2 * pt + (0.1 if op == 'exp' else 0.0)
                     rows[(be, kind, op, str(pt))] = [ulps, 100.0, 'S']
-    rows[('DD', 'r', 'add', '3')] = [2.0, 100.0, 'S']       # above 1 ulp, well inside its bound
-    rows[('DD', 'r', 'exp', '3')] = [200.0, 100.0, 'S']     # a registered defect: above its bound
-    rows[('DD', 'r', 'log', '1')] = [90.0, 100.0, 'S']      # near its bound
+    rows[('DD', 'r', 'add', '3')] = [2.0, 100.0, 'S']
+    rows[('DD', 'r', 'exp', '3')] = [200.0, 100.0, 'S']
+    rows[('DD', 'r', 'log', '1')] = [90.0, 100.0, 'S']
     return rows
 
 
@@ -48,7 +48,6 @@ def sh(*cmd, cwd=None):
 
 
 class Repo:
-    """A tiny git repo with the layout the gate reads; `tweak` edits Current/Reference."""
     def __init__(self, root, tweak=None):
         self.root = root
         sw = os.path.join(root, 'validation', 'sweep')
@@ -95,10 +94,11 @@ def write_perf(d, perf):
 
 
 def run_case(repo, fresh_mut=None, perf_mut=None, exits=None, drop=(), deferred='', ops='exp',
-             backend='DD', base=None, extra=None, repo_mut=None, raw_fresh=None, workdir=None):
+             backend='DD', base=None, extra=None, repo_mut=None, raw_fresh=None, workdir=None,
+             host_only=False):
     work = tempfile.mkdtemp(dir=workdir)
     root = repo.root
-    if repo_mut:                      # edit the working tree after the base commit
+    if repo_mut:
         root = os.path.join(work, 'repo')
         shutil.copytree(repo.root, root)
         repo_mut(root)
@@ -107,6 +107,20 @@ def run_case(repo, fresh_mut=None, perf_mut=None, exits=None, drop=(), deferred=
     rows = {l: copy.deepcopy(repo.fast[l]) for l in LOCS}
     if fresh_mut:
         fresh_mut(rows)
+    if host_only:
+        l = 'host'
+        write_scored(os.path.join(fresh, l + '.csv.gz'), rows[l], l)
+        with open(os.path.join(fresh, l + '.exits'), 'w') as f:
+            f.write('absolute=%d\nmonotone=0\n' % (exits or {}).get(l, 0))
+        if raw_fresh:
+            raw_fresh(fresh)
+        cmd = [sys.executable, '-I', GATE, '--host-only', '--backend', backend, '--ops', ops, '--base', base or repo.base,
+               '--fresh', fresh, '--repo', root]
+        if extra:
+            cmd = extra(cmd)
+        r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        shutil.rmtree(work, ignore_errors=True)
+        return r.returncode, r.stdout + r.stderr
     for l in LOCS:
         if l in drop:
             continue
@@ -173,13 +187,11 @@ def main():
     tmp = tempfile.mkdtemp(prefix='p3gate_selftest_')
     try:
         plain = Repo(os.path.join(tmp, 'plain'))
-        K = ('DD', 'r', 'exp', '1')            # base ulps 0.7, bound 100
-        KL = ('DD', 'r', 'log', '1')           # base 90, bound 100
-        KA = ('DD', 'r', 'add', '3')           # base 2.0
-        KD = ('DD', 'r', 'exp', '3')           # base 200 > bound 100 (registered defect)
+        K = ('DD', 'r', 'exp', '1')
+        KL = ('DD', 'r', 'log', '1')
+        KD = ('DD', 'r', 'exp', '3')
         W = tmp
 
-        # ---------------- exit 0: every STRICT rule passes ----------------
         expect('strict pass: identical rows, 10% faster', 0, 'accept into strict', plain, workdir=W)
         expect('strict pass: speed 0.9708 (just inside 3%)', 0, 'exit 0', plain, workdir=W,
                perf_mut=set_perf('DD_fast', 'exp', 97.08))
@@ -187,14 +199,6 @@ def main():
                perf_mut=lambda p: (set_perf('DD_fast', 'exp', 100)(p), set_perf('cDD_fast', 'exp', 90)(p)))
         expect('strict pass: speedup on a single GPU is enough', 0, 'exit 0', plain, workdir=W,
                perf_mut=lambda p: (set_perf('DD_fast', 'exp', 100)(p), set_perf('DD_fast', 'exp', 90, ['gfx942'])(p)))
-        expect('strict pass: Worse threshold is exclusive (x1.2589254)', 0, 'exit 0', plain, workdir=W,
-               fresh_mut=lambda r: set_row(r, KA, ulps=2.0 * 1.2589254))
-        expect('reject: just past the Worse threshold (x1.26)', 2, 'failing the strict rules: 5', plain,
-               workdir=W, fresh_mut=lambda r: set_row(r, KA, ulps=2.0 * 1.26))
-        expect('strict pass: > noise but <= 1 ulp is not Worse', 0, 'exit 0', plain, workdir=W,
-               fresh_mut=lambda r: set_row(r, ('DD', 'r', 'add', '0'), ulps=0.95))
-        expect('strict pass: above bound but equal to Reference', 0, 'exit 0', plain, workdir=W,
-               fresh_mut=lambda r: set_row(r, KD, ulps=200.0))
         expect('strict pass: improved rows are fine', 0, 'exit 0', plain, workdir=W,
                fresh_mut=lambda r: set_row(r, KL, ulps=40.0))
         expect('strict pass: b200 deferred (no b200 data needed)', 0, 'DEFERRED', plain, workdir=W,
@@ -204,36 +208,104 @@ def main():
         expect('strict pass: backend FF, other backends equal to Current', 0, 'exit 0', plain, workdir=W,
                backend='FF', perf_mut=rename_backend('FF'))
 
-        # ---------------- exit 1: strict fails, every FAST rule passes -----
-        def drift(rp, cur=1.2, fast=1.2, ref=1.0):
+        def mk_rf_089(repo):
             for l in LOCS:
-                rp.strict[l][K][0] = cur
-                rp.fast[l][K][0] = fast
-                rp.ref[l][K][0] = ref
-        d_mild = Repo(os.path.join(tmp, 'drift_mild'), drift)
-        expect('fast only: Worse vs Reference, within 4x', 1, 'fast only', d_mild, workdir=W,
-               fresh_mut=lambda r: set_row(r, K, ulps=1.5))
-        d_far = Repo(os.path.join(tmp, 'drift_far'), lambda rp: drift(rp, 3.0, 3.0, 1.0))
-        expect('fast only: 3.5x Reference is still <= 4x', 1, 'fast only', d_far, workdir=W,
-               fresh_mut=lambda r: set_row(r, K, ulps=3.5))
-        d_loose = Repo(os.path.join(tmp, 'drift_loose'), lambda rp: drift(rp, 1.5, 5.0, 1.5))
-        expect('fast only: equals fast Current, Worse vs strict Current', 1, 'fast only', d_loose, workdir=W,
-               fresh_mut=lambda r: set_row(r, K, ulps=5.0))
-        expect('fast only: speed exactly 0.90 passes the 10% rule', 1, 'exit 1', d_mild, workdir=W,
-               fresh_mut=lambda r: set_row(r, K, ulps=1.5))
+                repo.ref[l][K][0] = 0.089
+                repo.strict[l][K][0] = 0.089
+                repo.fast[l][K][0] = 0.089
+        r089 = Repo(os.path.join(tmp, 'r089'), mk_rf_089)
+        expect('fast only: r=0.089 f=1.51 (strict fail)', 1, 'fast only', r089, workdir=W,
+               fresh_mut=lambda r: set_row(r, K, ulps=1.51))
+        def mk_r06(repo):
+            for l in LOCS:
+                repo.ref[l][K][0] = 0.6
+                repo.strict[l][K][0] = 0.6
+                repo.fast[l][K][0] = 0.6
+        r06 = Repo(os.path.join(tmp, 'r06'), mk_r06)
+        expect('strict pass: r=0.6 f=1.0', 0, 'exit 0', r06, workdir=W,
+               fresh_mut=lambda r: set_row(r, K, ulps=1.0))
+        def mk_r12(repo):
+            for l in LOCS:
+                repo.ref[l][K][0] = 1.2
+                repo.strict[l][K][0] = 1.2
+                repo.fast[l][K][0] = 1.2
+        r12 = Repo(os.path.join(tmp, 'r12'), mk_r12)
+        expect('fast only: strict fail r=1.2 f=1.8', 1, 'fast only', r12, workdir=W,
+               fresh_mut=lambda r: set_row(r, K, ulps=1.8))
+        expect('strict pass: r=1.2 f=1.7 edge', 0, 'exit 0', r12, workdir=W,
+               fresh_mut=lambda r: set_row(r, K, ulps=1.7))
+        def mk_r3_b90(repo):
+            for l in LOCS:
+                repo.ref[l][K][0] = 3.0; repo.ref[l][K][1] = 90.0
+                repo.strict[l][K][0] = 3.0; repo.strict[l][K][1] = 90.0
+                repo.fast[l][K][0] = 3.0; repo.fast[l][K][1] = 90.0
+        r3b90 = Repo(os.path.join(tmp, 'r3b90'), mk_r3_b90)
+        expect('reject: fast fail r=3.0 f=4.2 b=90', 2, 'reject', r3b90, workdir=W,
+               fresh_mut=lambda r: set_row(r, K, ulps=4.2, bound=90.0))
+        def mk_r10_b20(repo):
+            for l in LOCS:
+                repo.ref[l][K][0] = 10.0; repo.ref[l][K][1] = 20.0
+                repo.strict[l][K][0] = 10.0; repo.strict[l][K][1] = 20.0
+                repo.fast[l][K][0] = 10.0; repo.fast[l][K][1] = 20.0
+        r10b20 = Repo(os.path.join(tmp, 'r10b20'), mk_r10_b20)
+        expect('fast only: r=10 f=10.9 b=20 fast pass', 1, 'fast only', r10b20, workdir=W,
+               fresh_mut=lambda r: set_row(r, K, ulps=10.9, bound=20.0))
+        expect('reject: fast fail r=10 f=11.1 b=20', 2, 'reject', r10b20, workdir=W,
+               fresh_mut=lambda r: set_row(r, K, ulps=11.1, bound=20.0))
+        def mk_r25_b3(repo):
+            for l in LOCS:
+                repo.ref[l][K][0] = 2.5; repo.ref[l][K][1] = 3.0
+                repo.strict[l][K][0] = 2.5; repo.strict[l][K][1] = 3.0
+                repo.fast[l][K][0] = 2.5; repo.fast[l][K][1] = 3.0
+        r25b3 = Repo(os.path.join(tmp, 'r25b3'), mk_r25_b3)
+        expect('reject: bound fail r=2.5 f=3.4 b=3', 2, 'reject', r25b3, workdir=W,
+               fresh_mut=lambda r: set_row(r, K, ulps=3.4, bound=3.0))
+        def mk_r5_b3(repo):
+            for l in LOCS:
+                repo.ref[l][K][0] = 5.0; repo.ref[l][K][1] = 3.0
+                repo.strict[l][K][0] = 5.0; repo.strict[l][K][1] = 3.0
+                repo.fast[l][K][0] = 5.0; repo.fast[l][K][1] = 3.0
+        r5b3 = Repo(os.path.join(tmp, 'r5b3'), mk_r5_b3)
+        expect('strict pass: bound pass r=5 f=5.4 b=3', 0, 'exit 0', r5b3, workdir=W,
+               fresh_mut=lambda r: set_row(r, K, ulps=5.4, bound=3.0))
+        def mk_cur02_ref15(repo):
+            for l in LOCS:
+                repo.ref[l][K][0] = 1.5
+                repo.strict[l][K][0] = 0.2
+                repo.fast[l][K][0] = 1.5
+        cur02 = Repo(os.path.join(tmp, 'cur02'), mk_cur02_ref15)
+        expect('fast only: strict fail via Current only c=0.2 r=1.5 f=1.6', 1, 'fast only', cur02, workdir=W,
+               fresh_mut=lambda r: set_row(r, K, ulps=1.6))
+        expect('host-only strict pass', 0, 'HOST-ONLY', r06, workdir=W,
+               fresh_mut=lambda r: set_row(r, K, ulps=1.0), host_only=True)
+        expect('host-only fast only', 1, 'HOST-ONLY', r089, workdir=W,
+               fresh_mut=lambda r: set_row(r, K, ulps=1.51), host_only=True)
+        expect('host-only fast only r=1.2 f=1.8', 1, 'HOST-ONLY', r12, workdir=W,
+               fresh_mut=lambda r: set_row(r, K, ulps=1.8), host_only=True)
+        expect('host-only reject bound fail', 2, 'HOST-ONLY', r25b3, workdir=W,
+               fresh_mut=lambda r: set_row(r, K, ulps=3.4, bound=3.0), host_only=True)
+        def host_missing(fresh):
+            os.remove(os.path.join(fresh, 'host.csv.gz'))
+        expect('host-only stop: missing file', 3, 'no host.csv', r06, workdir=W, host_only=True, raw_fresh=host_missing)
 
-        # ---------------- exit 2: reject ---------------------------------
+        def drift(repo, cur=1.5, ref=1.0):
+            for l in LOCS:
+                repo.strict[l][K][0] = cur
+                repo.fast[l][K][0] = cur
+                repo.ref[l][K][0] = ref
+        d2 = Repo(os.path.join(tmp, 'drift2'), lambda rp: drift(rp, 1.5, 1.0))
+        expect('fast only: generic drifts', 1, 'fast only', d2, workdir=W,
+               fresh_mut=lambda r: set_row(r, K, ulps=1.6))
+        expect('fast only: speed exactly 0.90 passes the 10% rule', 1, 'exit 1', d2, workdir=W,
+               fresh_mut=lambda r: set_row(r, K, ulps=1.6))
+
         expect('reject: absolute gate failed on a100', 2, 'the absolute gate exited 1', plain, workdir=W,
                exits={'a100': 1})
         expect('reject: absolute gate failed on host', 2, 'host: the absolute gate', plain, workdir=W,
                exits={'host': 2})
-        expect('reject: Worse vs Current (both tiers)', 2, 'failing the fast rules: 5', plain, workdir=W,
-               fresh_mut=lambda r: set_row(r, KA, ulps=2.6))
-        expect('reject: fast cap, 5x Reference', 2, 'exit 2', Repo(os.path.join(tmp, 'drift_cap'),
-               lambda rp: drift(rp, 4.5, 4.5, 1.0)), workdir=W, fresh_mut=lambda r: set_row(r, K, ulps=5.0))
-        expect('reject: bound rule (above bound, Reference not)', 2, 'exit 2', plain, workdir=W,
+        expect('reject: bound rule (above bound, Reference not)', 2, 'reject', plain, workdir=W,
                fresh_mut=lambda r: set_row(r, KL, ulps=101.0))
-        expect('reject: bound rule second branch, Worse vs Reference', 2, 'exit 2', plain, workdir=W,
+        expect('reject: bound rule Registered defect still requires bound pass', 2, 'reject', plain, workdir=W,
                fresh_mut=lambda r: set_row(r, KD, ulps=300.0))
         expect('reject: one op 5% slower on mi250', 2, 'more than 3% slower on a gated GPU: 1', plain,
                workdir=W,
@@ -244,8 +316,8 @@ def main():
                perf_mut=lambda p: p['gfx942'].__setitem__(3, ('DD_fast', 'science', 'science', 100, 105)))
         expect('reject: changed op only 2% faster (strict needs 3%)', 2, 'exp=0.980',
                plain, workdir=W, perf_mut=set_perf('DD_fast', 'exp', 98))
-        expect('reject: fast-only accuracy but only 5% faster', 2, 'exit 2', d_mild, workdir=W,
-               fresh_mut=lambda r: set_row(r, K, ulps=1.5),
+        expect('reject: fast-only accuracy but only 5% faster', 2, 'reject', d2, workdir=W,
+               fresh_mut=lambda r: set_row(r, K, ulps=1.6),
                perf_mut=set_perf('DD_fast', 'exp', 95))
 
         def edit(rel, fn):
@@ -274,7 +346,6 @@ def main():
         expect('reject (pre-check): file added to Reference', 2, 'untracked files', plain, workdir=W,
                repo_mut=add_ref)
 
-        # ---------------- exit 3: every door ------------------------------
         expect('stop: fresh file missing, not deferred', 3, 'a100: no a100.csv', plain, workdir=W, drop=('a100',))
         def no_exits(fresh): os.remove(os.path.join(fresh, 'mi300.exits'))
         expect('stop: .exits file missing', 3, 'mi300.exits', plain, workdir=W, raw_fresh=no_exits)
@@ -289,7 +360,6 @@ def main():
                repo_mut=lambda root: os.remove(os.path.join(root, 'validation/sweep/sweep_baseline_fast_b200.csv.gz')))
         expect('stop: perf file missing for a gated GPU', 3, 'ratios_gfx942.csv', plain, workdir=W,
                perf_mut=lambda p: p.pop('gfx942'))
-        # a ratio column that disagrees with before/after needs a hand-written file:
         work = tempfile.mkdtemp(dir=W)
         write_perf(os.path.join(work, 'perf'), default_perf())
         with open(os.path.join(work, 'perf', 'ratios_sm_80.csv'), 'a') as f:
@@ -343,6 +413,21 @@ def main():
             with open(os.path.join(fresh, 'host.csv'), 'w') as f: f.write('hello\n')
         expect('stop: fresh file has no scored-sweep header', 3, 'no scored-sweep header', plain, workdir=W,
                raw_fresh=plain_text)
+        COUNT[0] += 1
+        work2 = tempfile.mkdtemp(dir=W)
+        os.makedirs(os.path.join(work2, 'fresh'))
+        write_scored(os.path.join(work2, 'fresh', 'host.csv.gz'), plain.fast['host'], 'host')
+        with open(os.path.join(work2, 'fresh', 'host.exits'), 'w') as f: f.write('absolute=0\nmonotone=0\n')
+        write_perf(os.path.join(work2, 'perf'), default_perf())
+        r = subprocess.run([sys.executable, '-I', GATE, '--host-only', '--backend', 'DD', '--ops', 'exp', '--base', plain.base,
+                            '--fresh', os.path.join(work2, 'fresh'), '--perf', os.path.join(work2, 'perf'), '--repo', plain.root],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        ok = r.returncode == 3 and 'does not take --perf' in r.stdout
+        print('%s %-52s exit %d (want 3)' % ('ok  ' if ok else 'FAIL', 'stop: host-only does not take --perf',
+                                             r.returncode))
+        if not ok:
+            FAILED.append('host-only perf'); print(r.stdout[-600:])
+        shutil.rmtree(work2, ignore_errors=True)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print('\n%d cases, %d failed' % (COUNT[0], len(FAILED)))

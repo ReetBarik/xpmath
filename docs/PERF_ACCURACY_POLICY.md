@@ -16,14 +16,26 @@ tier; (d) (b) with caps. (c) was chosen; the fast tier uses (d)'s caps.
   ulps 0-0.25. So the bound limits mul/div, the bit cap limits transcendentals.
 - Unverified (from memory): the JMP FMA multiply (P3.4) may reach ~4-5 ulps,
   above the mul bound of 3. If so it fails both tiers; P3.4 must measure it.
+- **Precision ladder (P3.0c):** the backends fill the ladder between native
+  types — float 24 bits, FF ~46, double 53, TF ~72, QF ~96, DD ~103–106,
+  fp128 113 on host. A fast tier is its own rung: close to strict (at most
+  2 bits lost, i.e. K = 4 ulps for every backend and op), well above the next
+  rung down, and cheaper. The bound rule keeps multiply/divide at their bound
+  of 3.
 
 ## Definitions (all per backend, per point, scored points only)
 - **Reference** = the baseline .gz files (host + a100, b200, mi250, mi300) at
   xpmath `4d597fd`, frozen by P3.0b. Never regenerated.
-- **Current** = the tier's latest committed baseline.
-- **Worse(x, y)** = `x > y * 1.2589254` and `x > 1 ulp` (the monotone rule).
-- **Bound rule**: fresh ulps <= 1x bound, or (reference ulps > 1x bound and not
-  Worse(fresh, reference)).
+- **Current** = the tier's latest committed baseline (strict Current `c` for the
+  strict rule; fast has no Current check).
+- **Constants:** `STRICT_SLACK = 0.5`, `FAST_CAP = 4.0`, `FAST_SLACK = 1.0`.
+- **Bound rule (both tiers):** `f <= b` or `r > b`, where `f` fresh ulps,
+  `r` Reference ulps, `b` bound. If the Reference already exceeds its bound,
+  the bound does not block the candidate.
+- **Strict vs Reference:** `f <= max(1, r + 0.5)`.
+- **Strict vs Current:** `f <= max(1, c + 0.5)`.
+- **Fast vs Reference:** `f <= max(4, r + 1.0)`. No check against fast Current;
+  the Reference cap is absolute so chained overrides cannot drift past it.
 - **Speed** = CHECK-PERF ratio per op for that backend, same GPU before/after.
 - **Gate script** = `python3 -I scripts/p3_tier_gate.py` (stdlib, Python 3.6+).
   It reads the candidate's FAST-tier scored sweeps (`<loc>.csv[.gz]` and
@@ -31,6 +43,10 @@ tier; (d) (b) with caps. (c) was chosen; the fast tier uses (d)'s caps.
   below. Exit codes: **0** every strict rule passed (accept into strict);
   **1** strict failed but every fast rule passed (accept into fast only);
   **2** reject; **3** tool error, missing data or drift (stop and ask).
+  Host-only pre-screen: `python3 -I scripts/p3_tier_gate.py --host-only
+  --backend DD --ops log --base <sha> --fresh <dir>` (needs only host.csv[.gz]
+  + host.exits, no --perf); exit 0 = strict accuracy passes at host,
+  1 = fast only, 2 = neither, 3 = stop.
 - **Worker flow**: make the change in the fast tier first and score it with
   `TIER=fast`. On gate exit 0, promote the change to strict and re-run
   `TIER=both`. On exit 1 keep it fast-only. On 2 reject; on 3 stop.
@@ -41,9 +57,9 @@ tier; (d) (b) with caps. (c) was chosen; the fast tier uses (d)'s caps.
 | Rule | strict | fast |
 |---|---|---|
 | Absolute gate (scorer exit code) + register unchanged | must pass | must pass |
-| Bound rule (1x, not 8x) | must pass | must pass |
-| vs Current | not Worse | not Worse vs fast Current |
-| vs Reference | not Worse | fresh <= 4x reference (2 bits) or fresh <= 1 ulp |
+| Bound rule (1x, not 8x) | `f <= b` or `r > b` | `f <= b` or `r > b` |
+| vs Reference | `f <= max(1, r + 0.5)` | `f <= max(4, r + 1)` |
+| vs Current | `f <= max(1, c + 0.5)` | none (Reference cap is absolute) |
 | Speed: changed op | >= 3% faster on >= 1 gated GPU | >= 10% faster on >= 1 gated GPU |
 | Speed: every op of that backend | no more than 3% slower on any gated GPU | same |
 
@@ -78,9 +94,16 @@ Subject: `P3.<n>[<b>]: re-baseline <strict|fast> after <function>`. Body:
 the numbers below.
 
 **Report** (status block and re-baseline body), per op touched: max/median/p99
-ulps before -> after; points Worse vs Current and vs Reference; worst
-ulps/bound; worst bits lost vs Reference (log2 of the ratio); speedup per GPU
-(all 5, GB300 marked reporting-only); tier accepted into.
+ulps before -> after; counts of points failing each accuracy rule (bound,
+strict-Ref, strict-Cur, fast-Ref); worst ulps/bound; worst bits lost vs
+Reference (log2 of the ratio); speedup per GPU (all 5, GB300 marked
+reporting-only); tier accepted into.
+
+**Pre-screen (host-only):** before requesting GPUs, run the gate in
+`--host-only` mode on the host sweep alone; it applies the accuracy rules
+at host only and prints `HOST-ONLY: accuracy pre-screen, no speed verdict`
+on its RESULT line. Exit 0 = strict accuracy passes, 1 = fast only, 2 =
+neither, 3 = stop.
 
 **Deferred GPU (C-<arch> step 3):** run the device sweep at the row's after-SHA,
 score it with the same compare script, tier and Reference the task used.

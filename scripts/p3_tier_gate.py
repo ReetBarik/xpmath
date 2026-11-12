@@ -19,20 +19,31 @@ issues no verdict of its own beyond that table.
                             perf/perf_ratios.py: type,op,kind,before_ns,after_ns,ratio
   --deferred a100,b200,...  GPUs the user declared unavailable (ledger rows owed)
   --repo <dir>              the xpmath worktree (default: .)
+  --host-only               accuracy pre-screen at host only: needs only --backend
+                            --ops --base --fresh (host.csv[.gz]+host.exits); no
+                            --perf, no GPUs; exit 0=strict pass 1=fast pass 2=reject 3=stop
 
-Exit codes:
+Exit codes (normal mode):
   0  every STRICT rule passed             -> accept into strict (promote, re-run TIER=both)
   1  strict failed, every FAST rule passed -> accept into fast only
   2  reject (a rule failed, a pre-check failed or the absolute gate failed)
   3  tool error / missing data / drift     -> stop and ask the user
+
+Exit codes (host-only mode):
+  0  strict accuracy passes at host
+  1  strict fails but fast accuracy passes at host
+  2  neither passes (or absolute gate failed, pre-check failed)
+  3  tool error / missing data / drift
 """
 import argparse, csv, gzip, math, os, subprocess, sys
 
-NOISE = 1.2589254            # the monotone gate's 10^0.1
+STRICT_SLACK = 0.5
+FAST_CAP = 4.0
+FAST_SLACK = 1.0
+
 STRICT_SPEED = 1.0 / 1.03    # changed op: at least 3% faster
 FAST_SPEED = 1.0 / 1.10      # changed op: at least 10% faster
 SLOWER_LIMIT = 1.03          # every op: no more than 3% slower
-FAST_REF_CAP = 4.0           # fast tier: at most 2 bits worse than the Reference
 
 GATED = ['host', 'a100', 'b200', 'mi250', 'mi300']
 DEFERRABLE = ['a100', 'b200', 'mi250', 'mi300']          # host is never deferrable
@@ -47,10 +58,6 @@ BACKENDS = ['DD', 'FF', 'QF', 'TF']
 
 class Stop(Exception):
     """exit 3: a tool error, missing data or drift; the user decides."""
-
-
-def worse(x, y):
-    return x > y * NOISE and x > 1.0
 
 
 def opener(path):
@@ -199,20 +206,31 @@ def judge_location(loc, repo, fresh_path, backend, ops, report):
             continue
         if fstate != 'S':
             continue
-        ok_bound = f <= fb or (r > rb and not worse(f, r))
-        w_cs, w_cf, w_ref = worse(f, cs), worse(f, cf), worse(f, r)
-        strict_ok = ok_bound and not w_cs and not w_ref
-        fast_ok = ok_bound and not w_cf and (f <= FAST_REF_CAP * r or f <= 1.0)
+        # --- new ulp rules ---
+        ok_bound = (f <= fb) or (r > rb)
+        strict_ref_ok = f <= max(1.0, r + STRICT_SLACK)
+        strict_cur_ok = f <= max(1.0, cs + STRICT_SLACK)
+        fast_ref_ok = f <= max(FAST_CAP, r + FAST_SLACK)
+        strict_ok = ok_bound and strict_ref_ok and strict_cur_ok
+        fast_ok = ok_bound and fast_ref_ok
         if not strict_ok:
             strict_fail.append((loc, key, f, cs, r, fb))
         if not fast_ok:
             fast_fail.append((loc, key, f, cf, r, fb))
         if op in ops:
-            st = stats.setdefault((kind, op), dict(n=0, cur=[], fresh=[], w_cs=0, w_cf=0, w_ref=0,
+            st = stats.setdefault((kind, op), dict(n=0, cur=[], fresh=[],
+                                                   bound_fail=0, strict_ref_fail=0, strict_cur_fail=0, fast_ref_fail=0,
                                                    worst_ratio=0.0, worst_bits=0.0))
             st['n'] += 1
             st['cur'].append(cs); st['fresh'].append(f)
-            st['w_cs'] += w_cs; st['w_cf'] += w_cf; st['w_ref'] += w_ref
+            if not ok_bound:
+                st['bound_fail'] += 1
+            if not strict_ref_ok:
+                st['strict_ref_fail'] += 1
+            if not strict_cur_ok:
+                st['strict_cur_fail'] += 1
+            if not fast_ref_ok:
+                st['fast_ref_fail'] += 1
             if fb > 0:
                 st['worst_ratio'] = max(st['worst_ratio'], f / fb)
             if f > 0 and r > 0:
@@ -223,12 +241,13 @@ def judge_location(loc, repo, fresh_path, backend, ops, report):
     for (kind, op), st in sorted(stats.items()):
         c, fr = sorted(st['cur']), sorted(st['fresh'])
         report.append('  %-5s %s %-9s n=%-5d ulps max/med/p99 %.4g/%.4g/%.4g -> %.4g/%.4g/%.4g | '
-                      'Worse vs strict Cur %d, fast Cur %d, Ref %d | worst ulps/bound %.4g | '
+                      'fails bound %d, strict-Ref %d, strict-Cur %d, fast-Ref %d | worst ulps/bound %.4g | '
                       'worst bits lost vs Ref %.3f'
                       % (loc, 'real' if kind == 'r' else 'cplx', op, st['n'],
                          c[-1], c[len(c) // 2], percentile(c, 0.99),
                          fr[-1], fr[len(fr) // 2], percentile(fr, 0.99),
-                         st['w_cs'], st['w_cf'], st['w_ref'], st['worst_ratio'], st['worst_bits']))
+                         st['bound_fail'], st['strict_ref_fail'], st['strict_cur_fail'], st['fast_ref_fail'],
+                         st['worst_ratio'], st['worst_bits']))
     return strict_fail, fast_fail
 
 
@@ -262,9 +281,10 @@ def main(argv):
     ap.add_argument('--ops', required=True)
     ap.add_argument('--base', required=True)
     ap.add_argument('--fresh', required=True)
-    ap.add_argument('--perf', required=True)
+    ap.add_argument('--perf', required=False, default=None)
     ap.add_argument('--deferred', default='')
     ap.add_argument('--repo', default='.')
+    ap.add_argument('--host-only', action='store_true', dest='host_only')
     try:
         args = ap.parse_args(argv)
     except SystemExit as e:
@@ -288,7 +308,16 @@ def run(args):
         if d not in DEFERRABLE:
             raise Stop('--deferred %s: not a deferrable GPU (%s); host is never deferred and '
                        'gb300 is report-only' % (d, DEFERRABLE))
-    gated = [l for l in GATED if l not in deferred]
+    if args.host_only:
+        if args.deferred:
+            raise Stop('--host-only cannot be combined with --deferred')
+        if args.perf is not None:
+            raise Stop('--host-only does not take --perf')
+        gated = ['host']
+    else:
+        if args.perf is None:
+            raise Stop('--perf is required (omit only with --host-only)')
+        gated = [l for l in GATED if l not in deferred]
     perf_types = {backend + '_fast', 'c' + backend + '_fast'}
     report = ['P3 tier gate: backend %s, ops %s, base %s' % (backend, ','.join(ops), args.base[:12])]
 
@@ -296,7 +325,10 @@ def run(args):
     failures = ['pre-check: ' + b for b in prechecks(args.repo, args.base)]
     if failures:
         print('\n'.join(report + failures))
-        print('RESULT: reject (exit 2)')
+        if args.host_only:
+            print('RESULT: reject (exit 2) HOST-ONLY: accuracy pre-screen, no speed verdict')
+        else:
+            print('RESULT: reject (exit 2)')
         return 2
     report.append('pre-checks: register, Reference, scorer and kUlpAllowance unchanged since base')
 
@@ -326,6 +358,20 @@ def run(args):
         for loc, key, f, cur, r, fb in lst[:3]:
             report.append('   %s %s fresh %.6g, Current %.6g, Reference %.6g, bound %.6g'
                           % (loc, '/'.join(key), f, cur, r, fb))
+
+    if args.host_only:
+        # no speed section
+        for f in failures:
+            report.append('FAIL: ' + f)
+        print('\n'.join(report))
+        if not failures and not strict_fail:
+            print('RESULT: strict pass -> accept into strict (exit 0) HOST-ONLY: accuracy pre-screen, no speed verdict')
+            return 0
+        if not failures and not fast_fail:
+            print('RESULT: strict failed, fast passed -> accept into fast only (exit 1) HOST-ONLY: accuracy pre-screen, no speed verdict')
+            return 1
+        print('RESULT: reject (exit 2) HOST-ONLY: accuracy pre-screen, no speed verdict')
+        return 2
 
     # 4. speed
     slower, best = [], {op: None for op in ops}
