@@ -282,7 +282,7 @@ runs both and returns one verdict:
 
 | tree | compiler | contains |
 |---|---|---|
-| `<dir>/host` | always `g++`, no Kokkos, identical on all three arches | `sweep_accuracy`, **both gates, both gate self-tests**, `sweep_device_gate_a100` / `sweep_device_gate_mi250` and the device-gate self-test, `oracle_conv_test`, `domains_fresh`, `device_domains_fresh` — 42 tests |
+| `<dir>/host` | always `g++`, no Kokkos, identical on all three arches | `sweep_accuracy`, **both gates, both gate self-tests**, `sweep_device_gate_a100` / `sweep_device_gate_mi250` and the device-gate self-test, `oracle_conv_test`, `domains_fresh`, `device_domains_fresh`, and the P3.0b tier tests (`sweep_absolute_gate_fast`, `sweep_monotone_gate_fast`, `tier_mix_compile_fail`, `sweep_reference_frozen`, `p3_tier_gate_selftest`) — 49 tests |
 | `<dir>/device` | the arch's compiler and Kokkos | the `*_test_device` halves, the harness self-test, the demos — 24 tests |
 
 42 + 24 = 66 and the union is 65: `build_provenance` is registered in every

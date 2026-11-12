@@ -670,6 +670,19 @@ if(XPMATH_BUILD_DEVICE_TARGETS)
     # value either way: the two builds' 436,080-row outputs were compared with
     # `cmp` and are BYTE-IDENTICAL.
     XPMATH_ENABLE_DIAGNOSTICS=0)
+
+  # P3.0b: the same source compiled against the FAST tier. EXCLUDE_FROM_ALL so
+  # CI and a normal build do not double their ptxas time; run_<arch>_sweep.sh
+  # builds it by name when TIER=fast|both. Not run in P3.0b (first run: P3.1[dd]).
+  add_executable(sweep_device_fast EXCLUDE_FROM_ALL ${CMAKE_SOURCE_DIR}/scripts/sweep_device.cpp)
+  target_include_directories(sweep_device_fast PRIVATE
+                             ${CMAKE_SOURCE_DIR}/include
+                             ${CMAKE_SOURCE_DIR}/tests)
+  target_compile_features(sweep_device_fast PRIVATE cxx_std_17)
+  target_compile_definitions(sweep_device_fast PRIVATE
+    XPMATH_SWEEP_GRID_DEFAULT="${CMAKE_SOURCE_DIR}/validation/sweep/sweep_grid.csv"
+    XPMATH_ENABLE_DIAGNOSTICS=0
+    XPMATH_SWEEP_TIER_FAST)
 endif()
 
 # --- WHERE THE KOKKOS-LINKED TESTS WENT ------------------------------------
@@ -1552,6 +1565,37 @@ add_test(NAME device_tu_purity
 # headers, for no gain -- and would lose the mirror half of the check (no host
 # TU may launch a kernel), whose subjects are the host targets.
 xpm_tag_test(host device_tu_purity)
+
+# ---------------------------------------------------------------------------
+# P3.0b: TWO TIERS (strict + fast). docs/PERF_ACCURACY_POLICY.md, include/xp/tier.hpp
+# ---------------------------------------------------------------------------
+# Fast forwards to strict until a P3 task overrides a function, so the fast
+# baselines are BYTE COPIES of the strict ones (user decision 2026-11-11) and
+# these two gates are the proof that fast still equals strict on the host.
+# Fast device sweeps are not part of P3.0b: the device gates are run by
+# validation/<arch>/run_<arch>_sweep.sh with TIER=fast (first used in P3.1[dd]).
+add_test(NAME sweep_absolute_gate_fast
+         COMMAND sweep_accuracy --tier fast --ulp
+                 --register ${CMAKE_SOURCE_DIR}/validation/sweep/open_defects.txt)
+add_test(NAME sweep_monotone_gate_fast
+         COMMAND sweep_accuracy --tier fast
+                 --baseline ${CMAKE_SOURCE_DIR}/validation/sweep/sweep_baseline_fast.csv.gz)
+# The tiers must not mix implicitly: a try-to-compile that has to fail.
+add_test(NAME tier_mix_compile_fail
+         COMMAND ${CMAKE_SOURCE_DIR}/validation/check_tier_mix.sh
+                 ${CMAKE_CXX_COMPILER} ${CMAKE_SOURCE_DIR}/include
+                 ${CMAKE_SOURCE_DIR}/tests/tier_mix_compile_fail.cpp)
+# The Reference every P3 task is judged against, frozen at xpmath 4d597fd.
+add_test(NAME sweep_reference_frozen
+         COMMAND ${CMAKE_SOURCE_DIR}/validation/check_reference_frozen.sh
+                 ${CMAKE_SOURCE_DIR}/validation/sweep/reference_4d597fd)
+# The P3 accept/reject script, exercised on synthetic inputs only.
+add_test(NAME p3_tier_gate_selftest
+         COMMAND python3 -I ${CMAKE_SOURCE_DIR}/scripts/p3_tier_gate_selftest.py)
+xpm_tag_test(host sweep_absolute_gate_fast sweep_monotone_gate_fast
+                  tier_mix_compile_fail sweep_reference_frozen p3_tier_gate_selftest)
+set_tests_properties(sweep_absolute_gate_fast sweep_monotone_gate_fast
+                     PROPERTIES TIMEOUT 600)
 
 set_tests_properties(sweep_absolute_gate sweep_monotone_gate
                      PROPERTIES TIMEOUT 600)

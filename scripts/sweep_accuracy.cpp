@@ -1876,6 +1876,12 @@ __float128 to_q(const xp::QuadFloat& x) {
   return (((__float128)x.f0 + (__float128)x.f1) + (__float128)x.f2) + (__float128)x.f3;
 }
 
+// Fast-tier values widen through the strict value of the same limbs (bit-exact).
+__float128 to_q(const xp::DoubleDoubleFast& x) { return to_q(xp::to_strict(x)); }
+__float128 to_q(const xp::FloatFloatFast& x)   { return to_q(xp::to_strict(x)); }
+__float128 to_q(const xp::TripleFloatFast& x)  { return to_q(xp::to_strict(x)); }
+__float128 to_q(const xp::QuadFloatFast& x)    { return to_q(xp::to_strict(x)); }
+
 // ── Device-result support (--score-results / --where) ────────────────────
 // A DeviceLimbs holds the raw IEEE-754 bit patterns written by sweep_device.
 // FP64 backends (DD): v[0]=hi, v[1]=lo, v[2..3] unused.
@@ -1885,10 +1891,10 @@ __float128 to_q(const xp::QuadFloat& x) {
 // BackendDD/FF/QF/TF are defined later (with the sweep templates). Forward-
 // declare them so the tag-dispatch overloads below compile here; the bodies
 // only need the xp::* types already in scope.
-struct BackendDD;
-struct BackendFF;
-struct BackendQF;
-struct BackendTF;
+template <class Tier> struct BackendDD;
+template <class Tier> struct BackendFF;
+template <class Tier> struct BackendQF;
+template <class Tier> struct BackendTF;
 
 struct DeviceLimbs { uint64_t v[8] = {}; };
 using DeviceMap = std::unordered_map<std::string, DeviceLimbs>;
@@ -1901,17 +1907,21 @@ inline std::string make_dev_key(const char* be, char k, const char* op, int pt) 
 
 // Reconstruct a __float128 from device limbs at word offset `off` (0=real, 4=imag).
 // Declared as overloads on backend type for clean call syntax below.
-inline __float128 dev_q(const DeviceLimbs& L, int off, const BackendDD*) {
+template <class T>
+inline __float128 dev_q(const DeviceLimbs& L, int off, const BackendDD<T>*) {
   return to_q(xp::DoubleDouble::from_bits(L.v[off], L.v[off+1]));
 }
-inline __float128 dev_q(const DeviceLimbs& L, int off, const BackendFF*) {
+template <class T>
+inline __float128 dev_q(const DeviceLimbs& L, int off, const BackendFF<T>*) {
   return to_q(xp::FloatFloat::from_bits((uint32_t)L.v[off], (uint32_t)L.v[off+1]));
 }
-inline __float128 dev_q(const DeviceLimbs& L, int off, const BackendQF*) {
+template <class T>
+inline __float128 dev_q(const DeviceLimbs& L, int off, const BackendQF<T>*) {
   return to_q(xp::QuadFloat::from_bits((uint32_t)L.v[off], (uint32_t)L.v[off+1],
                                         (uint32_t)L.v[off+2], (uint32_t)L.v[off+3]));
 }
-inline __float128 dev_q(const DeviceLimbs& L, int off, const BackendTF*) {
+template <class T>
+inline __float128 dev_q(const DeviceLimbs& L, int off, const BackendTF<T>*) {
   return to_q(xp::TripleFloat::from_bits((uint32_t)L.v[off], (uint32_t)L.v[off+1],
                                           (uint32_t)L.v[off+2]));
 }
@@ -1921,7 +1931,7 @@ inline __float128 dev_q(const DeviceLimbs& L, int off, const BackendTF*) {
 // Gzipped inputs are accepted: C7 commits the A100 raw results as
 // validation/a100/logs/1001685_raw.csv.gz, and compare_baseline already
 // reads the scored baseline through gzip -dc. One scorer, one decompressor.
-bool load_device_results(const std::string& path, DeviceMap& out) {
+bool load_device_results(const std::string& path, DeviceMap& out, std::string* tier = nullptr) {
   const bool gz = path.size() > 3 && path.compare(path.size() - 3, 3, ".gz") == 0;
   std::FILE* f = nullptr;
   if (gz) {
@@ -1932,8 +1942,13 @@ bool load_device_results(const std::string& path, DeviceMap& out) {
   }
   if (!f) { std::fprintf(stderr, "cannot open device results: %s\n", path.c_str()); return false; }
   char line[640]; bool saw_header = false;
+  if (tier) *tier = "strict";   // a raw file without a "# tier:" line predates the tiers
   while (std::fgets(line, sizeof(line), f)) {
-    if (line[0] == '#') continue;
+    if (line[0] == '#') {
+      char tv[16];
+      if (tier && std::sscanf(line, "# tier: %15s", tv) == 1) *tier = tv;
+      continue;
+    }
     if (!saw_header) { saw_header = true; continue; }  // skip "backend,kind,op,..." header
     // Split on commas; expect exactly 12 fields.
     char* tok[12]; int ntok = 0;
@@ -2732,25 +2747,29 @@ bool point_unresolved(double bound, __float128 ref, const __float128* exact,
 // sig_bits() is limbs x word-significand (FP64 53, FP32 24, hidden bit
 // included) — the p in ulp(true) = |true| * 2^-p. Same arithmetic the SCORING
 // section uses to argue that widening to binary128 is exact.
-struct BackendDD { using S = xp::DoubleDouble; using Z = xp::DoubleDoubleComplex;
+template <class Tier>
+struct BackendDD { using S = xp::basic_dd<Tier>; using Z = xp::basic_dd_complex<Tier>;
                    static const char* name() { return "DD"; } static double cap() { return 31.0; }
                    static int sig_bits() { return 106; }   // 2 x 53
                    static int exp_squarings() { return 6; }  // dd_math.hpp:374
                    static int trig_squarings() { return 5; } // dd_math.hpp sincos nq
                    static Range range() { return range_double(2); } };
-struct BackendFF { using S = xp::FloatFloat;   using Z = xp::FloatFloatComplex;
+template <class Tier>
+struct BackendFF { using S = xp::basic_ff<Tier>;   using Z = xp::basic_ff_complex<Tier>;
                    static const char* name() { return "FF"; } static double cap() { return 14.0; }
                    static int sig_bits() { return 48; }    // 2 x 24
                    static int exp_squarings() { return 4; }  // ff_math.hpp:606
                    static int trig_squarings() { return 4; } // ff_math.hpp sincos nq
                    static Range range() { return range_float(2); } };
-struct BackendQF { using S = xp::QuadFloat;    using Z = xp::QuadFloatComplex;
+template <class Tier>
+struct BackendQF { using S = xp::basic_qf<Tier>;    using Z = xp::basic_qf_complex<Tier>;
                    static const char* name() { return "QF"; } static double cap() { return 29.0; }
                    static int sig_bits() { return 96; }    // 4 x 24
                    static int exp_squarings() { return 6; }  // qf_math.hpp:927
                    static int trig_squarings() { return 5; } // qf_math.hpp sincos nq
                    static Range range() { return range_float(4); } };
-struct BackendTF { using S = xp::TripleFloat;  using Z = xp::TripleFloatComplex;
+template <class Tier>
+struct BackendTF { using S = xp::basic_tf<Tier>;  using Z = xp::basic_tf_complex<Tier>;
                    static const char* name() { return "TF"; } static double cap() { return 21.7; }
                    static int sig_bits() { return 72; }    // 3 x 24
                    static int exp_squarings() { return 5; }  // tf_math.hpp:844
@@ -3424,6 +3443,7 @@ void sweep_complex(int id, const std::vector<GridPoint>& grid,
 // and against an identical reference — the comparability property gen_corpus
 // exists to provide, applied to a grid instead of a sample.
 // ---------------------------------------------------------------------------
+template <class Tier>
 void run_sweep(uint64_t seed, const std::vector<GridPoint>& rgrid,
                const std::vector<GridPoint>& cgrid,
                std::vector<Row>& rows, std::vector<Cell>& cells,
@@ -3442,10 +3462,10 @@ void run_sweep(uint64_t seed, const std::vector<GridPoint>& rgrid,
       a[i] = av; b[i] = bv; c[i] = cv;
       ref[i] = reference_real(id, av, bv, cv);
     }
-    sweep_real<BackendDD>(id, rgrid, a, b, c, ref, rows, cells, ux);
-    sweep_real<BackendFF>(id, rgrid, a, b, c, ref, rows, cells, ux);
-    sweep_real<BackendQF>(id, rgrid, a, b, c, ref, rows, cells, ux);
-    sweep_real<BackendTF>(id, rgrid, a, b, c, ref, rows, cells, ux);
+    sweep_real<BackendDD<Tier>>(id, rgrid, a, b, c, ref, rows, cells, ux);
+    sweep_real<BackendFF<Tier>>(id, rgrid, a, b, c, ref, rows, cells, ux);
+    sweep_real<BackendQF<Tier>>(id, rgrid, a, b, c, ref, rows, cells, ux);
+    sweep_real<BackendTF<Tier>>(id, rgrid, a, b, c, ref, rows, cells, ux);
   }
 
   for (int id = 0; id < C_COUNT; ++id) {
@@ -3456,10 +3476,10 @@ void run_sweep(uint64_t seed, const std::vector<GridPoint>& rgrid,
       fill_complex_operands(id, i, cgrid, cgrid[i].re, cgrid[i].im, rng, bre[i], bim[i]);
       reference_complex(id, cgrid[i].re, cgrid[i].im, bre[i], bim[i], rre[i], rim[i]);
     }
-    sweep_complex<BackendDD>(id, cgrid, bre, bim, rre, rim, rows, cells, ux);
-    sweep_complex<BackendFF>(id, cgrid, bre, bim, rre, rim, rows, cells, ux);
-    sweep_complex<BackendQF>(id, cgrid, bre, bim, rre, rim, rows, cells, ux);
-    sweep_complex<BackendTF>(id, cgrid, bre, bim, rre, rim, rows, cells, ux);
+    sweep_complex<BackendDD<Tier>>(id, cgrid, bre, bim, rre, rim, rows, cells, ux);
+    sweep_complex<BackendFF<Tier>>(id, cgrid, bre, bim, rre, rim, rows, cells, ux);
+    sweep_complex<BackendQF<Tier>>(id, cgrid, bre, bim, rre, rim, rows, cells, ux);
+    sweep_complex<BackendTF<Tier>>(id, cgrid, bre, bim, rre, rim, rows, cells, ux);
   }
 }
 
@@ -3497,6 +3517,7 @@ void build_complex_precomp(const DeviceMap& dmap, int id, char kind,
   }
 }
 
+template <class Tier>
 void run_sweep_from_device(const DeviceMap& dmap, uint64_t seed,
                            const std::vector<GridPoint>& rgrid,
                            const std::vector<GridPoint>& cgrid,
@@ -3517,14 +3538,14 @@ void run_sweep_from_device(const DeviceMap& dmap, uint64_t seed,
       ref[i] = reference_real(id, av, bv, cv);
     }
     std::vector<__float128> pDD, pFF, pQF, pTF;
-    build_real_precomp<BackendDD>(dmap, id, 'r', rgrid, pDD);
-    build_real_precomp<BackendFF>(dmap, id, 'r', rgrid, pFF);
-    build_real_precomp<BackendQF>(dmap, id, 'r', rgrid, pQF);
-    build_real_precomp<BackendTF>(dmap, id, 'r', rgrid, pTF);
-    sweep_real<BackendDD>(id, rgrid, a, b, c, ref, rows, cells, ux, &pDD);
-    sweep_real<BackendFF>(id, rgrid, a, b, c, ref, rows, cells, ux, &pFF);
-    sweep_real<BackendQF>(id, rgrid, a, b, c, ref, rows, cells, ux, &pQF);
-    sweep_real<BackendTF>(id, rgrid, a, b, c, ref, rows, cells, ux, &pTF);
+    build_real_precomp<BackendDD<Tier>>(dmap, id, 'r', rgrid, pDD);
+    build_real_precomp<BackendFF<Tier>>(dmap, id, 'r', rgrid, pFF);
+    build_real_precomp<BackendQF<Tier>>(dmap, id, 'r', rgrid, pQF);
+    build_real_precomp<BackendTF<Tier>>(dmap, id, 'r', rgrid, pTF);
+    sweep_real<BackendDD<Tier>>(id, rgrid, a, b, c, ref, rows, cells, ux, &pDD);
+    sweep_real<BackendFF<Tier>>(id, rgrid, a, b, c, ref, rows, cells, ux, &pFF);
+    sweep_real<BackendQF<Tier>>(id, rgrid, a, b, c, ref, rows, cells, ux, &pQF);
+    sweep_real<BackendTF<Tier>>(id, rgrid, a, b, c, ref, rows, cells, ux, &pTF);
   }
 
   for (int id = 0; id < C_COUNT; ++id) {
@@ -3536,14 +3557,14 @@ void run_sweep_from_device(const DeviceMap& dmap, uint64_t seed,
       reference_complex(id, cgrid[i].re, cgrid[i].im, bre[i], bim[i], rre[i], rim[i]);
     }
     std::vector<__float128> pDD_re, pDD_im, pFF_re, pFF_im, pQF_re, pQF_im, pTF_re, pTF_im;
-    build_complex_precomp<BackendDD>(dmap, id, 'c', cgrid, pDD_re, pDD_im);
-    build_complex_precomp<BackendFF>(dmap, id, 'c', cgrid, pFF_re, pFF_im);
-    build_complex_precomp<BackendQF>(dmap, id, 'c', cgrid, pQF_re, pQF_im);
-    build_complex_precomp<BackendTF>(dmap, id, 'c', cgrid, pTF_re, pTF_im);
-    sweep_complex<BackendDD>(id, cgrid, bre, bim, rre, rim, rows, cells, ux, &pDD_re, &pDD_im);
-    sweep_complex<BackendFF>(id, cgrid, bre, bim, rre, rim, rows, cells, ux, &pFF_re, &pFF_im);
-    sweep_complex<BackendQF>(id, cgrid, bre, bim, rre, rim, rows, cells, ux, &pQF_re, &pQF_im);
-    sweep_complex<BackendTF>(id, cgrid, bre, bim, rre, rim, rows, cells, ux, &pTF_re, &pTF_im);
+    build_complex_precomp<BackendDD<Tier>>(dmap, id, 'c', cgrid, pDD_re, pDD_im);
+    build_complex_precomp<BackendFF<Tier>>(dmap, id, 'c', cgrid, pFF_re, pFF_im);
+    build_complex_precomp<BackendQF<Tier>>(dmap, id, 'c', cgrid, pQF_re, pQF_im);
+    build_complex_precomp<BackendTF<Tier>>(dmap, id, 'c', cgrid, pTF_re, pTF_im);
+    sweep_complex<BackendDD<Tier>>(id, cgrid, bre, bim, rre, rim, rows, cells, ux, &pDD_re, &pDD_im);
+    sweep_complex<BackendFF<Tier>>(id, cgrid, bre, bim, rre, rim, rows, cells, ux, &pFF_re, &pFF_im);
+    sweep_complex<BackendQF<Tier>>(id, cgrid, bre, bim, rre, rim, rows, cells, ux, &pQF_re, &pQF_im);
+    sweep_complex<BackendTF<Tier>>(id, cgrid, bre, bim, rre, rim, rows, cells, ux, &pTF_re, &pTF_im);
   }
 }
 
@@ -4454,6 +4475,9 @@ void usage(const char* argv0) {
     "       %s --baseline PATH                the MONOTONE gate\n"
     "       %s [--out PATH] [--grid-out PATH] [--seed N] [--summary]\n"
     "\n"
+    "  --tier T          strict (default) or fast: which tier of the backends the\n"
+    "                    host sweep evaluates. With --score-results the raw file's\n"
+    "                    \"# tier:\" header (absent = strict) must equal T, else exit 2.\n"
     "  --out PATH        write the baseline CSV here. No default: without this\n"
     "                    flag nothing is written.\n"
     "  --grid-out PATH   also write the grid manifest here\n"
@@ -4517,7 +4541,7 @@ int main(int argc, char** argv) {
   // --where carries the producer label, matching CORE_PLAN C6 ("when
   // --score-results is absent, where is host"). Pass --where explicitly to
   // override. Accepted tokens: host, a100, mi250, b200, mi300, gb300.
-  std::string score_results_path, where_label = "host";
+  std::string score_results_path, where_label = "host", tier = "strict";
   int dump_point = -1;
   bool dump_terms = false;
   std::string ulp_register;
@@ -4626,6 +4650,7 @@ int main(int argc, char** argv) {
     }
     else if (s == "--score-results") { score_results_path = need_v("--score-results"); }
     else if (s == "--where")     { where_label = need_v("--where"); }
+    else if (s == "--tier")      { tier = need_v("--tier"); }
     else { std::fprintf(stderr, "Unknown argument: %s\n", s.c_str()); usage(argv[0]); return 2; }
   }
   (void)out_set;
@@ -4645,10 +4670,16 @@ int main(int argc, char** argv) {
     }
   }
 
+  if (tier != "strict" && tier != "fast") {
+    std::fprintf(stderr, "--tier '%s' must be strict or fast\n", tier.c_str());
+    return 2;
+  }
+
   const std::vector<GridPoint> rgrid = build_real_grid();
   const std::vector<GridPoint> cgrid = build_complex_grid();
 
   std::printf("sweep_accuracy %s\n", kFormatVersion);
+  std::printf("  tier: %s\n", tier.c_str());
   std::printf("  grid: %zu real points x %d ops, %zu complex points x %d ops, 4 backends\n",
               rgrid.size(), int(R_COUNT), cgrid.size(), int(C_COUNT));
   std::printf("  rows: %zu   seed: %llu\n",
@@ -4669,16 +4700,25 @@ int main(int argc, char** argv) {
   // so the baseline it writes always carries it.
   if (!score_results_path.empty()) {
     DeviceMap dmap;
-    if (!load_device_results(score_results_path, dmap)) return 1;
+    std::string raw_tier;
+    if (!load_device_results(score_results_path, dmap, &raw_tier)) return 1;
+    if (raw_tier != tier) {
+      std::fprintf(stderr,
+                   "tier mismatch: %s is a '%s' raw file but --tier is '%s'; refusing to score it\n",
+                   score_results_path.c_str(), raw_tier.c_str(), tier.c_str());
+      return 2;
+    }
     if (dmap.empty()) {
       std::fprintf(stderr, "no rows loaded from %s — empty or header-only?\n",
                    score_results_path.c_str()); return 1;
     }
     std::printf("  loaded %zu device result rows from %s\n",
                 dmap.size(), score_results_path.c_str());
-    run_sweep_from_device(dmap, seed, rgrid, cgrid, rows, cells, &ux);
+    if (tier == "fast") run_sweep_from_device<xp::fast>(dmap, seed, rgrid, cgrid, rows, cells, &ux);
+    else                run_sweep_from_device<xp::strict>(dmap, seed, rgrid, cgrid, rows, cells, &ux);
   } else {
-    run_sweep(seed, rgrid, cgrid, rows, cells, &ux);
+    if (tier == "fast") run_sweep<xp::fast>(seed, rgrid, cgrid, rows, cells, &ux);
+    else                run_sweep<xp::strict>(seed, rgrid, cgrid, rows, cells, &ux);
   }
 
   if (!quiet) print_summary(cells, &ulp_cells);

@@ -146,15 +146,54 @@ template <> struct Limbs<xp::QuadFloat> {
   }
 };
 
+// Fast-tier types have the same limbs; the sweep_device_fast target selects
+// them with -DXPMATH_SWEEP_TIER_FAST (P3.0b).
+template <> struct Limbs<xp::DoubleDoubleFast> {
+  using W = double;
+  static constexpr int n = 2;
+  static XPMATH_INLINE_FUNCTION void store(const xp::DoubleDoubleFast& v, W* o) {
+    o[0] = v.hi; o[1] = v.lo;
+  }
+};
+template <> struct Limbs<xp::FloatFloatFast> {
+  using W = float;
+  static constexpr int n = 2;
+  static XPMATH_INLINE_FUNCTION void store(const xp::FloatFloatFast& v, W* o) {
+    o[0] = v.hi; o[1] = v.lo;
+  }
+};
+template <> struct Limbs<xp::TripleFloatFast> {
+  using W = float;
+  static constexpr int n = 3;
+  static XPMATH_INLINE_FUNCTION void store(const xp::TripleFloatFast& v, W* o) {
+    o[0] = v.f0; o[1] = v.f1; o[2] = v.f2;
+  }
+};
+template <> struct Limbs<xp::QuadFloatFast> {
+  using W = float;
+  static constexpr int n = 4;
+  static XPMATH_INLINE_FUNCTION void store(const xp::QuadFloatFast& v, W* o) {
+    o[0] = v.f0; o[1] = v.f1; o[2] = v.f2; o[3] = v.f3;
+  }
+};
+
+#if defined(XPMATH_SWEEP_TIER_FAST)
+using SweepTier = xp::fast;
+constexpr const char* kSweepTierName = "fast";
+#else
+using SweepTier = xp::strict;
+constexpr const char* kSweepTierName = "strict";
+#endif
+
 // The four backends, named exactly as the baseline's `backend` column spells
 // them. The scorer joins on this string.
-struct BeDD { using S = xp::DoubleDouble; using Z = xp::DoubleDoubleComplex;
+struct BeDD { using S = xp::basic_dd<SweepTier>; using Z = xp::basic_dd_complex<SweepTier>;
               static const char* name() { return "DD"; } };
-struct BeFF { using S = xp::FloatFloat;   using Z = xp::FloatFloatComplex;
+struct BeFF { using S = xp::basic_ff<SweepTier>; using Z = xp::basic_ff_complex<SweepTier>;
               static const char* name() { return "FF"; } };
-struct BeQF { using S = xp::QuadFloat;    using Z = xp::QuadFloatComplex;
+struct BeQF { using S = xp::basic_qf<SweepTier>; using Z = xp::basic_qf_complex<SweepTier>;
               static const char* name() { return "QF"; } };
-struct BeTF { using S = xp::TripleFloat;  using Z = xp::TripleFloatComplex;
+struct BeTF { using S = xp::basic_tf<SweepTier>; using Z = xp::basic_tf_complex<SweepTier>;
               static const char* name() { return "TF"; } };
 
 // ---------------------------------------------------------------------------
@@ -530,6 +569,7 @@ int main(int argc, char** argv) {
   std::fprintf(f, "# xp-device-1\n");
   std::fprintf(f, "# raw device results; see scripts/sweep_device.cpp. NOT SCORED.\n");
   std::fprintf(f, "# where: %s\n", xpt::where_name());
+  std::fprintf(f, "# tier: %s\n", kSweepTierName);
   std::fprintf(f, "# grid: real=%zu complex=%zu  seed=%llu\n", nr, nc,
                (unsigned long long)seed);
   std::fprintf(f, "# grid-file: %s\n", grid.c_str());

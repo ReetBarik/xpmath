@@ -48,15 +48,45 @@ RAW_OUT=${RAW_OUT:-$REPO_ROOT/validation/b200/logs/sweep_b200_raw.csv}
 SCORED_OUT=${SCORED_OUT:-$REPO_ROOT/validation/b200/logs/sweep_b200_scored.csv}
 BASELINE=$REPO_ROOT/validation/sweep/sweep_baseline_b200.csv.gz
 
+# TIER=strict|fast|both (default strict, so a plain run behaves as before).
+# "both" runs the strict pass, then the fast pass, and exits with the first
+# nonzero exit. The fast pass builds sweep_device_fast, writes RAW_OUT and
+# SCORED_OUT with a _fast suffix and scores against sweep_baseline_fast_b200.
+# Each pass also writes <raw>.exits ("absolute=<n>" from --register and
+# "monotone=<n>"), the file scripts/p3_tier_gate.py reads.
+TIER=${TIER:-strict}
+case "$TIER" in
+  strict|fast) ;;
+  both)
+    rc_both=0
+    for _t in strict fast; do
+      TIER=$_t bash "${BASH_SOURCE[0]:-$0}"
+      _rc=$?
+      if [ "$rc_both" -eq 0 ]; then rc_both=$_rc; fi
+    done
+    exit "$rc_both"
+    ;;
+  *) echo "FATAL: TIER must be strict, fast or both (got '$TIER')" >&2; exit 2 ;;
+esac
+
 if [ ! -f "$REPO_ROOT/include/xp/dd_math.hpp" ]; then
   echo "FATAL: REPO_ROOT=$REPO_ROOT does not look like the repo. Set REPO_ROOT." >&2
   exit 2
 fi
 
+TIER_SUF=""
+REGISTER=$REPO_ROOT/validation/sweep/open_defects.txt
+if [ "$TIER" = fast ]; then
+  TIER_SUF="_fast"
+  RAW_OUT=${RAW_OUT%.csv}_fast.csv
+  SCORED_OUT=${SCORED_OUT%.csv}_fast.csv
+  BASELINE=$REPO_ROOT/validation/sweep/sweep_baseline_fast_b200.csv.gz
+fi
+
 LOGDIR="$REPO_ROOT/validation/b200/logs"
 mkdir -p "$LOGDIR"
 STAMP=$(date +%Y%m%d_%H%M%S)
-LOG="$LOGDIR/b200_sweep_${STAMP}.log"
+LOG="$LOGDIR/b200_sweep${TIER_SUF}_${STAMP}.log"
 
 exec > >(tee -a "$LOG") 2>&1
 
@@ -106,6 +136,16 @@ fi
 
 DEV_BIN=$BUILD_DIR/device/tests/sweep_device
 HOST_BIN=$BUILD_DIR/host/tests/sweep_accuracy
+if [ "$TIER" = fast ]; then
+  echo "--- building sweep_device_fast (EXCLUDE_FROM_ALL target) ---"
+  nice -n 10 cmake --build "$BUILD_DIR/device" --target sweep_device_fast -j"${BUILD_JOBS:-8}"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "FATAL: building sweep_device_fast exited $rc" >&2
+    exit "$rc"
+  fi
+  DEV_BIN=$BUILD_DIR/device/tests/sweep_device_fast
+fi
 if [ ! -x "$DEV_BIN" ]; then
   echo "FATAL: device producer missing: $DEV_BIN" >&2
   exit 2
@@ -117,7 +157,7 @@ fi
 
 echo
 echo "--- [2/3] sweep_device on this GPU ---"
-SWEEP_LOG="$LOGDIR/sweep_device_${STAMP}.out"
+SWEEP_LOG="$LOGDIR/sweep_device${TIER_SUF}_${STAMP}.out"
 "$DEV_BIN" --out "$RAW_OUT" >"$SWEEP_LOG" 2>&1
 rc=$?
 cat "$SWEEP_LOG"
@@ -161,7 +201,7 @@ if [ "$rc" -ne 0 ]; then
     echo "  no 'first fault' line; re-running every kernel"
   fi
 
-  ISO="$LOGDIR/isolate_${STAMP}"
+  ISO="$LOGDIR/isolate${TIER_SUF}_${STAMP}"
   mkdir -p "$ISO"
   faults=()
   for ((i = start; i < ${#keys[@]}; i++)); do
@@ -186,7 +226,7 @@ if [ "$rc" -ne 0 ]; then
     exit 3
   fi
 
-  STITCHED="$LOGDIR/sweep_b200_stitched.csv"
+  STITCHED="$LOGDIR/sweep_b200_stitched${TIER_SUF}.csv"
   {
     awk 'BEGIN{p=1} /^[^#]/ && !/^backend,/ {p=0} p' "$RAW_OUT"
     if [ "$start" -gt 0 ]; then
@@ -204,7 +244,7 @@ fi
 
 echo
 echo "--- [3/3] host score --where b200 ---"
-score_args=(--ulp --score-results "$RAW_OUT" --where b200 --out "$SCORED_OUT")
+score_args=(--tier "$TIER" --ulp --score-results "$RAW_OUT" --where b200 --out "$SCORED_OUT")
 if [ -f "$BASELINE" ]; then
   score_args+=(--baseline "$BASELINE")
   echo "  monotone-comparing against $BASELINE"
@@ -213,6 +253,24 @@ else
 fi
 "$HOST_BIN" "${score_args[@]}"
 rc=$?
+scorer_rc=$rc
+echo
+echo "--- gate exits (TIER=$TIER) -> ${RAW_OUT}.exits ---"
+"$HOST_BIN" --tier "$TIER" --ulp --register "$REGISTER" \
+    --score-results "$RAW_OUT" --where b200 > "$LOGDIR/gate_absolute_${TIER}_${STAMP}.log" 2>&1
+abs_rc=$?
+mono_rc=-1   # -1 = monotone gate skipped (no baseline file)
+if [ -f "$BASELINE" ]; then
+  "$HOST_BIN" --tier "$TIER" --score-results "$RAW_OUT" --where b200 \
+      --baseline "$BASELINE" > "$LOGDIR/gate_monotone_${TIER}_${STAMP}.log" 2>&1
+  mono_rc=$?
+fi
+printf 'absolute=%d\nmonotone=%d\n' "$abs_rc" "$mono_rc" > "${RAW_OUT}.exits"
+echo "  absolute (--register) exit: $abs_rc"
+echo "  monotone (--baseline) exit: $mono_rc"
+rc=$scorer_rc
+if [ "$rc" -eq 0 ]; then rc=$abs_rc; fi
+if [ "$rc" -eq 0 ] && [ "$mono_rc" -gt 0 ]; then rc=$mono_rc; fi
 echo
 echo "scorer exit: $rc"
 echo "raw    : $RAW_OUT"

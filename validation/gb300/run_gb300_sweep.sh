@@ -36,6 +36,31 @@ REPO_ROOT=${REPO_ROOT:-$(cd "$_self/../.." && pwd)}
 BUILD_DIR=${BUILD_DIR:-$REPO_ROOT/build-gb300-sweep}
 RAW_OUT=${RAW_OUT:-$REPO_ROOT/validation/gb300/logs/sweep_gb300_raw.csv}
 
+# TIER=strict|fast|both (default strict). "both" runs the strict pass, then the
+# fast pass, and exits with the first nonzero exit. The fast pass builds
+# sweep_device_fast and writes RAW_OUT with a _fast suffix. GB300 has no
+# committed baseline and cannot score here, so the printed scoring command (run
+# on the x86 login node) is score-only for both tiers.
+TIER=${TIER:-strict}
+case "$TIER" in
+  strict|fast) ;;
+  both)
+    rc_both=0
+    for _t in strict fast; do
+      TIER=$_t bash "${BASH_SOURCE[0]:-$0}"
+      _rc=$?
+      if [ "$rc_both" -eq 0 ]; then rc_both=$_rc; fi
+    done
+    exit "$rc_both"
+    ;;
+  *) echo "FATAL: TIER must be strict, fast or both (got '$TIER')" >&2; exit 2 ;;
+esac
+TIER_SUF=""
+if [ "$TIER" = fast ]; then
+  TIER_SUF="_fast"
+  RAW_OUT=${RAW_OUT%.csv}_fast.csv
+fi
+
 if [ ! -f "$REPO_ROOT/include/xp/dd_math.hpp" ]; then
   echo "FATAL: REPO_ROOT=$REPO_ROOT does not look like the repo. Set REPO_ROOT." >&2
   exit 2
@@ -44,7 +69,7 @@ fi
 LOGDIR="$REPO_ROOT/validation/gb300/logs"
 mkdir -p "$LOGDIR" "$(dirname "$RAW_OUT")"
 STAMP=$(date +%Y%m%d_%H%M%S)
-LOG="$LOGDIR/gb300_sweep_${STAMP}.log"
+LOG="$LOGDIR/gb300_sweep${TIER_SUF}_${STAMP}.log"
 
 exec > >(tee -a "$LOG") 2>&1
 
@@ -94,6 +119,16 @@ if [ "$rc" -ne 0 ]; then
 fi
 
 DEV_BIN=$BUILD_DIR/device/tests/sweep_device
+if [ "$TIER" = fast ]; then
+  echo "--- building sweep_device_fast (EXCLUDE_FROM_ALL target) ---"
+  nice -n 10 cmake --build "$BUILD_DIR/device" --target sweep_device_fast -j"${BUILD_JOBS:-8}"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "FATAL: building sweep_device_fast exited $rc" >&2
+    exit "$rc"
+  fi
+  DEV_BIN=$BUILD_DIR/device/tests/sweep_device_fast
+fi
 if [ ! -x "$DEV_BIN" ]; then
   echo "FATAL: device producer missing: $DEV_BIN" >&2
   exit 2
@@ -101,7 +136,7 @@ fi
 
 echo
 echo "--- [2/2] sweep_device on this GPU ---"
-SWEEP_LOG="$LOGDIR/sweep_device_${STAMP}.out"
+SWEEP_LOG="$LOGDIR/sweep_device${TIER_SUF}_${STAMP}.out"
 "$DEV_BIN" --out "$RAW_OUT" >"$SWEEP_LOG" 2>&1
 rc=$?
 cat "$SWEEP_LOG"
@@ -143,7 +178,7 @@ if [ "$rc" -ne 0 ]; then
     echo "  no 'first fault' line; re-running every kernel"
   fi
 
-  ISO="$LOGDIR/isolate_${STAMP}"
+  ISO="$LOGDIR/isolate${TIER_SUF}_${STAMP}"
   mkdir -p "$ISO"
   faults=()
   for ((i = start; i < ${#keys[@]}; i++)); do
@@ -167,7 +202,7 @@ if [ "$rc" -ne 0 ]; then
     exit 3
   fi
 
-  STITCHED="$LOGDIR/sweep_gb300_stitched.csv"
+  STITCHED="$LOGDIR/sweep_gb300_stitched${TIER_SUF}.csv"
   {
     awk 'BEGIN{p=1} /^[^#]/ && !/^backend,/ {p=0} p' "$RAW_OUT"
     if [ "$start" -gt 0 ]; then
@@ -188,5 +223,5 @@ echo "sweep_device exit 0 -- raw device output written (NOT scored)."
 echo "raw : $RAW_OUT"
 echo "log : $LOG"
 echo "score on an x86 login node with:"
-echo "  <host-build>/host/tests/sweep_accuracy --ulp --score-results $RAW_OUT --where gb300 --out /tmp/gb300_scored.csv"
+echo "  <host-build>/host/tests/sweep_accuracy --tier $TIER --ulp --score-results $RAW_OUT --where gb300 --out /tmp/gb300_scored${TIER_SUF}.csv"
 exit 0
