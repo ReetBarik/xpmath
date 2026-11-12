@@ -25,6 +25,18 @@ tier; (d) (b) with caps. (c) was chosen; the fast tier uses (d)'s caps.
 - **Bound rule**: fresh ulps <= 1x bound, or (reference ulps > 1x bound and not
   Worse(fresh, reference)).
 - **Speed** = CHECK-PERF ratio per op for that backend, same GPU before/after.
+- **Gate script** = `python3 -I scripts/p3_tier_gate.py` (stdlib, Python 3.6+).
+  It reads the candidate's FAST-tier scored sweeps (`<loc>.csv[.gz]` and
+  `<loc>.exits`) plus `ratios_<arch>.csv`, and judges them against the table
+  below. Exit codes: **0** every strict rule passed (accept into strict);
+  **1** strict failed but every fast rule passed (accept into fast only);
+  **2** reject; **3** tool error, missing data or drift (stop and ask).
+- **Worker flow**: make the change in the fast tier first and score it with
+  `TIER=fast`. On gate exit 0, promote the change to strict and re-run
+  `TIER=both`. On exit 1 keep it fast-only. On 2 reject; on 3 stop.
+- **Device binaries**: the fast device binaries (`sweep_device_fast`) are first
+  run on GPUs in P3.1[dd]. A fast-device fault there is a P3.0b defect, not a
+  P3.1[dd] defect: stop and report it.
 
 | Rule | strict | fast |
 |---|---|---|
@@ -38,8 +50,15 @@ tier; (d) (b) with caps. (c) was chosen; the fast tier uses (d)'s caps.
 GB300 is scored and timed, reported only, never gated.
 
 ## Gate procedure for every P3.1-P3.5[b] task (mechanical)
-0. **Prerequisite:** P3.0b (switch, fast baselines, frozen reference, the
-   compare script, xpmath-kokkos two-tier bit-identity tests) is done. If not: stop.
+0. **Prerequisite:** P3.0b is done: `include/xp/tier.hpp` and
+   `include/xp/{dd,ff,tf,qf}_fast.hpp` (the tier switch), the fast baselines
+   `validation/sweep/sweep_baseline_fast.csv.gz` and
+   `sweep_baseline_fast_{a100,b200,mi250,mi300}.csv.gz`, the frozen Reference
+   `validation/sweep/reference_4d597fd/` (guarded by
+   `validation/check_reference_frozen.sh`), `scripts/p3_tier_gate.py`,
+   `perf/perf_ratios.py` in xpmath-kokkos, and the tier-aware
+   `validation/<arch>/run_*_sweep.sh` (`TIER=strict|fast|both`). If any is
+   missing: stop.
 1. Never edit the bound, its derivation, `kUlpAllowance`, the register, or the
    Reference. If the change seems to need it: **stop and ask the user**.
 2. Absolute gate fails or the register changes on host or any GPU -> **reject**.
