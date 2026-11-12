@@ -146,7 +146,7 @@ XPMATH_INLINE_FUNCTION DoubleDouble dd_log_fast_impl(DoubleDouble a) {
         return DoubleDouble(0.0);
     }
     DoubleDouble b = DoubleDouble(detail::log(a.hi));
-    for (int k = 0; k < 1; ++k) {
+    for (int k = 0; k < 2; ++k) {
         if (b.hi < -671.7 && -b.hi <= 709.78271289338397) {
             DoubleDouble s0 = exp(negate(b));
             b = subtract(add(b, multiply(a, s0)), DoubleDouble(1.0));
