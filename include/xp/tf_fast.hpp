@@ -159,7 +159,27 @@ XPMATH_INLINE_FUNCTION TripleFloatFast sqrt(TripleFloatFast a) { return to_fast(
 XPMATH_INLINE_FUNCTION TripleFloatFast round_to_nearest_int(TripleFloatFast a) { return to_fast(round_to_nearest_int(to_strict(a))); }
 XPMATH_INLINE_FUNCTION TripleFloatFast pow_int(TripleFloatFast a, int n) { return to_fast(pow_int(to_strict(a), n)); }
 XPMATH_INLINE_FUNCTION TripleFloatFast exp(TripleFloatFast a) { return to_fast(exp(to_strict(a))); }
-XPMATH_INLINE_FUNCTION TripleFloatFast log(TripleFloatFast a) { return to_fast(log(to_strict(a))); }
+namespace detail {
+XPMATH_INLINE_FUNCTION TripleFloat tf_log_fast_impl(TripleFloat a) {
+    if (detail::isinf(a.f0)) return a;
+    if (a.f0 <= 0.0f) {
+        XPMATH_PRINTF("TFLOG: non-positive argument\n");
+        return TripleFloat(0.0f);
+    }
+    TripleFloat x = TripleFloat(detail::log(a.f0));
+    for (int k = 0; k < 2; ++k) {
+        if (x.f0 < -54.1f && -x.f0 <= 88.722839f) {
+            TripleFloat e = exp(negate(x));
+            x = subtract(add(x, multiply(a, e)), TripleFloat(1.0f));
+        } else {
+            TripleFloat e = exp(x);
+            x = add(x, divide(subtract(a, e), e));
+        }
+    }
+    return x;
+}
+} // namespace detail
+XPMATH_INLINE_FUNCTION TripleFloatFast log(TripleFloatFast a) { return to_fast(detail::tf_log_fast_impl(to_strict(a))); }
 XPMATH_INLINE_FUNCTION TripleFloatFast log1p(TripleFloatFast a) { return to_fast(log1p(to_strict(a))); }
 XPMATH_INLINE_FUNCTION TripleFloatFast pow(TripleFloatFast a, TripleFloatFast b) { return to_fast(pow(to_strict(a), to_strict(b))); }
 XPMATH_INLINE_FUNCTION void sincos(TripleFloatFast a, TripleFloatFast& sin_a, TripleFloatFast& cos_a) { TripleFloat t_sin_a; TripleFloat t_cos_a; sincos(to_strict(a), t_sin_a, t_cos_a); sin_a = to_fast(t_sin_a); cos_a = to_fast(t_cos_a); }
