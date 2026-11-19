@@ -307,9 +307,14 @@ def main():
                fresh_mut=lambda r: set_row(r, KL, ulps=101.0))
         expect('reject: bound rule Registered defect still requires bound pass', 2, 'reject', plain, workdir=W,
                fresh_mut=lambda r: set_row(r, KD, ulps=300.0))
-        expect('reject: one op 5% slower on mi250', 2, 'more than 3% slower on a gated GPU: 1', plain,
+        expect('strict pass: unchanged op 5% slower, report only', 0,
+               'code unchanged (report only): 1', plain,
                workdir=W,
                perf_mut=lambda p: p['gfx90a'].__setitem__(0, ('DD_fast', 'add', 'chain', 100, 105)))
+        expect('reject: changed op 5% slower on mi250', 2,
+               'more than 3% slower on a gated GPU: 1', plain,
+               workdir=W,
+               perf_mut=set_perf('DD_fast', 'exp', 105, ['gfx90a']))
         expect('reject: complex op 6% slower', 2, 'slower on a gated GPU: 1', plain, workdir=W,
                perf_mut=set_perf('cDD_fast', 'exp', 106, ['sm_80']))
         expect('reject: science kernel 5% slower', 2, 'slower on a gated GPU: 1', plain, workdir=W,

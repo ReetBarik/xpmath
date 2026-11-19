@@ -61,9 +61,13 @@ tier; (d) (b) with caps. (c) was chosen; the fast tier uses (d)'s caps.
 | vs Reference | `f <= max(1, r + 0.5)` | `f <= max(4, r + 1)` |
 | vs Current | `f <= max(1, c + 0.5)` | none (Reference cap is absolute) |
 | Speed: changed op | >= 3% faster on >= 1 gated GPU | >= 10% faster on >= 1 gated GPU |
-| Speed: every op of that backend | no more than 3% slower on any gated GPU | same |
+| Speed: changed ops (`--ops`, real and complex) and the science kernel | no more than 3% slower on any gated GPU | same |
 
 GB300 is scored and timed, reported only, never gated.
+
+Other ops of the backend (code unchanged) more than 3% slower are
+printed, report only (user, 2026-11-19: MI300 timing drift on
+unchanged code flagged P3.1[dd] twice).
 
 ## Gate procedure for every P3.1-P3.5[b] task (mechanical)
 0. **Prerequisite:** P3.0b is done: `include/xp/tier.hpp` and
@@ -108,7 +112,7 @@ neither, 3 = stop.
 **Deferred GPU (C-<arch> step 3):** run the device sweep at the row's after-SHA,
 score it with the same compare script, tier and Reference the task used.
 Any failing row -> stop (C-<arch> "Stop if"). Speed for a deferred GPU comes from
-C-<arch> step 5 (all rows together); any op more than 3% slower -> stop and ask.
+C-<arch> step 5 (all rows together); any changed op or science row more than 3% slower -> stop and ask.
 
 Phase 2 context: tf/qf inlining was bit-identical but NO-GO (AMD 17-30% faster,
 NVIDIA 35-65% slower); parked for P3.4[tf]/[qf]. It does not affect this policy.

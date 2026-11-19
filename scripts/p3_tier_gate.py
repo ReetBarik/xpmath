@@ -43,7 +43,7 @@ FAST_SLACK = 1.0
 
 STRICT_SPEED = 1.0 / 1.03    # changed op: at least 3% faster
 FAST_SPEED = 1.0 / 1.10      # changed op: at least 10% faster
-SLOWER_LIMIT = 1.03          # every op: no more than 3% slower
+SLOWER_LIMIT = 1.03          # changed ops + science: no more than 3% slower
 
 GATED = ['host', 'a100', 'b200', 'mi250', 'mi300']
 DEFERRABLE = ['a100', 'b200', 'mi250', 'mi300']          # host is never deferrable
@@ -374,7 +374,7 @@ def run(args):
         return 2
 
     # 4. speed
-    slower, best = [], {op: None for op in ops}
+    slower, drift, best = [], [], {op: None for op in ops}
     for loc in gated + ['gb300']:
         if loc == 'host':
             continue
@@ -395,16 +395,24 @@ def run(args):
         if loc == 'gb300':
             continue
         for t, o, k, q in rows:
-            if q > SLOWER_LIMIT:
+            if q > SLOWER_LIMIT and (o in best or k == 'science'):
                 slower.append((loc, t, o, q))
+            elif q > SLOWER_LIMIT:
+                drift.append((loc, t, o, q))
             if o in best and (best[o] is None or q < best[o]):
                 best[o] = q
     for op in ops:
         if best[op] is None:
             raise Stop('changed op %s has no perf row on any gated GPU' % op)
-    report.append('ops more than 3%% slower on a gated GPU: %d' % len(slower))
+    report.append('ops more than 3%% slower on a gated GPU: %d'
+                  ' (changed ops + science)' % len(slower))
     for loc, t, o, q in slower[:3]:
         report.append('   %s %s/%s ratio %.3f' % (loc, t, o, q))
+    report.append('other ops more than 3%% slower, code unchanged'
+                  ' (report only): %d' % len(drift))
+    for loc, t, o, q in drift:
+        report.append('   %s %s/%s ratio %.3f (report only)'
+                      % (loc, t, o, q))
     strict_speed = not slower and all(best[o] <= STRICT_SPEED for o in ops)
     fast_speed = not slower and all(best[o] <= FAST_SPEED for o in ops)
 
