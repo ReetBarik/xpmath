@@ -266,9 +266,15 @@ def load_ratios(path, perf_types):
                     b, a, q = float(r['before_ns']), float(r['after_ns']), float(r['ratio'])
                 except ValueError:
                     raise Stop('%s: non-numeric row %r' % (path, r))
-                if b <= 0 or abs(q - a / b) > 0.01 * max(q, a / b):
-                    raise Stop('%s: ratio %g is not after/before (%g/%g) for %s/%s'
-                               % (path, q, a, b, r['type'], r['op']))
+                # ratio = median of per-pair after/before
+                # (perf/perf_ratios.py), not after_ns/before_ns
+                if not all(math.isfinite(x) and x > 0
+                           for x in (b, a, q)):
+                    raise Stop('%s: before/after/ratio must be'
+                               ' finite and > 0 (%g/%g/%g)'
+                               ' for %s/%s'
+                               % (path, b, a, q, r['type'],
+                                  r['op']))
                 rows.append((r['type'], r['op'], r['kind'], q))
     except OSError as e:
         raise Stop('cannot read %s: %s' % (path, e))

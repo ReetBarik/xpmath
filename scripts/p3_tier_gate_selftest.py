@@ -89,8 +89,10 @@ def write_perf(d, perf):
     for arch, rows in perf.items():
         with open(os.path.join(d, 'ratios_%s.csv' % arch), 'w') as f:
             f.write('type,op,kind,before_ns,after_ns,ratio\n')
-            for t, op, kind, b, a in rows:
-                f.write('%s,%s,%s,%s,%s,%.6f\n' % (t, op, kind, b, a, a / b))
+            for row in rows:
+                t, op, kind, b, a = row[:5]
+                q = row[5] if len(row) > 5 else a / b
+                f.write('%s,%s,%s,%s,%s,%.6f\n' % (t, op, kind, b, a, q))
 
 
 def run_case(repo, fresh_mut=None, perf_mut=None, exits=None, drop=(), deferred='', ops='exp',
@@ -150,6 +152,17 @@ def set_perf(typ, op, after, archs=None):
             if a == 'sm_103' or (archs and a not in archs):
                 continue
             p[a] = [(r[0], r[1], r[2], 100, after) if (r[0], r[1]) == (typ, op) else r for r in rows]
+    return go
+
+
+def set_ratio(typ, op, after, q, archs=None):
+    def go(p):
+        for a, rows in p.items():
+            if a == 'sm_103' or (archs and a not in archs):
+                continue
+            p[a] = [(r[0], r[1], r[2], 100, after, q)
+                    if (r[0], r[1]) == (typ, op) else r
+                    for r in rows]
     return go
 
 
@@ -315,6 +328,14 @@ def main():
                'more than 3% slower on a gated GPU: 1', plain,
                workdir=W,
                perf_mut=set_perf('DD_fast', 'exp', 105, ['gfx90a']))
+        expect('strict pass: ratio column != after/before', 0,
+               'accept into strict', plain, workdir=W,
+               perf_mut=set_ratio('DD_fast', 'exp', 100, 0.9))
+        expect('reject: ratio 1.05, after/before 0.9', 2,
+               'more than 3% slower on a gated GPU: 1', plain,
+               workdir=W,
+               perf_mut=set_ratio('DD_fast', 'exp', 90, 1.05,
+                                  ['gfx90a']))
         expect('reject: complex op 6% slower', 2, 'slower on a gated GPU: 1', plain, workdir=W,
                perf_mut=set_perf('cDD_fast', 'exp', 106, ['sm_80']))
         expect('reject: science kernel 5% slower', 2, 'slower on a gated GPU: 1', plain, workdir=W,
@@ -368,7 +389,7 @@ def main():
         work = tempfile.mkdtemp(dir=W)
         write_perf(os.path.join(work, 'perf'), default_perf())
         with open(os.path.join(work, 'perf', 'ratios_sm_80.csv'), 'a') as f:
-            f.write('DD_fast,mul,chain,100,90,1.5\n')
+            f.write('DD_fast,mul,chain,100,90,0\n')
         COUNT[0] += 1
         fresh = os.path.join(work, 'fresh'); os.makedirs(fresh)
         for l in LOCS:
@@ -377,8 +398,8 @@ def main():
         r = subprocess.run([sys.executable, '-I', GATE, '--backend', 'DD', '--ops', 'exp', '--base', plain.base,
                             '--fresh', fresh, '--perf', os.path.join(work, 'perf'), '--repo', plain.root],
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-        ok = r.returncode == 3 and 'is not after/before' in r.stdout
-        print('%s %-52s exit %d (want 3)' % ('ok  ' if ok else 'FAIL', 'stop: perf ratio is not after/before',
+        ok = r.returncode == 3 and 'must be finite and > 0' in r.stdout
+        print('%s %-52s exit %d (want 3)' % ('ok  ' if ok else 'FAIL', 'stop: perf ratio is not positive',
                                              r.returncode))
         if not ok:
             FAILED.append('perf ratio'); print(r.stdout[-600:])

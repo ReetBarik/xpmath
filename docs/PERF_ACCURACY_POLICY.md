@@ -36,7 +36,9 @@ tier; (d) (b) with caps. (c) was chosen; the fast tier uses (d)'s caps.
 - **Strict vs Current:** `f <= max(1, c + 0.5)`.
 - **Fast vs Reference:** `f <= max(4, r + 1.0)`. No check against fast Current;
   the Reference cap is absolute so chained overrides cannot drift past it.
-- **Speed** = CHECK-PERF ratio per op for that backend, same GPU before/after.
+- **Speed** = CHECK-PERF `ratio` column per op for that backend, same GPU
+  before/after: the median of per-pair after/before (not
+  after_ns/before_ns, separate medians printed to 4 decimals).
 - **Gate script** = `python3 -I scripts/p3_tier_gate.py` (stdlib, Python 3.6+).
   It reads the candidate's FAST-tier scored sweeps (`<loc>.csv[.gz]` and
   `<loc>.exits`) plus `ratios_<arch>.csv`, and judges them against the table
