@@ -139,7 +139,29 @@ XPMATH_INLINE_FUNCTION FloatFloatFast sqrt(FloatFloatFast a) { return to_fast(sq
 XPMATH_INLINE_FUNCTION FloatFloatFast round_to_nearest_int(FloatFloatFast a) { return to_fast(round_to_nearest_int(to_strict(a))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast pow_int(FloatFloatFast a, int n) { return to_fast(pow_int(to_strict(a), n)); }
 XPMATH_INLINE_FUNCTION FloatFloatFast exp(FloatFloatFast a) { return to_fast(exp(to_strict(a))); }
-XPMATH_INLINE_FUNCTION FloatFloatFast log(FloatFloatFast a) { return to_fast(log(to_strict(a))); }
+namespace detail {
+XPMATH_INLINE_FUNCTION FloatFloat ff_log_fast_impl(FloatFloat a) {
+    if (detail::isinf(a.hi)) return a;
+    if (a.hi <= 0.0f) {
+        XPMATH_PRINTF("FFLOG: non-positive argument\n");
+        return FloatFloat(0.0f);
+    }
+    FloatFloat b = FloatFloat(detail::log(a.hi));
+    for (int k = 0; k < 1; ++k) {
+        if (b.hi < -70.7f && -b.hi <= 88.722839f) {
+            FloatFloat s0 = exp(negate(b));
+            b = subtract(add(b, multiply(a, s0)), FloatFloat(1.0f));
+        } else {
+            FloatFloat s0 = exp(b);
+            FloatFloat s1 = subtract(a, s0);
+            FloatFloat s2 = divide(s1, s0);
+            b = add(b, s2);
+        }
+    }
+    return b;
+}
+} // namespace detail
+XPMATH_INLINE_FUNCTION FloatFloatFast log(FloatFloatFast a) { return to_fast(detail::ff_log_fast_impl(to_strict(a))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast pow(FloatFloatFast a, FloatFloatFast b) { return to_fast(pow(to_strict(a), to_strict(b))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast ff_mul_ext(FloatFloatFast x, FloatFloatFast y, float& err) { return to_fast(ff_mul_ext(to_strict(x), to_strict(y), err)); }
 XPMATH_INLINE_FUNCTION FloatFloatFast ff_log_ext(FloatFloatFast a, float& err) { return to_fast(ff_log_ext(to_strict(a), err)); }
