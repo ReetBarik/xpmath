@@ -137,7 +137,53 @@ XPMATH_INLINE_FUNCTION DoubleDoubleFast abs(DoubleDoubleFast a) { return to_fast
 XPMATH_INLINE_FUNCTION DoubleDoubleFast sqrt(DoubleDoubleFast a) { return to_fast(sqrt(to_strict(a))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast round_to_nearest_int(DoubleDoubleFast a) { return to_fast(round_to_nearest_int(to_strict(a))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast pow_int(DoubleDoubleFast a, int n) { return to_fast(pow_int(to_strict(a), n)); }
-XPMATH_INLINE_FUNCTION DoubleDoubleFast exp(DoubleDoubleFast a) { return to_fast(exp(to_strict(a))); }
+namespace detail {
+// P3.2[dd] fast exp. Same guards, Cody-Waite pieces, nq = 6 squarings
+// and 2^nz scaling as strict exp; two changes: the reduction integer
+// is rint(a.hi * 1/ln2) (one native multiply, not divide(a, ln2)),
+// and e^x - 1 is a fixed 12-term Horner series with 1/n! constants
+// (no divide_scalar, no data-dependent exit). Terms 7..12 weigh
+// < 1e-17 of the sum at |x| <= ln2/128, so they run in double.
+XPMATH_INLINE_FUNCTION DoubleDouble dd_exp_fast_impl(DoubleDouble a) {
+    if (a.hi != a.hi) return a;
+    if (a.hi > 709.78271289338397) {
+        XPMATH_PRINTF("DDEXP: overflow\n");
+        return DoubleDouble(HUGE_VAL);
+    }
+    if (a.hi < -745.2) return DoubleDouble(0.0);
+    const double kd = detail::rint(a.hi * 0x1.71547652b82fep+0);
+    const int nz = (int)kd;
+    const double kLn2_1 =  0x1.62e42fefa38p-1;
+    const double kLn2_2 =  0x1.ef35793c768p-45;
+    const double kLn2_3 = -0x1.9ff0342543p-90;
+    DoubleDouble r = subtract(a, DoubleDouble(kd * kLn2_1));
+    r = subtract(r, DoubleDouble(kd * kLn2_2));
+    r = subtract(r, DoubleDouble(kd * kLn2_3));
+    if (r.hi == 0.0) return DoubleDouble(detail::ldexp(1.0, nz));
+    const DoubleDouble x = multiply_scalar(r, 0x1p-6);
+    double q = 0x1.1eed8eff8d898p-29;                                  // 1/12!
+    q = detail::eft_add(0x1.ae64567f544e4p-26, detail::eft_mul(q, x.hi)); // 1/11!
+    q = detail::eft_add(0x1.27e4fb7789f5cp-22, detail::eft_mul(q, x.hi)); // 1/10!
+    q = detail::eft_add(0x1.71de3a556c734p-19, detail::eft_mul(q, x.hi)); // 1/9!
+    q = detail::eft_add(0x1.a01a01a01a01ap-16, detail::eft_mul(q, x.hi)); // 1/8!
+    q = detail::eft_add(0x1.a01a01a01a01ap-13, detail::eft_mul(q, x.hi)); // 1/7!
+    DoubleDouble t = add(DoubleDouble(0x1.6c16c16c16c17p-10, -0x1.f49f49f49f49fp-65), multiply(DoubleDouble(q), x)); // 1/6!
+    t = add(DoubleDouble(0x1.1111111111111p-7, 0x1.1111111111111p-63), multiply(t, x)); // 1/5!
+    t = add(DoubleDouble(0x1.5555555555555p-5, 0x1.5555555555555p-59), multiply(t, x)); // 1/4!
+    t = add(DoubleDouble(0x1.5555555555555p-3, 0x1.5555555555555p-57), multiply(t, x)); // 1/3!
+    t = add(DoubleDouble(0.5), multiply(t, x));
+    t = add(DoubleDouble(1.0), multiply(t, x));
+    DoubleDouble s = multiply(t, x);                                   // e^x - 1
+    for (int i = 0; i < 6; ++i) s = multiply(s, add(s, DoubleDouble(2.0)));
+    s = add(DoubleDouble(1.0), s);
+    if (nz >= -1021 && nz <= 1023) {
+        const double pow2 = detail::ldexp(1.0, nz);
+        return DoubleDouble(s.hi * pow2, s.lo * pow2);
+    }
+    return DoubleDouble(detail::ldexp(s.hi, nz), detail::ldexp(s.lo, nz));
+}
+} // namespace detail
+XPMATH_INLINE_FUNCTION DoubleDoubleFast exp(DoubleDoubleFast a) { return to_fast(detail::dd_exp_fast_impl(to_strict(a))); }
 namespace detail {
 XPMATH_INLINE_FUNCTION DoubleDouble dd_log_fast_impl(DoubleDouble a) {
     if (detail::isinf(a.hi)) return a;
