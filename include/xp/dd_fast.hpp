@@ -185,6 +185,7 @@ XPMATH_INLINE_FUNCTION DoubleDouble dd_exp_fast_impl(DoubleDouble a) {
 } // namespace detail
 XPMATH_INLINE_FUNCTION DoubleDoubleFast exp(DoubleDoubleFast a) { return to_fast(detail::dd_exp_fast_impl(to_strict(a))); }
 namespace detail {
+// P3.2[dd]-chain: the Newton steps call the fast exp.
 XPMATH_INLINE_FUNCTION DoubleDouble dd_log_fast_impl(DoubleDouble a) {
     if (detail::isinf(a.hi)) return a;
     if (a.hi <= 0.0) {
@@ -194,10 +195,10 @@ XPMATH_INLINE_FUNCTION DoubleDouble dd_log_fast_impl(DoubleDouble a) {
     DoubleDouble b = DoubleDouble(detail::log(a.hi));
     for (int k = 0; k < 2; ++k) {
         if (b.hi < -671.7 && -b.hi <= 709.78271289338397) {
-            DoubleDouble s0 = exp(negate(b));
+            DoubleDouble s0 = dd_exp_fast_impl(negate(b));
             b = subtract(add(b, multiply(a, s0)), DoubleDouble(1.0));
         } else {
-            DoubleDouble s0 = exp(b);
+            DoubleDouble s0 = dd_exp_fast_impl(b);
             DoubleDouble s1 = subtract(a, s0);
             DoubleDouble s2 = divide(s1, s0);
             b = add(b, s2);
