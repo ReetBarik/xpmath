@@ -294,7 +294,15 @@ XPMATH_INLINE_FUNCTION FloatFloatFast abs(FloatFloatComplexFast z) { return to_f
 XPMATH_INLINE_FUNCTION FloatFloatComplexFast conj(FloatFloatComplexFast z) { return to_fast(conj(to_strict(z))); }
 XPMATH_INLINE_FUNCTION FloatFloatComplexFast sqrt(FloatFloatComplexFast z) { return to_fast(sqrt(to_strict(z))); }
 XPMATH_INLINE_FUNCTION FloatFloatComplexFast exp(FloatFloatComplexFast z) { return to_fast(exp(to_strict(z))); }
-XPMATH_INLINE_FUNCTION FloatFloatComplexFast log(FloatFloatComplexFast z) { return to_fast(log(to_strict(z))); }
+// P3.2[ff]-chain: strict complex log body, fast real log.
+// Not inline (strict is inline, but its real log is a call;
+// this body inlines the fast real log and its fast exps). TD-4.
+XPMATH_NOINLINE_FUNCTION FloatFloatComplexFast log(FloatFloatComplexFast z) {
+    const FloatFloatComplex w = to_strict(z);
+    const FloatFloat modulus = abs(w);
+    const FloatFloat arg = atan2(w.im, w.re);
+    return to_fast(FloatFloatComplex(detail::ff_log_fast_impl(modulus), arg));
+}
 XPMATH_INLINE_FUNCTION FloatFloatComplexFast log1p(FloatFloatComplexFast w) { return to_fast(log1p(to_strict(w))); }
 XPMATH_INLINE_FUNCTION FloatFloatComplexFast log10(FloatFloatComplexFast z) { return to_fast(log10(to_strict(z))); }
 XPMATH_INLINE_FUNCTION FloatFloatComplexFast sin(FloatFloatComplexFast z) { return to_fast(sin(to_strict(z))); }
