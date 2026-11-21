@@ -138,7 +138,52 @@ XPMATH_INLINE_FUNCTION FloatFloatFast abs(FloatFloatFast a) { return to_fast(abs
 XPMATH_INLINE_FUNCTION FloatFloatFast sqrt(FloatFloatFast a) { return to_fast(sqrt(to_strict(a))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast round_to_nearest_int(FloatFloatFast a) { return to_fast(round_to_nearest_int(to_strict(a))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast pow_int(FloatFloatFast a, int n) { return to_fast(pow_int(to_strict(a), n)); }
-XPMATH_INLINE_FUNCTION FloatFloatFast exp(FloatFloatFast a) { return to_fast(exp(to_strict(a))); }
+namespace detail {
+// P3.2[ff] fast exp. Same guards, four Cody-Waite pieces, nq = 4
+// squarings and 2^nz scaling as strict exp; two changes: the
+// reduction integer is rint(a.hi * 1/ln2) (one native float multiply,
+// not divide(a, ln2)), and e^x - 1 is a fixed 8-term Horner series
+// with 1/n! constants (no divide_scalar, no data-dependent exit).
+// Terms 5..8 weigh < 2e-9 of the sum at |x| <= ln2/32, so they run
+// in float; terms 1..4 in FF.
+XPMATH_INLINE_FUNCTION FloatFloat ff_exp_fast_impl(FloatFloat a) {
+    if (a.hi != a.hi) return a;
+    if (a.hi > 88.722839f) {
+        XPMATH_PRINTF("FFEXP: overflow\n");
+        return FloatFloat(HUGE_VALF);
+    }
+    if (a.hi < -104.0f) return FloatFloat(0.0f);
+    const float kf = detail::rint(detail::eft_mul(a.hi, 0x1.715476p+0f));
+    const int nz = (int)kf;
+    const float kLn2_1 =  0x1.62e4p-1f;
+    const float kLn2_2 =  0x1.7f7ep-20f;
+    const float kLn2_3 = -0x1.c61p-37f;
+    const float kLn2_4 = -0x1.950ep-54f;
+    FloatFloat r = subtract(a, FloatFloat(kf * kLn2_1));
+    r = subtract(r, FloatFloat(kf * kLn2_2));
+    r = subtract(r, FloatFloat(kf * kLn2_3));
+    r = subtract(r, FloatFloat(kf * kLn2_4));
+    if (r.hi == 0.0f) return FloatFloat(ldexpf(1.0f, nz));
+    const FloatFloat x = multiply_scalar(r, 0x1p-4f);
+    float q = 0x1.a01a02p-16f;                                   // 1/8!
+    q = detail::eft_add(0x1.a01a02p-13f, detail::eft_mul(q, x.hi)); // 1/7!
+    q = detail::eft_add(0x1.6c16c2p-10f, detail::eft_mul(q, x.hi)); // 1/6!
+    q = detail::eft_add(0x1.111112p-7f, detail::eft_mul(q, x.hi));  // 1/5!
+    FloatFloat t = add(FloatFloat(0x1.555556p-5f, -0x1.555556p-30f), multiply(FloatFloat(q), x)); // 1/4!
+    t = add(FloatFloat(0x1.555556p-3f, -0x1.555556p-28f), multiply(t, x)); // 1/3!
+    t = add(FloatFloat(0.5f), multiply(t, x));
+    t = add(FloatFloat(1.0f), multiply(t, x));
+    FloatFloat s = multiply(t, x);                               // e^x - 1
+    for (int i = 0; i < 4; ++i) s = multiply(s, add(s, FloatFloat(2.0f)));
+    s = add(FloatFloat(1.0f), s);
+    if (nz >= -125 && nz <= 127) {
+        const float pow2 = ldexpf(1.0f, nz);
+        return FloatFloat(s.hi * pow2, s.lo * pow2);
+    }
+    return FloatFloat(ldexpf(s.hi, nz), ldexpf(s.lo, nz));
+}
+} // namespace detail
+XPMATH_INLINE_FUNCTION FloatFloatFast exp(FloatFloatFast a) { return to_fast(detail::ff_exp_fast_impl(to_strict(a))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast log(FloatFloatFast a) { return to_fast(log(to_strict(a))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast pow(FloatFloatFast a, FloatFloatFast b) { return to_fast(pow(to_strict(a), to_strict(b))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast ff_mul_ext(FloatFloatFast x, FloatFloatFast y, float& err) { return to_fast(ff_mul_ext(to_strict(x), to_strict(y), err)); }
