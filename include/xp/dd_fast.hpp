@@ -289,7 +289,14 @@ XPMATH_INLINE_FUNCTION DoubleDoubleFast abs(DoubleDoubleComplexFast z) { return 
 XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast conj(DoubleDoubleComplexFast z) { return to_fast(conj(to_strict(z))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast sqrt(DoubleDoubleComplexFast z) { return to_fast(sqrt(to_strict(z))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast exp(DoubleDoubleComplexFast z) { return to_fast(exp(to_strict(z))); }
-XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast log(DoubleDoubleComplexFast z) { return to_fast(log(to_strict(z))); }
+// P3.2[dd]-chain: strict complex log body, fast real log.
+// Not inline, same as strict complex log (TD-4, sm_100).
+XPMATH_NOINLINE_FUNCTION DoubleDoubleComplexFast log(DoubleDoubleComplexFast z) {
+    const DoubleDoubleComplex w = to_strict(z);
+    const DoubleDouble modulus = abs(w);
+    const DoubleDouble arg = atan2(w.im, w.re);
+    return to_fast(DoubleDoubleComplex(detail::dd_log_fast_impl(modulus), arg));
+}
 XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast log1p(DoubleDoubleComplexFast w) { return to_fast(log1p(to_strict(w))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast log10(DoubleDoubleComplexFast z) { return to_fast(log10(to_strict(z))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast sin(DoubleDoubleComplexFast z) { return to_fast(sin(to_strict(z))); }
