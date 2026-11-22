@@ -213,7 +213,31 @@ XPMATH_NOINLINE_FUNCTION TripleFloat tf_exp_fast_impl(TripleFloat a) {
 }
 } // namespace detail
 XPMATH_INLINE_FUNCTION TripleFloatFast exp(TripleFloatFast a) { return to_fast(detail::tf_exp_fast_impl(to_strict(a))); }
-XPMATH_INLINE_FUNCTION TripleFloatFast log(TripleFloatFast a) { return to_fast(log(to_strict(a))); }
+namespace detail {
+// P3.2[tf]-chain: strict TF log (3 Newton steps from a float
+// seed, KI-23 small-argument branch); the Newton steps call the
+// fast exp. NOINLINE like strict TF log (TD-4; P2.2[tf]
+// code-size lesson).
+XPMATH_NOINLINE_FUNCTION TripleFloat tf_log_fast_impl(TripleFloat a) {
+    if (detail::isinf(a.f0)) return a;
+    if (a.f0 <= 0.0f) {
+        XPMATH_PRINTF("TFLOG: non-positive argument\n");
+        return TripleFloat(0.0f);
+    }
+    TripleFloat x = TripleFloat(detail::log(a.f0));
+    for (int i = 0; i < 3; i++) {
+        if (x.f0 < -54.1f && -x.f0 <= 88.722839f) {
+            TripleFloat e = tf_exp_fast_impl(negate(x));
+            x = subtract(add(x, multiply(a, e)), TripleFloat(1.0f));
+        } else {
+            TripleFloat e = tf_exp_fast_impl(x);
+            x = add(x, divide(subtract(a, e), e));
+        }
+    }
+    return x;
+}
+} // namespace detail
+XPMATH_INLINE_FUNCTION TripleFloatFast log(TripleFloatFast a) { return to_fast(detail::tf_log_fast_impl(to_strict(a))); }
 XPMATH_INLINE_FUNCTION TripleFloatFast log1p(TripleFloatFast a) { return to_fast(log1p(to_strict(a))); }
 XPMATH_INLINE_FUNCTION TripleFloatFast pow(TripleFloatFast a, TripleFloatFast b) { return to_fast(pow(to_strict(a), to_strict(b))); }
 XPMATH_INLINE_FUNCTION void sincos(TripleFloatFast a, TripleFloatFast& sin_a, TripleFloatFast& cos_a) { TripleFloat t_sin_a; TripleFloat t_cos_a; sincos(to_strict(a), t_sin_a, t_cos_a); sin_a = to_fast(t_sin_a); cos_a = to_fast(t_cos_a); }
