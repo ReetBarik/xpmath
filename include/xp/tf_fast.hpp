@@ -158,7 +158,61 @@ XPMATH_INLINE_FUNCTION TripleFloatFast sqr(TripleFloatFast a) { return to_fast(s
 XPMATH_INLINE_FUNCTION TripleFloatFast sqrt(TripleFloatFast a) { return to_fast(sqrt(to_strict(a))); }
 XPMATH_INLINE_FUNCTION TripleFloatFast round_to_nearest_int(TripleFloatFast a) { return to_fast(round_to_nearest_int(to_strict(a))); }
 XPMATH_INLINE_FUNCTION TripleFloatFast pow_int(TripleFloatFast a, int n) { return to_fast(pow_int(to_strict(a), n)); }
-XPMATH_INLINE_FUNCTION TripleFloatFast exp(TripleFloatFast a) { return to_fast(exp(to_strict(a))); }
+namespace detail {
+// P3.2[tf] fast exp. Strict exp's guards, reduction integer (one
+// float multiply; TF already had it), five Cody-Waite pieces, nq = 5
+// squarings and 2^m scaling are kept. Changes: r/32 by an exact
+// power-of-two scaling (mul_pwr2, not divide_scalar), and e^x - 1
+// as a fixed 9-term Horner series with 1/n! constants (strict's
+// loop also stops after term 9 at |x| = ln2/64): no divide_scalar,
+// no data-dependent exit. Terms 7..9 weigh < 4e-16 of the sum, so
+// they run in float; terms 1..6 in TF (each constant three words).
+// NaN returns NaN in all three words (strict reaches (int)NaN).
+// NOINLINE like strict TF exp (TD-4; P2.2[tf] code-size lesson).
+XPMATH_NOINLINE_FUNCTION TripleFloat tf_exp_fast_impl(TripleFloat a) {
+    if (a.f0 != a.f0) return TripleFloat(a.f0, a.f0, a.f0);
+    if (a.f0 < -104.0f) return TripleFloat(0.0f);
+    if (a.f0 >  88.722839f) {
+        XPMATH_PRINTF("TFEXP: overflow\n");
+        return TripleFloat(HUGE_VALF);
+    }
+    const float k_inv_log2 = 1.44269504088896341f;
+    const float m = detail::floor(detail::eft_add(
+        detail::eft_mul(a.f0, k_inv_log2), 0.5f));
+    const float kLn2_1 =  0x1.62e4p-1f;
+    const float kLn2_2 =  0x1.7f7ep-20f;
+    const float kLn2_3 = -0x1.c61p-37f;
+    const float kLn2_4 = -0x1.950ep-54f;
+    const float kLn2_5 =  0x1.e3b4p-72f;
+    TripleFloat r = subtract(a, TripleFloat(m * kLn2_1));
+    r = subtract(r, TripleFloat(m * kLn2_2));
+    r = subtract(r, TripleFloat(m * kLn2_3));
+    r = subtract(r, TripleFloat(m * kLn2_4));
+    r = subtract(r, TripleFloat(m * kLn2_5));
+    const TripleFloat x = mul_pwr2(r, 0x1p-5f);
+    float q = 0x1.71de3ap-19f;                                 // 1/9!
+    q = detail::eft_add(0x1.a01a02p-16f, detail::eft_mul(q, x.f0)); // 1/8!
+    q = detail::eft_add(0x1.a01a02p-13f, detail::eft_mul(q, x.f0)); // 1/7!
+    TripleFloat t = add(TripleFloat(0x1.6c16c2p-10f, -0x1.27d27ep-35f, 0x1.b05b06p-60f),
+                        multiply_scalar(x, q));               // 1/6!
+    t = add(TripleFloat(0x1.111112p-7f, -0x1.dddddep-32f, 0x1.111112p-59f),
+            multiply(t, x));                                  // 1/5!
+    t = add(TripleFloat(0x1.555556p-5f, -0x1.555556p-30f, 0x1.555556p-55f),
+            multiply(t, x));                                  // 1/4!
+    t = add(TripleFloat(0x1.555556p-3f, -0x1.555556p-28f, 0x1.555556p-53f),
+            multiply(t, x));                                  // 1/3!
+    t = add(TripleFloat(0.5f), multiply(t, x));
+    t = add(TripleFloat(1.0f), multiply(t, x));
+    TripleFloat s = multiply(t, x);                           // e^x - 1
+    for (int i = 0; i < 5; ++i) s = multiply(s, add(s, TripleFloat(2.0f)));
+    s = add(TripleFloat(1.0f), s);
+    const int mi = (int)m;
+    if (mi >= -125 && mi <= 127) return mul_pwr2(s, ldexpf(1.0f, mi));
+    return TripleFloat(ldexpf(s.f0, mi), ldexpf(s.f1, mi),
+                       ldexpf(s.f2, mi));
+}
+} // namespace detail
+XPMATH_INLINE_FUNCTION TripleFloatFast exp(TripleFloatFast a) { return to_fast(detail::tf_exp_fast_impl(to_strict(a))); }
 XPMATH_INLINE_FUNCTION TripleFloatFast log(TripleFloatFast a) { return to_fast(log(to_strict(a))); }
 XPMATH_INLINE_FUNCTION TripleFloatFast log1p(TripleFloatFast a) { return to_fast(log1p(to_strict(a))); }
 XPMATH_INLINE_FUNCTION TripleFloatFast pow(TripleFloatFast a, TripleFloatFast b) { return to_fast(pow(to_strict(a), to_strict(b))); }
