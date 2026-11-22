@@ -309,7 +309,14 @@ XPMATH_INLINE_FUNCTION TripleFloatFast arg(TripleFloatComplexFast z) { return to
 XPMATH_INLINE_FUNCTION TripleFloatComplexFast conj(TripleFloatComplexFast z) { return to_fast(conj(to_strict(z))); }
 XPMATH_INLINE_FUNCTION TripleFloatComplexFast sqrt(TripleFloatComplexFast z) { return to_fast(sqrt(to_strict(z))); }
 XPMATH_INLINE_FUNCTION TripleFloatComplexFast exp(TripleFloatComplexFast z) { return to_fast(exp(to_strict(z))); }
-XPMATH_INLINE_FUNCTION TripleFloatComplexFast log(TripleFloatComplexFast z) { return to_fast(log(to_strict(z))); }
+// P3.2[tf]-chain: strict complex log body (|z|, atan2), fast
+// real log. NOINLINE like strict TF complex log (TD-4).
+XPMATH_NOINLINE_FUNCTION TripleFloatComplexFast log(TripleFloatComplexFast z) {
+    const TripleFloatComplex w = to_strict(z);
+    const TripleFloat modulus = abs(w);
+    const TripleFloat argument = atan2(w.im, w.re);
+    return to_fast(TripleFloatComplex(detail::tf_log_fast_impl(modulus), argument));
+}
 XPMATH_INLINE_FUNCTION TripleFloatComplexFast log1p(TripleFloatComplexFast w) { return to_fast(log1p(to_strict(w))); }
 XPMATH_INLINE_FUNCTION TripleFloatComplexFast log10(TripleFloatComplexFast z) { return to_fast(log10(to_strict(z))); }
 XPMATH_INLINE_FUNCTION TripleFloatComplexFast sin(TripleFloatComplexFast z) { return to_fast(sin(to_strict(z))); }
