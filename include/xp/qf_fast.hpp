@@ -51,11 +51,8 @@ struct alignas(16) QuadFloatFast {
         float  c3 = (float)r;
         f0 = c0; f1 = c1; f2 = c2; f3 = c3;
     }
-    XPMATH_INLINE_FUNCTION QuadFloatFast(const QuadFloatFast& o)
-        : f0(o.f0), f1(o.f1), f2(o.f2), f3(o.f3) {}
-    XPMATH_INLINE_FUNCTION QuadFloatFast& operator=(const QuadFloatFast& o) {
-        f0=o.f0; f1=o.f1; f2=o.f2; f3=o.f3; return *this;
-    }
+    QuadFloatFast(const QuadFloatFast&) = default;
+    QuadFloatFast& operator=(const QuadFloatFast&) = default;
     XPMATH_INLINE_FUNCTION float operator[](int i) const {
         return (i==0)?f0:(i==1)?f1:(i==2)?f2:f3;
     }
@@ -120,8 +117,8 @@ struct QuadFloatComplexFast {
     XPMATH_INLINE_FUNCTION QuadFloatComplexFast(QuadFloatFast r) : re(r), im() {}
     XPMATH_INLINE_FUNCTION QuadFloatComplexFast(float r, float i) : re(r), im(i) {}
     XPMATH_INLINE_FUNCTION QuadFloatComplexFast(QuadFloatFast r, QuadFloatFast i) : re(r), im(i) {}
-    XPMATH_INLINE_FUNCTION QuadFloatComplexFast(const QuadFloatComplexFast& o) : re(o.re), im(o.im) {}
-    XPMATH_INLINE_FUNCTION QuadFloatComplexFast& operator=(const QuadFloatComplexFast& o) { re = o.re; im = o.im; return *this; }
+    QuadFloatComplexFast(const QuadFloatComplexFast&) = default;
+    QuadFloatComplexFast& operator=(const QuadFloatComplexFast&) = default;
     XPMATH_INLINE_FUNCTION QuadFloatComplexFast& operator=(QuadFloatFast r) { re = r; im = QuadFloatFast(); return *this; }
 
     // Tier boundary: explicit only.

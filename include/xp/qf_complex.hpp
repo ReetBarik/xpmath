@@ -186,10 +186,8 @@ struct QuadFloatComplex {
     XPMATH_INLINE_FUNCTION QuadFloatComplex(QuadFloat r)             : re(r),    im(0.0f) {}
     XPMATH_INLINE_FUNCTION QuadFloatComplex(float r, float i)         : re(r),    im(i)    {}
     XPMATH_INLINE_FUNCTION QuadFloatComplex(QuadFloat r, QuadFloat i) : re(r),    im(i)    {}
-    XPMATH_INLINE_FUNCTION QuadFloatComplex(const QuadFloatComplex& o): re(o.re), im(o.im) {}
-    XPMATH_INLINE_FUNCTION QuadFloatComplex& operator=(const QuadFloatComplex& o) {
-        re = o.re; im = o.im; return *this;
-    }
+    QuadFloatComplex(const QuadFloatComplex&) = default;
+    QuadFloatComplex& operator=(const QuadFloatComplex&) = default;
     XPMATH_INLINE_FUNCTION QuadFloatComplex& operator=(QuadFloat r) {
         re = r; im = QuadFloat(0.0f); return *this;
     }

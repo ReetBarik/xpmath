@@ -317,11 +317,8 @@ struct alignas(16) QuadFloat {
         f0 = c0; f1 = c1; f2 = c2; f3 = c3;
     }
 
-    XPMATH_INLINE_FUNCTION QuadFloat(const QuadFloat& o)
-        : f0(o.f0), f1(o.f1), f2(o.f2), f3(o.f3) {}
-    XPMATH_INLINE_FUNCTION QuadFloat& operator=(const QuadFloat& o) {
-        f0=o.f0; f1=o.f1; f2=o.f2; f3=o.f3; return *this;
-    }
+    QuadFloat(const QuadFloat&) = default;
+    QuadFloat& operator=(const QuadFloat&) = default;
 
     XPMATH_INLINE_FUNCTION float operator[](int i) const {
         return (i==0)?f0:(i==1)?f1:(i==2)?f2:f3;
