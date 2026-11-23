@@ -162,7 +162,78 @@ XPMATH_INLINE_FUNCTION QuadFloatFast sqr(QuadFloatFast a) { return to_fast(sqr(t
 XPMATH_INLINE_FUNCTION QuadFloatFast sqrt(QuadFloatFast a) { return to_fast(sqrt(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast round_to_nearest_int(QuadFloatFast a) { return to_fast(round_to_nearest_int(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast pow_int(QuadFloatFast a, int n) { return to_fast(pow_int(to_strict(a), n)); }
-XPMATH_INLINE_FUNCTION QuadFloatFast exp(QuadFloatFast a) { return to_fast(exp(to_strict(a))); }
+namespace detail {
+// P3.2[qf] fast exp series: e^x - 1 for |x| <= ln2/128 as a fixed
+// 11-term Horner series with 1/n! constants (strict's loop with
+// divide_scalar and a data-dependent exit is replaced). Terms 9..11
+// weigh < 3e-24 of the sum, so they run in float; terms 1..8 in QF
+// (each constant four words). 10 terms was tested and fails (up to
+// 5.3 ulps). NOINLINE like strict's detail::qf_exp_taylor (frame).
+XPMATH_NOINLINE_FUNCTION QuadFloat qf_exp_fast_series(QuadFloat x) {
+    float q = 0x1.ae6456p-26f;                          // 1/11!
+    q = detail::eft_add(0x1.27e4fcp-22f,
+                        detail::eft_mul(q, x.f0));      // 1/10!
+    q = detail::eft_add(0x1.71de3ap-19f,
+                        detail::eft_mul(q, x.f0));      // 1/9!
+    QuadFloat t = add(QuadFloat(0x1.a01a02p-16f, -0x1.7f97fap-42f,
+                  0x1.00d00ep-67f, -0x1.fe5fe6p-92f),
+              multiply_scalar(x, q));  // 1/8!
+    t = add(QuadFloat(0x1.a01a02p-13f, -0x1.7f97fap-39f,
+                  0x1.00d00ep-64f, -0x1.fe5fe6p-89f),
+              multiply(t, x));  // 1/7!
+    t = add(QuadFloat(0x1.6c16c2p-10f, -0x1.27d27ep-35f,
+                  0x1.b05b06p-60f, -0x1.3e93eap-86f),
+              multiply(t, x));  // 1/6!
+    t = add(QuadFloat(0x1.111112p-7f, -0x1.dddddep-32f,
+                  0x1.111112p-59f, -0x1.dddddep-84f),
+              multiply(t, x));  // 1/5!
+    t = add(QuadFloat(0x1.555556p-5f, -0x1.555556p-30f,
+                  0x1.555556p-55f, -0x1.555556p-80f),
+              multiply(t, x));  // 1/4!
+    t = add(QuadFloat(0x1.555556p-3f, -0x1.555556p-28f,
+                  0x1.555556p-53f, -0x1.555556p-78f),
+              multiply(t, x));  // 1/3!
+    t = add(QuadFloat(0.5f), multiply(t, x));
+    t = add(QuadFloat(1.0f), multiply(t, x));
+    return multiply(t, x);                              // e^x - 1
+}
+// P3.2[qf] fast exp. Strict exp's guards (KI-6), reduction integer
+// (divide by ln2, round), six-piece Cody-Waite helper, nq = 6
+// squarings helper and 2^nz scaling are kept; only the e^x - 1
+// series changes (qf_exp_fast_series). NaN returns NaN in all four
+// words (strict reaches (int)NaN). NOINLINE like strict QF exp.
+XPMATH_NOINLINE_FUNCTION QuadFloat qf_exp_fast_impl(QuadFloat a) {
+    if (a.f0 != a.f0) return QuadFloat(a.f0, a.f0, a.f0, a.f0);
+    if (a.f0 > 88.722839f) {
+        XPMATH_PRINTF("QFEXP: overflow\n");
+        return QuadFloat(HUGE_VALF);
+    }
+    if (a.f0 < -104.0f) return QuadFloat(0.0f);
+    const QuadFloat s1 =
+        round_to_nearest_int(divide(a, QuadFloat_log2()));
+    const float t1 = s1.f0;
+    const int nz = (int)(t1 + detail::copysign(1.0e-6f, t1));
+    const float kf = (float)nz;
+    const QuadFloat s0 = detail::qf_exp_cw_reduce(a, kf);
+    if (s0.f0 == 0.0f && s0.f1 == 0.0f) {
+        return QuadFloat(ldexpf(1.0f, nz));
+    }
+    const QuadFloat r = mul_pwr2(s0, ldexpf(1.0f, -6));
+    QuadFloat s3 = detail::qf_exp_fast_series(r);   // e^r - 1
+    s3 = detail::qf_exp_squarings(s3);
+    s3 = add(QuadFloat(1.0f), s3);
+    if (nz >= -125 && nz <= 127) {
+        const float pow2 = ldexpf(1.0f, nz);
+        return QuadFloat(s3.f0 * pow2, s3.f1 * pow2,
+                         s3.f2 * pow2, s3.f3 * pow2);
+    }
+    return QuadFloat(ldexpf(s3.f0, nz), ldexpf(s3.f1, nz),
+                     ldexpf(s3.f2, nz), ldexpf(s3.f3, nz));
+}
+}  // namespace detail
+XPMATH_INLINE_FUNCTION QuadFloatFast exp(QuadFloatFast a) {
+    return to_fast(detail::qf_exp_fast_impl(to_strict(a)));
+}
 XPMATH_INLINE_FUNCTION QuadFloatFast log(QuadFloatFast a) { return to_fast(log(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast pow(QuadFloatFast a, QuadFloatFast b) { return to_fast(pow(to_strict(a), to_strict(b))); }
 XPMATH_INLINE_FUNCTION void sincos(QuadFloatFast a, QuadFloatFast& sin_a, QuadFloatFast& cos_a) { QuadFloat t_sin_a; QuadFloat t_cos_a; sincos(to_strict(a), t_sin_a, t_cos_a); sin_a = to_fast(t_sin_a); cos_a = to_fast(t_cos_a); }
