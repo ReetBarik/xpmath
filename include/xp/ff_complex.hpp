@@ -129,10 +129,8 @@ struct FloatFloatComplex {
     XPMATH_INLINE_FUNCTION FloatFloatComplex(FloatFloat r)              : re(r),    im(0.0f) {}
     XPMATH_INLINE_FUNCTION FloatFloatComplex(float r, float i)      : re(r),    im(i)    {}
     XPMATH_INLINE_FUNCTION FloatFloatComplex(FloatFloat r, FloatFloat i)    : re(r),    im(i)    {}
-    XPMATH_INLINE_FUNCTION FloatFloatComplex(const FloatFloatComplex& o)    : re(o.re), im(o.im) {}
-    XPMATH_INLINE_FUNCTION FloatFloatComplex& operator=(const FloatFloatComplex& o) {
-        re = o.re; im = o.im; return *this;
-    }
+    FloatFloatComplex(const FloatFloatComplex&) = default;
+    FloatFloatComplex& operator=(const FloatFloatComplex&) = default;
     XPMATH_INLINE_FUNCTION FloatFloatComplex& operator=(FloatFloat r) {
         re = r; im = FloatFloat(0.0f); return *this;
     }

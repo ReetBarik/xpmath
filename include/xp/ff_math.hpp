@@ -131,8 +131,8 @@ struct alignas(8) FloatFloat {
     XPMATH_INLINE_FUNCTION FloatFloat(float h) : hi(h), lo(0.0f) {}
     XPMATH_INLINE_FUNCTION FloatFloat(float h, float l) : hi(h), lo(l) {}
     XPMATH_INLINE_FUNCTION FloatFloat(double h) : hi((float)h), lo((float)detail::eft_sub(h, (double)(float)h)) {}
-    XPMATH_INLINE_FUNCTION FloatFloat(const FloatFloat& o) : hi(o.hi), lo(o.lo) {}
-    XPMATH_INLINE_FUNCTION FloatFloat& operator=(const FloatFloat& o) { hi=o.hi; lo=o.lo; return *this; }
+    FloatFloat(const FloatFloat&) = default;
+    FloatFloat& operator=(const FloatFloat&) = default;
 
     // Factory: build a FloatFloat from the IEEE-754 bit patterns of its two
     // components. Safe on host (memcpy) and device (__int_as_float). Replaces

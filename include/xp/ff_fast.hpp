@@ -44,8 +44,8 @@ struct alignas(8) FloatFloatFast {
     XPMATH_INLINE_FUNCTION FloatFloatFast(float h) : hi(h), lo(0.0f) {}
     XPMATH_INLINE_FUNCTION FloatFloatFast(float h, float l) : hi(h), lo(l) {}
     XPMATH_INLINE_FUNCTION FloatFloatFast(double h) : hi((float)h), lo((float)detail::eft_sub(h, (double)(float)h)) {}
-    XPMATH_INLINE_FUNCTION FloatFloatFast(const FloatFloatFast& o) : hi(o.hi), lo(o.lo) {}
-    XPMATH_INLINE_FUNCTION FloatFloatFast& operator=(const FloatFloatFast& o) { hi=o.hi; lo=o.lo; return *this; }
+    FloatFloatFast(const FloatFloatFast&) = default;
+    FloatFloatFast& operator=(const FloatFloatFast&) = default;
     static XPMATH_INLINE_FUNCTION FloatFloatFast from_bits(uint32_t hi_bits, uint32_t lo_bits) {
         float h, l;
 #if defined(XPMATH_ON_DEVICE_CUDA_OR_HIP)
@@ -95,8 +95,8 @@ struct FloatFloatComplexFast {
     XPMATH_INLINE_FUNCTION FloatFloatComplexFast(FloatFloatFast r) : re(r), im() {}
     XPMATH_INLINE_FUNCTION FloatFloatComplexFast(float r, float i) : re(r), im(i) {}
     XPMATH_INLINE_FUNCTION FloatFloatComplexFast(FloatFloatFast r, FloatFloatFast i) : re(r), im(i) {}
-    XPMATH_INLINE_FUNCTION FloatFloatComplexFast(const FloatFloatComplexFast& o) : re(o.re), im(o.im) {}
-    XPMATH_INLINE_FUNCTION FloatFloatComplexFast& operator=(const FloatFloatComplexFast& o) { re = o.re; im = o.im; return *this; }
+    FloatFloatComplexFast(const FloatFloatComplexFast&) = default;
+    FloatFloatComplexFast& operator=(const FloatFloatComplexFast&) = default;
     XPMATH_INLINE_FUNCTION FloatFloatComplexFast& operator=(FloatFloatFast r) { re = r; im = FloatFloatFast(); return *this; }
 
     // Tier boundary: explicit only.
