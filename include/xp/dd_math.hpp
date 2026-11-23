@@ -118,8 +118,8 @@ struct alignas(16) DoubleDouble {
     XPMATH_INLINE_FUNCTION DoubleDouble() : hi(0.0), lo(0.0) {}
     XPMATH_INLINE_FUNCTION DoubleDouble(double h) : hi(h), lo(0.0) {}
     XPMATH_INLINE_FUNCTION DoubleDouble(double h, double l) : hi(h), lo(l) {}
-    XPMATH_INLINE_FUNCTION DoubleDouble(const DoubleDouble& o) : hi(o.hi), lo(o.lo) {}
-    XPMATH_INLINE_FUNCTION DoubleDouble& operator=(const DoubleDouble& o) { hi=o.hi; lo=o.lo; return *this; }
+    DoubleDouble(const DoubleDouble&) = default;
+    DoubleDouble& operator=(const DoubleDouble&) = default;
 
     // Factory: build a DoubleDouble from the IEEE-754 bit patterns of its two
     // components. Safe on host (memcpy) and device (__longlong_as_double).

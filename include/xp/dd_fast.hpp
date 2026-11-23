@@ -43,8 +43,8 @@ struct alignas(16) DoubleDoubleFast {
     XPMATH_INLINE_FUNCTION DoubleDoubleFast() : hi(0.0), lo(0.0) {}
     XPMATH_INLINE_FUNCTION DoubleDoubleFast(double h) : hi(h), lo(0.0) {}
     XPMATH_INLINE_FUNCTION DoubleDoubleFast(double h, double l) : hi(h), lo(l) {}
-    XPMATH_INLINE_FUNCTION DoubleDoubleFast(const DoubleDoubleFast& o) : hi(o.hi), lo(o.lo) {}
-    XPMATH_INLINE_FUNCTION DoubleDoubleFast& operator=(const DoubleDoubleFast& o) { hi=o.hi; lo=o.lo; return *this; }
+    DoubleDoubleFast(const DoubleDoubleFast&) = default;
+    DoubleDoubleFast& operator=(const DoubleDoubleFast&) = default;
     static XPMATH_INLINE_FUNCTION DoubleDoubleFast from_bits(uint64_t hi_bits, uint64_t lo_bits) {
         double h, l;
 #if !defined(XPMATH_ON_DEVICE_CUDA_OR_HIP)
@@ -94,8 +94,8 @@ struct DoubleDoubleComplexFast {
     XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast(DoubleDoubleFast r) : re(r), im() {}
     XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast(double r, double i) : re(r), im(i) {}
     XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast(DoubleDoubleFast r, DoubleDoubleFast i) : re(r), im(i) {}
-    XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast(const DoubleDoubleComplexFast& o) : re(o.re), im(o.im) {}
-    XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast& operator=(const DoubleDoubleComplexFast& o) { re = o.re; im = o.im; return *this; }
+    DoubleDoubleComplexFast(const DoubleDoubleComplexFast&) = default;
+    DoubleDoubleComplexFast& operator=(const DoubleDoubleComplexFast&) = default;
     XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast& operator=(DoubleDoubleFast r) { re = r; im = DoubleDoubleFast(); return *this; }
 
     // Tier boundary: explicit only.

@@ -192,10 +192,8 @@ struct DoubleDoubleComplex {
     XPMATH_INLINE_FUNCTION DoubleDoubleComplex(DoubleDouble r)               : re(r),    im(0.0) {}
     XPMATH_INLINE_FUNCTION DoubleDoubleComplex(double r, double i)           : re(r),    im(i)   {}
     XPMATH_INLINE_FUNCTION DoubleDoubleComplex(DoubleDouble r, DoubleDouble i) : re(r),  im(i)   {}
-    XPMATH_INLINE_FUNCTION DoubleDoubleComplex(const DoubleDoubleComplex& o) : re(o.re), im(o.im){}
-    XPMATH_INLINE_FUNCTION DoubleDoubleComplex& operator=(const DoubleDoubleComplex& o) {
-        re = o.re; im = o.im; return *this;
-    }
+    DoubleDoubleComplex(const DoubleDoubleComplex&) = default;
+    DoubleDoubleComplex& operator=(const DoubleDoubleComplex&) = default;
     XPMATH_INLINE_FUNCTION DoubleDoubleComplex& operator=(DoubleDouble r) {
         re = r; im = DoubleDouble(0.0); return *this;
     }
