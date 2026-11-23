@@ -234,6 +234,50 @@ XPMATH_NOINLINE_FUNCTION QuadFloat qf_exp_fast_impl(QuadFloat a) {
 XPMATH_INLINE_FUNCTION QuadFloatFast exp(QuadFloatFast a) {
     return to_fast(detail::qf_exp_fast_impl(to_strict(a)));
 }
+// P3.2[qf] chain: exp2 and exp10 are strict's bodies with the
+// inner exp replaced by detail::qf_exp_fast_impl. pow stays strict.
+namespace detail {
+XPMATH_INLINE_FUNCTION QuadFloat qf_exp2_fast_impl(QuadFloat a) {
+    QuadFloat k = round_to_nearest_int(a);
+    const int ki = (int)k.f0;
+    QuadFloat r = subtract(a, k);                       // EXACT
+    QuadFloat s = (r.f0 == 0.0f && r.f1 == 0.0f && r.f2 == 0.0f && r.f3 == 0.0f)
+                ? QuadFloat(1.0f)
+                : qf_exp_fast_impl(multiply(r, QuadFloat_log2()));
+    if (ki >= -125 && ki <= 127) {
+        const float p2 = ldexpf(1.0f, ki);
+        return QuadFloat(s.f0 * p2, s.f1 * p2, s.f2 * p2, s.f3 * p2);
+    }
+    return QuadFloat(ldexpf(s.f0, ki), ldexpf(s.f1, ki),
+                     ldexpf(s.f2, ki), ldexpf(s.f3, ki));
+}
+XPMATH_INLINE_FUNCTION QuadFloat qf_exp10_fast_impl(QuadFloat a) {
+    const float kLog2_10 = 3.32192809f;
+    const float kf = detail::rint(a.f0 * kLog2_10);
+    if (!(detail::fabs(kf) < 1.0e5f))
+        return qf_exp_fast_impl(multiply(a, QuadFloat_log10()));
+    const int ki = (int)kf;
+    const float kLog10_2_1 =  0x1.3442p-2f;
+    const float kLog10_2_2 = -0x1.95ecp-19f;
+    const float kLog10_2_3 = -0x1.0c02p-39f;
+    const float kLog10_2_4 = -0x1.9dc2p-59f;
+    const float kLog10_2_5 =  0x1.2b36p-78f;
+    const float kLog10_2_6 = -0x1.fa42p-96f;
+    QuadFloat r = subtract(a,  QuadFloat(kf * kLog10_2_1));
+    r = subtract(r, QuadFloat(kf * kLog10_2_2));
+    r = subtract(r, QuadFloat(kf * kLog10_2_3));
+    r = subtract(r, QuadFloat(kf * kLog10_2_4));
+    r = subtract(r, QuadFloat(kf * kLog10_2_5));
+    r = subtract(r, QuadFloat(kf * kLog10_2_6));
+    QuadFloat s = qf_exp_fast_impl(multiply(r, QuadFloat_log10()));
+    if (ki >= -125 && ki <= 127) {
+        const float p2 = ldexpf(1.0f, ki);
+        return QuadFloat(s.f0 * p2, s.f1 * p2, s.f2 * p2, s.f3 * p2);
+    }
+    return QuadFloat(ldexpf(s.f0, ki), ldexpf(s.f1, ki),
+                     ldexpf(s.f2, ki), ldexpf(s.f3, ki));
+}
+}  // namespace detail
 XPMATH_INLINE_FUNCTION QuadFloatFast log(QuadFloatFast a) { return to_fast(log(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast pow(QuadFloatFast a, QuadFloatFast b) { return to_fast(pow(to_strict(a), to_strict(b))); }
 XPMATH_INLINE_FUNCTION void sincos(QuadFloatFast a, QuadFloatFast& sin_a, QuadFloatFast& cos_a) { QuadFloat t_sin_a; QuadFloat t_cos_a; sincos(to_strict(a), t_sin_a, t_cos_a); sin_a = to_fast(t_sin_a); cos_a = to_fast(t_cos_a); }
@@ -258,8 +302,8 @@ XPMATH_INLINE_FUNCTION QuadFloatFast divide_accurate(QuadFloatFast a, QuadFloatF
 XPMATH_INLINE_FUNCTION QuadFloatFast log10(QuadFloatFast a) { return to_fast(log10(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast log2(QuadFloatFast a) { return to_fast(log2(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast log1p(QuadFloatFast a) { return to_fast(log1p(to_strict(a))); }
-XPMATH_INLINE_FUNCTION QuadFloatFast exp2(QuadFloatFast a) { return to_fast(exp2(to_strict(a))); }
-XPMATH_INLINE_FUNCTION QuadFloatFast exp10(QuadFloatFast a) { return to_fast(exp10(to_strict(a))); }
+XPMATH_INLINE_FUNCTION QuadFloatFast exp2(QuadFloatFast a) { return to_fast(detail::qf_exp2_fast_impl(to_strict(a))); }
+XPMATH_INLINE_FUNCTION QuadFloatFast exp10(QuadFloatFast a) { return to_fast(detail::qf_exp10_fast_impl(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast expm1(QuadFloatFast a) { return to_fast(expm1(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast sin(QuadFloatFast a) { return to_fast(sin(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast cos(QuadFloatFast a) { return to_fast(cos(to_strict(a))); }
