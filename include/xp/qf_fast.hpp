@@ -209,10 +209,9 @@ XPMATH_NOINLINE_FUNCTION QuadFloat qf_exp_fast_impl(QuadFloat a) {
         return QuadFloat(HUGE_VALF);
     }
     if (a.f0 < -104.0f) return QuadFloat(0.0f);
-    const QuadFloat s1 =
-        round_to_nearest_int(divide(a, QuadFloat_log2()));
-    const float t1 = s1.f0;
-    const int nz = (int)(t1 + detail::copysign(1.0e-6f, t1));
+    const float k_inv_log2 = 1.44269504088896341f;
+    const int nz = (int)detail::floor(detail::eft_add(
+        detail::eft_mul(a.f0, k_inv_log2), 0.5f));
     const float kf = (float)nz;
     const QuadFloat s0 = detail::qf_exp_cw_reduce(a, kf);
     if (s0.f0 == 0.0f && s0.f1 == 0.0f) {
