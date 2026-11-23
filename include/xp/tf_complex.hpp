@@ -161,10 +161,8 @@ struct TripleFloatComplex {
     XPMATH_INLINE_FUNCTION TripleFloatComplex(TripleFloat r)           : re(r),    im(0.0f) {}
     XPMATH_INLINE_FUNCTION TripleFloatComplex(float r, float i)        : re(r),    im(i)    {}
     XPMATH_INLINE_FUNCTION TripleFloatComplex(TripleFloat r, TripleFloat i) : re(r),    im(i)    {}
-    XPMATH_INLINE_FUNCTION TripleFloatComplex(const TripleFloatComplex& o): re(o.re), im(o.im) {}
-    XPMATH_INLINE_FUNCTION TripleFloatComplex& operator=(const TripleFloatComplex& o) {
-        re = o.re; im = o.im; return *this;
-    }
+    TripleFloatComplex(const TripleFloatComplex&) = default;
+    TripleFloatComplex& operator=(const TripleFloatComplex&) = default;
     XPMATH_INLINE_FUNCTION TripleFloatComplex& operator=(TripleFloat r) {
         re = r; im = TripleFloat(0.0f); return *this;
     }

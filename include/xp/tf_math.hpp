@@ -316,11 +316,8 @@ struct TripleFloat {
         f0 = c0; f1 = c1; f2 = c2;
     }
 
-    XPMATH_INLINE_FUNCTION TripleFloat(const TripleFloat& o)
-        : f0(o.f0), f1(o.f1), f2(o.f2) {}
-    XPMATH_INLINE_FUNCTION TripleFloat& operator=(const TripleFloat& o) {
-        f0=o.f0; f1=o.f1; f2=o.f2; return *this;
-    }
+    TripleFloat(const TripleFloat&) = default;
+    TripleFloat& operator=(const TripleFloat&) = default;
 
     XPMATH_INLINE_FUNCTION float operator[](int i) const {
         return (i==0)?f0:(i==1)?f1:f2;

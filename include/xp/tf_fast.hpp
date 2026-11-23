@@ -50,11 +50,8 @@ struct TripleFloatFast {
         float  c2 = (float)r;
         f0 = c0; f1 = c1; f2 = c2;
     }
-    XPMATH_INLINE_FUNCTION TripleFloatFast(const TripleFloatFast& o)
-        : f0(o.f0), f1(o.f1), f2(o.f2) {}
-    XPMATH_INLINE_FUNCTION TripleFloatFast& operator=(const TripleFloatFast& o) {
-        f0=o.f0; f1=o.f1; f2=o.f2; return *this;
-    }
+    TripleFloatFast(const TripleFloatFast&) = default;
+    TripleFloatFast& operator=(const TripleFloatFast&) = default;
     XPMATH_INLINE_FUNCTION float operator[](int i) const {
         return (i==0)?f0:(i==1)?f1:f2;
     }
@@ -113,8 +110,8 @@ struct TripleFloatComplexFast {
     XPMATH_INLINE_FUNCTION TripleFloatComplexFast(TripleFloatFast r) : re(r), im() {}
     XPMATH_INLINE_FUNCTION TripleFloatComplexFast(float r, float i) : re(r), im(i) {}
     XPMATH_INLINE_FUNCTION TripleFloatComplexFast(TripleFloatFast r, TripleFloatFast i) : re(r), im(i) {}
-    XPMATH_INLINE_FUNCTION TripleFloatComplexFast(const TripleFloatComplexFast& o) : re(o.re), im(o.im) {}
-    XPMATH_INLINE_FUNCTION TripleFloatComplexFast& operator=(const TripleFloatComplexFast& o) { re = o.re; im = o.im; return *this; }
+    TripleFloatComplexFast(const TripleFloatComplexFast&) = default;
+    TripleFloatComplexFast& operator=(const TripleFloatComplexFast&) = default;
     XPMATH_INLINE_FUNCTION TripleFloatComplexFast& operator=(TripleFloatFast r) { re = r; im = TripleFloatFast(); return *this; }
 
     // Tier boundary: explicit only.
