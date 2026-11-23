@@ -198,7 +198,8 @@ XPMATH_NOINLINE_FUNCTION QuadFloat qf_exp_fast_series(QuadFloat x) {
     return multiply(t, x);                              // e^x - 1
 }
 // P3.2[qf] fast exp. Strict exp's guards (KI-6), reduction integer
-// (divide by ln2, round), six-piece Cody-Waite helper, nq = 6
+// (native multiply: floor(a.f0 / ln2 + 0.5), no QF divide), six-piece
+// Cody-Waite helper, nq = 6
 // squarings helper and 2^nz scaling are kept; only the e^x - 1
 // series changes (qf_exp_fast_series). NaN returns NaN in all four
 // words (strict reaches (int)NaN). NOINLINE like strict QF exp.
