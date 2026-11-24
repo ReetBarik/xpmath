@@ -277,11 +277,56 @@ XPMATH_INLINE_FUNCTION QuadFloat qf_exp10_fast_impl(QuadFloat a) {
     return QuadFloat(ldexpf(s.f0, ki), ldexpf(s.f1, ki),
                      ldexpf(s.f2, ki), ldexpf(s.f3, ki));
 }
+// P3.2[qf] e3: expm1, sinhcosh (-> sinh, cosh) and tanh are strict's
+// bodies with the exp calls replaced by detail::qf_exp_fast_impl. The
+// small-argument Taylor branches are strict's own code, called as is.
+XPMATH_INLINE_FUNCTION QuadFloat qf_expm1_fast_impl(QuadFloat a) {
+    if (detail::fabs(a.f0) > 0.5f)
+        return subtract(qf_exp_fast_impl(a), QuadFloat(1.0f));
+    return expm1(a);
+}
+XPMATH_INLINE_FUNCTION void qf_sinhcosh_fast_impl(
+    QuadFloat a, QuadFloat& sinh_a, QuadFloat& cosh_a) {
+    if (detail::fabs(a.f0) < 0.5f) { sinhcosh(a, sinh_a, cosh_a); return; }
+    if (detail::fabs(a.f0) > kQFHyperbolicSaturate) {
+        QuadFloat aa = (a.f0 < 0.0f) ? negate(a) : a;
+        QuadFloat h;
+        const float kQFReciprocalFloor = -40.0f;
+        if (a.f0 < kQFReciprocalFloor) {
+            h = qf_exp_fast_impl(subtract(aa, QuadFloat_log2()));
+        } else {
+            QuadFloat e = qf_exp_fast_impl(a);
+            if (a.f0 < 0.0f) e = divide(QuadFloat(1.0f), e);
+            h = (detail::isinf(e.f0) || e.f0 != e.f0)
+                    ? qf_exp_fast_impl(subtract(aa, QuadFloat_log2()))
+                    : mul_pwr2(e, 0.5f);
+        }
+        cosh_a = h;
+        sinh_a = (a.f0 < 0.0f) ? negate(h) : h;
+        return;
+    }
+    QuadFloat s0 = qf_exp_fast_impl(a);
+    QuadFloat s1 = divide(QuadFloat(1.0f), s0);
+    cosh_a = mul_pwr2(add(s0, s1), 0.5f);
+    sinh_a = mul_pwr2(subtract(s0, s1), 0.5f);
+}
+XPMATH_NOINLINE_FUNCTION QuadFloat qf_tanh_fast_impl(QuadFloat a) {
+    const bool neg = (a.f0 < 0.0f);
+    if (neg) a = negate(a);
+    QuadFloat r;
+    if (a.f0 > kQFHyperbolicSaturate) {
+        r = QuadFloat(1.0f);
+    } else {
+        QuadFloat e = qf_expm1_fast_impl(mul_pwr2(a, 2.0f));
+        r = divide(e, add(e, QuadFloat(2.0f)));
+    }
+    return neg ? negate(r) : r;
+}
 }  // namespace detail
 XPMATH_INLINE_FUNCTION QuadFloatFast log(QuadFloatFast a) { return to_fast(log(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast pow(QuadFloatFast a, QuadFloatFast b) { return to_fast(pow(to_strict(a), to_strict(b))); }
 XPMATH_INLINE_FUNCTION void sincos(QuadFloatFast a, QuadFloatFast& sin_a, QuadFloatFast& cos_a) { QuadFloat t_sin_a; QuadFloat t_cos_a; sincos(to_strict(a), t_sin_a, t_cos_a); sin_a = to_fast(t_sin_a); cos_a = to_fast(t_cos_a); }
-XPMATH_INLINE_FUNCTION void sinhcosh(QuadFloatFast a, QuadFloatFast& sinh_a, QuadFloatFast& cosh_a) { QuadFloat t_sinh_a; QuadFloat t_cosh_a; sinhcosh(to_strict(a), t_sinh_a, t_cosh_a); sinh_a = to_fast(t_sinh_a); cosh_a = to_fast(t_cosh_a); }
+XPMATH_INLINE_FUNCTION void sinhcosh(QuadFloatFast a, QuadFloatFast& sinh_a, QuadFloatFast& cosh_a) { QuadFloat t_sinh_a; QuadFloat t_cosh_a; detail::qf_sinhcosh_fast_impl(to_strict(a), t_sinh_a, t_cosh_a); sinh_a = to_fast(t_sinh_a); cosh_a = to_fast(t_cosh_a); }
 XPMATH_INLINE_FUNCTION QuadFloatFast angle(QuadFloatFast x, QuadFloatFast y) { return to_fast(angle(to_strict(x), to_strict(y))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast ceil(QuadFloatFast a) { return to_fast(ceil(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast floor(QuadFloatFast a) { return to_fast(floor(to_strict(a))); }
@@ -304,7 +349,7 @@ XPMATH_INLINE_FUNCTION QuadFloatFast log2(QuadFloatFast a) { return to_fast(log2
 XPMATH_INLINE_FUNCTION QuadFloatFast log1p(QuadFloatFast a) { return to_fast(log1p(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast exp2(QuadFloatFast a) { return to_fast(detail::qf_exp2_fast_impl(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast exp10(QuadFloatFast a) { return to_fast(detail::qf_exp10_fast_impl(to_strict(a))); }
-XPMATH_INLINE_FUNCTION QuadFloatFast expm1(QuadFloatFast a) { return to_fast(expm1(to_strict(a))); }
+XPMATH_INLINE_FUNCTION QuadFloatFast expm1(QuadFloatFast a) { return to_fast(detail::qf_expm1_fast_impl(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast sin(QuadFloatFast a) { return to_fast(sin(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast cos(QuadFloatFast a) { return to_fast(cos(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast tan(QuadFloatFast a) { return to_fast(tan(to_strict(a))); }
@@ -314,9 +359,9 @@ XPMATH_INLINE_FUNCTION QuadFloatFast asin(QuadFloatFast a) { return to_fast(asin
 XPMATH_INLINE_FUNCTION QuadFloatFast acos(QuadFloatFast a) { return to_fast(acos(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast atan(QuadFloatFast a) { return to_fast(atan(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast atan2(QuadFloatFast y, QuadFloatFast x) { return to_fast(atan2(to_strict(y), to_strict(x))); }
-XPMATH_INLINE_FUNCTION QuadFloatFast sinh(QuadFloatFast a) { return to_fast(sinh(to_strict(a))); }
-XPMATH_INLINE_FUNCTION QuadFloatFast cosh(QuadFloatFast a) { return to_fast(cosh(to_strict(a))); }
-XPMATH_INLINE_FUNCTION QuadFloatFast tanh(QuadFloatFast a) { return to_fast(tanh(to_strict(a))); }
+XPMATH_INLINE_FUNCTION QuadFloatFast sinh(QuadFloatFast a) { QuadFloat s, c; detail::qf_sinhcosh_fast_impl(to_strict(a), s, c); return to_fast(s); }
+XPMATH_INLINE_FUNCTION QuadFloatFast cosh(QuadFloatFast a) { QuadFloat s, c; detail::qf_sinhcosh_fast_impl(to_strict(a), s, c); return to_fast(c); }
+XPMATH_INLINE_FUNCTION QuadFloatFast tanh(QuadFloatFast a) { return to_fast(detail::qf_tanh_fast_impl(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast asinh(QuadFloatFast a) { return to_fast(asinh(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast acosh(QuadFloatFast a) { return to_fast(acosh(to_strict(a))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast atanh(QuadFloatFast a) { return to_fast(atanh(to_strict(a))); }
