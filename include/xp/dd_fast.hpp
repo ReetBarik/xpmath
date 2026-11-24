@@ -210,7 +210,74 @@ XPMATH_INLINE_FUNCTION DoubleDouble dd_log_fast_impl(DoubleDouble a) {
 XPMATH_INLINE_FUNCTION DoubleDoubleFast log(DoubleDoubleFast a) { return to_fast(detail::dd_log_fast_impl(to_strict(a))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast pow(DoubleDoubleFast a, DoubleDoubleFast b) { return to_fast(pow(to_strict(a), to_strict(b))); }
 XPMATH_INLINE_FUNCTION void sinhcosh(DoubleDoubleFast a, DoubleDoubleFast& x, DoubleDoubleFast& y) { DoubleDouble t_x; DoubleDouble t_y; sinhcosh(to_strict(a), t_x, t_y); x = to_fast(t_x); y = to_fast(t_y); }
-XPMATH_INLINE_FUNCTION void sincos(DoubleDoubleFast a, DoubleDoubleFast& x, DoubleDoubleFast& y) { DoubleDouble t_x; DoubleDouble t_y; sincos(to_strict(a), t_x, t_y); x = to_fast(t_x); y = to_fast(t_y); }
+namespace detail {
+// P3.3[dd] fast sincos. Rare inputs (|a| >= 1e6, NaN/inf, huge
+// cancellation after the cheap reduction) go to the strict sincos
+// unchanged, out of line.
+XPMATH_NOINLINE_FUNCTION void dd_sincos_slow(DoubleDouble a, DoubleDouble& x, DoubleDouble& y) { sincos(a, x, y); }
+// Same guards, nq = 5 halvings, (sin, 1-cos) form and 5 doublings as
+// strict. Changes: (1) for 0.75 < |a| < 1e6 the reduction is
+// k = rint(a.hi * 2/pi) and four 33-bit Cody-Waite pieces of pi/2 plus
+// one full double (k*piece exact for |k| < 2^20), Payne-Hanek only
+// above that or when |r| < 2^-40 (the pieces no longer cover it);
+// (2) the series is a fixed Horner polynomial (6 sin terms, 7 v terms)
+// with 1/n! constants and no data-dependent exit; terms past the third
+// weigh < 1e-17 of the sum and run in double.
+XPMATH_INLINE_FUNCTION void dd_sincos_fast_impl(DoubleDouble a, DoubleDouble& x, DoubleDouble& y) {
+    if (a.hi == 0.0) { x = DoubleDouble(1.0); y = DoubleDouble(0.0); return; }
+    const double aa = detail::fabs(a.hi);
+    if (aa < 32.0 * 2.2250738585072014e-308) { x = DoubleDouble(1.0); y = a; return; }
+    if (!(aa < 1.0e6)) { dd_sincos_slow(a, x, y); return; }
+    int j = 0;
+    DoubleDouble r_mod = a;
+    if (aa > 0.75) {
+        const double kd = detail::rint(a.hi * 0x1.45f306dc9c883p-1);   // 2/pi
+        r_mod = subtract(a, DoubleDouble(kd * 0x1.921fb54400000p+0));
+        r_mod = subtract(r_mod, DoubleDouble(kd * 0x1.0b4611a600000p-34));
+        r_mod = subtract(r_mod, DoubleDouble(kd * 0x1.3198a2e000000p-69));
+        r_mod = subtract(r_mod, DoubleDouble(kd * 0x1.b839a25200000p-104));
+        r_mod = subtract(r_mod, DoubleDouble(kd * 0x1.27044533e63a0p-142));
+        if (!(detail::fabs(r_mod.hi) >= 0x1p-40)) { dd_sincos_slow(a, x, y); return; }
+        j = (int)((long long)kd & 3);
+    }
+    const DoubleDouble r  = multiply_scalar(r_mod, 0x1p-5);
+    const DoubleDouble yy = multiply(r, r);
+    double qs = 0x1.6124613a86d09p-33;                                   // 1/13!
+    qs = detail::eft_add(-0x1.ae64567f544e4p-26, detail::eft_mul(qs, yy.hi)); // 1/11!
+    qs = detail::eft_add(0x1.71de3a556c734p-19, detail::eft_mul(qs, yy.hi));  // 1/9!
+    DoubleDouble ts = add(DoubleDouble(-0x1.a01a01a01a01ap-13, -0x1.a01a01a01a01ap-73), multiply(DoubleDouble(qs), yy)); // 1/7!
+    ts = add(DoubleDouble(0x1.1111111111111p-7, 0x1.1111111111111p-63), multiply(ts, yy));   // 1/5!
+    ts = add(DoubleDouble(-0x1.5555555555555p-3, -0x1.5555555555555p-57), multiply(ts, yy)); // 1/3!
+    DoubleDouble sin_r = add(r, multiply(r, multiply(ts, yy)));
+    double qv = 0x1.93974a8c07c9dp-37;                                   // 1/14!
+    qv = detail::eft_add(-0x1.1eed8eff8d898p-29, detail::eft_mul(qv, yy.hi)); // 1/12!
+    qv = detail::eft_add(0x1.27e4fb7789f5cp-22, detail::eft_mul(qv, yy.hi));  // 1/10!
+    DoubleDouble tv = add(DoubleDouble(-0x1.a01a01a01a01ap-16, -0x1.a01a01a01a01ap-76), multiply(DoubleDouble(qv), yy)); // 1/8!
+    tv = add(DoubleDouble(0x1.6c16c16c16c17p-10, -0x1.f49f49f49f49fp-65), multiply(tv, yy)); // 1/6!
+    tv = add(DoubleDouble(-0x1.5555555555555p-5, -0x1.5555555555555p-59), multiply(tv, yy)); // 1/4!
+    tv = add(DoubleDouble(0.5), multiply(tv, yy));
+    DoubleDouble v_r = multiply(tv, yy);
+    for (int q = 0; q < 5; ++q) {
+        const DoubleDouble c_q = subtract(DoubleDouble(1.0), v_r);
+        const DoubleDouble new_sin = multiply_scalar(multiply(sin_r, c_q), 2.0);
+        v_r   = multiply_scalar(multiply(sin_r, sin_r), 2.0);
+        sin_r = new_sin;
+    }
+    DoubleDouble cos_r = subtract(DoubleDouble(1.0), v_r);
+    // NaN/inf in a word (e.g. a finite hi with a NaN lo): strict answers
+    // with its identity-point fallback; let strict do it.
+    if (!(detail::fabs(sin_r.hi) <= 1.0009765625) || !(detail::fabs(cos_r.hi) <= 1.0009765625)) { dd_sincos_slow(a, x, y); return; }
+    if (sin_r.hi >  1.0 || (sin_r.hi ==  1.0 && sin_r.lo > 0.0)) sin_r = DoubleDouble( 1.0);
+    if (sin_r.hi < -1.0 || (sin_r.hi == -1.0 && sin_r.lo < 0.0)) sin_r = DoubleDouble(-1.0);
+    if (cos_r.hi >  1.0 || (cos_r.hi ==  1.0 && cos_r.lo > 0.0)) cos_r = DoubleDouble( 1.0);
+    if (cos_r.hi < -1.0 || (cos_r.hi == -1.0 && cos_r.lo < 0.0)) cos_r = DoubleDouble(-1.0);
+    if (j == 0)      { x = cos_r;         y = sin_r; }
+    else if (j == 1) { x = negate(sin_r); y = cos_r; }
+    else if (j == 2) { x = negate(cos_r); y = negate(sin_r); }
+    else             { x = sin_r;         y = negate(cos_r); }
+}
+} // namespace detail
+XPMATH_INLINE_FUNCTION void sincos(DoubleDoubleFast a, DoubleDoubleFast& x, DoubleDoubleFast& y) { DoubleDouble t_x; DoubleDouble t_y; detail::dd_sincos_fast_impl(to_strict(a), t_x, t_y); x = to_fast(t_x); y = to_fast(t_y); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast angle(DoubleDoubleFast x, DoubleDoubleFast y) { return to_fast(angle(to_strict(x), to_strict(y))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast operator+(double a, DoubleDoubleFast b) { return to_fast(a + to_strict(b)); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast operator-(double a, DoubleDoubleFast b) { return to_fast(a - to_strict(b)); }
@@ -228,8 +295,8 @@ XPMATH_INLINE_FUNCTION DoubleDoubleFast log1p(DoubleDoubleFast a) { return to_fa
 XPMATH_INLINE_FUNCTION DoubleDoubleFast exp2(DoubleDoubleFast a) { return to_fast(exp2(to_strict(a))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast exp10(DoubleDoubleFast a) { return to_fast(exp10(to_strict(a))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast expm1(DoubleDoubleFast a) { return to_fast(expm1(to_strict(a))); }
-XPMATH_INLINE_FUNCTION DoubleDoubleFast sin(DoubleDoubleFast a) { return to_fast(sin(to_strict(a))); }
-XPMATH_INLINE_FUNCTION DoubleDoubleFast cos(DoubleDoubleFast a) { return to_fast(cos(to_strict(a))); }
+XPMATH_INLINE_FUNCTION DoubleDoubleFast sin(DoubleDoubleFast a) { DoubleDouble c, s; detail::dd_sincos_fast_impl(to_strict(a), c, s); return to_fast(s); }
+XPMATH_INLINE_FUNCTION DoubleDoubleFast cos(DoubleDoubleFast a) { DoubleDouble c, s; detail::dd_sincos_fast_impl(to_strict(a), c, s); return to_fast(c); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast tan(DoubleDoubleFast a) { return to_fast(tan(to_strict(a))); }
 XPMATH_INLINE_FUNCTION int dd_cmp_one(DoubleDoubleFast a) { return dd_cmp_one(to_strict(a)); }
 XPMATH_INLINE_FUNCTION int dd_cmp_abs_one(DoubleDoubleFast a) { return dd_cmp_abs_one(to_strict(a)); }
