@@ -277,6 +277,96 @@ XPMATH_INLINE_FUNCTION void dd_sincos_fast_impl(DoubleDouble a, DoubleDouble& x,
     else             { x = sin_r;         y = negate(cos_r); }
 }
 } // namespace detail
+namespace detail {
+// P3.3b[dd]: callers of sincos wired to the fast sincos (atan, atan2, complex
+// exp/sin/cos/tan; real tan and tgamma stay strict, see the status doc). Each body is the
+// strict body (dd_math.hpp / dd_complex.hpp) with sincos -> dd_sincos_fast_impl;
+// complex exp and tan also use the fast real exp. Strict is unchanged.
+// angle: strict angle() body (comments dropped), 3 Newton steps.
+XPMATH_INLINE_FUNCTION DoubleDouble dd_angle_fast_body(DoubleDouble x, DoubleDouble y) {
+    DoubleDouble pi = DoubleDouble_pi();
+    if (y.hi == 0.0) {
+        const DoubleDouble r =
+            (detail::copysign(1.0, x.hi) < 0.0) ? pi : DoubleDouble(0.0);
+        return (detail::copysign(1.0, y.hi) < 0.0) ? negate(r) : r;
+    }
+    if (x.hi == 0.0)
+        return (y.hi > 0.0) ? DoubleDouble::from_bits(0x3ff921fb54442d18ULL, 0x3c91a62633145c07ULL)
+                            : DoubleDouble::from_bits(0xbff921fb54442d18ULL, 0xbc91a62633145c07ULL);
+    {
+        const double mx = detail::fabs(x.hi), my = detail::fabs(y.hi);
+        const double mm = (mx > my) ? mx : my;
+        if (mm > detail::kDDSqHi) {
+            const double s = detail::dd_pow2_unit_scale(mm);
+            x = detail::dd_pow2_scale(x, s);
+            y = detail::dd_pow2_scale(y, s);
+        }
+    }
+    DoubleDouble r = sqrt(add(multiply(x,x), multiply(y,y)));
+    DoubleDouble nx = divide(x, r), ny = divide(y, r);
+    DoubleDouble a = DoubleDouble(detail::atan2(ny.hi, nx.hi));
+    bool use_x = (detail::fabs(nx.hi) <= detail::fabs(ny.hi));
+    DoubleDouble target = use_x ? nx : ny;
+    for (int k = 0; k < 3; ++k) {
+        DoubleDouble sin_a, cos_a;
+        dd_sincos_fast_impl(a, cos_a, sin_a);
+        DoubleDouble corr;
+        if (use_x) {
+            corr = divide(subtract(target, cos_a), sin_a);
+            a = subtract(a, corr);
+        } else {
+            corr = divide(subtract(target, sin_a), cos_a);
+            a = add(a, corr);
+        }
+    }
+    return a;
+}
+// Out of line, like strict atan2.
+XPMATH_NOINLINE_FUNCTION DoubleDouble dd_angle_fast(DoubleDouble x, DoubleDouble y) { return dd_angle_fast_body(x, y); }
+XPMATH_INLINE_FUNCTION DoubleDouble dd_atan_fast_impl(DoubleDouble a) {
+    DoubleDouble r = dd_angle_fast(DoubleDouble(1.0), a);
+    const DoubleDouble p = DoubleDouble_pi();
+    const DoubleDouble h(p.hi * 0.5, p.lo * 0.5);
+    const DoubleDouble ar = (r.hi < 0.0) ? DoubleDouble(-r.hi, -r.lo) : r;
+    if (subtract(ar, h).hi > 0.0)
+        return (r.hi < 0.0) ? DoubleDouble(-h.hi, -h.lo) : h;
+    return r;
+}
+XPMATH_INLINE_FUNCTION DoubleDoubleComplex dd_cexp_fast_impl(DoubleDoubleComplex z) {
+    DoubleDouble er = dd_exp_fast_impl(z.re);
+    DoubleDouble c, s;
+    dd_sincos_fast_impl(z.im, c, s);
+    return DoubleDoubleComplex(multiply(er, c), multiply(er, s));
+}
+XPMATH_INLINE_FUNCTION DoubleDoubleComplex dd_csin_fast_impl(DoubleDoubleComplex z) {
+    DoubleDouble ca, sa, cb, sb;
+    dd_sincos_fast_impl(z.re, ca, sa);
+    sinhcosh(z.im, cb, sb);
+    return DoubleDoubleComplex(multiply(sa, cb), multiply(ca, sb));
+}
+XPMATH_INLINE_FUNCTION DoubleDoubleComplex dd_ccos_fast_impl(DoubleDoubleComplex z) {
+    DoubleDouble ca, sa, cb, sb;
+    dd_sincos_fast_impl(z.re, ca, sa);
+    sinhcosh(z.im, cb, sb);
+    return DoubleDoubleComplex(multiply(ca, cb), negate(multiply(sa, sb)));
+}
+XPMATH_INLINE_FUNCTION DoubleDoubleComplex dd_ctan_fast_impl(DoubleDoubleComplex z) {
+    const double kXpTanAsymptote = 2.0;
+    if (detail::fabs(z.im.hi) >= kXpTanAsymptote) {
+        DoubleDouble ca, sa;
+        dd_sincos_fast_impl(z.re, ca, sa);
+        const DoubleDouble s2 = multiply_scalar(multiply(sa, ca), 2.0);
+        const DoubleDouble c2 = multiply(subtract(ca, sa), add(ca, sa));
+        const DoubleDouble t  = dd_exp_fast_impl(multiply_scalar(z.im, z.im.hi < 0.0 ? 2.0 : -2.0));
+        const DoubleDouble t2 = multiply(t, t);
+        const DoubleDouble den = add(add(DoubleDouble(1.0), t2), multiply_scalar(multiply(t, c2), 2.0));
+        DoubleDouble im = divide(subtract(DoubleDouble(1.0), t2), den);
+        if (z.im.hi < 0.0) im = negate(im);
+        return DoubleDoubleComplex(divide(multiply_scalar(multiply(t, s2), 2.0), den), im);
+    }
+    return dd_csin_fast_impl(z) / dd_ccos_fast_impl(z);
+}
+} // namespace detail
 XPMATH_INLINE_FUNCTION void sincos(DoubleDoubleFast a, DoubleDoubleFast& x, DoubleDoubleFast& y) { DoubleDouble t_x; DoubleDouble t_y; detail::dd_sincos_fast_impl(to_strict(a), t_x, t_y); x = to_fast(t_x); y = to_fast(t_y); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast angle(DoubleDoubleFast x, DoubleDoubleFast y) { return to_fast(angle(to_strict(x), to_strict(y))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast operator+(double a, DoubleDoubleFast b) { return to_fast(a + to_strict(b)); }
@@ -302,8 +392,8 @@ XPMATH_INLINE_FUNCTION int dd_cmp_one(DoubleDoubleFast a) { return dd_cmp_one(to
 XPMATH_INLINE_FUNCTION int dd_cmp_abs_one(DoubleDoubleFast a) { return dd_cmp_abs_one(to_strict(a)); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast asin(DoubleDoubleFast a) { return to_fast(asin(to_strict(a))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast acos(DoubleDoubleFast a) { return to_fast(acos(to_strict(a))); }
-XPMATH_INLINE_FUNCTION DoubleDoubleFast atan(DoubleDoubleFast a) { return to_fast(atan(to_strict(a))); }
-XPMATH_INLINE_FUNCTION DoubleDoubleFast atan2(DoubleDoubleFast y, DoubleDoubleFast x) { return to_fast(atan2(to_strict(y), to_strict(x))); }
+XPMATH_INLINE_FUNCTION DoubleDoubleFast atan(DoubleDoubleFast a) { return to_fast(detail::dd_atan_fast_impl(to_strict(a))); }
+XPMATH_NOINLINE_FUNCTION DoubleDoubleFast atan2(DoubleDoubleFast y, DoubleDoubleFast x) { return to_fast(detail::dd_angle_fast(to_strict(x), to_strict(y))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast sinh(DoubleDoubleFast a) { return to_fast(sinh(to_strict(a))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast cosh(DoubleDoubleFast a) { return to_fast(cosh(to_strict(a))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast tanh(DoubleDoubleFast a) { return to_fast(tanh(to_strict(a))); }
@@ -355,7 +445,7 @@ XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast operator/(double b, DoubleDoubleC
 XPMATH_INLINE_FUNCTION DoubleDoubleFast abs(DoubleDoubleComplexFast z) { return to_fast(abs(to_strict(z))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast conj(DoubleDoubleComplexFast z) { return to_fast(conj(to_strict(z))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast sqrt(DoubleDoubleComplexFast z) { return to_fast(sqrt(to_strict(z))); }
-XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast exp(DoubleDoubleComplexFast z) { return to_fast(exp(to_strict(z))); }
+XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast exp(DoubleDoubleComplexFast z) { return to_fast(detail::dd_cexp_fast_impl(to_strict(z))); }
 // P3.2[dd]-chain: strict complex log body, fast real log.
 // Not inline, same as strict complex log (TD-4, sm_100).
 XPMATH_NOINLINE_FUNCTION DoubleDoubleComplexFast log(DoubleDoubleComplexFast z) {
@@ -366,9 +456,9 @@ XPMATH_NOINLINE_FUNCTION DoubleDoubleComplexFast log(DoubleDoubleComplexFast z) 
 }
 XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast log1p(DoubleDoubleComplexFast w) { return to_fast(log1p(to_strict(w))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast log10(DoubleDoubleComplexFast z) { return to_fast(log10(to_strict(z))); }
-XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast sin(DoubleDoubleComplexFast z) { return to_fast(sin(to_strict(z))); }
-XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast cos(DoubleDoubleComplexFast z) { return to_fast(cos(to_strict(z))); }
-XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast tan(DoubleDoubleComplexFast z) { return to_fast(tan(to_strict(z))); }
+XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast sin(DoubleDoubleComplexFast z) { return to_fast(detail::dd_csin_fast_impl(to_strict(z))); }
+XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast cos(DoubleDoubleComplexFast z) { return to_fast(detail::dd_ccos_fast_impl(to_strict(z))); }
+XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast tan(DoubleDoubleComplexFast z) { return to_fast(detail::dd_ctan_fast_impl(to_strict(z))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast xp_asin_imag_mag(DoubleDoubleFast x, DoubleDoubleFast y) { return to_fast(xp_asin_imag_mag(to_strict(x), to_strict(y))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast xp_asin_real_leg(DoubleDoubleFast x, DoubleDoubleFast y) { return to_fast(xp_asin_real_leg(to_strict(x), to_strict(y))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast xp_asin_real_mag(DoubleDoubleFast x, DoubleDoubleFast y) { return to_fast(xp_asin_real_mag(to_strict(x), to_strict(y))); }
