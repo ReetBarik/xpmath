@@ -215,7 +215,72 @@ XPMATH_INLINE_FUNCTION FloatFloatFast ff_mul_ext(FloatFloatFast x, FloatFloatFas
 XPMATH_INLINE_FUNCTION FloatFloatFast ff_log_ext(FloatFloatFast a, float& err) { return to_fast(ff_log_ext(to_strict(a), err)); }
 XPMATH_INLINE_FUNCTION FloatFloatFast ff_exp_ext(FloatFloatFast a, float resid) { return to_fast(ff_exp_ext(to_strict(a), resid)); }
 XPMATH_INLINE_FUNCTION void sinhcosh(FloatFloatFast a, FloatFloatFast& x, FloatFloatFast& y) { FloatFloat t_x; FloatFloat t_y; sinhcosh(to_strict(a), t_x, t_y); x = to_fast(t_x); y = to_fast(t_y); }
-XPMATH_INLINE_FUNCTION void sincos(FloatFloatFast a, FloatFloatFast& x, FloatFloatFast& y) { FloatFloat t_x; FloatFloat t_y; sincos(to_strict(a), t_x, t_y); x = to_fast(t_x); y = to_fast(t_y); }
+namespace detail {
+// P3.3[ff] fast sincos. Rare inputs (|a| >= 800, NaN/inf, huge
+// cancellation after the cheap reduction) go to the strict sincos
+// unchanged, out of line.
+XPMATH_NOINLINE_FUNCTION void ff_sincos_slow(FloatFloat a, FloatFloat& x, FloatFloat& y) { sincos(a, x, y); }
+// Same guards, nq = 0 and (sin, 1-cos) form as strict. Changes:
+// (1) for 0.75 < |a| < 800 the reduction is k = rint(a.hi * 2/pi)
+// and seven 15-bit pieces of pi/2 plus a float tail, so k*piece is
+// one exact float for k <= 512; beyond |a| = 800, or when |r| < 2^-40 (the pieces no longer
+// cover it), the strict Payne-Hanek path runs; (2) the series is a fixed Horner polynomial (sin to
+// r^15, v to r^16) with 1/n! constants and no data-dependent exit;
+// the last three terms of each weigh < 2^-26 of the sum and run in
+// float.
+XPMATH_INLINE_FUNCTION void ff_sincos_fast_impl(FloatFloat a, FloatFloat& x, FloatFloat& y) {
+    if (a.hi == 0.0f) { x = FloatFloat(1.0f); y = FloatFloat(0.0f); return; }
+    const float aa = detail::fabs(a.hi);
+    if (aa < 1.17549435e-38f) { x = FloatFloat(1.0f); y = a; return; }
+    if (!(aa < 800.0f)) { ff_sincos_slow(a, x, y); return; }
+    int j = 0;
+    FloatFloat r = a;
+    if (aa > 0.75f) {
+        const float kf = detail::rint(a.hi * 0x1.45f306p-1f);   // 2/pi
+        r = subtract(r, FloatFloat(kf * 0x1.922p+0f));
+        r = subtract(r, FloatFloat(kf * -0x1.2afp-18f));
+        r = subtract(r, FloatFloat(kf * 0x1.0b48p-34f));
+        r = subtract(r, FloatFloat(kf * -0x1.ee58p-50f));
+        r = subtract(r, FloatFloat(kf * -0x1.d9ccp-66f));
+        r = subtract(r, FloatFloat(kf * -0x1.d748p-83f));
+        r = subtract(r, FloatFloat(kf * 0x1.b838p-104f));
+        r = subtract(r, FloatFloat(kf * 0x1.a25204p-120f));
+        if (!(detail::fabs(r.hi) >= 0x1p-40f)) { ff_sincos_slow(a, x, y); return; }
+        j = (int)((long long)kf & 3);
+    }
+    const FloatFloat yy = multiply(r, r);
+    float qs = -0x1.ae7f3ep-41f;                                           // -1/15!
+    qs = detail::eft_add(0x1.612462p-33f, detail::eft_mul(qs, yy.hi));    // 1/13!
+    qs = detail::eft_add(-0x1.ae6456p-26f, detail::eft_mul(qs, yy.hi));    // -1/11!
+    FloatFloat ts = add(FloatFloat(0x1.71de3ap-19f, 0x1.55b1ccp-45f), multiply(FloatFloat(qs), yy));   // 1/9!
+    ts = add(FloatFloat(-0x1.a01a02p-13f, 0x1.7f97fap-39f), multiply(ts, yy));   // -1/7!
+    ts = add(FloatFloat(0x1.111112p-7f, -0x1.dddddep-32f), multiply(ts, yy));   // 1/5!
+    ts = add(FloatFloat(-0x1.555556p-3f, 0x1.555556p-28f), multiply(ts, yy));   // -1/3!
+    FloatFloat sin_r = add(r, multiply(r, multiply(ts, yy)));
+    float qv = -0x1.ae7f3ep-45f;                                           // -1/16!
+    qv = detail::eft_add(0x1.93974ap-37f, detail::eft_mul(qv, yy.hi));    // 1/14!
+    qv = detail::eft_add(-0x1.1eed8ep-29f, detail::eft_mul(qv, yy.hi));    // -1/12!
+    FloatFloat tv = add(FloatFloat(0x1.27e4fcp-22f, -0x1.10ec14p-47f), multiply(FloatFloat(qv), yy));   // 1/10!
+    tv = add(FloatFloat(-0x1.a01a02p-16f, 0x1.7f97fap-42f), multiply(tv, yy));   // -1/8!
+    tv = add(FloatFloat(0x1.6c16c2p-10f, -0x1.27d27ep-35f), multiply(tv, yy));   // 1/6!
+    tv = add(FloatFloat(-0x1.555556p-5f, 0x1.555556p-30f), multiply(tv, yy));   // -1/4!
+    tv = add(FloatFloat(0.5f), multiply(tv, yy));
+    const FloatFloat v_r = multiply(tv, yy);
+    FloatFloat cos_r = subtract(FloatFloat(1.0f), v_r);
+    // NaN/inf in a word: strict answers with its identity-point
+    // fallback; let strict do it.
+    if (!(detail::fabs(sin_r.hi) <= 1.0009765625f) || !(detail::fabs(cos_r.hi) <= 1.0009765625f)) { ff_sincos_slow(a, x, y); return; }
+    if (sin_r.hi >  1.0f || (sin_r.hi ==  1.0f && sin_r.lo > 0.0f)) sin_r = FloatFloat( 1.0f);
+    if (sin_r.hi < -1.0f || (sin_r.hi == -1.0f && sin_r.lo < 0.0f)) sin_r = FloatFloat(-1.0f);
+    if (cos_r.hi >  1.0f || (cos_r.hi ==  1.0f && cos_r.lo > 0.0f)) cos_r = FloatFloat( 1.0f);
+    if (cos_r.hi < -1.0f || (cos_r.hi == -1.0f && cos_r.lo < 0.0f)) cos_r = FloatFloat(-1.0f);
+    if (j == 0)      { x = cos_r;         y = sin_r; }
+    else if (j == 1) { x = negate(sin_r); y = cos_r; }
+    else if (j == 2) { x = negate(cos_r); y = negate(sin_r); }
+    else             { x = sin_r;         y = negate(cos_r); }
+}
+} // namespace detail
+XPMATH_INLINE_FUNCTION void sincos(FloatFloatFast a, FloatFloatFast& x, FloatFloatFast& y) { FloatFloat t_x; FloatFloat t_y; detail::ff_sincos_fast_impl(to_strict(a), t_x, t_y); x = to_fast(t_x); y = to_fast(t_y); }
 XPMATH_INLINE_FUNCTION FloatFloatFast angle(FloatFloatFast x, FloatFloatFast y) { return to_fast(angle(to_strict(x), to_strict(y))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast operator+(float a, FloatFloatFast b) { return to_fast(a + to_strict(b)); }
 XPMATH_INLINE_FUNCTION FloatFloatFast operator-(float a, FloatFloatFast b) { return to_fast(a - to_strict(b)); }
@@ -233,15 +298,103 @@ XPMATH_INLINE_FUNCTION FloatFloatFast log1p(FloatFloatFast a) { return to_fast(l
 XPMATH_INLINE_FUNCTION FloatFloatFast exp2(FloatFloatFast a) { return to_fast(exp2(to_strict(a))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast exp10(FloatFloatFast a) { return to_fast(exp10(to_strict(a))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast expm1(FloatFloatFast a) { return to_fast(expm1(to_strict(a))); }
-XPMATH_INLINE_FUNCTION FloatFloatFast sin(FloatFloatFast a) { return to_fast(sin(to_strict(a))); }
-XPMATH_INLINE_FUNCTION FloatFloatFast cos(FloatFloatFast a) { return to_fast(cos(to_strict(a))); }
-XPMATH_INLINE_FUNCTION FloatFloatFast tan(FloatFloatFast a) { return to_fast(tan(to_strict(a))); }
+XPMATH_NOINLINE_FUNCTION FloatFloatFast sin(FloatFloatFast a) { FloatFloat c, s; detail::ff_sincos_fast_impl(to_strict(a), c, s); return to_fast(s); }
+XPMATH_NOINLINE_FUNCTION FloatFloatFast cos(FloatFloatFast a) { FloatFloat c, s; detail::ff_sincos_fast_impl(to_strict(a), c, s); return to_fast(c); }
+XPMATH_INLINE_FUNCTION FloatFloatFast tan(FloatFloatFast a) { FloatFloat c, s; detail::ff_sincos_fast_impl(to_strict(a), c, s); return to_fast(divide(s, c)); }
 XPMATH_INLINE_FUNCTION int ff_cmp_one(FloatFloatFast a) { return ff_cmp_one(to_strict(a)); }
 XPMATH_INLINE_FUNCTION int ff_cmp_abs_one(FloatFloatFast a) { return ff_cmp_abs_one(to_strict(a)); }
 XPMATH_INLINE_FUNCTION FloatFloatFast asin(FloatFloatFast a) { return to_fast(asin(to_strict(a))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast acos(FloatFloatFast a) { return to_fast(acos(to_strict(a))); }
-XPMATH_INLINE_FUNCTION FloatFloatFast atan(FloatFloatFast a) { return to_fast(atan(to_strict(a))); }
-XPMATH_INLINE_FUNCTION FloatFloatFast atan2(FloatFloatFast y, FloatFloatFast x) { return to_fast(atan2(to_strict(y), to_strict(x))); }
+namespace detail {
+// P3.3[ff] callers of sincos wired to the fast sincos (atan, atan2,
+// real tan, complex exp/sin/cos/tan). Each body is the strict body
+// (ff_math.hpp / ff_complex.hpp) with sincos -> ff_sincos_fast_impl;
+// complex exp and tan also use the fast real exp. Strict is unchanged.
+// angle: strict angle() body (comments dropped), 3 Newton steps.
+XPMATH_INLINE_FUNCTION FloatFloat ff_angle_fast_body(FloatFloat x, FloatFloat y) {
+    FloatFloat pi = FloatFloat_pi();
+    if (y.hi == 0.0f) {
+        const FloatFloat r =
+            (detail::copysign(1.0f, x.hi) < 0.0f) ? pi : FloatFloat(0.0f);
+        return (detail::copysign(1.0f, y.hi) < 0.0f) ? negate(r) : r;
+    }
+    if (x.hi == 0.0f) return (y.hi > 0.0f) ? multiply_scalar(pi, 0.5f) : multiply_scalar(pi, -0.5f);
+    {
+        const float mx = detail::fabs(x.hi), my = detail::fabs(y.hi);
+        const float mm = (mx > my) ? mx : my;
+        if (mm > detail::kFFSqHi) {
+            const float s = detail::ff_pow2_unit_scale(mm);
+            x = detail::ff_pow2_scale(x, s);
+            y = detail::ff_pow2_scale(y, s);
+        }
+    }
+    FloatFloat r = sqrt(add(multiply(x,x), multiply(y,y)));
+    FloatFloat nx = divide(x, r), ny = divide(y, r);
+    FloatFloat a = FloatFloat(detail::atan2(ny.hi, nx.hi));
+    bool use_x = (detail::fabs(nx.hi) <= detail::fabs(ny.hi));
+    FloatFloat target = use_x ? nx : ny;
+    for (int k = 0; k < 3; ++k) {
+        FloatFloat sin_a, cos_a;
+        ff_sincos_fast_impl(a, cos_a, sin_a);
+        FloatFloat corr;
+        if (use_x) {
+            corr = divide(subtract(target, cos_a), sin_a);
+            a = subtract(a, corr);
+        } else {
+            corr = divide(subtract(target, sin_a), cos_a);
+            a = add(a, corr);
+        }
+    }
+    return a;
+}
+// Out of line, like strict atan2.
+XPMATH_NOINLINE_FUNCTION FloatFloat ff_angle_fast(FloatFloat x, FloatFloat y) { return ff_angle_fast_body(x, y); }
+XPMATH_INLINE_FUNCTION FloatFloat ff_atan_fast_impl(FloatFloat a) {
+    FloatFloat r = ff_angle_fast(FloatFloat(1.0f), a);
+    const FloatFloat p = FloatFloat_pi();
+    const FloatFloat h(p.hi * 0.5f, p.lo * 0.5f);
+    const FloatFloat ar = (r.hi < 0.0f) ? FloatFloat(-r.hi, -r.lo) : r;
+    if (subtract(ar, h).hi > 0.0f)
+        return (r.hi < 0.0f) ? FloatFloat(-h.hi, -h.lo) : h;
+    return r;
+}
+XPMATH_INLINE_FUNCTION FloatFloatComplex ff_cexp_fast_impl(FloatFloatComplex z) {
+    FloatFloat er = ff_exp_fast_impl(z.re);
+    FloatFloat c, s;
+    ff_sincos_fast_impl(z.im, c, s);
+    return FloatFloatComplex(multiply(er, c), multiply(er, s));
+}
+XPMATH_INLINE_FUNCTION FloatFloatComplex ff_csin_fast_impl(FloatFloatComplex z) {
+    FloatFloat ca, sa, cb, sb;
+    ff_sincos_fast_impl(z.re, ca, sa);
+    sinhcosh(z.im, cb, sb);
+    return FloatFloatComplex(multiply(sa, cb), multiply(ca, sb));
+}
+XPMATH_INLINE_FUNCTION FloatFloatComplex ff_ccos_fast_impl(FloatFloatComplex z) {
+    FloatFloat ca, sa, cb, sb;
+    ff_sincos_fast_impl(z.re, ca, sa);
+    sinhcosh(z.im, cb, sb);
+    return FloatFloatComplex(multiply(ca, cb), negate(multiply(sa, sb)));
+}
+XPMATH_INLINE_FUNCTION FloatFloatComplex ff_ctan_fast_impl(FloatFloatComplex z) {
+    const float kXpTanAsymptote = 4.0f;
+    if (detail::fabs(z.im.hi) >= kXpTanAsymptote) {
+        FloatFloat ca, sa;
+        ff_sincos_fast_impl(z.re, ca, sa);
+        const FloatFloat s2 = multiply_scalar(multiply(sa, ca), 2.0f);
+        const FloatFloat c2 = multiply(subtract(ca, sa), add(ca, sa));
+        const FloatFloat t  = ff_exp_fast_impl(multiply_scalar(z.im, z.im.hi < 0.0f ? 2.0f : -2.0f));
+        const FloatFloat t2 = multiply(t, t);
+        const FloatFloat den = add(add(FloatFloat(1.0f), t2), multiply_scalar(multiply(t, c2), 2.0f));
+        FloatFloat im = divide(subtract(FloatFloat(1.0f), t2), den);
+        if (z.im.hi < 0.0f) im = negate(im);
+        return FloatFloatComplex(divide(multiply_scalar(multiply(t, s2), 2.0f), den), im);
+    }
+    return ff_csin_fast_impl(z) / ff_ccos_fast_impl(z);
+}
+} // namespace detail
+XPMATH_INLINE_FUNCTION FloatFloatFast atan(FloatFloatFast a) { return to_fast(detail::ff_atan_fast_impl(to_strict(a))); }
+XPMATH_NOINLINE_FUNCTION FloatFloatFast atan2(FloatFloatFast y, FloatFloatFast x) { return to_fast(detail::ff_angle_fast(to_strict(x), to_strict(y))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast sinh(FloatFloatFast a) { return to_fast(sinh(to_strict(a))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast cosh(FloatFloatFast a) { return to_fast(cosh(to_strict(a))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast tanh(FloatFloatFast a) { return to_fast(tanh(to_strict(a))); }
@@ -293,7 +446,7 @@ XPMATH_INLINE_FUNCTION FloatFloatComplexFast operator/(float b, FloatFloatComple
 XPMATH_INLINE_FUNCTION FloatFloatFast abs(FloatFloatComplexFast z) { return to_fast(abs(to_strict(z))); }
 XPMATH_INLINE_FUNCTION FloatFloatComplexFast conj(FloatFloatComplexFast z) { return to_fast(conj(to_strict(z))); }
 XPMATH_INLINE_FUNCTION FloatFloatComplexFast sqrt(FloatFloatComplexFast z) { return to_fast(sqrt(to_strict(z))); }
-XPMATH_INLINE_FUNCTION FloatFloatComplexFast exp(FloatFloatComplexFast z) { return to_fast(exp(to_strict(z))); }
+XPMATH_NOINLINE_FUNCTION FloatFloatComplexFast exp(FloatFloatComplexFast z) { return to_fast(detail::ff_cexp_fast_impl(to_strict(z))); }
 // P3.2[ff]-chain: strict complex log body, fast real log.
 // Not inline (strict is inline, but its real log is a call;
 // this body inlines the fast real log and its fast exps). TD-4.
@@ -305,9 +458,9 @@ XPMATH_NOINLINE_FUNCTION FloatFloatComplexFast log(FloatFloatComplexFast z) {
 }
 XPMATH_INLINE_FUNCTION FloatFloatComplexFast log1p(FloatFloatComplexFast w) { return to_fast(log1p(to_strict(w))); }
 XPMATH_INLINE_FUNCTION FloatFloatComplexFast log10(FloatFloatComplexFast z) { return to_fast(log10(to_strict(z))); }
-XPMATH_INLINE_FUNCTION FloatFloatComplexFast sin(FloatFloatComplexFast z) { return to_fast(sin(to_strict(z))); }
-XPMATH_INLINE_FUNCTION FloatFloatComplexFast cos(FloatFloatComplexFast z) { return to_fast(cos(to_strict(z))); }
-XPMATH_INLINE_FUNCTION FloatFloatComplexFast tan(FloatFloatComplexFast z) { return to_fast(tan(to_strict(z))); }
+XPMATH_INLINE_FUNCTION FloatFloatComplexFast sin(FloatFloatComplexFast z) { return to_fast(detail::ff_csin_fast_impl(to_strict(z))); }
+XPMATH_INLINE_FUNCTION FloatFloatComplexFast cos(FloatFloatComplexFast z) { return to_fast(detail::ff_ccos_fast_impl(to_strict(z))); }
+XPMATH_INLINE_FUNCTION FloatFloatComplexFast tan(FloatFloatComplexFast z) { return to_fast(detail::ff_ctan_fast_impl(to_strict(z))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast xp_asin_imag_mag(FloatFloatFast x, FloatFloatFast y) { return to_fast(xp_asin_imag_mag(to_strict(x), to_strict(y))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast xp_asin_real_leg(FloatFloatFast x, FloatFloatFast y) { return to_fast(xp_asin_real_leg(to_strict(x), to_strict(y))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast xp_asin_real_mag(FloatFloatFast x, FloatFloatFast y) { return to_fast(xp_asin_real_mag(to_strict(x), to_strict(y))); }
