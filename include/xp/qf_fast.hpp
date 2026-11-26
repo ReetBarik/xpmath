@@ -148,10 +148,50 @@ XPMATH_INLINE_FUNCTION QuadFloatFast to_fast(QuadFloat a) { return QuadFloatFast
 XPMATH_INLINE_FUNCTION QuadFloatComplex to_strict(QuadFloatComplexFast z) { return QuadFloatComplex(z); }
 XPMATH_INLINE_FUNCTION QuadFloatComplexFast to_fast(QuadFloatComplex z) { return QuadFloatComplexFast(z); }
 
+namespace detail {
+// P3.4[qf] fast multiply, variant B. Same partial
+// products and leading accumulation as strict; the tail is
+// folded with fma. NOINLINE like strict multiply.
+XPMATH_NOINLINE_FUNCTION QuadFloat qf_multiply_fast_impl(QuadFloat a, QuadFloat b) {
+    float p0, p1, p2, p3, p4, p5;
+    float q0, q1, q2, q3, q4, q5;
+    float t0, t1;
+    float s0, s1, s2;
+
+    p0 = qf_two_prod(a.f0, b.f0, q0);
+
+    p1 = qf_two_prod(a.f0, b.f1, q1);
+    p2 = qf_two_prod(a.f1, b.f0, q2);
+
+    p3 = qf_two_prod(a.f0, b.f2, q3);
+    p4 = qf_two_prod(a.f1, b.f1, q4);
+    p5 = qf_two_prod(a.f2, b.f0, q5);
+
+    qf_three_sum(p1, p2, q0);
+    float e0, e1, e2, e3, e4;
+    s0 = qf_two_sum(p2, q1, e0);
+    t0 = qf_two_sum(p3, p4, e1);
+    s0 = qf_two_sum(s0, t0, e2);
+    t1 = qf_two_sum(q2, p5, e3);
+    s0 = qf_two_sum(s0, t1, e4);
+    const float g = detail::eft_add(detail::eft_add(
+        detail::eft_add(e0, e1), detail::eft_add(e2, e3)), e4);
+    const float r = detail::eft_add(
+        detail::eft_add(q0, q3), detail::eft_add(q4, q5));
+    const float tail = detail::eft_fma(a.f0, b.f3,
+        detail::eft_fma(a.f1, b.f2,
+        detail::eft_fma(a.f2, b.f1,
+        detail::eft_fma(a.f3, b.f0, r))));
+    s1 = qf_two_sum(g, tail, s2);
+    renorm_4(p0, p1, s0, s1, s2);
+    return QuadFloat(p0, p1, s0, s1);
+}
+} // namespace detail
+
 // ---- forwarders: one line per public strict function / operator ------------
 XPMATH_INLINE_FUNCTION QuadFloatFast add(QuadFloatFast a, QuadFloatFast b) { return to_fast(add(to_strict(a), to_strict(b))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast subtract(QuadFloatFast a, QuadFloatFast b) { return to_fast(subtract(to_strict(a), to_strict(b))); }
-XPMATH_INLINE_FUNCTION QuadFloatFast multiply(QuadFloatFast a, QuadFloatFast b) { return to_fast(multiply(to_strict(a), to_strict(b))); }
+XPMATH_INLINE_FUNCTION QuadFloatFast multiply(QuadFloatFast a, QuadFloatFast b) { return to_fast(detail::qf_multiply_fast_impl(to_strict(a), to_strict(b))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast divide(QuadFloatFast a, QuadFloatFast b) { return to_fast(divide(to_strict(a), to_strict(b))); }
 XPMATH_INLINE_FUNCTION QuadFloatFast multiply_scalar(QuadFloatFast a, float b) { return to_fast(multiply_scalar(to_strict(a), b)); }
 XPMATH_INLINE_FUNCTION QuadFloatFast divide_scalar(QuadFloatFast a, float b) { return to_fast(divide_scalar(to_strict(a), b)); }
