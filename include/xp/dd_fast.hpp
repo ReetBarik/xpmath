@@ -125,10 +125,28 @@ XPMATH_INLINE_FUNCTION DoubleDoubleFast to_fast(DoubleDouble a) { return DoubleD
 XPMATH_INLINE_FUNCTION DoubleDoubleComplex to_strict(DoubleDoubleComplexFast z) { return DoubleDoubleComplex(z); }
 XPMATH_INLINE_FUNCTION DoubleDoubleComplexFast to_fast(DoubleDoubleComplex z) { return DoubleDoubleComplexFast(z); }
 
+namespace detail {
+// P3.4[dd] fast multiply: Joldes-Muller-Popescu FMA double-word
+// product (DWTimesDW3). Same early return as strict for non-finite or
+// zero leading product. Every operation is an eft_* call so host,
+// CUDA and HIP round identically.
+XPMATH_INLINE_FUNCTION DoubleDouble dd_multiply_fast_impl(DoubleDouble a, DoubleDouble b) {
+    const DoubleDouble p = two_prod(a.hi, b.hi);
+    if (!detail::isfinite(p.hi) || p.hi == 0.0) return p;
+    const double t0 = detail::eft_mul(a.lo, b.lo);
+    const double t1 = detail::eft_fma(a.hi, b.lo, t0);
+    const double t2 = detail::eft_fma(a.lo, b.hi, t1);
+    const double c3 = detail::eft_add(p.lo, t2);
+    const double hi = detail::eft_add(p.hi, c3);
+    const double lo = detail::eft_sub(c3, detail::eft_sub(hi, p.hi));
+    return DoubleDouble(hi, lo);
+}
+} // namespace detail
+
 // ---- forwarders: one line per public strict function / operator ------------
 XPMATH_INLINE_FUNCTION DoubleDoubleFast add(DoubleDoubleFast a, DoubleDoubleFast b) { return to_fast(add(to_strict(a), to_strict(b))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast subtract(DoubleDoubleFast a, DoubleDoubleFast b) { return to_fast(subtract(to_strict(a), to_strict(b))); }
-XPMATH_INLINE_FUNCTION DoubleDoubleFast multiply(DoubleDoubleFast a, DoubleDoubleFast b) { return to_fast(multiply(to_strict(a), to_strict(b))); }
+XPMATH_INLINE_FUNCTION DoubleDoubleFast multiply(DoubleDoubleFast a, DoubleDoubleFast b) { return to_fast(detail::dd_multiply_fast_impl(to_strict(a), to_strict(b))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast divide(DoubleDoubleFast a, DoubleDoubleFast b) { return to_fast(divide(to_strict(a), to_strict(b))); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast multiply_scalar(DoubleDoubleFast a, double b) { return to_fast(multiply_scalar(to_strict(a), b)); }
 XPMATH_INLINE_FUNCTION DoubleDoubleFast divide_scalar(DoubleDoubleFast a, double b) { return to_fast(divide_scalar(to_strict(a), b)); }
