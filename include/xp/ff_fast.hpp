@@ -126,10 +126,28 @@ XPMATH_INLINE_FUNCTION FloatFloatFast to_fast(FloatFloat a) { return FloatFloatF
 XPMATH_INLINE_FUNCTION FloatFloatComplex to_strict(FloatFloatComplexFast z) { return FloatFloatComplex(z); }
 XPMATH_INLINE_FUNCTION FloatFloatComplexFast to_fast(FloatFloatComplex z) { return FloatFloatComplexFast(z); }
 
+namespace detail {
+// P3.4[ff] fast multiply: Joldes-Muller-Popescu FMA double-word
+// product (DWTimesDW3). Same early return as strict for non-finite or
+// zero leading product. Every operation is an eft_* call so host,
+// CUDA and HIP round identically.
+XPMATH_INLINE_FUNCTION FloatFloat ff_multiply_fast_impl(FloatFloat a, FloatFloat b) {
+    const FloatFloat p = two_prod(a.hi, b.hi);
+    if (!detail::isfinite(p.hi) || p.hi == 0.0f) return p;
+    const float t0 = detail::eft_mul(a.lo, b.lo);
+    const float t1 = detail::eft_fma(a.hi, b.lo, t0);
+    const float t2 = detail::eft_fma(a.lo, b.hi, t1);
+    const float c3 = detail::eft_add(p.lo, t2);
+    const float hi = detail::eft_add(p.hi, c3);
+    const float lo = detail::eft_sub(c3, detail::eft_sub(hi, p.hi));
+    return FloatFloat(hi, lo);
+}
+} // namespace detail
+
 // ---- forwarders: one line per public strict function / operator ------------
 XPMATH_INLINE_FUNCTION FloatFloatFast add(FloatFloatFast a, FloatFloatFast b) { return to_fast(add(to_strict(a), to_strict(b))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast subtract(FloatFloatFast a, FloatFloatFast b) { return to_fast(subtract(to_strict(a), to_strict(b))); }
-XPMATH_INLINE_FUNCTION FloatFloatFast multiply(FloatFloatFast a, FloatFloatFast b) { return to_fast(multiply(to_strict(a), to_strict(b))); }
+XPMATH_INLINE_FUNCTION FloatFloatFast multiply(FloatFloatFast a, FloatFloatFast b) { return to_fast(detail::ff_multiply_fast_impl(to_strict(a), to_strict(b))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast divide(FloatFloatFast a, FloatFloatFast b) { return to_fast(divide(to_strict(a), to_strict(b))); }
 XPMATH_INLINE_FUNCTION FloatFloatFast multiply_scalar(FloatFloatFast a, float b) { return to_fast(multiply_scalar(to_strict(a), b)); }
 XPMATH_INLINE_FUNCTION FloatFloatFast divide_scalar(FloatFloatFast a, float b) { return to_fast(divide_scalar(to_strict(a), b)); }
